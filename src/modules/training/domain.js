@@ -4,12 +4,13 @@ import {directoryPeople,personKey} from '../master-data/people-directory.js';
 import {linkedTwi} from '../library/linked-materials.js';
 import {validDate} from '../library/sop-review.js';
 export const TRAINING_TYPES=Object.freeze({
- mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
+ mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
  training_program:'Программа обучения',training_enrollment:'Персональная программа',training_task_result:'Результат задания программы',
  training_assignment:'Назначение обучения',training_session:'Факт инструктажа',training_verification:'Проверка знаний',
  assessment_session:'Практическая оценка / квалификация',admission_decision:'Решение о допуске',
  role_requirement:'Требование к компетенции',coverage_requirement:'Потребность в покрытии',development_plan:'План развития',development_goal:'Цель развития'
 });
+export const isLC41Event=e=>e.entity_type==='mentor_order'||(e.entity_type==='training_enrollment'&&Object.hasOwn(e.payload||{},'internship_start'));
 export const PRACTICAL_CODE='PRACTICAL_APP8';
 export const isTrainingEvent=e=>Object.hasOwn(TRAINING_TYPES,e.entity_type)||(e.entity_type==='checklist_version'&&e.payload?.format==='lean-practical-checklist-v1');
 const exact=(p,keys)=>invariant(p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).length===keys.length&&keys.every(k=>Object.hasOwn(p,k)),'Некорректные поля LC4');
@@ -69,7 +70,7 @@ export function currentStandard(db,revisionId){
 export function isCurrentStandard(db,revisionId){const r=currentStandard(db,revisionId);return !!(r&&r.state==='effective'&&!r.archived)}
 function effective(db,revisionId){const r=currentStandard(db,revisionId);invariant(r&&r.state==='effective'&&!r.archived&&r.operation_id&&r.source?.kind==='sop','Выберите действующую редакцию СОП, привязанную к операции');active(db,'operation',r.operation_id);return r}
 function names(db,ids){return Object.fromEntries(Object.entries(ids).map(([k,id])=>[k,id?person(db,id).display_name:'']))}
-function certificateValid(db,id,day){const x=one(db,'SELECT * FROM mentor_credential WHERE id=?',[id]);return x&&x.kind==='certificate'&&within(day,x.issued_on,x.valid_until)&&beforeRevocation(x.revoked_at,day)?x:null}
+export function certificateValid(db,id,day){const x=one(db,'SELECT * FROM mentor_credential WHERE id=?',[id]);return x&&x.kind==='certificate'&&within(day,x.issued_on,x.valid_until)&&beforeRevocation(x.revoked_at,day)?x:null}
 function appointmentValid(db,id,day){
  const x=one(db,'SELECT * FROM mentor_appointment WHERE id=?',[id]);if(!x||!within(day,x.valid_from,x.valid_to)||x.acknowledged_on>day||!beforeRevocation(x.revoked_at,day))return null;
  const c=certificateValid(db,x.credential_id,day);return c&&c.person_id===x.person_id&&c.role===x.role?x:null
@@ -153,6 +154,26 @@ export function applyTrainingEvent(db,e,old){
   invariant(['certificate','attendance'].includes(p.kind)&&roles.includes(p.role)&&required(p.number,200)&&required(p.issuer)&&required(p.evidence)&&period(p.issued_on,p.valid_until),'Заполните реквизиты фактического документа о подготовке');
   store(db,t,{id,...p,rev:1});return
  }
+ if(t==='mentor_order'){
+  createOnly(e,old);exact(p,['order_number','order_on','organization','city','approved_by','valid_from','valid_to','supplement_from','instructor_amount','trainer_amount','evidence','members']);
+  const approver=person(db,p.approved_by);noFuture(p.order_on,e);
+  invariant(required(p.order_number,200)&&required(p.organization,300)&&required(p.city,150)&&required(p.evidence)&&period(p.valid_from,p.valid_to)&&p.order_on<=p.valid_from&&Array.isArray(p.members)&&p.members.length>0&&p.members.length<=200,'Заполните реквизиты подписанного группового приказа');
+  invariant([p.instructor_amount,p.trainer_amount].every(v=>v===null||integer(v,0,10000000)),'Доплата: целая сумма рублей или не установлена');
+  invariant((p.instructor_amount===null&&p.trainer_amount===null)?p.supplement_from===null:date(p.supplement_from)&&p.supplement_from>=p.order_on,'Укажите дату начала доплаты');
+  invariant(!one(db,'SELECT id FROM mentor_order WHERE organization=? AND order_number=? AND order_on=?',[p.organization,p.order_number,p.order_on]),'Такой групповой приказ уже зарегистрирован');
+  const directory=new Map(directoryPeople(db,p.valid_from).map(x=>[x.id,x])),seen=new Set(),ids=new Set();
+  const members=p.members.map(m=>{
+   exact(m,['id','credential_id','acknowledged_on']);invariant(isId(m.id)&&!ids.has(m.id),'Повтор идентификатора назначения');ids.add(m.id);
+   noFuture(m.acknowledged_on,e);invariant(m.acknowledged_on>=p.order_on,'Ознакомление не может предшествовать приказу');
+   const c=certificateValid(db,m.credential_id,p.valid_from);invariant(c&&roles.includes(c.role),'Нужен действующий сертификат, а не свидетельство');
+   const who=person(db,c.person_id),info=directory.get(who.id),position=info?.position||'';
+   invariant(position.trim(),'Укажите действующую должность сотрудника в справочнике: '+who.display_name);
+   const key=who.id+':'+(c.role==='internal_trainer'?'internal_trainer':'instructor');invariant(!seen.has(key),'Сотрудник повторяется в одной группе приказа');seen.add(key);
+   return {id:m.id,person_id:who.id,credential_id:c.id,role:c.role,order_number:p.order_number,order_on:p.order_on,approved_by:p.approved_by,valid_from:p.valid_from,valid_to:p.valid_to,acknowledged_on:m.acknowledged_on,evidence:p.evidence,order_id:id,person_name:who.display_name,position_name:position,rev:1}
+  });
+  const {members:ignored,...header}=p;store(db,t,{id,...header,approved_name:approver.display_name,recorded_at:e.occurred_at,rev:1});
+  for(const m of members)store(db,'mentor_appointment',m);return
+ }
  if(t==='mentor_appointment'){
   if(old)return revoke(db,t,e,old);
   createOnly(e,old);exact(p,['person_id','credential_id','role','order_number','order_on','approved_by','valid_from','valid_to','acknowledged_on','evidence']);
@@ -191,8 +212,14 @@ export function applyTrainingEvent(db,e,old){
  }
  if(t==='training_enrollment'){
   if(!old){
-   createOnly(e,old);exact(p,['program_id','trainee_id','mentor_id','manager_id','start_on','due_on','reason']);
+   createOnly(e,old);
+   const hasPeriods=Object.hasOwn(p,'internship_start'),baseKeys=['program_id','trainee_id','mentor_id','manager_id','start_on','due_on','reason'];
+   exact(p,hasPeriods?[...baseKeys,'internship_start','internship_end','entry_start','entry_end']:baseKeys);
    const program=one(db,'SELECT * FROM training_program WHERE id=? AND state=?',[p.program_id,'active']);invariant(program&&period(p.start_on,p.due_on)&&p.due_on&&required(p.reason),'Выберите активную программу, сроки и причину');
+   if(hasPeriods){
+    for(const [a,b] of [[p.internship_start,p.internship_end],[p.entry_start,p.entry_end]])invariant(a===null&&b===null||date(a)&&date(b)&&a<=b&&a>=p.start_on&&b<=p.due_on,'Периоды стажировки и ввода должны быть указаны полностью и входить в общий срок');
+    if(program.kind==='internship')invariant(p.internship_start&&p.internship_end&&p.entry_start&&p.entry_end,'Укажите оба периода из формы стажировки');
+   }
    invariant(rows(db,'SELECT day_offset FROM training_program_task WHERE program_id=?',[program.id]).every(x=>plusDays(p.start_on,x.day_offset)<=p.due_on),'Срок персональной программы должен включать все задания');
    hasRole(db,p.trainee_id,p.start_on,['trainee']);hasRole(db,p.mentor_id,p.start_on,['mentor','instructor']);person(db,p.manager_id);invariant(p.trainee_id!==p.mentor_id,'Сотрудник не может обучать себя');
    const a=one(db,"SELECT * FROM person_assignment WHERE person_id=? AND valid_from<=? AND coalesce(valid_to,'9999-12-31')>=? ORDER BY valid_from DESC LIMIT 1",[p.trainee_id,p.start_on,p.start_on]);

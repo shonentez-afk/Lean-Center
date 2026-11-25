@@ -14,7 +14,7 @@ const files=new Map();
 const put=(name,content)=>{if(files.has(name))throw Error('Duplicate file '+name);files.set(name,Buffer.isBuffer(content)?content:Buffer.from(content,'utf8'))};
 const code=(name,content)=>{new Script(content,{filename:name});put(releasePath+'/'+name,content)};
 const js=buildSync({entryPoints:['src/app.js'],bundle:true,platform:'browser',format:'iife',target:'es2020',write:false,minify:false}).outputFiles[0].text;
-const settings={schema:read('db/schema_v1.sql'),migration:read('db/migrations/002_lc1.sql'),migration3:read('db/migrations/003_lc2.sql'),migration4:read('db/migrations/004_lc3.sql'),migration5:read('db/migrations/005_lc3_requirements.sql'),migration6:read('db/migrations/006_stage43_checklist.sql'),migration7:read('db/migrations/007_lc4_training.sql'),version};
+const settings={schema:read('db/schema_v1.sql'),migration:read('db/migrations/002_lc1.sql'),migration3:read('db/migrations/003_lc2.sql'),migration4:read('db/migrations/004_lc3.sql'),migration5:read('db/migrations/005_lc3_requirements.sql'),migration6:read('db/migrations/006_stage43_checklist.sql'),migration7:read('db/migrations/007_lc4_training.sql'),migration8:read('db/migrations/008_lc4_corporate_forms.sql'),version};
 code('app/config.js','window.LC_BUILD='+JSON.stringify(settings)+';\n');
 code('vendor/sql-wasm-data.js','window.LC_BUILD.wasm='+JSON.stringify(fs.readFileSync('node_modules/sql.js/dist/sql-wasm.wasm').toString('base64'))+';\n');
 code('vendor/sql-wasm.js',read('node_modules/sql.js/dist/sql-wasm.js'));
