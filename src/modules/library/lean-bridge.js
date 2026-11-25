@@ -6,6 +6,7 @@
  const make=(id,label)=>{const b=document.createElement('button');b.id=id;b.type='button';b.textContent=label;b.style.cssText='padding:7px 12px;border:1px solid #bfc0c0;background:white;color:#242e40;border-radius:3px;cursor:pointer';bar.append(b);return b};
  const send=make('lc-editor-send','Передать в Lean Center'),download=make('lc-editor-download','Скачать JSON'),status=document.createElement('span');status.id='lc-editor-status';status.textContent='Ожидание загрузки…';bar.append(status);document.body.prepend(bar);
  let loaded=false,busy=false;
+ if(kind==='frv'){for(const el of document.querySelectorAll('.tab-btn:not([data-tab="frvstudy"])'))el.style.display='none'}
  send.disabled=true;download.disabled=true;
  const tell=(type,extra={})=>window.opener?.postMessage({protocol:'lean-editor-v1',session,type,...extra},'*');
  const say=(s)=>{status.textContent=s};
@@ -29,7 +30,7 @@
     if(defaults?.operation){state.meta.operation=defaults.operation;setVal('meta-operation',defaults.operation)}
     if(defaults?.unit){state.meta.department=defaults.unit;setVal('meta-department',defaults.unit)}
    }else if(defaults?.operation){const d=ensureFrvStudy();d.operationId=defaults.operation;renderFrvStudy()}
-   if(kind==='frv'){const tab=document.querySelector('[data-tab="frv"]');tab?.click()}else document.querySelector('[data-tab="editor"]')?.click();
+   if(kind==='frv'){const tab=document.querySelector('[data-tab="frvstudy"]');tab?.click()}else document.querySelector('[data-tab="editor"]')?.click();
    loaded=true;send.disabled=false;download.disabled=false;say('Рабочая копия готова. Передача не публикует документ.');tell('loaded')
   }catch(e){say('Ошибка загрузки: '+e.message+' · закройте окно и сохраните исходный файл');tell('error',{message:e.message})}finally{busy=false}
  }

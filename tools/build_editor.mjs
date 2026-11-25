@@ -1,8 +1,8 @@
-import fs from 'node:fs';
+import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 const BASE='baselines/sop-stage43/releases/stage43-sop-print-formats-20261125.html';
 export function buildEditor(){
- const bytes=fs.readFileSync(BASE);
+ const bytes=execFileSync('git',['show','HEAD:'+BASE],{maxBuffer:10*1024*1024});
  // Pin the exact accepted artifact (Git blob hash includes the blob header).
  const sha=createHash('sha1').update(Buffer.from('blob '+bytes.length+'\0')).update(bytes).digest('hex');
  if(sha!=='5e35036ce243fed74ea018ac8eaf5f6c4a3c3e45')throw Error('Stage43 baseline changed: '+sha);

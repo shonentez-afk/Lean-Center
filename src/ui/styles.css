@@ -109,3 +109,5 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .registry-shortcuts{margin:0 0 16px}.org-tree{max-height:380px;overflow:auto}.org-node{display:flex;align-items:center;gap:9px;padding-top:5px;padding-bottom:5px;border-bottom:1px solid var(--line);min-height:34px;flex-wrap:wrap}.multiline-cell,.preview-detail{white-space:pre-wrap;overflow-wrap:anywhere;max-width:560px}.preview-detail{font-size:12px;padding:2px 0}.tablewrap td:has(.preview-detail){white-space:normal;min-width:240px}.field textarea{resize:vertical;min-height:90px}
+
+.library-version{border:1px solid var(--line);background:var(--surface-alt);padding:12px;margin:10px 0;border-radius:var(--radius)}.library-version details,.panel>details{margin:8px 0}.library-version summary,.panel>details>summary{cursor:pointer;font-weight:600;color:var(--ink)}.source-hash{font-family:monospace;font-size:11px;overflow-wrap:anywhere;color:var(--muted)}.library-action{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;align-items:end;padding:10px 0}.library-version>p{margin:6px 0}

@@ -1,8 +1,8 @@
-name: LC2 master data
+name: LC3 document library
 on:
   push:
-    branches: [feature/lc2-master-data]
-    paths: ['src/**','db/**','tests/**','tools/build_lc1.mjs','tools/build_folder.mjs','tools/package_folder.py','docs/DEPLOY_NETWORK_RU.md','package.json','.github/workflows/lc1.yml']
+    branches: [feature/lc3-document-library]
+    paths: ['src/**','db/**','tests/**','tools/build_lc1.mjs','tools/build_folder.mjs','tools/build_editor.mjs','tools/package_folder.py','docs/DEPLOY_NETWORK_RU.md','package.json','.github/workflows/lc1.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,17 +36,17 @@ jobs:
       - run: npm run smoke
       - uses: actions/upload-artifact@v4
         with:
-          name: LeanCenter-LC2.0-${{ runner.os }}
-          path: releases/LeanCenter-LC2.0.zip
+          name: LeanCenter-LC3.0-${{ runner.os }}
+          path: releases/LeanCenter-LC3.0.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: LC2.0-screenshots-${{ runner.os }}
+          name: LC3.0-screenshots-${{ runner.os }}
           path: artifacts
           if-no-files-found: error
   publish:
     needs: verify
-    if: github.ref == 'refs/heads/feature/lc2-master-data'
+    if: github.ref == 'refs/heads/feature/lc3-document-library'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -54,14 +54,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: LeanCenter-LC2.0-Linux
+          name: LeanCenter-LC3.0-Linux
           path: releases
       - name: Publish verified folder candidate
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add releases/LeanCenter-LC2.0.zip
+          git add releases/LeanCenter-LC3.0.zip
           if ! git diff --cached --quiet; then
-            git commit -m "Build: verified LC2.0 master data candidate"
-            git push origin HEAD:feature/lc2-master-data
+            git commit -m "Build: verified LC3.0 document library candidate"
+            git push origin HEAD:feature/lc3-document-library
           fi
