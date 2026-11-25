@@ -5,7 +5,7 @@ export const ACTION_KINDS={corrective:'Корректирующее меропр
 export const ACTION_STATES={open:'Открыто',in_progress:'В работе',implemented:'Ожидает проверки',verified:'Эффект подтверждён',ineffective:'Эффект не подтверждён',cancelled:'Отменено'};
 export const RESPONSE_LABELS={yes:'Да',no:'Нет',not_observed:'Не наблюдалось',not_applicable:'Не применимо',legacy:'Историческая доля'};
 export const LC5_TYPES={action_item:'Задача / мероприятие',schedule_event:'Календарное событие'};
-export const isLC5Event=e=>['import_rc1','import_rc1_method'].includes(e.payload?.command)||Object.hasOwn(LC5_TYPES,e.entity_type)||(e.entity_type==='audit_session'&&e.payload?.responses?.some(r=>typeof r.value==='string'));
+export const isLC5Event=e=>['import_rc1','import_rc1_method','mobile_lc5','observe_lc5'].includes(e.payload?.command)||Object.hasOwn(LC5_TYPES,e.entity_type)||(e.entity_type==='audit_session'&&e.payload?.responses?.some(r=>typeof r.value==='string'));
 const required=(v,n=2000)=>typeof v==='string'&&v.trim().length>0&&v.length<=n;
 const exact=(p,k)=>invariant(p&&Object.keys(p).length===k.length&&k.every(x=>Object.hasOwn(p,x)),'Некорректные поля LC5');
 const insert=(db,t,p)=>db.run('INSERT INTO '+t+'('+Object.keys(p).join(',')+') VALUES('+Object.keys(p).map(()=>'?').join(',')+')',Object.values(p));
@@ -29,7 +29,7 @@ export function actionRows(db){
 export function evidenceForAction(db,a){
  if(!a.audit_id||!a.implemented_at||!a.operation_id||!a.standard_revision_id||a.audit_state!=='final')return [];
  // Day precision: a same-day record cannot prove it was after implementation.
- return rows(db,`SELECT s.id,s.observed_at,r.response,r.note FROM audit_session s LEFT JOIN audit_response r ON r.audit_id=s.id AND r.criterion_id=? WHERE s.state='final' AND s.mentor_id=? AND s.operation_id=? AND s.standard_revision_id=? AND s.version_id=? AND substr(s.observed_at,1,10)>? ORDER BY s.observed_at,s.id`,[a.criterion_id,a.mentor_id,a.operation_id,a.standard_revision_id,a.version_id,a.implemented_at.slice(0,10)]);
+ return rows(db,`SELECT s.id,s.observed_at,r.response,r.note FROM audit_session s JOIN training_session t ON t.id=s.training_session_id LEFT JOIN audit_response r ON r.audit_id=s.id AND r.criterion_id=? WHERE s.state='final' AND s.mentor_id=? AND s.operation_id=? AND s.standard_revision_id=? AND s.version_id=? AND substr(s.observed_at,1,10)>? AND substr(t.held_at,1,10)>? ORDER BY s.observed_at,s.id`,[a.criterion_id,a.mentor_id,a.operation_id,a.standard_revision_id,a.version_id,a.implemented_at.slice(0,10),a.implemented_at.slice(0,10)]);
 }
 export function effectiveEvidence(db,a,auditId){
  const evidence=evidenceForAction(db,a),selected=evidence.find(x=>x.id===auditId);
@@ -73,10 +73,10 @@ export function applyLC5Event(db,e,old){
   if(a.finding_id){const unresolved=one(db,"SELECT id FROM action_item WHERE finding_id=? AND state<>'verified' AND state<>'cancelled'",[a.finding_id]);if(!unresolved&&p.outcome==='effective')db.run("UPDATE finding SET state='resolved' WHERE id=?",[a.finding_id])}return
  }
  if(t==='schedule_event'){
-  if(!old){exact(p,['assignment_id','owner_id','due_on']);person(db,p.owner_id);invariant(e.operation==='create'&&validDate(p.due_on)&&p.due_on>=day(e)&&one(db,"SELECT id FROM training_assignment WHERE id=? AND state<>'cancelled' AND source_sha256 IS NOT NULL",[p.assignment_id]),'Укажите назначение, ответственного и дату аудита');insert(db,t,{id,kind:'audit',owner_id:p.owner_id,source_id:p.assignment_id,due_on:p.due_on,state:'planned',source_type:'training_assignment',rev:1});return}
+  if(!old){exact(p,['assignment_id','owner_id','due_on']);person(db,p.owner_id);invariant(e.operation==='create'&&validDate(p.due_on)&&p.due_on>=day(e)&&one(db,"SELECT id FROM training_assignment WHERE id=? AND state<>'cancelled' AND source_sha256 IS NOT NULL",[p.assignment_id]),'Укажите назначение, ответственного и дату аудита');insert(db,t,{id,kind:'audit',owner_id:p.owner_id,source_id:p.assignment_id,due_on:p.due_on,state:'planned',source_type:'training_assignment',created_at:e.occurred_at,rev:1});return}
   invariant(e.operation==='update'&&old.state==='planned'&&old.kind==='audit'&&old.source_type==='training_assignment','Событие не доступно для изменения');
   if(p.command==='cancel'){exact(p,['command']);update(db,t,id,{state:'cancelled'});return}
-  exact(p,['command','audit_id']);const a=one(db,"SELECT * FROM audit_session WHERE id=? AND state='final' AND assignment_id=?",[p.audit_id,old.source_id]);invariant(p.command==='complete'&&a&&a.auditor_id===old.owner_id&&a.observed_at.slice(0,10)<=day(e)&&!one(db,'SELECT id FROM schedule_event WHERE completed_audit_id=?',[a.id]),'Выберите фактически проведённый аудит этого назначения и ответственного');update(db,t,id,{state:'done',completed_audit_id:a.id});return
+  exact(p,['command','audit_id']);const a=one(db,"SELECT * FROM audit_session WHERE id=? AND state='final' AND assignment_id=?",[p.audit_id,old.source_id]);invariant(p.command==='complete'&&a&&a.auditor_id===old.owner_id&&a.observed_at.slice(0,10)<=day(e)&&(!old.created_at||a.recorded_at>=old.created_at&&a.observed_at.slice(0,10)>=old.created_at.slice(0,10))&&!one(db,'SELECT id FROM schedule_event WHERE completed_audit_id=?',[a.id]),'Выберите фактически проведённый аудит этого назначения и ответственного');update(db,t,id,{state:'done',completed_audit_id:a.id});return
  }
  throw Error('Неизвестное событие LC5')
 }

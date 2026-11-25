@@ -142,7 +142,7 @@ function orgTree(panel,items){
  if(items.length)panel.append(pane('Иерархия предприятия',box));
 }
 const employeeTabs=[['overview','Обзор'],['matrices','Матрицы компетенций'],['training','Обучение'],['assessments','Оценки и допуски'],['mentoring','Наставничество'],['documents','СОП и ФРВ'],['development','Планы и мероприятия'],['history','Назначения и роли']];
-const employeeStates={active:'Действует',retired:'Предыдущая версия',planned:'Запланировано',in_progress:'В процессе',completed:'Завершено',cancelled:'Отменено',confirmed:'Подтверждено',void:'Аннулировано',registered:'Зарегистрировано',revoked:'Отозвано',closed:'Закрыто',granted:'Допуск выдан',denied:'Не допущен',final:'Зафиксировано',draft:'Черновик',pass:'Пройдено',fail:'Не пройдено',incomplete:'Не завершено',effective:'Действует',superseded:'Заменено',withdrawn:'Выведено из действия',open:'Открыто',review:'На согласовании',approved:'Согласовано',archived:'Архив'};
+const employeeStates={active:'Действует',retired:'Предыдущая версия',planned:'Запланировано',in_progress:'В процессе',completed:'Завершено',cancelled:'Отменено',confirmed:'Подтверждено',void:'Аннулировано',registered:'Зарегистрировано',revoked:'Отозвано',closed:'Закрыто',granted:'Допуск выдан',denied:'Не допущен',final:'Зафиксировано',draft:'Черновик',pass:'Пройдено',fail:'Не пройдено',incomplete:'Не завершено',effective:'Действует',superseded:'Заменено',withdrawn:'Выведено из действия',open:'Открыто',implemented:'Ожидает проверки',verified:'Эффект подтверждён',ineffective:'Эффект не подтверждён',done:'Выполнено',review:'На согласовании',approved:'Согласовано',archived:'Архив'};
 function openEmployee(id,{restore=false}={}){
  if(!id||!one(ws.working,'SELECT id FROM person WHERE id=?',[id]))return;
  const keep=restore&&employeeReturn===id,tab=keep?employeeTab:'overview';navigate('person',{retainEmployee:keep});employeeSelected=id;employeeReturn=id;employeeTab=tab;employeeSources=null;render()
@@ -220,7 +220,7 @@ function registry(main,type){
  search.oninput=()=>{query=search.value;draw()};filter.onchange=()=>{archiveFilter=filter.value;draw()};draw();
  if(type==='org_unit')orgTree(panel,items)
 }
-function downloadBytes(name,bytes){const url=URL.createObjectURL(new Blob([bytes],{type:name.endsWith('.docx')?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function downloadBytes(name,bytes){const url=URL.createObjectURL(new Blob([bytes],{type:name.endsWith('.docx')?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':name.endsWith('.html')?'text/html':name.endsWith('.json')?'application/json':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function updateMapping(s){s.plan=null;s.mapping=s.book?autoMap(s.type,sheetHeaders(s.book.worksheets[s.sheet],s.header)):{}}
 function importScreen(main){
  main.append(pane('Импорт RC1 и мобильных аудитов',btn('Открыть импорт аудитов',()=>goTraining('audit_import'),'primary')));

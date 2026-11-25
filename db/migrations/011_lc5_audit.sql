@@ -7,6 +7,7 @@ ALTER TABLE action_item ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal' CHECK
 ALTER TABLE action_item ADD COLUMN created_at TEXT;
 ALTER TABLE schedule_event ADD COLUMN rev INTEGER NOT NULL DEFAULT 1 CHECK(rev>0);
 ALTER TABLE schedule_event ADD COLUMN source_type TEXT;
+ALTER TABLE schedule_event ADD COLUMN created_at TEXT;
 ALTER TABLE schedule_event ADD COLUMN completed_audit_id TEXT REFERENCES audit_session(id);
 ALTER TABLE checklist_version ADD COLUMN legacy_context_json TEXT CHECK(legacy_context_json IS NULL OR json_valid(legacy_context_json));
 ALTER TABLE audit_session ADD COLUMN legacy_context_json TEXT CHECK(legacy_context_json IS NULL OR json_valid(legacy_context_json));

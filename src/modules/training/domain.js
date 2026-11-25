@@ -3,6 +3,7 @@ import {invariant,one,rows,canonical,isId,foldKey} from '../../core/db.js';
 import {directoryPeople,personKey} from '../master-data/people-directory.js';
 import {linkedTwi} from '../library/linked-materials.js';
 import {validDate} from '../library/sop-review.js';
+import {verifyMobileContext,recordMobileMapping} from './mobile-audit.js';
 import {isRC1Import,applyRC1Event} from './rc1-import.js';
 import {LC5_TYPES,applyLC5Event} from './audit-domain.js';
 export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,
@@ -219,16 +220,17 @@ export function applyTrainingEvent(db,e,old){
  }
  if(t==='audit_session'){
   if(old){changeOnly(e,old);exact(p,['command','reason']);invariant(old.assignment_id&&old.state==='final'&&p.command==='void'&&required(p.reason),'Укажите основание аннулирования');update(db,t,id,{state:'void',void_reason:p.reason});return}
-  createOnly(e,old);exact(p,['assignment_id','assignment_rev','method_id','auditor_id','session_id','observed_on','responses','feedback']);
+  createOnly(e,old);const mobile=p.command==='mobile_lc5',native=p.command==='observe_lc5';exact(p,['assignment_id','assignment_rev','method_id','auditor_id','session_id','observed_on','responses','feedback',...(mobile?['command','mobile_record','mobile_hash']:native?['command']:[])]);
   const a=freshAssignment(db,p);noFuture(p.observed_on,e);person(db,p.auditor_id);
   hasRole(db,p.auditor_id,p.observed_on,['internal_trainer']);invariant(p.auditor_id!==a.mentor_id&&p.auditor_id!==a.trainee_id,'Внутренний тренер должен отличаться от инструктора и обучаемого');
   const fact=one(db,'SELECT * FROM training_session WHERE id=? AND assignment_id=? AND stage_code IS NOT NULL',[p.session_id,a.id]);
   invariant(a.state!=='cancelled'&&a.approval_json&&fact&&fact.held_at.slice(0,10)<=p.observed_on&&p.observed_on>=a.assigned_on&&required(p.feedback),'Выберите факт этого инструктажа, дату наблюдения и обратную связь');
-  invariant(trainingMethods(db,AUDIT_CODE).some(x=>x.id===p.method_id&&x.state==='active'),'Выберите действующую методику аудита L1');
+  if(mobile)verifyMobileContext(db,p,a);else invariant(trainingMethods(db,AUDIT_CODE).some(x=>x.id===p.method_id&&x.state==='active'),'Выберите действующую методику аудита L1');
+  if(mobile||native)invariant(!one(db,"SELECT id FROM audit_session WHERE state='final' AND training_session_id=? AND auditor_id=? AND version_id=? AND substr(observed_at,1,10)=?",[fact.id,p.auditor_id,p.method_id,p.observed_on]),'Такое наблюдение этого факта уже зарегистрировано; выберите другой фактический инструктаж или аннулируйте ошибочную запись');
   const criteria=practicalCriteria(db,p.method_id);invariant(Array.isArray(p.responses)&&criteria.length>0&&p.responses.length===criteria.length,'Заполните все критерии аудита');
   p.responses.forEach((x,i)=>{exact(x,['criterion_id','value','note']);invariant(x.criterion_id===criteria[i].id&&(x.value===0||x.value===1||(['not_observed','not_applicable'].includes(x.value)&&required(x.note,2000)))&&text(x.note),'Некорректный ответ аудита: для ненаблюдавшегося / неприменимого пункта укажите основание')});
   store(db,t,{id,version_id:p.method_id,mentor_id:a.mentor_id,auditor_id:p.auditor_id,trainee_id:a.trainee_id,operation_id:a.operation_id,standard_revision_id:a.sop_revision_id,training_session_id:fact.id,observed_at:p.observed_on,state:'draft',recorded_names_json:canonical(names(db,{mentor:a.mentor_id,auditor:p.auditor_id,trainee:a.trainee_id})),assignment_id:a.id,summary:p.feedback,recorded_at:e.occurred_at,rev:1});
-  p.responses.forEach(x=>store(db,'audit_response',{id:id+':'+x.criterion_id,audit_id:id,version_id:p.method_id,criterion_id:x.criterion_id,response:x.value===1?'yes':x.value===0?'no':x.value,note:x.note}));db.run("UPDATE audit_session SET state='final' WHERE id=?",[id]);return
+  p.responses.forEach(x=>store(db,'audit_response',{id:id+':'+x.criterion_id,audit_id:id,version_id:p.method_id,criterion_id:x.criterion_id,response:x.value===1?'yes':x.value===0?'no':x.value,note:x.note}));db.run("UPDATE audit_session SET state='final' WHERE id=?",[id]);if(mobile)recordMobileMapping(db,e);return
  }
  if(t==='mentor_order'){
   createOnly(e,old);exact(p,['order_number','order_on','organization','city','approved_by','valid_from','valid_to','supplement_from','instructor_amount','trainer_amount','evidence','members']);
