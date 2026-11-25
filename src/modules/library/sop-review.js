@@ -21,6 +21,8 @@ export function applySopMethod(db,e,old){
  const n=methods.length?methods[0].version_no+1:1;
  db.run("INSERT INTO checklist_version(id,checklist_id,version_no,state,methodology_json,rev) VALUES(?,?,?,'draft',?,1)",[e.entity_id,c.id,n,canonical(p)]);
  for(const q of p.criteria)db.run('INSERT INTO checklist_criterion(id,version_id,code,section_code,position,question) VALUES(?,?,?,?,?,?)',[e.entity_id+':'+q.code,e.entity_id,String(q.code),'SOP',q.code,q.question]);
+ // Only one active revision per method; prior criteria and assessments remain intact.
+ db.run("UPDATE checklist_version SET state='retired',rev=rev+1 WHERE checklist_id=? AND state='active'",[c.id]);
  db.run("UPDATE checklist_version SET state='active' WHERE id=?",[e.entity_id])
 }
 export function applySopEvaluation(db,e,old){

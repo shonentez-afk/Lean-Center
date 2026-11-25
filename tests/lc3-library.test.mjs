@@ -65,7 +65,7 @@ test('SOP assessment separate versioned 20-criterion methodology; unanswered is 
  const ev=event(w,'sop_evaluation',null,payload);await w.applyContentEvents([ev]);assert.equal(one(w.working,'SELECT count(*) n FROM sop_evaluation_response').n,20);
  await assert.rejects(w.applyContentEvents([event(w,'sop_evaluation',ev.entity_id,payload)]),/неизменяема/);
  await w.applyContentEvents([event(w,'checklist_version',null,{...m,source_sha256:'b'.repeat(64),criteria:m.criteria.map(q=>({...q,question:q.question+' v2'}))})]);
- assert.equal(sopMethods(w.working)[0].version_no,2);assert.equal(one(w.working,'SELECT method_id FROM sop_evaluation').method_id,me.entity_id);
+ assert.equal(sopMethods(w.working)[0].version_no,2);assert.deepEqual(sopMethods(w.working).map(m=>m.state),['active','retired']);assert.equal(one(w.working,'SELECT method_id FROM sop_evaluation').method_id,me.entity_id);
  await w.acceptOwn(readFrom(s));assert.equal(one(w.base,'SELECT count(*) n FROM sop_evaluation_response').n,20);
 });
 test('FRV statistics preserve seconds, incomplete cycles, approved comparisons and actual/planned distinction with linked draft',async()=>{

@@ -183,7 +183,7 @@ function tableOf(headers,data){
  for(const r of data){const tr=el('tr');for(const v of r)tr.append(v instanceof Node?add(el('td'),v):el('td',String(v??'—')));body.append(tr)}t.append(body);return add(el('div',undefined,'tablewrap detail-table'),t)
 }
 function evaluationForm(revision,source){
- const methods=sopMethods(ws.working);if(!methods.length)return add(el('div'),el('p','Сначала загрузите корпоративскую методику оценки СОП в разделе «Оценка СОП».','muted'),btn('Перейти к оценке СОП',()=>navigate('sop_evaluation')));
+ const methods=sopMethods(ws.working).filter(m=>m.state==='active');if(!methods.length)return add(el('div'),el('p','Сначала загрузите корпоративскую методику оценки СОП в разделе «Оценка СОП».','muted'),btn('Перейти к оценке СОП',()=>navigate('sop_evaluation')));
  const panel=el('div'),select=el('select');for(const m of methods){const o=el('option','Методика v'+m.version_no);o.value=m.id;select.append(o)}
  const actor=selectRef('person','eval_actor'),day=fieldInput('eval_date',today(),'date'),place=fieldInput('eval_place',revision.workplace_name||''),content=el('div');
  panel.append(add(el('div',undefined,'formgrid'),inputField('Версия методики',select),inputField('Оценщик',actor),inputField('Дата',day),inputField('Место',place)),content);
@@ -213,7 +213,7 @@ function evaluationHistory(revision,source){
 function sopEvaluationScreen(main){
  const p=pane('Методики оценки СОП',el('p','Загрузите приватный JSON из корпоративского приложения 4. Оценка СОП — отдельная форма из 20 пунктов, не аудит инструктора L1 и не 13-пунктный чек-лист Stage43.','muted'));
  p.append(btn('Загрузить методику JSON',()=>{const i=el('input');i.type='file';i.accept='.json';i.onchange=()=>{if(!i.files?.[0])return;run(async()=>{invariant(i.files[0].size<=128000,'Слишком большой файл методики');const m=validateChecklist(JSON.parse(await i.files[0].text()));if(!confirm(m.title+'\n20 критериев. Добавить неизменяемую версию методики?'))return 'Импорт отменён';await ws.applyContentEvents([contentEvent('checklist_version',m)]);return 'Методика добавлена, ожидает публикации.'})};i.click()},'primary',!!ws.conflicts.length));
- for(const m of sopMethods(ws.working)){const data=JSON.parse(m.methodology_json),d=el('details');d.append(el('summary','Версия '+m.version_no+' · '+data.title),el('p','SHA-256 исходного документа: '+data.source_sha256,'source-hash'),tableOf(['№','Требование'],sopCriteria(ws.working,m.id).map(q=>[q.position,q.question])));p.append(d)}
+ for(const m of sopMethods(ws.working)){const data=JSON.parse(m.methodology_json),d=el('details');d.append(el('summary','Версия '+m.version_no+' · '+data.title+' · '+(m.state==='active'?'Действует':'Архив')),el('p','SHA-256 исходного документа: '+data.source_sha256,'source-hash'),tableOf(['№','Требование'],sopCriteria(ws.working,m.id).map(q=>[q.position,q.question])));p.append(d)}
  main.append(p,pane('Оценивание конкретной версии',el('p','Откройте документ в каталоге СОП, вкладку «Оценка СОП». Результаты привязаны к версии и хэшу исходника.','muted'),btn('Каталог СОП',()=>navigate('sop'),'primary')))
 }
 function passportForm(c,revision){
