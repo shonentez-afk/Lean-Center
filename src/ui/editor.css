@@ -22,3 +22,17 @@ body>.max-w-7xl{max-width:none!important;width:100%!important;margin:0!important
 .lc-person-dialog{font:14px var(--lc-font);border:1px solid var(--lc-line);background:var(--lc-surface);color:var(--lc-ink);padding:18px;border-radius:6px;max-width:min(640px,96vw);width:640px;margin:auto}
 .lc-person-dialog::backdrop{background:#242e4077}.lc-person-dialog h2{font-size:16px;font-weight:700;margin:0 0 12px}.lc-person-dialog input{font:inherit;width:100%;padding:9px;border:1px solid var(--lc-line);border-radius:4px;margin-bottom:8px;background:var(--lc-surface);color:var(--lc-ink)}
 #lc-person-results{display:flex;flex-direction:column;gap:4px;max-height:42vh;overflow:auto;margin-bottom:10px}.lc-person-option{text-align:left;font:13px var(--lc-font)!important}.lc-person-option:hover{border-color:var(--lc-red)!important}
+
+/* LC3.4: always-visible AI controls and notifications below the sticky toolbar. */
+#lc-editor-bar{gap:8px!important}
+#lc-editor-bar #lc-editor-status{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}
+#lc-editor-ai{display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex:1 1 100%;min-width:0;padding-top:7px;border-top:1px solid var(--lc-line)}
+#lc-editor-ai #aiTestBtn{flex:none;display:inline-flex!important;align-items:center;min-height:32px;padding:6px 12px!important;white-space:nowrap;font-size:13px!important;font-weight:600;background:var(--lc-surface)!important;color:var(--lc-ink)!important;border:1px solid var(--lc-line)!important;border-radius:4px!important}
+#lc-editor-ai #aiTestBtn:focus-visible{outline:2px solid var(--lc-focus);outline-offset:2px}
+#lc-editor-ai #aiTestBtn:hover{border-color:var(--lc-red)!important}
+#lc-editor-ai #aiConnectivityBadge{flex:none;white-space:nowrap;font-size:12px!important}
+#lc-editor-ai #modelSelector{min-width:0;max-width:100%;padding:6px 8px;border:1px solid var(--lc-line);border-radius:4px;background:var(--lc-surface);color:var(--lc-ink);font-size:12px}
+#lc-editor-ai .lc-ai-notice{font-size:11px;color:var(--lc-muted)}
+#toastContainer{position:fixed!important;top:var(--lc-toast-top,120px)!important;right:12px!important;left:auto!important;bottom:auto!important;z-index:10001!important;display:flex!important;flex-direction:column-reverse!important;gap:8px;width:max-content;max-width:min(460px,calc(100vw - 24px));max-height:max(0px,calc(100vh - var(--lc-toast-top,120px) - 12px));overflow:hidden;pointer-events:none}
+#toastContainer .toast{flex-shrink:0;min-width:0;max-width:100%;overflow-wrap:anywhere;white-space:normal;font:13px/1.45 var(--lc-font)}
+#toastContainer .toast>span:last-child{min-width:0;overflow-wrap:anywhere}

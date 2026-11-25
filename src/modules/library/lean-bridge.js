@@ -8,10 +8,18 @@
  // The old Stage43 header is hidden by the center theme. Move the original
  // controls (and their existing listeners) into the integrated toolbar.
  const aiModel=document.getElementById('modelSelector'),aiBadge=document.getElementById('aiConnectivityBadge'),aiTest=document.getElementById('aiTestBtn');
- if(aiModel){aiModel.setAttribute('aria-label','Модель ИИ');aiModel.style.cssText='padding:6px 8px;border:1px solid var(--lc-line);border-radius:4px;background:var(--lc-surface);color:var(--lc-ink)';bar.insertBefore(aiModel,status)}
- if(aiBadge){aiBadge.setAttribute('role','status');bar.insertBefore(aiBadge,status)}
- if(aiTest){aiTest.type='button';bar.insertBefore(aiTest,status)}
- const aiNotice=document.createElement('span');aiNotice.textContent='ИИ: Yandex Cloud по команде';aiNotice.title='При запуске функции ИИ необходимые данные текущей задачи отправляются в Yandex Cloud. Используйте только разрешённые организацией данные.';aiNotice.style.cssText='font-size:11px;color:var(--lc-muted)';bar.insertBefore(aiNotice,status);
+ const aiPanel=document.createElement('div');aiPanel.id='lc-editor-ai';aiPanel.setAttribute('role','group');aiPanel.setAttribute('aria-label','Подключение ИИ');
+ if(aiTest){aiTest.type='button';aiPanel.append(aiTest)}
+ if(aiBadge){aiBadge.setAttribute('role','status');aiPanel.append(aiBadge)}
+ if(aiModel){aiModel.setAttribute('aria-label','Модель ИИ');aiPanel.append(aiModel)}
+ const aiNotice=document.createElement('span');aiNotice.className='lc-ai-notice';aiNotice.textContent='ИИ: Yandex Cloud по команде';aiNotice.title='При запуске функции ИИ необходимые данные текущей задачи отправляются в Yandex Cloud. Используйте только разрешённые организацией данные.';aiPanel.append(aiNotice);bar.append(aiPanel);
+ // Stage43 notifications are fixed inside the iframe, not the outer page.
+ // Keep them below the actual sticky toolbar, including wrapped rows.
+ function syncToastPosition(){const bottom=bar.getBoundingClientRect().bottom;document.documentElement.style.setProperty('--lc-toast-top',Math.max(12,Math.ceil(bottom)+12)+'px')}
+ syncToastPosition();
+ if(typeof ResizeObserver==='function')new ResizeObserver(syncToastPosition).observe(bar);
+ window.addEventListener('resize',syncToastPosition);
+ window.addEventListener('scroll',syncToastPosition,{passive:true});
  let loaded=false,busy=false,people=[],links=[],selected=null;
  const staticFields={
   'meta-approver-name':{slot:'approver',label:'Утверждающий',post:'meta-approver-post'},

@@ -29,6 +29,12 @@ try{
  await page.addInitScript(()=>{window.open=()=>{throw Error('Unexpected popup: editor must not call window.open')}});
  let popups=0;page.on('popup',()=>popups++);
  async function editorFrame(){const frame=page.locator('#lc-editor-frame');await frame.waitFor();const editor=await (await frame.elementHandle()).contentFrame();assert(editor);await editor.locator('#lc-editor-status').waitFor({timeout:30000});await editor.waitForFunction(()=>{const t=document.getElementById('lc-editor-status')?.textContent||'';return t.includes('Рабочая копия готова')||t.includes('Ошибка загрузки:')},{},{timeout:30000});assert.match(await editor.locator('#lc-editor-status').textContent(),/Рабочая копия готова/);await page.getByText('Редактор готов',{exact:true}).waitFor();return editor}
+ async function checkEditorNotifications(frame,label){
+  await frame.locator('#lc-editor-ai #aiTestBtn').waitFor({state:'visible'});
+  await frame.waitForFunction(()=>{const b=document.getElementById('aiTestBtn'),r=b.getBoundingClientRect();return r.top>=0&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))});
+  await frame.evaluate(msg=>toast(msg,'error'),label);
+  await frame.waitForFunction(msg=>{const bar=document.getElementById('lc-editor-bar').getBoundingClientRect(),n=[...document.querySelectorAll('#toastContainer .toast')].find(x=>x.textContent.includes(msg));if(!n)return false;const r=n.getBoundingClientRect();return r.top>=bar.bottom+8&&r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&getComputedStyle(n).opacity==='1'},label);
+ }
  await page.goto(entry);await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();
  await page.getByRole('button',{name:'Сотрудники',exact:true}).first().click();
  await page.getByRole('button',{name:'Добавить',exact:true}).click();
@@ -45,6 +51,13 @@ try{
  await emptyEditor.locator('#aiTestBtn').click();
  await emptyEditor.getByText('AI: доступен',{exact:true}).waitFor();
  assert.deepEqual(aiTasks,['healthcheck']);
+ await emptyEditor.locator('#toastContainer').getByText('AI proxy отвечает',{exact:true}).waitFor();
+ await checkEditorNotifications(emptyEditor,'Учебное уведомление СОП');
+ const normalViewport=page.viewportSize();await page.setViewportSize({width:900,height:650});
+ await checkEditorNotifications(emptyEditor,'Учебное уведомление после изменения ширины');
+ await page.setViewportSize(normalViewport);
+ await fs.mkdir('artifacts/lc3',{recursive:true});
+ await page.screenshot({path:'artifacts/lc3/sop-ai-toolbar-notification.png',fullPage:true});
  const violations=await emptyEditor.evaluate(async()=>{
   const seen=[];const record=e=>{if(e.violatedDirective==='connect-src')seen.push(e.blockedURI)};
   document.addEventListener('securitypolicyviolation',record);
@@ -147,6 +160,13 @@ try{
  await page.getByRole('button',{name:'ФРВ',exact:true}).first().click();const frv=path.join(tmp,'frv.json');await fs.writeFile(frv,JSON.stringify({schemaVersion:'FRV-1.3',study:{studyId:'FRV-QA',operationId:'Исследование QA'},cycles:[{id:'c1',cycleNo:1,phase:'baseline',observations:[{id:'o1',actionRaw:'Действие',durationSec:10,valueType:'VA'}]}]}));
  const cf=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Импорт JSON Stage43'}).click();await (await cf).setFiles(frv);await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();await page.locator('input[name=library_observed]').fill('2026-11-20');await page.getByRole('button',{name:'Сохранить новый черновик'}).click();await page.getByRole('heading',{name:'Исследование QA',exact:true}).waitFor();
  await page.getByRole('button',{name:'Открыть редактор',exact:true}).click();const frvEditor=await editorFrame();await frvEditor.locator('#frvs-studyId').waitFor({state:'visible'});assert.equal(await frvEditor.locator('#frvs-studyId').inputValue(),'FRV-QA');
+ await ctx.setOffline(false);await frvEditor.locator('#aiTestBtn').click();
+ await frvEditor.getByText('AI: доступен',{exact:true}).waitFor();
+ await checkEditorNotifications(frvEditor,'Учебное уведомление ФРВ');
+ await frvEditor.evaluate(()=>window.scrollTo(0,300));
+ await checkEditorNotifications(frvEditor,'Учебное уведомление ФРВ после прокрутки');
+ await page.screenshot({path:'artifacts/lc3/frv-ai-toolbar-notification.png',fullPage:true});
+ await frvEditor.evaluate(()=>window.scrollTo(0,0));await ctx.setOffline(true);
  await frvEditor.locator('#frvs-operationId').fill('Исследование QA — уточнение');await choosePerson(frvEditor,'Наблюдатель');assert.equal(await frvEditor.locator('#frvs-observer').inputValue(),'Учебный оценщик');
  await frvEditor.locator('#lc-editor-send').click();
  await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();
