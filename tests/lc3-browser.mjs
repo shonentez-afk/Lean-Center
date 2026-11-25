@@ -45,6 +45,34 @@ try{
  await editor.close();
  await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();await page.getByRole('heading',{name:'QA-SOP · Проверить учебный стенд'}).waitFor();
  const dl2=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать JSON',exact:true}).click();await (await dl2).saveAs(path.join(tmp,'edited.json'));const edited=JSON.parse(await fs.readFile(path.join(tmp,'edited.json'),'utf8'));assert.equal(edited.constructor.steps[0].action,'Проверить повторно');assert(edited.photoAssets['1'].original.startsWith('data:image/'));
+
+ // New corporate SOP assessment is distinct from Stage43's legacy print sheet.
+ await page.getByRole('button',{name:'Сотрудники',exact:true}).first().click();
+ await page.getByRole('button',{name:'Добавить',exact:true}).click();
+ await page.locator('input[name=employee_code]').fill('QA-001');
+ await page.locator('input[name=display_name]').fill('Учебный оценщик');
+ await page.getByRole('button',{name:'Сохранить',exact:true}).click();
+ await page.getByText('Запись сохранена локально. Изменение ожидает публикации.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Оценка СОП',exact:true}).first().click();
+ const method={format:'lean-sop-checklist-v1',title:'Учебная методика',source_sha256:'a'.repeat(64),criteria:Array.from({length:20},(_,i)=>({code:i+1,question:'Учебное требование '+(i+1)}))};
+ const mf=path.join(tmp,'method.json');await fs.writeFile(mf,JSON.stringify(method));
+ const mc=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Загрузить методику JSON'}).click();await (await mc).setFiles(mf);
+ await page.getByText('Методика добавлена, ожидает публикации.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();
+ await page.locator('.library-tabs').getByRole('button',{name:'Оценка СОП',exact:true}).click();
+ await page.locator('select[name=eval_actor]').selectOption({index:1});
+ await page.locator('input[name=eval_place]').fill('Учебное место');
+ const saveEval=page.getByRole('button',{name:'Зафиксировать оценку'});assert.equal(await saveEval.isDisabled(),true);
+ for(let i=1;i<=20;i++)await page.locator('select[name=criterion_'+i+']').selectOption(i<=17?'1':'0');
+ assert.equal(await saveEval.isDisabled(),false);await saveEval.click();
+ await page.getByText('Оценка СОП сохранена. Ожидает публикации.',{exact:true}).waitFor();
+ await page.locator('.library-tabs').getByRole('button',{name:'Оценка СОП',exact:true}).click();
+ await page.getByText('17/20 · 85%',{exact:true}).waitFor();
+ const reportDl=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать XLSX',exact:true}).click();
+ const report=await reportDl,rf=path.join(tmp,'evaluation.xlsx');await report.saveAs(rf);
+ const reportData=await page.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const s=w.getWorksheet('Оценка СОП');return {last:s.getCell('A25').value,formula:s.getCell('C26').value.formula,result:s.getCell('C26').value.result}},Array.from(await fs.readFile(rf)));
+ assert.deepEqual(reportData,{last:20,formula:'SUM(C6:C25)/20',result:.85});
+ await page.screenshot({path:'artifacts/lc3/sop-evaluation.png',fullPage:true});
  await page.getByRole('button',{name:'ФРВ',exact:true}).first().click();const frv=path.join(tmp,'frv.json');await fs.writeFile(frv,JSON.stringify({schemaVersion:'FRV-1.3',study:{studyId:'FRV-QA',operationId:'Исследование QA'},cycles:[{id:'c1',cycleNo:1,phase:'baseline',observations:[{id:'o1',actionRaw:'Действие',durationSec:10,valueType:'VA'}]}]}));
  const cf=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Импорт JSON Stage43'}).click();await (await cf).setFiles(frv);await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();await page.locator('input[name=library_observed]').fill('2026-11-20');await page.getByRole('button',{name:'Сохранить новый черновик'}).click();await page.getByRole('heading',{name:'Исследование QA',exact:true}).waitFor();
  const pp=page.waitForEvent('popup');await page.getByRole('button',{name:'Открыть редактор',exact:true}).click();const frvEditor=await pp;frvEditor.on('pageerror',e=>errors.push(e.message));frvEditor.on('dialog',d=>d.accept());await frvEditor.locator('#lc-editor-status').waitFor({timeout:20000});await frvEditor.waitForFunction(()=>{const t=document.getElementById('lc-editor-status')?.textContent||'';return t.includes('Рабочая копия готова')||t.includes('Ошибка загрузки:')},{},{timeout:20000}).catch(async e=>{console.error('FRV EDITOR STATE',await frvEditor.locator('#lc-editor-status').textContent(),await page.locator('#status').textContent());throw e});assert.match(await frvEditor.locator('#lc-editor-status').textContent(),/Рабочая копия готова/);await frvEditor.locator('#frvs-studyId').waitFor({state:'visible'});assert.equal(await frvEditor.locator('#frvs-studyId').inputValue(),'FRV-QA');

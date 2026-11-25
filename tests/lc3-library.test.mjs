@@ -35,3 +35,56 @@ const missing=()=>Object.assign(new Error('missing'),{name:'NotFoundError'});
 class FileHandle{constructor(){this.kind='file';this.data=new Uint8Array()}async getFile(){return new Blob([this.data])}async createWritable(){let data;return {write:async d=>{data=typeof d==='string'?new TextEncoder().encode(d):new Uint8Array(d)},close:async()=>{this.data=data},abort:async()=>{}}}}
 class Folder{constructor(){this.kind='directory';this.files=new Map()}async queryPermission(){return 'granted'}async requestPermission(){return 'granted'}async getFileHandle(n,{create=false}={}){if(!this.files.has(n)){if(!create)throw missing();this.files.set(n,new FileHandle())}const f=this.files.get(n);assert.equal(f.kind,'file');return f}async getDirectoryHandle(n,{create=false}={}){if(!this.files.has(n)){if(!create)throw missing();this.files.set(n,new Folder())}const f=this.files.get(n);assert.equal(f.kind,'directory');return f}async *entries(){yield* this.files.entries()}}
 test('network files precede package and snapshot, two clients read exact source; corrupted content blocks publish',async()=>{const dir=new Folder(),master=fresh(),first=await prepareSnapshot(master);await net.publishSnapshot(dir,SQL,first);master.replaceBase((await net.latestSnapshot(dir,SQL)).db);const client=new Workspace(SQL,(await net.latestSnapshot(dir,SQL)).db),s=await sop(),e=createDoc(client,s);await client.applyContentEvents([e],readFrom(s));const p=await client.package();await assert.rejects(net.sendPackage(dir,p),/Нет исходного/);await net.sendPackage(dir,p,readFrom(s));assert.equal(await net.readContent(dir,s.source),s.text);assert.equal((await master.accept(p,r=>net.readContent(dir,r))).count,1);const next=await prepareSnapshot(master);await net.publishSnapshot(dir,SQL,next,r=>net.readContent(dir,r));client.replaceBase((await net.latestSnapshot(dir,SQL)).db);assert.equal(client.pending.length,0);assert.equal(refsForDb(client.base)[0].sha256,s.source.sha256);const content=(await dir.getDirectoryHandle('Documents')).files.get(s.source.sha256+'.json');content.data[0]^=1;await assert.rejects(net.readContent(dir,s.source));master.replaceBase((await net.latestSnapshot(dir,SQL)).db);const third=await prepareSnapshot(master);await assert.rejects(net.publishSnapshot(dir,SQL,third));assert.equal((await net.latestSnapshot(dir,SQL)).manifest.id,next.manifest.id)});
+
+import {reviewDue,validateChecklist,sopMethods,sopCriteria,evaluationResult} from '../src/modules/library/sop-review.js';
+import {frvSummary,draftFromFrv} from '../src/modules/library/frv-summary.js';
+test('passport is required for review, has calendar-year review due, and is invalidated on content edit',async()=>{
+ const w=fresh(),{op,p}=masters(w),s=await sop(),d=createDoc(w,s,op);
+ await w.applyContentEvents([d],readFrom(s));await assert.rejects(action(w,d.entity_id,d.id,p,'submit'),/паспорт/);
+ assert.equal(reviewDue('2024-02-29'),'2025-02-28');assert.throws(()=>reviewDue('2025-02-29'));
+ await passport(w,d.entity_id,d.id);
+ const v=one(w.working,'SELECT * FROM document_revision WHERE id=?',[d.id]);
+ assert.equal(v.review_due,'2027-11-20');assert(v.workplace_id);assert.equal(v.workplace_name,'Учебное место');
+ const s2=await sop('Новая проверка');
+ await w.applyContentEvents([event(w,'document',d.entity_id,{command:'save',revision_id:d.id,title:'Проверка',operation_id:op,...projection(s2)})],readFrom(s2));
+ assert.equal(one(w.working,'SELECT review_due FROM document_revision WHERE id=?',[d.id]).review_due,null);
+ await assert.rejects(action(w,d.entity_id,d.id,p,'submit'),/паспорт/);
+});
+test('SOP assessment separate versioned 20-criterion methodology; unanswered is not zero; complete result is immutable',async()=>{
+ const w=fresh(),{op,p}=masters(w),s=await sop(),d=createDoc(w,s,op);
+ await w.applyContentEvents([d],readFrom(s));
+ const m={format:'lean-sop-checklist-v1',title:'Учебная форма',source_sha256:'a'.repeat(64),criteria:Array.from({length:20},(_,i)=>({code:i+1,question:'Учебный критерий '+(i+1)}))};
+ assert.throws(()=>validateChecklist({...m,criteria:m.criteria.slice(0,19)}),/20/);
+ const me=event(w,'checklist_version',null,m);await w.applyContentEvents([me]);
+ assert.equal(sopMethods(w.working).length,1);await assert.rejects(w.applyContentEvents([event(w,'checklist_version',null,m)]),/уже загружена/);
+ const qs=sopCriteria(w.working,me.entity_id),responses=qs.map((q,i)=>({criterion_id:q.id,value:i<17?1:0,note:''}));
+ assert.equal(evaluationResult(responses.slice(0,19)).fraction,null);assert.equal(evaluationResult(responses).fraction,.85);
+ const payload={revision_id:d.id,method_id:me.entity_id,actor_id:p,evaluated_on:'2026-11-20',place:'Учебное место',source_sha256:s.source.sha256,responses};
+ await assert.rejects(w.applyContentEvents([event(w,'sop_evaluation',null,{...payload,responses:responses.slice(0,19)})]),/20/);
+ await assert.rejects(w.applyContentEvents([event(w,'sop_evaluation',null,{...payload,source_sha256:'b'.repeat(64)})]),/изменились/);
+ const ev=event(w,'sop_evaluation',null,payload);await w.applyContentEvents([ev]);assert.equal(one(w.working,'SELECT count(*) n FROM sop_evaluation_response').n,20);
+ await assert.rejects(w.applyContentEvents([event(w,'sop_evaluation',ev.entity_id,payload)]),/неизменяема/);
+ await w.applyContentEvents([event(w,'checklist_version',null,{...m,source_sha256:'b'.repeat(64),criteria:m.criteria.map(q=>({...q,question:q.question+' v2'}))})]);
+ assert.equal(sopMethods(w.working)[0].version_no,2);assert.equal(one(w.working,'SELECT method_id FROM sop_evaluation').method_id,me.entity_id);
+ await w.acceptOwn(readFrom(s));assert.equal(one(w.base,'SELECT count(*) n FROM sop_evaluation_response').n,20);
+});
+test('FRV statistics preserve seconds, incomplete cycles, approved comparisons and actual/planned distinction with linked draft',async()=>{
+ const w=fresh(),{op}=masters(w);
+ const raw={schemaVersion:'FRV-1.3',study:{studyId:'QA-FRV',operationId:'Проверка'},cycles:[
+ {id:'c1',cycleNo:1,phase:'baseline',observations:[{id:'o1',actionRaw:'Проверка',valueType:'VA',durationSec:4000,standardCandidate:true}]},
+ {id:'c2',cycleNo:2,phase:'improved',observations:[{id:'o2',actionRaw:'Проверка',valueType:'VA',durationSec:2000,standardCandidate:true}]},
+ {id:'c3',cycleNo:3,phase:'improved',observations:[{id:'o3',actionRaw:'Ожидание',valueType:'WAIT',durationSec:null}]}],
+ comparisonApproved:false,standard:{outdated:false,steps:[{action:'Проверка',plannedTimeSec:1800,sourceObservationIds:['o1','o2'],keyMoment:'КМ',reason:'Причина',valueType:'VA'}]}};
+ const a=frvSummary(raw);assert.equal(a.totals.VA,6000);assert.equal(a.missing,1);assert.equal(a.before,4000);assert.equal(a.after,2000);assert.equal(a.delta,null);
+ raw.comparisonApproved=true;assert.equal(frvSummary(raw).percent,50);
+ const text=JSON.stringify(raw),s={text,...await inspectSource(text,'frv')},study=event(w,'frv_study',null,{command:'create',title:'Исследование',operation_id:op,observed_at:'2026-11-20',...projection(s)});
+ await w.applyContentEvents([study],readFrom(s));
+ const draft=await draftFromFrv(text),step=JSON.parse(draft.text).constructor.steps[0];assert.equal(step.durationSeconds,1800);assert.equal(step.frvSource.observedTimeSec,3000);assert.equal(step.frvSource.projectTimeSec,1800);assert.equal(step.hasPhoto,false);
+ const doc=createDoc(w,draft,op);await w.applyContentEvents([doc],readFrom(draft));
+ const origin={command:'origin',revision_id:doc.id,study_id:study.entity_id,source_sha256:s.source.sha256};
+ await assert.rejects(w.applyContentEvents([event(w,'document',doc.entity_id,{...origin,source_sha256:'c'.repeat(64)})]),/изменилось/);
+ await w.applyContentEvents([event(w,'document',doc.entity_id,origin)]);
+ assert.equal(one(w.working,'SELECT study_id FROM sop_frv_origin').study_id,study.entity_id);
+ assert.equal(one(w.working,'SELECT sum(duration_seconds) n FROM frv_measurement').n,6000);await w.acceptOwn(readFrom(s,draft));
+ raw.standard.outdated=true;await assert.rejects(draftFromFrv(JSON.stringify(raw)),/актуальный проект/);
+});
