@@ -83,7 +83,11 @@ export function trainingScreen(main,page,c){
   s.views=[{state:'frozen',ySplit:1}];s.autoFilter={from:{row:1,column:1},to:{row:1,column:headers.length}};downloadBytes(name+'.xlsx',await w.xlsx.writeBuffer())
  }
  const saveWorkbook=async(name,w)=>{downloadBytes(name+'.xlsx',await w.xlsx.writeBuffer());return 'Отчёт сформирован'};
- const localDocx=(label,handler)=>btn(label,()=>{const input=el('input');input.type='file';input.accept='.docx';input.onchange=()=>{if(input.files?.[0])run(async()=>{const file=input.files[0];invariant(file.size<=32*1024*1024,'Файл слишком большой');return handler(new Uint8Array(await file.arrayBuffer()))},{save:false})};input.click()});
+ // Printing a draft must not rerender the screen or discard the form.
+ const localDocx=(label,handler)=>{
+  const trigger=btn(label,()=>{const input=el('input');input.type='file';input.accept='.docx';input.onchange=async()=>{const file=input.files?.[0];if(!file)return;trigger.disabled=true;try{invariant(file.size<=32*1024*1024,'Файл слишком большой');c.notify(await handler(new Uint8Array(await file.arrayBuffer())))}catch(e){c.notify(e.message,true)}finally{trigger.disabled=false}};input.click()});
+  return trigger
+ };
  const exportButton=(name,headers,items)=>btn('Скачать XLSX',()=>run(async()=>{await exportTable(name,headers,items);return 'Отчёт сформирован'},{save:false}));
  function filterList(out,input,items,searchText,draw){const update=()=>{const q=input.value.trim().toLocaleLowerCase('ru-RU');out.replaceChildren(draw(items.filter(x=>searchText(x).toLocaleLowerCase('ru-RU').includes(q))))};input.oninput=update;update()}
  function searchInput(name='lc4_search'){const i=fieldInput(name,'','search');i.placeholder='Поиск по сотруднику, операции, номеру';return i}
@@ -283,7 +287,7 @@ export function trainingScreen(main,page,c){
    else if(x.state==='active')controls.append(action('Записать результат',()=>goLocal({enrollmentId:x.id,taskId:t.id})));
    return [parts[t.part],t.title,due,t.hours,t.done?'Выполнено':t.assignment?stateLabel(t.assignment):t.result?resultLabels[t.result.result]:'Не выполнено',controls]
   })));
-  const facts=tasks.flatMap(t=>t.assignment?rows(db,'SELECT held_at,duration_minutes FROM training_session WHERE assignment_id=? AND stage_code IS NOT NULL',[t.assignment.id]).map(v=>({date:v.held_at.slice(0,10),minutes:v.duration_minutes,title:t.title})):rows(db,'SELECT held_on,minutes FROM training_task_result WHERE enrollment_id=? AND task_id=?',[x.id,t.id]).map(v=>({date:v.held_on,minutes:v.minutes,title:t.title})));
+  const facts=tasks.flatMap(t=>t.sop_revision_id?rows(db,'SELECT s.held_at,s.duration_minutes FROM training_session s JOIN training_assignment a ON a.id=s.assignment_id WHERE a.enrollment_id=? AND a.program_task_id=? AND s.stage_code IS NOT NULL',[x.id,t.id]).map(v=>({date:v.held_at.slice(0,10),minutes:v.duration_minutes,title:t.title})):rows(db,'SELECT held_on,minutes FROM training_task_result WHERE enrollment_id=? AND task_id=?',[x.id,t.id]).map(v=>({date:v.held_on,minutes:v.minutes,title:t.title})));
   const cal=calendarData(x.start_on,tasks),dates=calendarFacts(x.start_on,tasks,facts),calendar=pane('Календарный план',msg('Плановые даты берутся из версии программы, факты — из фактических дат записей. Повторения учитываются отдельно.'),tableOf(['Дата','Плановые задания','План, ч','Фактические задания','Факт, ч'],dates.map(d=>[d.date,d.plannedTasks.join(' · '),d.planned,d.actualTasks.join(' · '),Math.round(d.actual*100)/100])),msg('Всего плановых часов: '+cal.total));
   if(p.kind==='internship')calendar.append(msg(x.internship_start?'Стажировка: '+x.internship_start+' — '+x.internship_end+' · Ввод: '+x.entry_start+' — '+x.entry_end:'Периоды стажировки и ввода в старой записи не указаны.'));
   const scope=directoryPeople(db,x.start_on).find(v=>v.id===x.trainee_id);
