@@ -1,3 +1,5 @@
+import {frvSummary,draftFromFrv} from './modules/library/frv-summary.js';
+import {validateChecklist,sopMethods,sopCriteria,evaluationResult} from './modules/library/sop-review.js';
 import {inspectSource,MAX_CONTENT,refsForDb,refsForEvents,unionRefs,DOMAIN_TYPES} from './modules/library/domain.js';
 import {ContentStore,makeTransfer,unpackTransfer,restoreContents,MAX_TRANSFER} from './modules/library/content.js';
 import {MAX_XLSX,loadWorkbook,sheetHeaders,sheetRows,importFields,fieldLabel,autoMap,planImport,commitImport,makeTemplate} from './modules/master-data/import-xlsx.js';
@@ -158,6 +160,65 @@ function selectRef(type,name,id=null,optional=true){
  for(const v of list(ws.working,type).filter(x=>!x.archived||x.id===id)){const o=el('option',refOption(type,v));o.value=v.id;s.append(o)}s.value=id||'';return s
 }
 function downloadRaw(name,text){const url=URL.createObjectURL(new Blob([text],{type:'application/json;charset=utf-8'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function contentEvent(type,payload){return {id:uuid(),entity_type:type,entity_id:uuid(),operation:'create',expected_revision:0,payload,occurred_at:new Date().toISOString()}}
+function tableOf(headers,data){
+ const t=el('table'),h=el('tr');headers.forEach(v=>h.append(el('th',v)));t.append(add(el('thead'),h));const body=el('tbody');
+ for(const r of data){const tr=el('tr');for(const v of r)tr.append(v instanceof Node?add(el('td'),v):el('td',String(v??'—')));body.append(tr)}t.append(body);return add(el('div',undefined,'tablewrap detail-table'),t)
+}
+function evaluationForm(revision,source){
+ const methods=sopMethods(ws.working);if(!methods.length)return add(el('div'),el('p','Сначала загрузите корпоративскую методику оценки СОП в разделе «Оценка СОП».','muted'),btn('Перейти к оценке СОП',()=>navigate('sop_evaluation')));
+ const panel=el('div'),select=el('select');for(const m of methods){const o=el('option','Методика v'+m.version_no);o.value=m.id;select.append(o)}
+ const actor=selectRef('person','eval_actor'),day=fieldInput('eval_date',today(),'date'),place=fieldInput('eval_place',revision.workplace_name||''),content=el('div');
+ panel.append(add(el('div',undefined,'formgrid'),inputField('Версия методики',select),inputField('Оценщик',actor),inputField('Дата',day),inputField('Место',place)),content);
+ function draw(){
+  content.replaceChildren();const criteria=sopCriteria(ws.working,select.value),values=criteria.map(c=>{const choice=el('select');choice.name='criterion_'+c.position;for(const [v,n] of [['','Не оценено'],['1','1 — выполнено'],['0','0 — не выполнено']]){const o=el('option',n);o.value=v;choice.append(o)}const note=fieldInput('note_'+c.position);note.maxLength=2000;return {c,choice,note}});
+  const progress=el('p','Оценено: 0 из 20','muted'),save=btn('Зафиксировать оценку',()=>run(async()=>{const payload={revision_id:revision.id,method_id:select.value,actor_id:actor.value,evaluated_on:day.value,place:place.value,source_sha256:source.sha256,responses:values.map(v=>({criterion_id:v.c.id,value:v.choice.value===''?null:Number(v.choice.value),note:v.note.value}))};await ws.applyContentEvents([contentEvent('sop_evaluation',payload)]);return 'Оценка СОП сохранена. Ожидает публикации.'}),'primary',true);
+  function update(){const result=evaluationResult(values.map(x=>({value:x.choice.value===''?null:Number(x.choice.value)})));progress.textContent='Оценено: '+result.rated+' из 20 · '+(result.fraction===null?'итог пока не рассчитан':(result.fraction*100).toFixed(0)+'%');save.disabled=busy||result.rated!==20||!!ws.conflicts.length}
+  values.forEach(v=>v.choice.onchange=update);
+  content.append(tableOf(['№','Проверяемое требование','Оценка','Комментарий'],values.map(v=>[v.c.position,v.c.question,v.choice,v.note])),progress,el('p','Результат — выполненные требования / 20. Порог зачёта не установлен; оценка не утверждает СОП автоматически.','muted'),save)
+ }
+ select.onchange=()=>{if(!confirm('Сменить версию методики? Незавершённые ответы будут очищены.')){select.value=select.dataset.previous;return}select.dataset.previous=select.value;draw()};select.dataset.previous=select.value;draw();return panel
+}
+async function evaluationXlsx(id){
+ const e=one(ws.working,'SELECT * FROM sop_evaluation WHERE id=?',[id]),v=one(ws.working,'SELECT * FROM document_revision WHERE id=?',[e.revision_id]),doc=one(ws.working,'SELECT * FROM document WHERE id=?',[v.document_id]);
+ const responses=rows(ws.working,'SELECT c.position,c.question,r.value,r.note FROM sop_evaluation_response r JOIN checklist_criterion c ON c.id=r.criterion_id WHERE r.evaluation_id=? ORDER BY c.position',[id]);const method=one(ws.working,'SELECT version_no FROM checklist_version WHERE id=?',[e.method_id]);
+ const w=new ExcelJS.Workbook(),s=w.addWorksheet('Оценка СОП',{pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
+ s.columns=[{width:7},{width:105},{width:13},{width:48}];s.mergeCells('A1:D1');s.getCell('A1').value='Чек-лист оценки СОП';s.getCell('A1').font={bold:true,size:16};s.mergeCells('A2:D2');s.getCell('A2').value=doc.code+' · '+doc.title+' · версия '+v.version_no;s.mergeCells('A3:D3');s.getCell('A3').value='Место: '+e.place+'    Дата: '+e.evaluated_on+'    Оценщик: '+e.actor_name+'    Методика v'+method.version_no;s.mergeCells('A4:D4');s.getCell('A4').value='Исходный SHA-256: '+e.source_sha256;
+ s.addRow(['№ п/п','Проверяемые требования','Оценка','Комментарий']);s.getRow(5).font={bold:true,color:{argb:'FFFFFFFF'}};s.getRow(5).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF242E40'}};
+ for(const x of responses){const row=s.addRow([x.position,x.question,x.value,x.note]);row.alignment={vertical:'top',wrapText:true};row.height=Math.max(28,15*Math.ceil(Math.max(x.question.length/100,(x.note||'').length/43)))}
+ const result=evaluationResult(responses),row=s.addRow(['','ИТОГО',{formula:'SUM(C6:C25)/20',result:result.fraction},'']);row.getCell(3).numFmt='0%';s.pageSetup.printArea='A1:D26';downloadBytes('Оценка-СОП-'+doc.code+'-v'+v.version_no+'.xlsx',await w.xlsx.writeBuffer());
+}
+function evaluationHistory(revision,source){
+ const data=rows(ws.working,'SELECT e.*,m.version_no AS method_version FROM sop_evaluation e JOIN checklist_version m ON m.id=e.method_id WHERE e.revision_id=? ORDER BY e.evaluated_on DESC,e.recorded_at DESC',[revision.id]);
+ const out=el('div');if(!data.length)out.append(el('p','Оценок этой версии ещё нет.','muted'));
+ else out.append(tableOf(['Дата','Оценщик','Методика','Результат','Исходник','Отчёт'],data.map(e=>{const r=evaluationResult(rows(ws.working,'SELECT value FROM sop_evaluation_response WHERE evaluation_id=?',[e.id]));return [e.evaluated_on,e.actor_name,'v'+e.method_version,r.yes+'/20 · '+(r.fraction*100).toFixed(0)+'%',e.source_sha256===source.sha256?'Текущий':'Предыдущий черновик',btn('Скачать XLSX',()=>run(async()=>{await evaluationXlsx(e.id);return 'Отчёт сформирован'},{save:false}))]})));return out
+}
+function sopEvaluationScreen(main){
+ const p=pane('Методики оценки СОП',el('p','Загрузите приватный JSON из корпоративского приложения 4. Оценка СОП — отдельная форма из 20 пунктов, не аудит инструктора L1 и не 13-пунктный чек-лист Stage43.','muted'));
+ p.append(btn('Загрузить методику JSON',()=>{const i=el('input');i.type='file';i.accept='.json';i.onchange=()=>{if(!i.files?.[0])return;run(async()=>{invariant(i.files[0].size<=128000,'Слишком большой файл методики');const m=validateChecklist(JSON.parse(await i.files[0].text()));if(!confirm(m.title+'\n20 критериев. Добавить неизменяемую версию методики?'))return 'Импорт отменён';await ws.applyContentEvents([contentEvent('checklist_version',m)]);return 'Методика добавлена, ожидает публикации.'})};i.click()},'primary',!!ws.conflicts.length));
+ for(const m of sopMethods(ws.working)){const data=JSON.parse(m.methodology_json),d=el('details');d.append(el('summary','Версия '+m.version_no+' · '+data.title),el('p','SHA-256 исходного документа: '+data.source_sha256,'source-hash'),tableOf(['№','Требование'],sopCriteria(ws.working,m.id).map(q=>[q.position,q.question])));p.append(d)}
+ main.append(p,pane('Оценивание конкретной версии',el('p','Откройте документ в каталоге СОП, вкладку «Оценка СОП». Результаты привязаны к версии и хэшу исходника.','muted'),btn('Каталог СОП',()=>navigate('sop'),'primary')))
+}
+function passportForm(c,revision){
+ const form=el('form'),format=el('select');format.name='print_format';for(const [v,n] of [['','— Выберите —'],['portrait','А3 книжный (9 шагов)'],['landscape','А3 альбомный (12 шагов)']]){const o=el('option',n);o.value=v;format.append(o)}format.value=revision.print_format||'';
+ const changed=fieldInput('changed_on',revision.changed_on||'','date');changed.required=true;format.required=true;const save=el('button','Сохранить паспорт','primary');save.type='submit';save.disabled=busy||!!ws.conflicts.length;
+ form.onsubmit=e=>{e.preventDefault();run(async()=>{await ws.applyContentEvents([libraryEvent(c,{command:'passport',revision_id:revision.id,print_format:format.value,changed_on:changed.value})]);return 'Паспорт сохранён: срок пересмотра рассчитан от даты изменения.'})};
+ form.append(add(el('div',undefined,'formgrid'),inputField('Формат печати',format),inputField('Фактическая дата изменения',changed)),el('p','Рабочее место и оборудование берутся из операции. Изменение исходника требует повторного подтверждения паспорта.','muted'),save);return form
+}
+function sourcePassport(data){
+ const panel=el('div'),open=btn('Прочитать паспорт исходника',async()=>{open.disabled=true;try{const p=JSON.parse(await readContent(data.source)),s=p.constructor,m=s.meta||{};panel.replaceChildren(tableOf(['Реквизит','Значение'],[['Филиал',m.branch],['Подразделение',m.department],['Рабочее место',m.workplace],['Исполнители',m.executor],['Операция',m.operation],['Номер',m.sopNumber],['Дата',m.date],['Безопасность / СИЗ',m.safety],['Инструменты',m.tools],['Материалы',m.material],['Рабочая группа',(s.responsibles||[]).join('; ')],['Согласующие',(s.agreedList||[]).map(x=>[x.post,x.name].filter(Boolean).join(' ')).join('; ')],['Утверждающий',[m.approverPost,m.approverName].filter(Boolean).join(' ')]]))}catch(e){panel.append(el('p',e.message,'bad'));open.disabled=false}});
+ panel.append(open);return panel
+}
+function materialsPanel(data){
+ const panel=el('div'),button=btn('Показать фотографии шагов',async()=>{button.disabled=true;try{const p=JSON.parse(await readContent(data.source));const grid=el('div',undefined,'material-grid');for(const [i,s] of p.constructor.steps.entries()){const a=p.photoAssets[String(s.id)];if(!a)continue;const img=el('img');img.alt='Визуализация шага '+(i+1);img.loading='lazy';img.src=a.rendered||a.original;grid.append(add(el('figure'),img,el('figcaption',(i+1)+'. '+s.action)))}panel.replaceChildren(grid,el('p','В исходном JSON сохраняются оригиналы и разметка.','muted'))}catch(e){panel.append(el('p',e.message,'bad'));button.disabled=false}});panel.append(button);return panel
+}
+function frvAnalysisPanel(v,data){
+ const panel=el('div'),button=btn('Показать измерения и анализ',async()=>{button.disabled=true;try{const raw=JSON.parse(await readContent(data.source)),s=frvSummary(raw),n=x=>x===null?'—':Number(x.toFixed(2)).toLocaleString('ru-RU');
+ panel.replaceChildren(tableOf(['Категория','Секунды','Минуты'],Object.entries(s.totals).map(([k,x])=>[({VA:'ВДЦ',NVA_Necessary:'М2',NVA_Waste:'М1',WAIT:'Ожидание',BREAK:'Перерыв',OTHER:'Не классифицировано'})[k],n(x),n(x/60)])),tableOf(['Группа','Полных циклов','Среднее, сек'],[['До',s.baselineCount,n(s.before)],['После',s.improvedCount,n(s.after)]]),el('p','Неполных строк: '+s.missing+' · '+(s.comparable?'Подтверждено сравнение: разница '+n(s.delta)+' сек ('+n(s.percent)+'%)':'Эффект не рассчитан: требуется сопоставимость и полные циклы до/после.'),'muted'),tableOf(['Цикл','Группа','Измерено, сек','Полнота'],s.cycles.map(x=>[x.index,x.phase,n(x.seconds),x.complete?'Полный':'Неполный'])));
+ }catch(e){panel.append(el('p',e.message,'bad'));button.disabled=false}});
+ const transfer=btn('Создать проект СОП из сохранённого ФРВ',()=>run(async()=>{invariant(!libraryDraft,'Сначала завершите текущий предпросмотр');const d=await draftFromFrv(await readContent(data.source));libraryDraft={ctx:{...libraryContext('sop'),operation_id:v.operation_id},...d,editor:false,origin:{study_id:v.id,source_sha256:data.source.sha256}};page='sop';return 'Подготовлен новый проект СОП. Проверьте проектное время, заполните паспорт и визуализацию.'},{save:false}),'primary',!!ws.conflicts.length);
+ return add(el('div'),panel,add(el('div',undefined,'row'),button,...(v.state!=='archived'?[transfer]:[])))
+}
 function libraryContext(kind,id=null,revisionId=null){
  const row=id?one(ws.working,'SELECT * FROM '+(kind==='sop'?'document':'frv_study')+' WHERE id=?',[id]):null;
  const revision=kind==='sop'&&revisionId?one(ws.working,'SELECT * FROM document_revision WHERE id=? AND document_id=?',[revisionId,id]):null;
@@ -210,7 +271,7 @@ function libraryPreview(main,kind){
  const confirm=el('button',c.command==='create'?'Сохранить новый черновик':c.command==='revise'?'Создать новую версию':'Сохранить изменения черновика','primary');confirm.type='submit';confirm.disabled=busy||!!ws.conflicts.length;
  form.onsubmit=e=>{e.preventDefault();run(async()=>{assertContext(c);const payload={command:c.command,title:title.value.trim(),operation_id:op.value||null,source:d.source,projection:p};if(kind==='sop'){if(c.command==='create')payload.code=code.value.trim();else payload.revision_id=c.command==='save'?c.revisionId:null}else payload.observed_at=observed.value;
    // The complete original content is durable before its reference is written.
-   await contentStore.put(d.source,d.text);const ev=libraryEvent(c,payload);await ws.applyContentEvents([ev],readContent);await persist();
+   await contentStore.put(d.source,d.text);const ev=libraryEvent(c,payload);const events=[ev];if(d.origin){invariant(c.command==='create','Проект из ФРВ должен быть новым документом');events.push({id:uuid(),entity_type:'document',entity_id:ev.entity_id,operation:'update',expected_revision:1,payload:{command:'origin',revision_id:ev.id,...d.origin},occurred_at:new Date().toISOString()})}await ws.applyContentEvents(events,readContent);await persist();
    libraryDraft=null;if(d.editor&&editorSession&&!editorSession.popup.closed){editorSession.popup.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'result',message:'Черновик сохранён в Lean Center. Скачайте JSON при необходимости. Для следующей правки откройте актуальный черновик из библиотеки.'},'*')}
    return 'Черновик сохранён. Ожидает общей публикации базы.';
  },{save:false})};
@@ -243,7 +304,16 @@ function libraryScreen(main,kind){
     for(const revision of versions){
      const data=JSON.parse(revision.payload_json),c=libraryContext(kind,v.id,revision.id),section=el('div',undefined,'library-version');
      const header=add(el('div',undefined,'row'),el('strong','Версия '+revision.version_no),el('span',revisionLabels[revision.state]||revision.state,'pill'),el('span',revision.created_at.slice(0,10),'muted'));
-     section.append(header,el('p',sourceSummary(data),'muted'),sourceDetails(data));
+     section.append(header,el('p',sourceSummary(data),'muted'),el('p','Пересмотр: '+(revision.review_due||'дата не задана')+' · '+(revision.print_format==='portrait'?'А3 книжный':revision.print_format==='landscape'?'А3 альбомный':'формат не выбран')+' · Рабочее место: '+(revision.workplace_name||'не определено'),revision.review_due&&revision.review_due<today()&&revision.state==='effective'?'bad':'muted'),sourceDetails(data));
+     const tabs=el('div',undefined,'library-tabs'),body=el('div',undefined,'library-tab-body');
+     const steps=()=>tableOf(['№','Действие','Сек','Ключевые моменты','Почему важно'],data.projection.steps.map((s,i)=>[i+1,s.action,s.seconds,s.key_points.join('\n'),s.reason]));
+     const passport=()=>add(el('div'),el('p','Рабочее место: '+(revision.workplace_name||'—')+' · Оборудование: '+(revision.equipment_name||'—')+' · Дата изменения: '+(revision.changed_on||'—')),sourcePassport(data),...(!v.archived&&revision.state==='draft'?[passportForm(c,revision)]:[]));
+     const assessments=()=>add(el('div'),evaluationHistory(revision,data.source),...(!v.archived?[evaluationForm(revision,data.source)]:[]));
+     const materials=()=>materialsPanel(data);
+     const history=()=>{const origin=one(ws.working,'SELECT * FROM sop_frv_origin WHERE revision_id=?',[revision.id]);return add(el('div'),tableOf(['Версия','Статус','Создана','Пересмотр'],versions.map(x=>[x.version_no,revisionLabels[x.state]||x.state,x.created_at.slice(0,10),x.review_due])),...(origin?[el('p','Создано из исследования ФРВ: '+origin.study_id+' · SHA-256 '+origin.source_sha256,'source-hash')]:[]))};
+     const stages=el('div',undefined,'lifecycle');for(const [k,n] of [['draft','Черновик'],['review','На согласовании'],['approved','Согласован'],['effective','Действует']])stages.append(el('span',n,'life-stage'+(revision.state===k?' current':'')));
+     section.append(stages);
+     for(const [name,make] of [['Шаги и ключевые моменты',steps],['Паспорт документа',passport],['Версии',history],['Оценка СОП',assessments],['Материалы',materials]]){const tab=btn(name,()=>{for(const t of tabs.children)t.classList.remove('selected');tab.classList.add('selected');body.replaceChildren(make())},'library-tab');tabs.append(tab)}tabs.firstChild.classList.add('selected');body.append(steps());section.append(tabs,body);
      const buttons=add(el('div',undefined,'row'),rawButton(data.source,'SOP-'+v.code+'-v'+revision.version_no+'.json'));
      const open=versions.some(x=>['draft','review','approved'].includes(x.state));
      if(!v.archived&&(revision.state==='draft'||(!open&&['effective','withdrawn','superseded'].includes(revision.state)))){
@@ -257,7 +327,7 @@ function libraryScreen(main,kind){
     }
     if(!v.archived&&versions.length&&versions.every(x=>['superseded','withdrawn'].includes(x.state)))p.append(btn('Архивировать СОП',()=>{if(confirm('Архивировать документ без удаления истории?'))run(async()=>{await ws.applyContentEvents([libraryEvent(libraryContext(kind,v.id),null,'archive')],readContent);return 'Документ в архиве'})},'danger',!!ws.conflicts.length))
    }else{
-    const data=JSON.parse(v.context_json),c=libraryContext(kind,v.id);p.append(el('p',revisionLabels[v.state]+' · Дата наблюдения: '+v.observed_at),el('p',sourceSummary(data),'muted'),sourceDetails(data));
+    const data=JSON.parse(v.context_json),c=libraryContext(kind,v.id);p.append(el('p',revisionLabels[v.state]+' · Дата наблюдения: '+v.observed_at),el('p',sourceSummary(data),'muted'),sourceDetails(data),frvAnalysisPanel(v,data));
     const buttons=add(el('div',undefined,'row'),rawButton(data.source,'FRV-'+v.id+'.json'));if(v.state==='draft'){buttons.append(btn('Открыть редактор',()=>launchEditor(c),'primary',!!ws.conflicts.length),btn('Импорт изменений JSON',()=>chooseLibraryFile(kind,c),'',!!ws.conflicts.length));const det=el('details');det.append(el('summary','Завершить исследование'),libraryAction(c,'finalize','Завершить исследование'));p.append(det)}
     if(v.state!=='archived')buttons.append(btn('Архивировать',()=>{if(confirm('Архивировать исследование без удаления измерений?'))run(async()=>{await ws.applyContentEvents([libraryEvent(c,null,'archive')],readContent);return 'Исследование в архиве'})},'danger',!!ws.conflicts.length));p.append(buttons)
    }out.append(p)
@@ -302,7 +372,7 @@ function render(){
  if(ws.conflicts.length)main.append(el('p','Есть конфликты локальных изменений. Откройте «База и обмен».','bad'));
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));
- if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(Object.hasOwn(definitions,page))registry(main,page);else if(page==='twi')main.append(pane('TWI в составе СОП',el('p','План TWI сохраняется вместе с версией СОП и доступен в редакторе Stage43. Назначения обучения и практические оценки будут реализованы на LC4.','muted'),btn('Открыть библиотеку СОП',()=>navigate('sop'),'primary')));else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
+ if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(page==='twi')main.append(pane('TWI в составе СОП',el('p','План TWI сохраняется вместе с версией СОП и доступен в редакторе Stage43. Назначения обучения и практические оценки будут реализованы на LC4.','muted'),btn('Открыть библиотеку СОП',()=>navigate('sop'),'primary')));else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
  main.append(el('p','LC3.0 · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
