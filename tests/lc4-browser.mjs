@@ -7,7 +7,8 @@ import {pathToFileURL} from 'node:url';
 import {fixture,date} from './lc4-fixture.mjs';
 import {one} from '../src/core/db.js';
 import {draftDocx,readZip} from '../src/modules/training/local-docx.js';
-const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'LC4 учебная база ')),f=await fixture();
+const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'LC4 учебная база ')),f=await fixture({installMethod:false});
+const vt=f.w.edit('business_role',null,{code:'internal_trainer',name:'Внутренний тренер'});f.w.edit('role_assignment',null,{person_id:f.actor,role_id:vt,valid_from:'2020-01-01',valid_to:null});
 const pos=f.w.edit('position',null,{code:'QA-POS',name:'Учебная должность'}),pa=one(f.w.working,'SELECT * FROM person_assignment WHERE person_id=?',[f.mentor]);
 const oldAssignment={person_id:pa.person_id,unit_id:pa.unit_id,profession_id:pa.profession_id,position_id:pa.position_id,shift_id:pa.shift_id,shift_code:pa.shift_code,valid_from:pa.valid_from,valid_to:pa.valid_to};
 f.w.edit('person_assignment',pa.id,{...oldAssignment,valid_to:'2026-01-19'});f.w.edit('person_assignment',null,{...oldAssignment,position_id:pos,valid_from:date,valid_to:null});
@@ -50,7 +51,7 @@ try{
   const summary=page.locator('summary').filter({hasText:'Зарегистрировать проверку '+label});await summary.click();
   await page.locator('button[name=verify_'+kind+'_actor]').click();await page.getByRole('searchbox',{name:'Поиск сотрудника'}).fill('LC4-003');await page.locator('.lc-picker-popup .lc-person-option').click();await page.locator('input[name=verify_'+kind+'_date]').fill(date);await page.locator('textarea[name=verify_'+kind+'_evidence]').fill('Учебное основание');await page.locator('textarea[name=verify_'+kind+'_feedback]').fill('Учебная обратная связь');await saved('Сохранить проверку '+label)
  }
- await page.getByText('Новая практическая оценка',{exact:true}).click();await page.locator('button[name=practical_actor]').click();await page.getByRole('searchbox',{name:'Поиск сотрудника'}).fill('LC4-003');await page.locator('.lc-picker-popup .lc-person-option').click();await page.locator('input[name=practical_date]').fill(date);
+ await page.getByText('Новая практическая оценка',{exact:true}).click();await page.getByText('Стажер использовал СОП?',{exact:true}).waitFor();await page.locator('button[name=practical_actor]').click();await page.getByRole('searchbox',{name:'Поиск сотрудника'}).fill('LC4-003');await page.locator('.lc-picker-popup .lc-person-option').click();await page.locator('input[name=practical_date]').fill(date);
  for(let i=1;i<=11;i++)await page.locator('select[name=practical_value_'+i+']').selectOption(i===11?'0':'1');
  await page.locator('select[name=practical_conclusion]').selectOption('basic');await page.locator('textarea[name=practical_feedback]').fill('Учебная обратная связь');await saved('Зафиксировать практическую оценку');
  await page.getByText('Подтвердить компетенцию',{exact:true}).click();await choose('Подтверждающий уровень','LC4-003');await page.locator('input[name=qualification_date]').fill(date);await page.locator('select[name=qualification_level]').selectOption('2');await page.locator('textarea[name=qualification_evidence]').fill('Учебное наблюдение');await page.locator('textarea[name=qualification_feedback]').fill('Учебная обратная связь');await saved('Сохранить подтверждение уровня');
@@ -77,6 +78,9 @@ try{
  const rawCell=sheetXml.match(/<c\b[^>]*\br="H7"[^>]*>\s*<v>([^<]+)<\/v>\s*<\/c>/);
  assert(rawCell,'Missing numeric duration H7 in XLSX XML');assert(Math.abs(Number(rawCell[1])-totalMinutes/1440)<1e-12,'Incorrect raw Excel duration: '+rawCell[1]);
  await page.screenshot({path:'artifacts/lc4/journal.png',fullPage:true});
+ await nav('Бланки и методики');await page.getByRole('cell',{name:'Чек-лист оценки выполнения операций Стажером',exact:true}).waitFor();
+ await nav('Самооценка');await page.getByRole('button',{name:'Новая самооценка',exact:true}).click();await page.locator('input[name=self_date]').fill(date);await choose('Инструктор / наставник','LC4-002');await page.locator('input[name=self_place]').fill('Учебный участок');for(let i=1;i<=20;i++)await page.locator('select[name=self_value_'+i+']').selectOption('3');await saved('Сохранить самооценку');await page.getByRole('heading',{name:'Самооценка · Инструктор Тестовый',exact:true}).waitFor();
+ await nav('Аудиты 1-го уровня');await page.getByRole('button',{name:'Новый аудит',exact:true}).click();await page.locator('select[name=audit_assignment]').selectOption({index:1});await page.locator('select[name=audit_fact]').selectOption({index:1});await page.locator('input[name=audit_date]').fill(date);await choose('Внутренний тренер','LC4-003');for(let i=1;i<=20;i++)await page.locator('select[name=audit_value_'+i+']').selectOption('1');await page.locator('textarea[name=audit_feedback]').fill('Учебный аудит');await saved('Сохранить аудит');await page.getByRole('heading',{name:'Аудит 1-го уровня · Инструктор Тестовый',exact:true}).waitFor();await page.getByText('Результат: 20 / 20',{exact:true}).waitFor();
  await nav('Наставники и ВТ');await page.getByRole('cell',{name:'Инструктор Тестовый',exact:true}).waitFor();
  await nav('Назначения');await page.getByRole('button',{name:'Групповой приказ',exact:true}).click();
  await page.locator('input[name=order_organization]').fill('Учебная организация');await page.locator('input[name=order_city]').fill('Учебный город');await page.locator('input[name=order_number]').fill('QA-GROUP');await page.locator('input[name=order_on]').fill(date);await page.locator('input[name=order_start]').fill(date);await choose('Директор / утверждающий','LC4-003');
@@ -88,6 +92,7 @@ try{
  await groupRole.selectOption('instructor');await choose('Сертифицированный сотрудник','Инстр');assert.equal(await groupCertificate.inputValue(),ids.certificate);
  await page.locator('input[name=group_member_ack]').fill(date);
  await page.locator('input[name=order_pay_instructor]').fill('1000');await page.locator('input[name=order_pay_from]').fill(date);
+ const builtDownload=page.waitForEvent('download');await page.getByRole('button',{name:'Сформировать проект DOCX',exact:true}).click();const builtFile=path.join(tmp,'qa-built.docx');await (await builtDownload).saveAs(builtFile);const builtParts=await readZip(new Uint8Array(await fs.readFile(builtFile)));assert.match(new TextDecoder().decode(builtParts.find(x=>x.name==='word/document.xml').bytes),/Инструктор Тестовый, Учебная должность/);
  const draftButton=page.getByRole('button',{name:'Сформировать проект по оригиналу DOCX',exact:true});
  const invalidTemplate=path.join(tmp,'qa-invalid-order.docx');await fs.writeFile(invalidTemplate,draftDocx(['Несовместимый учебный шаблон']));
  let chooser=page.waitForEvent('filechooser');await draftButton.click();await (await chooser).setFiles(invalidTemplate);

@@ -7,7 +7,7 @@ import {inspectSource,refsForDb,refsForEvents,unionRefs} from '../src/modules/li
 import {makeTransfer} from '../src/modules/library/content.js';
 import {sopTwiSignature,twiFields} from '../src/modules/library/linked-materials.js';
 const read=p=>fs.readFileSync(p,'utf8');
-export const schema=read('db/schema_v1.sql'),migrations=['002_lc1','003_lc2','004_lc3','005_lc3_requirements','006_stage43_checklist','007_lc4_training','008_lc4_corporate_forms'].map(x=>read('db/migrations/'+x+'.sql'));
+export const schema=read('db/schema_v1.sql'),migrations=['002_lc1','003_lc2','004_lc3','005_lc3_requirements','006_stage43_checklist','007_lc4_training','008_lc4_corporate_forms','009_lc42_methods'].map(x=>read('db/migrations/'+x+'.sql'));
 configureMigrations(...migrations.slice(1));
 export const SQL=await initSqlJs();
 export const date='2026-01-20';
@@ -20,7 +20,7 @@ export async function makeSop(action='Учебная операция',outdated=
  const p={schemaVersion:2,document:{id:'QA-LC4',status:'Опубликован',number:'QA-LC4',version:1},constructor:s,photoAssets:{'1':{original:img,rendered:null,ext:'png',annotations:[]}}};
  const text=JSON.stringify({...p,integrity:{algorithm:'SHA-256',sha256:await sha256(JSON.stringify(p))}});return {text,...await inspectSource(text,'sop')}
 }
-export async function fixture(){
+export async function fixture({installMethod=true}={}){
  const w=new Workspace(SQL,createDb(SQL,schema,migrations[0])),sources=new Map(),readContent=async r=>sources.get(r.sha256)?.text;
  let clock=Date.parse(date+'T00:00:00Z');
  const save=async(t,p,id=null)=>{const old=id?one(w.working,'SELECT * FROM '+t+' WHERE id=?',[id]):null,e={id:uuid(),entity_type:t,entity_id:id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload:p,occurred_at:new Date(clock++).toISOString()};await w.applyContentEvents([e],readContent);return e};
@@ -39,7 +39,7 @@ export async function fixture(){
  const certificate=(await save('mentor_credential',{person_id:mentor,kind:'certificate',role:'instructor',number:'QA-CERT',issuer:'Учебный центр',issued_on:'2020-01-01',valid_until:null,evidence:'Синтетический документ',registered_by:actor})).entity_id;
  const appointment=(await save('mentor_appointment',{person_id:mentor,credential_id:certificate,role:'instructor',order_number:'QA-ORDER',order_on:'2020-01-01',approved_by:actor,valid_from:'2020-01-01',valid_to:null,acknowledged_on:'2020-01-01',evidence:'Синтетический приказ'})).entity_id;
  const auth=(await save('mentor_authorization',{person_id:mentor,operation_id:operation,approved_by:actor,valid_from:'2020-01-01',valid_to:null,credential_id:certificate,appointment_id:appointment})).entity_id;
- const method=(await save('checklist_version',practicalMethod)).entity_id;
+ const method=installMethod?(await save('checklist_version',practicalMethod)).entity_id:null;
  const base={trainee_id:trainee,mentor_id:mentor,supervisor_id:null,authorization_id:auth,revision_id:doc.id,source:source.source,skill_id:skill,scale_id:scale,target_level:2,assigned_by:actor,assigned_on:date,due_on:'2027-01-31',reason:'Синтетическое обучение',variant:'classic',shift_id:shift,enrollment_id:null,program_task_id:null,plan_reviewed:true};
  const addAssignment=async(overrides={})=>(await save('training_assignment',{...base,...overrides})).entity_id;
  const getAssignment=id=>one(w.working,'SELECT * FROM training_assignment WHERE id=?',[id]);

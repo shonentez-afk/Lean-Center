@@ -6,10 +6,10 @@ import {one,rows,meta,bytesOf,openDb,Workspace,restore,backup,uuid,setMeta,prepa
 import {jiStages,progressFor,authorizationValid,admissionStatus,practicalResult,latestAssessment,matrixData,coverageData,enrollmentTasks,practicalMethods} from '../src/modules/training/domain.js';
 import {refsForDb,refsForEvents} from '../src/modules/library/domain.js';
 
-test('LC4.1 migration v7 to v8 retains identities and old data',()=>{
+test('LC4.2 migration v8 to v9 retains identities and old data',()=>{
  const db=new SQL.Database();db.run(schema);for(const m of migrations.slice(0,-1))db.run(m);setMeta(db,'database_id',uuid());
  const id=uuid();db.run('INSERT INTO person(id,employee_code,display_name) VALUES(?,?,?)',[id,'Q','Учебный']);
- const migrated=openDb(SQL,bytesOf(db));assert.equal(meta(db,'schema_version'),'7');assert.equal(meta(migrated,'schema_version'),'8');assert.equal(one(migrated,'SELECT id FROM person').id,id);assert.deepEqual(rows(migrated,'PRAGMA foreign_key_check'),[]);migrated.close();db.close()
+ const migrated=openDb(SQL,bytesOf(db));assert.equal(meta(db,'schema_version'),'8');assert.equal(meta(migrated,'schema_version'),'9');assert.equal(one(migrated,'SELECT id FROM person').id,id);assert.deepEqual(rows(migrated,'PRAGMA foreign_key_check'),[]);migrated.close();db.close()
 });
 test('role/certificate/order authorization and exact SOP source, no unreviewed or duplicate assignment',async()=>{
  const f=await fixture();try{
@@ -50,7 +50,7 @@ test('training stages, 5 followups, separate practical qualification and admissi
  assert.equal(one(other.base,'SELECT count(*) n FROM training_session').n,14);
  const restored=await restore(SQL,await backup(f.w),f.readContent);assert.equal(admissionStatus(restored.working,f.trainee,f.operation,date).current,true);assert.equal(progressFor(restored.working,one(restored.working,'SELECT * FROM training_assignment WHERE id=?',[id])).followup,5);
  restored.close();other.close();await f.w.acceptOwn(f.readContent);
- const next=await prepareSnapshot(f.w),opened=await readSnapshot(SQL,next.manifest,next.bytes);assert.equal(meta(opened,'schema_version'),'8');assert.deepEqual(rows(opened,'PRAGMA foreign_key_check'),[]);opened.close();
+ const next=await prepareSnapshot(f.w),opened=await readSnapshot(SQL,next.manifest,next.bytes);assert.equal(meta(opened,'schema_version'),'9');assert.deepEqual(rows(opened,'PRAGMA foreign_key_check'),[]);opened.close();
  const r=await f.revise();assert.equal(admissionStatus(f.w.working,f.trainee,f.operation,date).current,false);assert.match(admissionStatus(f.w.working,f.trainee,f.operation,date).status,/прежней/);assert.equal(matrixData(f.w.working,date).cells.get(f.trainee+':'+f.skill).fact.level,2);assert.equal(coverageData(f.w.working,date)[0].actual,0);
  await assert.rejects(f.stage(id,'prepare'),/актуальное/);await f.addAssignment({revision_id:r.revision,source:r.source.source});assert.equal(one(f.w.working,'SELECT count(*) n FROM training_assignment').n,2)
  }finally{f.w.close()}
@@ -146,4 +146,39 @@ test('LC4.1 daily duration preserves all minutes including repeat facts, multipl
  assert.deepEqual(result.map(r=>r.values[6]),[1515/1440,20/1440,null]);
  assert.equal(result.flatMap(r=>r.facts).reduce((n,f)=>n+f.duration_minutes,0),1535);
  assert(result.every(r=>r.values[7]===''&&r.values[8]===''));
+});
+
+import {BUILTIN_SOP,BUILTIN_PRACTICAL,BUILTIN_SELF,RC1_CRITERIA,FORM_CATALOG} from '../src/modules/training/builtin-forms.js';
+import {validateChecklist,evaluationResult,sopCriteria} from '../src/modules/library/sop-review.js';
+import {validatePracticalMethod,validateMentorMethod,trainingMethods,AUDIT_CODE,SELF_CODE} from '../src/modules/training/domain.js';
+import {builtinOrderDocx} from '../src/modules/training/local-docx.js';
+test('LC4.2 built-in forms contain source criteria and no example responses; variable revisions retain history',async()=>{
+ assert.equal(BUILTIN_SOP.criteria.length,20);assert.equal(BUILTIN_PRACTICAL.criteria.length,11);assert.equal(BUILTIN_SELF.criteria.length,20);assert.equal(RC1_CRITERIA.length,20);assert.equal(FORM_CATALOG.length,13);
+ assert.match(BUILTIN_PRACTICAL.criteria[9].question,/безопасно/);assert.equal(BUILTIN_SOP.criteria[19].question,'Дата изменения СОП не превышает 12 месяцев на момент проверки');
+ validateChecklist(BUILTIN_SOP);validatePracticalMethod(BUILTIN_PRACTICAL);validateMentorMethod(BUILTIN_SELF,BUILTIN_SELF.format);
+ assert.equal(practicalResult([{value:1},{value:0}],2).fraction,.5);assert.equal(evaluationResult([{value:1},{value:0},{value:1}],3).fraction,2/3);
+ const f=await fixture();try{
+ const old=f.method,next={...BUILTIN_PRACTICAL,format:'lean-practical-checklist-v2',title:'QA новая версия',criteria:BUILTIN_PRACTICAL.criteria.slice(0,3)};
+ const e=await f.save('checklist_version',next);assert.equal(practicalMethods(f.w.working)[0].id,e.entity_id);assert.equal(practicalMethods(f.w.working)[1].id,old);
+ assert.equal(rows(f.w.working,'SELECT * FROM checklist_criterion WHERE version_id=?',[old]).length,11);
+ const id=await f.addAssignment();await f.approve(id);for(const stage of jiStages('classic').filter(x=>!['support','followup'].includes(x.phase)))await f.stage(id,stage.code);
+ await f.assess(id,{method_id:e.entity_id,responses:rows(f.w.working,'SELECT id FROM checklist_criterion WHERE version_id=? ORDER BY position',[e.entity_id]).map((x,i)=>({criterion_id:x.id,value:i?1:0,note:''}))});
+ assert.equal(practicalResult(JSON.parse(latestAssessment(f.w.working,id,'practical').responses_json),3).fraction,2/3);
+ const sop=(await f.save('checklist_version',BUILTIN_SOP)).entity_id;const newSop={...BUILTIN_SOP,format:'lean-sop-checklist-v2',title:'QA сокращённая методика',criteria:BUILTIN_SOP.criteria.slice(0,3)};await f.save('checklist_version',newSop);assert.equal(sopCriteria(f.w.working,sop).length,20);
+ const self=(await f.save('checklist_version',BUILTIN_SELF)).entity_id;
+ const answers=rows(f.w.working,'SELECT id FROM checklist_criterion WHERE version_id=? ORDER BY position',[self]).map(x=>({criterion_id:x.id,value:3,note:''}));
+ await assert.rejects(f.save('mentor_self_evaluation',{person_id:f.mentor,method_id:self,evaluated_on:date,place:'QA',responses:answers.map(x=>({...x,value:0})),feedback:''}),/1–5/);
+ await f.save('mentor_self_evaluation',{person_id:f.mentor,method_id:self,evaluated_on:date,place:'QA',responses:answers,feedback:''});assert.equal(one(f.w.working,'SELECT count(*) n FROM mentor_self_evaluation').n,1);
+ const vt=f.w.edit('business_role',null,{code:'internal_trainer',name:'Внутренний тренер'});f.w.edit('role_assignment',null,{person_id:f.actor,role_id:vt,valid_from:'2020-01-01',valid_to:null});
+ const audit=(await f.save('checklist_version',{format:'lean-audit-checklist-v1',title:'QA RC1',source_sha256:'a'.repeat(64),criteria:RC1_CRITERIA.map(({rc1_id,...q})=>q)})).entity_id;
+ const sess=one(f.w.working,'SELECT id FROM training_session WHERE assignment_id=? LIMIT 1',[id]);
+ const payload={assignment_id:id,assignment_rev:f.getAssignment(id).rev,method_id:audit,auditor_id:f.actor,session_id:sess.id,observed_on:date,responses:rows(f.w.working,'SELECT id FROM checklist_criterion WHERE version_id=? ORDER BY position',[audit]).map(x=>({criterion_id:x.id,value:1,note:''})),feedback:'QA наблюдение'};
+ const ae=await f.save('audit_session',payload);assert.equal(one(f.w.working,'SELECT count(*) n FROM audit_response').n,20);assert.equal(one(f.w.working,'SELECT assignment_id FROM audit_session WHERE id=?',[ae.entity_id]).assignment_id,id);
+ await f.save('audit_session',{command:'void',reason:'QA отзыв'},ae.entity_id);assert.equal(one(f.w.working,'SELECT state FROM audit_session WHERE id=?',[ae.entity_id]).state,'void');
+ const restored=await restore(SQL,await backup(f.w),f.readContent);assert.equal(one(restored.working,'SELECT count(*) n FROM mentor_self_evaluation').n,1);assert.equal(one(restored.working,'SELECT count(*) n FROM audit_response').n,20);restored.close()
+ }finally{f.w.close()}
+});
+test('LC4.2 built-in order is an unsigned DOCX without external template',async()=>{
+ const parts=await readZip(builtinOrderDocx({organization:'QA',city:'QA',order_on:date,order_number:'QA-1',approved_name:'Учебный',instructor_amount:null,trainer_amount:null,supplement_from:null},[{role:'instructor',person_name:'Учебный наставник',position_name:'Должность'}]));
+ const xml=new TextDecoder().decode(parts.find(x=>x.name==='word/document.xml').bytes);assert.match(xml,/Учебный наставник, Должность/);assert.match(xml,/ПРОЕКТ · БЕЗ ПОДПИСИ/)
 });
