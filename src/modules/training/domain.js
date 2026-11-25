@@ -4,7 +4,7 @@ import {directoryPeople,personKey} from '../master-data/people-directory.js';
 import {linkedTwi} from '../library/linked-materials.js';
 import {validDate} from '../library/sop-review.js';
 export const TRAINING_TYPES=Object.freeze({
- mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
+ audit_session:'Аудит инструктора',mentor_self_evaluation:'Самооценка наставника',mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
  training_program:'Программа обучения',training_enrollment:'Персональная программа',training_task_result:'Результат задания программы',
  training_assignment:'Назначение обучения',training_session:'Факт инструктажа',training_verification:'Проверка знаний',
  assessment_session:'Практическая оценка / квалификация',admission_decision:'Решение о допуске',
@@ -12,7 +12,10 @@ export const TRAINING_TYPES=Object.freeze({
 });
 export const isLC41Event=e=>e.entity_type==='mentor_order'||(e.entity_type==='training_enrollment'&&Object.hasOwn(e.payload||{},'internship_start'));
 export const PRACTICAL_CODE='PRACTICAL_APP8';
-export const isTrainingEvent=e=>Object.hasOwn(TRAINING_TYPES,e.entity_type)||(e.entity_type==='checklist_version'&&e.payload?.format==='lean-practical-checklist-v1');
+export const AUDIT_CODE='TWI_L1_RC1',SELF_CODE='TWI_SELF_APP12';
+const extraFormats=['lean-practical-checklist-v2','lean-audit-checklist-v1','lean-self-checklist-v1'];
+export const isLC42Event=e=>['audit_session','mentor_self_evaluation'].includes(e.entity_type)||(e.entity_type==='checklist_version'&&[...extraFormats,'lean-sop-checklist-v2'].includes(e.payload?.format));
+export const isTrainingEvent=e=>Object.hasOwn(TRAINING_TYPES,e.entity_type)||(e.entity_type==='checklist_version'&&['lean-practical-checklist-v1',...extraFormats].includes(e.payload?.format));
 const exact=(p,keys)=>invariant(p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).length===keys.length&&keys.every(k=>Object.hasOwn(p,k)),'Некорректные поля LC4');
 const text=(x,n=2000)=>typeof x==='string'&&x.length<=n;
 const required=(x,n=500)=>text(x,n)&&x.trim().length>0;
@@ -85,17 +88,23 @@ export function authorizationValid(db,id,day){
  return !!(o&&c&&o.person_id===a.person_id&&c.person_id===a.person_id&&o.credential_id===c.id&&roleMatches(db,a.person_id,day,roleForCredential(c.role))&&one(db,'SELECT id FROM operation WHERE id=? AND archived=0',[a.operation_id]))
 }
 export function activeAuthorizations(db,operationId,day){return rows(db,'SELECT * FROM mentor_authorization WHERE operation_id=? ORDER BY valid_from DESC,id',[operationId]).filter(x=>authorizationValid(db,x.id,day))}
-export function practicalMethods(db){return rows(db,'SELECT v.* FROM checklist_version v JOIN checklist c ON c.id=v.checklist_id WHERE c.code=? ORDER BY v.version_no DESC',[PRACTICAL_CODE])}
+export function trainingMethods(db,code){return rows(db,'SELECT v.* FROM checklist_version v JOIN checklist c ON c.id=v.checklist_id WHERE c.code=? ORDER BY v.version_no DESC',[code])}
+export function practicalMethods(db){return trainingMethods(db,PRACTICAL_CODE)}
 export function practicalCriteria(db,id){return rows(db,'SELECT * FROM checklist_criterion WHERE version_id=? ORDER BY position',[id])}
-export function practicalResult(responses){const rated=responses.filter(x=>x.value===0||x.value===1),yes=rated.filter(x=>x.value===1).length;return {rated:rated.length,yes,total:11,fraction:rated.length===11?yes/11:null}}
+export function practicalResult(responses,total=11){const rated=responses.filter(x=>x.value===0||x.value===1),yes=rated.filter(x=>x.value===1).length;return {rated:rated.length,yes,total,fraction:total>0&&responses.length===total&&rated.length===total?yes/total:null}}
 export function validatePracticalMethod(p){
- exact(p,['format','title','source_sha256','criteria']);invariant(p.format==='lean-practical-checklist-v1'&&required(p.title,200)&&sha(p.source_sha256)&&Array.isArray(p.criteria)&&p.criteria.length===11,'Нужна отдельная практическая методика из 11 критериев');
+ exact(p,['format','title','source_sha256','criteria']);invariant(['lean-practical-checklist-v1','lean-practical-checklist-v2'].includes(p.format)&&required(p.title,200)&&sha(p.source_sha256)&&Array.isArray(p.criteria)&&(p.format==='lean-practical-checklist-v1'?p.criteria.length===11:p.criteria.length>=1&&p.criteria.length<=100),'Нужна методика практики: 11 критериев v1 либо 1–100 критериев v2');
  p.criteria.forEach((x,i)=>{exact(x,['code','section','question']);invariant(x.code===i+1&&required(x.section,100)&&required(x.question,2500),'Неверный критерий '+(i+1))});return p
 }
 export function verifyTrainingSource(e,source,raw){
  invariant(e.entity_type==='training_assignment'&&e.operation==='create'&&source.kind==='sop'&&canonical(source)===canonical(e.payload.source),'Некорректный исходник назначения');
  const t=linkedTwi(raw.constructor);
  invariant(t.exists&&!t.outdated&&e.payload.plan_reviewed===true,'Сформируйте и проверьте актуальный план TWI в редакции СОП')
+}
+export function validateMentorMethod(p,format){
+ exact(p,['format','title','source_sha256','criteria']);
+ invariant(['lean-audit-checklist-v1','lean-self-checklist-v1'].includes(format)&&p.format===format&&required(p.title,200)&&sha(p.source_sha256)&&Array.isArray(p.criteria)&&p.criteria.length>0&&p.criteria.length<=100,'Некорректная методика наставника');
+ p.criteria.forEach((x,i)=>{exact(x,['code','section','question',...(Object.hasOwn(x,'recommendation')?['recommendation']:[])]);invariant(x.code===i+1&&required(x.section,100)&&required(x.question,2500)&&(!Object.hasOwn(x,'recommendation')||text(x.recommendation,2500)),'Некорректный критерий '+(i+1))});return p
 }
 function createOnly(e,old){invariant(e.operation==='create'&&!old,'Историческая запись неизменяема; создайте новое событие')}
 function changeOnly(e,old){invariant(e.operation==='update'&&old,'Недопустимая операция с записью')}
@@ -144,9 +153,9 @@ function exactAssignmentTarget(db,p,r){const skill=active(db,'skill',p.skill_id)
 export function applyTrainingEvent(db,e,old){
  const p=e.payload,id=e.entity_id,t=e.entity_type;
  if(t==='checklist_version'){
-  createOnly(e,old);validatePracticalMethod(p);const methods=practicalMethods(db);
+  createOnly(e,old);const mentor=p.format==='lean-audit-checklist-v1'||p.format==='lean-self-checklist-v1';if(mentor)validateMentorMethod(p,p.format);else validatePracticalMethod(p);const code=p.format==='lean-audit-checklist-v1'?AUDIT_CODE:p.format==='lean-self-checklist-v1'?SELF_CODE:PRACTICAL_CODE,methods=trainingMethods(db,code);
   invariant(!methods.some(m=>canonical(JSON.parse(m.methodology_json))===canonical(p)),'Такая методика уже зарегистрирована');
-  let c=one(db,'SELECT * FROM checklist WHERE code=?',[PRACTICAL_CODE]);if(!c){c={id:e.id};store(db,'checklist',{id:c.id,code:PRACTICAL_CODE,name:'Практическая оценка'})}
+  let c=one(db,'SELECT * FROM checklist WHERE code=?',[code]);if(!c){c={id:e.id};store(db,'checklist',{id:c.id,code,name:code===AUDIT_CODE?'Аудит 1-го уровня':code===SELF_CODE?'Самооценка наставника':'Практическая оценка'})}
   store(db,t,{id,checklist_id:c.id,version_no:(methods[0]?.version_no||0)+1,state:'draft',methodology_json:canonical(p),rev:1});
   p.criteria.forEach(q=>store(db,'checklist_criterion',{id:id+':'+q.code,version_id:id,code:String(q.code),section_code:q.section,position:q.code,question:q.question}));
   db.run("UPDATE checklist_version SET state='retired',rev=rev+1 WHERE checklist_id=? AND state='active'",[c.id]);db.run("UPDATE checklist_version SET state='active' WHERE id=?",[id]);return
@@ -157,6 +166,27 @@ export function applyTrainingEvent(db,e,old){
   person(db,p.person_id);person(db,p.registered_by);noFuture(p.issued_on,e);
   invariant(['certificate','attendance'].includes(p.kind)&&roles.includes(p.role)&&required(p.number,200)&&required(p.issuer)&&required(p.evidence)&&period(p.issued_on,p.valid_until),'Заполните реквизиты фактического документа о подготовке');
   store(db,t,{id,...p,rev:1});return
+ }
+ if(t==='mentor_self_evaluation'){
+  createOnly(e,old);exact(p,['person_id','method_id','evaluated_on','place','responses','feedback']);noFuture(p.evaluated_on,e);
+  const who=person(db,p.person_id);hasRole(db,p.person_id,p.evaluated_on,['mentor','instructor','internal_trainer']);
+  invariant(trainingMethods(db,SELF_CODE).some(x=>x.id===p.method_id&&x.state==='active')&&required(p.place)&&text(p.feedback),'Выберите действующую методику самооценки и место');
+  const criteria=practicalCriteria(db,p.method_id);invariant(Array.isArray(p.responses)&&criteria.length>0&&p.responses.length===criteria.length,'Оцените все критерии самооценки');
+  p.responses.forEach((x,i)=>{exact(x,['criterion_id','value','note']);invariant(x.criterion_id===criteria[i].id&&integer(x.value,1,5)&&text(x.note),'Самооценка: уровень 1–5, незаполненное не равно нулю')});
+  store(db,t,{id,person_id:p.person_id,method_id:p.method_id,evaluated_on:p.evaluated_on,place:p.place,person_name:who.display_name,responses_json:canonical(p.responses),feedback:p.feedback,recorded_at:e.occurred_at,rev:1});return
+ }
+ if(t==='audit_session'){
+  if(old){changeOnly(e,old);exact(p,['command','reason']);invariant(old.assignment_id&&old.state==='final'&&p.command==='void'&&required(p.reason),'Укажите основание аннулирования');update(db,t,id,{state:'void',void_reason:p.reason});return}
+  createOnly(e,old);exact(p,['assignment_id','assignment_rev','method_id','auditor_id','session_id','observed_on','responses','feedback']);
+  const a=freshAssignment(db,p);noFuture(p.observed_on,e);person(db,p.auditor_id);
+  hasRole(db,p.auditor_id,p.observed_on,['internal_trainer']);invariant(p.auditor_id!==a.mentor_id&&p.auditor_id!==a.trainee_id,'Внутренний тренер должен отличаться от инструктора и обучаемого');
+  const fact=one(db,'SELECT * FROM training_session WHERE id=? AND assignment_id=? AND stage_code IS NOT NULL',[p.session_id,a.id]);
+  invariant(a.state!=='cancelled'&&a.approval_json&&fact&&fact.held_at.slice(0,10)<=p.observed_on&&p.observed_on>=a.assigned_on&&required(p.feedback),'Выберите факт этого инструктажа, дату наблюдения и обратную связь');
+  invariant(trainingMethods(db,AUDIT_CODE).some(x=>x.id===p.method_id&&x.state==='active'),'Выберите действующую методику аудита L1');
+  const criteria=practicalCriteria(db,p.method_id);invariant(Array.isArray(p.responses)&&criteria.length>0&&p.responses.length===criteria.length,'Заполните все критерии аудита');
+  p.responses.forEach((x,i)=>{exact(x,['criterion_id','value','note']);invariant(x.criterion_id===criteria[i].id&&(x.value===0||x.value===1)&&text(x.note),'Некорректный ответ аудита')});
+  store(db,t,{id,version_id:p.method_id,mentor_id:a.mentor_id,auditor_id:p.auditor_id,trainee_id:a.trainee_id,operation_id:a.operation_id,standard_revision_id:a.sop_revision_id,training_session_id:fact.id,observed_at:p.observed_on,state:'final',recorded_names_json:canonical(names(db,{mentor:a.mentor_id,auditor:p.auditor_id,trainee:a.trainee_id})),assignment_id:a.id,summary:p.feedback,recorded_at:e.occurred_at,rev:1});
+  p.responses.forEach(x=>store(db,'audit_response',{id:id+':'+x.criterion_id,audit_id:id,version_id:p.method_id,criterion_id:x.criterion_id,response:x.value?'yes':'no',note:x.note}));return
  }
  if(t==='mentor_order'){
   createOnly(e,old);exact(p,['order_number','order_on','organization','city','approved_by','valid_from','valid_to','supplement_from','instructor_amount','trainer_amount','evidence','members']);
@@ -309,7 +339,7 @@ export function applyTrainingEvent(db,e,old){
   if(p.command==='practical'){
    exact(p,['command','assignment_id','assignment_rev','evaluator_id','assessed_on','method_id','responses','conclusion','feedback']);
    invariant(practicalMethods(db).some(x=>x.id===p.method_id&&x.state==='active')&&Object.hasOwn(conclusions,p.conclusion),'Выберите действующую методику практики и фактическое заключение');
-   const c=practicalCriteria(db,p.method_id);invariant(c.length===11&&Array.isArray(p.responses)&&p.responses.length===11,'Необходимо ответить на все 11 критериев');
+   const c=practicalCriteria(db,p.method_id);invariant(c.length>0&&Array.isArray(p.responses)&&p.responses.length===c.length,'Необходимо ответить на все '+c.length+' критериев');
    p.responses.forEach((x,i)=>{exact(x,['criterion_id','value','note']);invariant(x.criterion_id===c[i].id&&(x.value===0||x.value===1)&&text(x.note),'Неверный ответ практической оценки')});
    store(db,t,{...common,method_id:p.method_id,responses_json:canonical(p.responses),conclusion:p.conclusion})
   }else{

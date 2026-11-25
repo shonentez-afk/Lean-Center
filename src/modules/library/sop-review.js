@@ -6,13 +6,13 @@ export const SOP_CHECKLIST_CODE='SOP_APP4';
 export function validDate(x){return typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&!isNaN(Date.parse(x))&&new Date(x).toISOString().slice(0,10)===x}
 export function reviewDue(changed){invariant(validDate(changed),'Укажите фактическую дату изменения СОП');const [y,m,d]=changed.split('-').map(Number);const day=Math.min(d,new Date(Date.UTC(y+1,m,0)).getUTCDate());return String(y+1).padStart(4,'0')+'-'+String(m).padStart(2,'0')+'-'+String(day).padStart(2,'0')}
 export function validateChecklist(p){
- exact(p,['format','title','source_sha256','criteria']);invariant(p.format==='lean-sop-checklist-v1'&&text(p.title,200)&&sha(p.source_sha256)&&Array.isArray(p.criteria)&&p.criteria.length===20,'Нужна форма оценки СОП из 20 критериев');
+ exact(p,['format','title','source_sha256','criteria']);invariant(['lean-sop-checklist-v1','lean-sop-checklist-v2'].includes(p.format)&&text(p.title,200)&&sha(p.source_sha256)&&Array.isArray(p.criteria)&&(p.format==='lean-sop-checklist-v1'?p.criteria.length===20:p.criteria.length>=1&&p.criteria.length<=100),'Нужна методика оценки СОП: 20 критериев v1 либо 1–100 критериев v2');
  p.criteria.forEach((q,i)=>{exact(q,['code','question']);invariant(q.code===i+1&&text(q.question,2500),'Неверная нумерация или текст критерия '+(i+1))});
  return p
 }
 export function sopMethods(db){return rows(db,"SELECT v.*,c.name FROM checklist_version v JOIN checklist c ON c.id=v.checklist_id WHERE c.code=? ORDER BY version_no DESC",[SOP_CHECKLIST_CODE])}
 export function sopCriteria(db,id){return rows(db,'SELECT * FROM checklist_criterion WHERE version_id=? ORDER BY position',[id])}
-export function evaluationResult(responses){const rated=responses.filter(r=>r.value===0||r.value===1);const yes=rated.filter(r=>r.value===1).length;return {rated:rated.length,yes,no:rated.length-yes,total:20,fraction:rated.length===20?yes/20:null}}
+export function evaluationResult(responses,total=20){const rated=responses.filter(r=>r.value===0||r.value===1);const yes=rated.filter(r=>r.value===1).length;return {rated:rated.length,yes,no:rated.length-yes,total,fraction:total>0&&responses.length===total&&rated.length===total?yes/total:null}}
 export function applySopMethod(db,e,old){
  invariant(e.operation==='create'&&!old,'Версия методики неизменяема');const p=validateChecklist(e.payload);
  const methods=sopMethods(db);
@@ -33,7 +33,7 @@ export function applySopEvaluation(db,e,old){
  const person=one(db,'SELECT display_name FROM person WHERE id=? AND archived=0',[p.actor_id]);invariant(person,'Оценщик отсутствует');
  invariant(sopMethods(db).some(m=>m.id===p.method_id&&m.state==='active'),'Выберите загруженную методику оценки СОП');
  const criteria=sopCriteria(db,p.method_id);
- invariant(criteria.length===20&&Array.isArray(p.responses)&&p.responses.length===20,'Необходимо ответить на все 20 критериев');
+ invariant(criteria.length>0&&Array.isArray(p.responses)&&p.responses.length===criteria.length,'Необходимо ответить на все '+criteria.length+' критериев');
  p.responses.forEach((q,i)=>{exact(q,['criterion_id','value','note']);invariant(q.criterion_id===criteria[i].id&&(q.value===0||q.value===1)&&typeof q.note==='string'&&q.note.length<=2000,'Некорректный ответ '+(i+1))});
  db.run('INSERT INTO sop_evaluation(id,revision_id,method_id,actor_id,evaluated_on,place,actor_name,source_sha256,recorded_at,rev) VALUES(?,?,?,?,?,?,?,?,?,1)',[e.entity_id,p.revision_id,p.method_id,p.actor_id,p.evaluated_on,p.place.trim(),person.display_name,p.source_sha256,e.occurred_at]);
  for(const q of p.responses)db.run('INSERT INTO sop_evaluation_response(evaluation_id,method_id,criterion_id,value,note) VALUES(?,?,?,?,?)',[e.entity_id,p.method_id,q.criterion_id,q.value,q.note])

@@ -1,3 +1,4 @@
+import {sopCriteriaFromDocx} from './modules/training/local-docx.js';
 import {BUILTIN_SOP,previewCriteria} from './modules/training/builtin-forms.js';
 import {TRAINING_PAGES,trainingScreen,resetTrainingRoute,setTrainingRoute} from './modules/training/screens.js';
 import {directoryPeople} from './modules/master-data/people-directory.js';
@@ -10,7 +11,7 @@ import {inspectSource,MAX_CONTENT,refsForDb,refsForEvents,unionRefs,DOMAIN_TYPES
 import {ContentStore,makeTransfer,unpackTransfer,restoreContents,MAX_TRANSFER} from './modules/library/content.js';
 import {MAX_XLSX,loadWorkbook,sheetHeaders,sheetRows,importFields,fieldLabel,autoMap,planImport,commitImport,makeTemplate} from './modules/master-data/import-xlsx.js';
 import {registryCountChart} from './analytics/palette.js';
-import {configureMigrations,recordPayload,createDb,openDb,Workspace,definitions,list,rows,one,meta,uuid,canonical,prepareSnapshot,readSnapshot,backup,restore,encode,decode,invariant,MAX_PACKAGE} from './core/db.js';
+import {configureMigrations,recordPayload,createDb,openDb,Workspace,definitions,list,rows,one,meta,uuid,canonical,sha256,prepareSnapshot,readSnapshot,backup,restore,encode,decode,invariant,MAX_PACKAGE} from './core/db.js';
 import * as local from './storage/local.js';
 import * as net from './storage/network.js';
 const root=document.getElementById('app');
@@ -212,11 +213,11 @@ function evaluationForm(revision,source){
  const actor=personPickerField('eval_actor','Оценщик',null,{optional:false}),day=fieldInput('eval_date',today(),'date'),place=fieldInput('eval_place',revision.workplace_name||''),content=el('div');
  panel.append(add(el('div',undefined,'formgrid'),inputField('Версия методики',select),personInputField('Оценщик',actor),inputField('Дата',day),inputField('Место',place)),content);
  function draw(){
-  content.replaceChildren();const criteria=builtin?previewCriteria(BUILTIN_SOP,builtin.entity_id):sopCriteria(ws.working,select.value),values=criteria.map(c=>{const choice=el('select');choice.name='criterion_'+c.position;for(const [v,n] of [['','Не оценено'],['1','1 — выполнено'],['0','0 — не выполнено']]){const o=el('option',n);o.value=v;choice.append(o)}const note=fieldInput('note_'+c.position);note.maxLength=2000;return {c,choice,note}});
-  const progress=el('p','Оценено: 0 из 20','muted'),save=btn('Зафиксировать оценку',()=>run(async()=>{const payload={revision_id:revision.id,method_id:select.value,actor_id:actor.value,evaluated_on:day.value,place:place.value,source_sha256:source.sha256,responses:values.map(v=>({criterion_id:v.c.id,value:v.choice.value===''?null:Number(v.choice.value),note:v.note.value}))};await ws.applyContentEvents([...(builtin?[builtin]:[]),contentEvent('sop_evaluation',payload)]);return 'Оценка СОП сохранена. Ожидает публикации.'}),'primary',true);
-  function update(){const result=evaluationResult(values.map(x=>({value:x.choice.value===''?null:Number(x.choice.value)})));progress.textContent='Оценено: '+result.rated+' из 20 · '+(result.fraction===null?'итог пока не рассчитан':(result.fraction*100).toFixed(0)+'%');save.disabled=busy||result.rated!==20||!!ws.conflicts.length}
+  content.replaceChildren();const criteria=builtin?previewCriteria(BUILTIN_SOP,builtin.entity_id):sopCriteria(ws.working,select.value),total=criteria.length,values=criteria.map(c=>{const choice=el('select');choice.name='criterion_'+c.position;for(const [v,n] of [['','Не оценено'],['1','1 — выполнено'],['0','0 — не выполнено']]){const o=el('option',n);o.value=v;choice.append(o)}const note=fieldInput('note_'+c.position);note.maxLength=2000;return {c,choice,note}});
+  const progress=el('p','Оценено: 0 из '+total,'muted'),save=btn('Зафиксировать оценку',()=>run(async()=>{const payload={revision_id:revision.id,method_id:select.value,actor_id:actor.value,evaluated_on:day.value,place:place.value,source_sha256:source.sha256,responses:values.map(v=>({criterion_id:v.c.id,value:v.choice.value===''?null:Number(v.choice.value),note:v.note.value}))};await ws.applyContentEvents([...(builtin?[builtin]:[]),contentEvent('sop_evaluation',payload)]);return 'Оценка СОП сохранена. Ожидает публикации.'}),'primary',true);
+  function update(){const result=evaluationResult(values.map(x=>({value:x.choice.value===''?null:Number(x.choice.value)})),total);progress.textContent='Оценено: '+result.rated+' из '+total+' · '+(result.fraction===null?'итог пока не рассчитан':(result.fraction*100).toFixed(0)+'%');save.disabled=busy||result.rated!==total||!!ws.conflicts.length}
   values.forEach(v=>v.choice.onchange=update);
-  content.append(tableOf(['№','Проверяемое требование','Оценка','Комментарий'],values.map(v=>[v.c.position,v.c.question,v.choice,v.note])),progress,el('p','Результат — выполненные требования / 20. Порог зачёта не установлен; оценка не утверждает СОП автоматически.','muted'),save)
+  content.append(tableOf(['№','Проверяемое требование','Оценка','Комментарий'],values.map(v=>[v.c.position,v.c.question,v.choice,v.note])),progress,el('p','Результат — выполненные требования / '+total+'. Порог зачёта не установлен; оценка не утверждает СОП автоматически.','muted'),save)
  }
  select.onchange=()=>{if(!confirm('Сменить версию методики? Незавершённые ответы будут очищены.')){select.value=select.dataset.previous;return}select.dataset.previous=select.value;draw()};select.dataset.previous=select.value;draw();return panel
 }
@@ -227,12 +228,12 @@ async function evaluationXlsx(id){
  s.columns=[{width:7},{width:105},{width:13},{width:48}];s.mergeCells('A1:D1');s.getCell('A1').value='Чек-лист оценки СОП';s.getCell('A1').font={bold:true,size:16};s.mergeCells('A2:D2');s.getCell('A2').value=doc.code+' · '+doc.title+' · версия '+v.version_no;s.mergeCells('A3:D3');s.getCell('A3').value='Место: '+e.place+'    Дата: '+e.evaluated_on+'    Оценщик: '+e.actor_name+'    Методика v'+method.version_no;s.mergeCells('A4:D4');s.getCell('A4').value='Исходный SHA-256: '+e.source_sha256;
  s.addRow(['№ п/п','Проверяемые требования','Оценка','Комментарий']);s.getRow(5).font={bold:true,color:{argb:'FFFFFFFF'}};s.getRow(5).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF242E40'}};
  for(const x of responses){const row=s.addRow([x.position,x.question,x.value,x.note]);row.alignment={vertical:'top',wrapText:true};row.height=Math.max(28,15*Math.ceil(Math.max(x.question.length/100,(x.note||'').length/43)))}
- const result=evaluationResult(responses),row=s.addRow(['','ИТОГО',{formula:'SUM(C6:C25)/20',result:result.fraction},'']);row.getCell(3).numFmt='0%';s.pageSetup.printArea='A1:D26';downloadBytes('Оценка-СОП-'+doc.code+'-v'+v.version_no+'.xlsx',await w.xlsx.writeBuffer());
+ const total=sopCriteria(ws.working,e.method_id).length,result=evaluationResult(responses,total),row=s.addRow(['','ИТОГО',{formula:'SUM(C6:C'+(5+total)+')/'+total,result:result.fraction},'']);row.getCell(3).numFmt='0%';s.pageSetup.printArea='A1:D'+(6+total);downloadBytes('Оценка-СОП-'+doc.code+'-v'+v.version_no+'.xlsx',await w.xlsx.writeBuffer());
 }
 function evaluationHistory(revision,source){
  const data=rows(ws.working,'SELECT e.*,m.version_no AS method_version FROM sop_evaluation e JOIN checklist_version m ON m.id=e.method_id WHERE e.revision_id=? ORDER BY e.evaluated_on DESC,e.recorded_at DESC',[revision.id]);
  const out=el('div');if(!data.length)out.append(el('p','Оценок этой версии ещё нет.','muted'));
- else out.append(tableOf(['Дата','Оценщик','Методика','Результат','Исходник','Отчёт'],data.map(e=>{const r=evaluationResult(rows(ws.working,'SELECT value FROM sop_evaluation_response WHERE evaluation_id=?',[e.id]));return [e.evaluated_on,e.actor_name,'v'+e.method_version,r.yes+'/20 · '+(r.fraction*100).toFixed(0)+'%',e.source_sha256===source.sha256?'Текущий':'Предыдущий черновик',btn('Скачать XLSX',()=>run(async()=>{await evaluationXlsx(e.id);return 'Отчёт сформирован'},{save:false}))]})));return out
+ else out.append(tableOf(['Дата','Оценщик','Методика','Результат','Исходник','Отчёт'],data.map(e=>{const r=evaluationResult(rows(ws.working,'SELECT value FROM sop_evaluation_response WHERE evaluation_id=?',[e.id]),sopCriteria(ws.working,e.method_id).length);return [e.evaluated_on,e.actor_name,'v'+e.method_version,r.yes+'/'+r.total · '+(r.fraction*100).toFixed(0)+'%',e.source_sha256===source.sha256?'Текущий':'Предыдущий черновик',btn('Скачать XLSX',()=>run(async()=>{await evaluationXlsx(e.id);return 'Отчёт сформирован'},{save:false}))]})));return out
 }
 function goEvaluation(id){navigate('sop_evaluation');evaluationSelected=id;render()}
 const stage43SourceLabels={seed:'Стартовое значение',auto:'Автоматически',manual:'Вручную',legacy:'Из исходника'};
@@ -280,14 +281,15 @@ function stage43Panel(doc,revision,source){
  return panel
 }
 function evaluationDetail(doc,v,source,{registry=false}={}){
+ const active=sopMethods(ws.working).find(m=>m.state==='active'),count=active?sopCriteria(ws.working,active.id).length:BUILTIN_SOP.criteria.length;
  const root=el('div'),tabs=el('div',undefined,'library-tabs evaluation-tabs'),content=el('div',undefined,'evaluation-content'),panels=new Map(),buttons=new Map();
  function show(kind){
   if(registry)evaluationTab=kind;
-  if(!panels.has(kind)){const body=kind==='weighted'?stage43Panel(doc,v,source):pane('Корпоративская оценка · 20 критериев',evaluationHistory(v,source),...(!v.archived?[evaluationForm(v,source)]:[]));panels.set(kind,body);content.append(body)}
+  if(!panels.has(kind)){const body=kind==='weighted'?stage43Panel(doc,v,source):pane('Корпоративская оценка · '+count+' критериев',evaluationHistory(v,source),...(!v.archived?[evaluationForm(v,source)]:[]));panels.set(kind,body);content.append(body)}
   for(const [k,body] of panels)body.hidden=k!==kind;
   for(const [k,b] of buttons){b.classList.toggle('selected',k===kind);b.setAttribute('aria-pressed',String(k===kind))}
  }
- for(const [kind,name] of [['weighted','Чек-лист (13 критериев)'],['corporate','Корпоративская оценка (20 критериев)']]){const b=btn(name,()=>show(kind),'library-tab');buttons.set(kind,b);tabs.append(b)}
+ for(const [kind,name] of [['weighted','Чек-лист (13 критериев)'],['corporate','Корпоративская оценка ('+count+' критериев)']]){const b=btn(name,()=>show(kind),'library-tab');buttons.set(kind,b);tabs.append(b)}
  root.append(tabs,content);show(registry?evaluationTab:'weighted');return root
 }
 function evaluationRegistry(){
@@ -303,12 +305,12 @@ function evaluationRegistry(){
   const epoch=++generation,q=search.value.trim().toLocaleLowerCase('ru-RU');evaluationSearch=search.value;
   const list=options.filter(x=>[x.code,x.title,refName('operation',x.operation_id)].some(s=>String(s||'').toLocaleLowerCase('ru-RU').includes(q))),entries=[];
   if(!list.length){out.replaceChildren(el('p',options.length?'Нет СОП по заданному поиску.':'Сохраните СОП в каталоге, чтобы оценивать его версии.','muted'));return}
-  const t=tableOf(['СОП','Операция','Версия','Статус СОП','Чек-лист (13)','Корпоративская оценка (20)',''],list.map(v=>{
+  const t=tableOf(['СОП','Операция','Версия','Статус СОП','Чек-лист (13)','Корпоративская оценка',''],list.map(v=>{
    const source=JSON.parse(v.payload_json).source,cell=el('span','Проверяется…','muted');
    const latest=one(ws.working,'SELECT * FROM sop_evaluation WHERE revision_id=? AND source_sha256=? ORDER BY evaluated_on DESC,recorded_at DESC LIMIT 1',[v.id,source.sha256]);
    const old=latest?null:one(ws.working,'SELECT id FROM sop_evaluation WHERE revision_id=? LIMIT 1',[v.id]);
-   const result=latest?evaluationResult(rows(ws.working,'SELECT value FROM sop_evaluation_response WHERE evaluation_id=?',[latest.id])):null;
-   const corporate=latest?result.yes+'/20 · '+(result.fraction*100).toFixed(0)+'%':old?'Только прежний исходник':'Не оценён';
+   const result=latest?evaluationResult(rows(ws.working,'SELECT value FROM sop_evaluation_response WHERE evaluation_id=?',[latest.id]),sopCriteria(ws.working,latest.method_id).length):null;
+   const corporate=latest?result.yes+'/'+result.total+' · '+(result.fraction*100).toFixed(0)+'%':old?'Только прежний исходник':'Не оценён';
    entries.push({v,source,cell});
    return [v.code+' · '+v.title,refName('operation',v.operation_id),v.version_no,v.archived?'Архив':revisionLabels[v.state]||v.state,cell,corporate,btn('Открыть',()=>{evaluationSelected=v.id;evaluationTab='weighted';render()},'primary')]
   }));
@@ -327,8 +329,9 @@ function evaluationRegistry(){
  search.oninput=draw;draw();return p
 }
 function sopEvaluationScreen(main){
- const p=pane('Методики оценки СОП',el('p','Приложение 4 встроено и регистрируется вместе с первой оценкой. Новая редакция методики загружается из JSON. Оценка СОП не является аудитом L1 или чек-листом Stage43.','muted'));
- p.append(btn('Загрузить методику JSON',()=>{const i=el('input');i.type='file';i.accept='.json';i.onchange=()=>{if(!i.files?.[0])return;run(async()=>{invariant(i.files[0].size<=128000,'Слишком большой файл методики');const m=validateChecklist(JSON.parse(await i.files[0].text()));if(!confirm(m.title+'\n20 критериев. Добавить неизменяемую версию методики?'))return 'Импорт отменён';await ws.applyContentEvents([contentEvent('checklist_version',m)]);return 'Методика добавлена, ожидает публикации.'})};i.click()},'primary',!!ws.conflicts.length));
+ const p=pane('Методики оценки СОП',el('p','Приложение 4 встроено и автоматически регистрируется при первой оценке. Можно загрузить новую версию из DOCX или JSON (1–100 критериев формата lean-sop-checklist-v2); прошлые результаты сохраняются.','muted'));
+ p.append(btn('Импорт методики DOCX',()=>{const i=el('input');i.type='file';i.accept='.docx';i.onchange=()=>{const file=i.files?.[0];if(!file)return;run(async()=>{invariant(file.size<=12*1024*1024,'Файл слишком большой');const bytes=new Uint8Array(await file.arrayBuffer()),criteria=await sopCriteriaFromDocx(bytes),m=validateChecklist({format:criteria.length===20?'lean-sop-checklist-v1':'lean-sop-checklist-v2',title:file.name.slice(0,200),source_sha256:await sha256(bytes),criteria});if(!confirm(m.title+'\n'+criteria.length+' критериев. Добавить версию?\n\n'+criteria.map(x=>x.code+'. '+x.question).join('\n')))return 'Импорт отменён';await ws.applyContentEvents([contentEvent('checklist_version',m)]);return 'Методика добавлена, ожидает публикации.'})};i.click()},'primary',!!ws.conflicts.length));
+ p.append(btn('Загрузить методику JSON',()=>{const i=el('input');i.type='file';i.accept='.json';i.onchange=()=>{if(!i.files?.[0])return;run(async()=>{invariant(i.files[0].size<=128000,'Слишком большой файл методики');const m=validateChecklist(JSON.parse(await i.files[0].text()));if(!confirm(m.title+'\n'+m.criteria.length+' критериев. Добавить неизменяемую версию методики?'))return 'Импорт отменён';await ws.applyContentEvents([contentEvent('checklist_version',m)]);return 'Методика добавлена, ожидает публикации.'})};i.click()},'primary',!!ws.conflicts.length));
  if(!sopMethods(ws.working).length)p.append(tableOf(['№','Требование'],BUILTIN_SOP.criteria.map(q=>[q.code,q.question])));
  for(const m of sopMethods(ws.working)){const data=JSON.parse(m.methodology_json),d=el('details');d.append(el('summary','Версия '+m.version_no+' · '+data.title+' · '+(m.state==='active'?'Действует':'Архив')),el('p','SHA-256 исходного документа: '+data.source_sha256,'source-hash'),tableOf(['№','Требование'],sopCriteria(ws.working,m.id).map(q=>[q.position,q.question])));p.append(d)}
  const methods=el('details',undefined,'panel evaluation-methods');methods.append(el('summary','Методики оценки СОП'),p);main.append(evaluationRegistry(),methods)
@@ -636,5 +639,5 @@ function render(){
  main.append(el('p','LC3.7 · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
-async function init(){configureMigrations(LC_BUILD.migration3,LC_BUILD.migration4,LC_BUILD.migration5,LC_BUILD.migration6,LC_BUILD.migration7,LC_BUILD.migration8);SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await net.latestSnapshot(folder,SQL);if(remote){await useSnapshot(remote.db);await persist();message(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки')}}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message('Сетевая база не обновлена: '+e.message,true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}
+async function init(){configureMigrations(LC_BUILD.migration3,LC_BUILD.migration4,LC_BUILD.migration5,LC_BUILD.migration6,LC_BUILD.migration7,LC_BUILD.migration8,LC_BUILD.migration9);SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await net.latestSnapshot(folder,SQL);if(remote){await useSnapshot(remote.db);await persist();message(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки')}}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message('Сетевая база не обновлена: '+e.message,true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}
 init().catch(e=>{console.error(e);root.replaceChildren(el('h1','Не удалось открыть Lean Center'),el('p',e.message),el('p','Существующие локальные данные не удалены. Проверьте браузер или восстановите проверенную копию.'))});

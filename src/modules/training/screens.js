@@ -1,5 +1,5 @@
 import {BUILTIN_PRACTICAL,INITIAL_PROGRAM_TASKS,previewCriteria} from './builtin-forms.js';
-import {SCALE_NAME,CORPORATE_LEVELS,practicalCriteriaFromSheet,calendarData,calendarFacts,matrixPoints,personalTargets,productionHeaders,productionRows,productionWorkbook,entryWorkbook,practicalWorkbook} from './corporate-forms.js';
+import {SCALE_NAME,CORPORATE_LEVELS,practicalCriteriaFromSheet,calendarData,calendarFacts,matrixPoints,personalTargets,productionHeaders,productionRows,productionWorkbook,entryWorkbook,practicalWorkbook,criteriaFromTabularSheet} from './corporate-forms.js';
 import {fillOrderTemplate,draftDocx,orderPayment,builtinOrderDocx} from './local-docx.js';
 // LC4 uses the same workspace, event log, directory and corporate UI as LC3.
 import {rows,one,list,uuid,invariant,sha256} from '../../core/db.js';
@@ -194,15 +194,15 @@ export function trainingScreen(main,page,c){
   return stack(planMaterial(a),panel)
  }
  function methodsPanel(){
-  const methods=practicalMethods(db),out=pane('Методика практической оценки',msg('Приложение 8 встроено и сохраняется вместе с первой оценкой. Новую редакцию можно загрузить из XLSX или JSON. Порог допуска не устанавливается.'),row(action('Загрузить методику практики JSON',()=>pick('.json',async p=>{validatePracticalMethod(p);await write('checklist_version',p);return 'Методика практики зарегистрирована'} ,128000)),action('Импорт оригинального XLSX',()=>{
+  const methods=practicalMethods(db),out=pane('Методика практической оценки',msg('Приложение 8 встроено. Новая редакция: оригинальный XLSX, JSON v2 или лист «Критерии» (№, Раздел, Критерий; 1–100 строк). Порог допуска не устанавливается.'),row(action('Загрузить методику практики JSON',()=>pick('.json',async p=>{validatePracticalMethod(p);await write('checklist_version',p);return 'Методика практики зарегистрирована'} ,128000)),action('Импорт оригинального XLSX',()=>{
    const input=el('input');input.type='file';input.accept='.xlsx';
    input.onchange=()=>{if(!input.files?.[0])return;const file=input.files[0];run(async()=>{
     invariant(file.size<=12*1024*1024,'Файл методики слишком большой');const bytes=new Uint8Array(await file.arrayBuffer()),book=new ExcelJS.Workbook();await book.xlsx.load(bytes);
-    const sheet=book.worksheets.find(s=>s.name.trim().toLocaleLowerCase('ru-RU')==='чек лист');invariant(sheet,'Выберите оригинальную форму с листом «Чек лист» или импортируйте JSON');
-    const criteria=practicalCriteriaFromSheet(sheet);
-    const p=validatePracticalMethod({format:'lean-practical-checklist-v1',title:'Практическая оценка · '+file.name.slice(0,150),source_sha256:await sha256(bytes),criteria});
-    invariant(new Set(criteria.map(x=>x.question)).size===11,'Проверьте строки критериев оригинальной формы');
-    if(!confirm('Зарегистрировать новую неизменяемую методику из 11 критериев?\n\n'+criteria.map(x=>x.code+'. '+x.question).join('\n')))return 'Импорт отменён';
+    const generic=book.getWorksheet('Критерии'),sheet=book.worksheets.find(s=>s.name.trim().toLocaleLowerCase('ru-RU')==='чек лист');
+    const criteria=generic?criteriaFromTabularSheet(generic):practicalCriteriaFromSheet(sheet);
+    const p=validatePracticalMethod({format:criteria.length===11?'lean-practical-checklist-v1':'lean-practical-checklist-v2',title:'Практическая оценка · '+file.name.slice(0,150),source_sha256:await sha256(bytes),criteria});
+    invariant(new Set(criteria.map(x=>x.question)).size===criteria.length,'Проверьте строки критериев оригинальной формы');
+    if(!confirm('Зарегистрировать новую неизменяемую методику из '+criteria.length+' критериев?\n\n'+criteria.map(x=>x.code+'. '+x.question).join('\n')))return 'Импорт отменён';
     await write('checklist_version',p);return 'Методика практики зарегистрирована'
    })};input.click()
   })));
@@ -216,12 +216,12 @@ export function trainingScreen(main,page,c){
  }
  function practicalForm(a){
   const methods=practicalMethods(db).filter(x=>x.state==='active'),builtin=methods.length?null:event('checklist_version',BUILTIN_PRACTICAL);
-  const m=methods[0]||{id:builtin.entity_id,version_no:1},criteria=builtin?previewCriteria(BUILTIN_PRACTICAL,m.id):practicalCriteria(db,m.id),who=person('practical_actor','Оценщик','',{filter:x=>x.id!==a.trainee_id}),when=date('practical_date'),conclusion=simple('practical_conclusion',conclusions,'','— Выберите заключение —'),feedback=note('practical_feedback');
+  const m=methods[0]||{id:builtin.entity_id,version_no:1},criteria=builtin?previewCriteria(BUILTIN_PRACTICAL,m.id):practicalCriteria(db,m.id),total=criteria.length,who=person('practical_actor','Оценщик','',{filter:x=>x.id!==a.trainee_id}),when=date('practical_date'),conclusion=simple('practical_conclusion',conclusions,'','— Выберите заключение —'),feedback=note('practical_feedback');
   const controls=criteria.map(x=>({x,value:select('practical_value_'+x.position,[[0,'0 — не выполнено'],[1,'1 — выполнено']],'','Не оценено'),note:fieldInput('practical_note_'+x.position)}));
-  const result=msg('Оценено 0/11'),value=()=>controls.map(q=>({criterion_id:q.x.id,value:q.value.value===''?null:Number(q.value.value),note:q.note.value}));
-  function refresh(){const x=practicalResult(value());result.textContent='Оценено '+x.rated+'/11 · '+(x.fraction===null?'итог не рассчитан':x.yes+'/11 · '+(x.fraction*100).toFixed(1)+'%')}
+  const result=msg('Оценено 0/'+total),value=()=>controls.map(q=>({criterion_id:q.x.id,value:q.value.value===''?null:Number(q.value.value),note:q.note.value}));
+  function refresh(){const x=practicalResult(value(),total);result.textContent='Оценено '+x.rated+'/'+total+' · '+(x.fraction===null?'итог не рассчитан':x.yes+'/'+total+' · '+(x.fraction*100).toFixed(1)+'%')}
   controls.forEach(q=>q.value.onchange=refresh);
-  const d=el('details');d.append(el('summary','Новая практическая оценка'),grid(who.element,f('Дата',when),f('Заключение по наблюдению',conclusion)),msg((builtin?'Встроенная форма · Приложение 8':'Методика v'+m.version_no)+' · процент считается только после всех 11 ответов; заключение выбирается отдельно.'),tableOf(['№','Раздел','Критерий','Оценка','Комментарий'],controls.map(q=>[q.x.position,q.x.section_code,q.x.question,q.value,q.note])),result,f('Обратная связь обучаемому / инструктору',feedback),action('Зафиксировать практическую оценку',()=>run(async()=>{await ws.applyContentEvents([...(builtin?[builtin]:[]),event('assessment_session',{command:'practical',assignment_id:a.id,assignment_rev:a.rev,evaluator_id:who.value,assessed_on:when.value,method_id:m.id,responses:value(),conclusion:conclusion.value,feedback:feedback.value})],readContent);return 'Запись сохранена. Ожидает публикации базы.'})));return d
+  const d=el('details');d.append(el('summary','Новая практическая оценка'),grid(who.element,f('Дата',when),f('Заключение по наблюдению',conclusion)),msg((builtin?'Встроенная форма · Приложение 8':'Методика v'+m.version_no)+' · процент после всех '+total+' ответов; заключение выбирается отдельно.'),tableOf(['№','Раздел','Критерий','Оценка','Комментарий'],controls.map(q=>[q.x.position,q.x.section_code,q.x.question,q.value,q.note])),result,f('Обратная связь обучаемому / инструктору',feedback),action('Зафиксировать практическую оценку',()=>run(async()=>{await ws.applyContentEvents([...(builtin?[builtin]:[]),event('assessment_session',{command:'practical',assignment_id:a.id,assignment_rev:a.rev,evaluator_id:who.value,assessed_on:when.value,method_id:m.id,responses:value(),conclusion:conclusion.value,feedback:feedback.value})],readContent);return 'Запись сохранена. Ожидает публикации базы.'})));return d
  }
  function qualificationForm(a,p){
   const actor=person('qualification_actor','Подтверждающий уровень','',{filter:x=>x.id!==a.trainee_id}),when=date('qualification_date'),state=simple('qualification_state',observationLabels,'rated'),level=levelPicker('qualification_level',a.scale_id),until=date('qualification_until',''),evidence=note('qualification_evidence'),feedback=note('qualification_feedback');
@@ -244,8 +244,8 @@ export function trainingScreen(main,page,c){
   for(const h of history){
    const detail=el('details');
    if(h.assessment_kind==='practical'){
-    const values=JSON.parse(h.responses_json),result=practicalResult(values),criteria=practicalCriteria(db,h.method_id),lines=values.map((v,i)=>[i+1,criteria[i]?.section_code,criteria[i]?.question,v.value,v.note]);
-    detail.append(el('summary',h.assessed_at+' · Практика · '+result.yes+'/11 · '+(result.fraction*100).toFixed(1)+'% · '+conclusions[h.conclusion]),msg('Оценщик: '+n('person',h.evaluator_id)+' · '+h.feedback),tableOf(['№','Раздел','Критерий','Оценка','Комментарий'],lines),btn('Скачать чек-лист стажёра XLSX',()=>run(async()=>{const method=JSON.parse(one(db,'SELECT methodology_json FROM checklist_version WHERE id=?',[h.method_id]).methodology_json);return saveWorkbook('Практическая-оценка-'+h.id.slice(0,8),practicalWorkbook(ExcelJS,method,[{operation:revLabel(a.sop_revision_id),responses:values,feedback:h.feedback,conclusion:conclusions[h.conclusion],date:h.assessed_at,evaluator:n('person',h.evaluator_id)}],{trainee:n('person',a.trainee_id)}))},{save:false})))
+    const values=JSON.parse(h.responses_json),criteria=practicalCriteria(db,h.method_id),result=practicalResult(values,criteria.length),lines=values.map((v,i)=>[i+1,criteria[i]?.section_code,criteria[i]?.question,v.value,v.note]);
+    detail.append(el('summary',h.assessed_at+' · Практика · '+result.yes+'/'+result.total+' · '+(result.fraction*100).toFixed(1)+'% · '+conclusions[h.conclusion]),msg('Оценщик: '+n('person',h.evaluator_id)+' · '+h.feedback),tableOf(['№','Раздел','Критерий','Оценка','Комментарий'],lines),btn('Скачать чек-лист стажёра XLSX',()=>run(async()=>{const method=JSON.parse(one(db,'SELECT methodology_json FROM checklist_version WHERE id=?',[h.method_id]).methodology_json);return saveWorkbook('Практическая-оценка-'+h.id.slice(0,8),practicalWorkbook(ExcelJS,method,[{operation:revLabel(a.sop_revision_id),responses:values,feedback:h.feedback,conclusion:conclusions[h.conclusion],date:h.assessed_at,evaluator:n('person',h.evaluator_id)}],{trainee:n('person',a.trainee_id)}))},{save:false})))
    }else{const i=one(db,'SELECT * FROM assessment_item WHERE session_id=?',[h.id]);detail.append(el('summary',h.assessed_at+' · Компетенция · '+(i?.observation_state==='rated'?'уровень '+i.level:observationLabels[i?.observation_state]||'—')),msg('Шкала: '+n('rating_scale',i?.scale_id)+' · до '+(i?.valid_until||'не установлено')+' · '+n('person',h.evaluator_id)),msg(i?.evidence_note||''),msg(h.feedback))}
    assessed.append(detail)
   }

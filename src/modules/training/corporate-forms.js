@@ -102,15 +102,24 @@ export function entryWorkbook(ExcelJS,program,enrollment,tasks,{organization='',
  return w
 }
 export function practicalWorkbook(ExcelJS,method,assessments,{trainee='',title='Чек-лист оценки выполнения операций стажёром'}={}){
- invariant(assessments.length>0&&assessments.length<=100&&method.criteria.length===11,'Выберите от 1 до 100 оценок одной методики');
+ invariant(assessments.length>0&&assessments.length<=100&&method.criteria.length>=1&&method.criteria.length<=100,'Выберите от 1 до 100 оценок одной методики');
  const w=new ExcelJS.Workbook(),s=sheet(w,'Чек лист',[83,...assessments.map(()=>23)],8),last=assessments.length+1;
  merge(s,1,1,last,title,true);merge(s,2,1,last,'Стажёр: '+trainee);merge(s,3,1,last,'Методика: '+method.title+' · SHA-256 '+method.source_sha256);
  cells(s,4,['Операция / редакция',...assessments.map(x=>x.operation)]);header(s,4,last);
  cells(s,5,['Готовность стажёра',...assessments.map(()=>null)]);cells(s,6,['Баллы',...assessments.map(()=>null)]);
- merge(s,7,1,last,method.criteria[0].section,true);header(s,7,last);merge(s,10,1,last,method.criteria[2].section,true);header(s,10,last);
- method.criteria.forEach((q,i)=>cells(s,PRACTICAL_ROWS[i],[q.question,...assessments.map(x=>x.responses[i]?.value??null)]));
- assessments.forEach((a,i)=>{const col=i+2,refs=PRACTICAL_ROWS.map(r=>s.getCell(r,col).address).join(','),values=a.responses.map(x=>x.value),sum=values.reduce((n,v)=>n+(v===1?1:0),0),valid=values.length===11&&values.every(v=>v===0||v===1);s.getCell(6,col).value={formula:'IF(COUNT('+refs+')=11,SUM('+refs+'),"")',result:valid?sum:''};s.getCell(5,col).value={formula:'IF(COUNT('+refs+')=11,'+s.getCell(6,col).address+'/11,"")',result:valid?sum/11:''};s.getCell(5,col).numFmt='0.0%'});
- cells(s,20,['Обратная связь',...assessments.map(x=>x.feedback)]);cells(s,21,['Заключение (отдельное решение)',...assessments.map(x=>x.conclusion)]);cells(s,22,['Дата / оценщик',...assessments.map(x=>x.date+' · '+x.evaluator)]);
- const notes=sheet(w,'Комментарии',[35,8,70,50]);cells(notes,1,['Операция','№','Критерий','Комментарий']);header(notes,1,4);let i=2;for(const a of assessments)for(let j=0;j<11;j++)cells(notes,i++,[a.operation,j+1,method.criteria[j].question,a.responses[j]?.note||'']);
- s.pageSetup.printArea='A1:'+s.getCell(22,last).address;s.views=[{state:'frozen',xSplit:1,ySplit:6}];return w
+ const total=method.criteria.length,criterionRows=[];let row=7,previous=null;
+ for(const [i,q] of method.criteria.entries()){
+  if(q.section!==previous){merge(s,row,1,last,q.section,true);header(s,row,last);row++;previous=q.section}
+  criterionRows.push(row);cells(s,row++,[q.question,...assessments.map(x=>x.responses[i]?.value??null)])
+ }
+ assessments.forEach((a,i)=>{const col=i+2,refs=criterionRows.map(r=>s.getCell(r,col).address).join(','),values=a.responses.map(x=>x.value),sum=values.reduce((n,v)=>n+(v===1?1:0),0),valid=values.length===total&&values.every(v=>v===0||v===1);s.getCell(6,col).value={formula:'IF(COUNT('+refs+')='+total+',SUM('+refs+'),"")',result:valid?sum:''};s.getCell(5,col).value={formula:'IF(COUNT('+refs+')='+total+','+s.getCell(6,col).address+'/'+total+',"")',result:valid?sum/total:''};s.getCell(5,col).numFmt='0.0%'});
+ cells(s,row++,['Над чем Инструктору работать? / обратная связь',...assessments.map(x=>x.feedback)]);cells(s,row++,['Заключение (отдельное решение)',...assessments.map(x=>x.conclusion)]);cells(s,row++,['Дата / оценщик',...assessments.map(x=>x.date+' · '+x.evaluator)]);
+ const notes=sheet(w,'Комментарии',[35,8,70,50]);cells(notes,1,['Операция','№','Критерий','Комментарий']);header(notes,1,4);let i=2;for(const a of assessments)for(let j=0;j<total;j++)cells(notes,i++,[a.operation,j+1,method.criteria[j].question,a.responses[j]?.note||'']);
+ s.pageSetup.printArea='A1:'+s.getCell(row-1,last).address;s.views=[{state:'frozen',xSplit:1,ySplit:6}];return w
+}
+export function criteriaFromTabularSheet(sheet){
+ invariant(sheet&&sheet.getCell('A1').text.trim()==='№'&&sheet.getCell('B1').text.trim()==='Раздел'&&sheet.getCell('C1').text.trim()==='Критерий','Нужен лист «Критерии»: № / Раздел / Критерий');
+ invariant(sheet.rowCount<=101,'До 100 критериев');const result=[];
+ for(let r=2;r<=sheet.rowCount;r++){const code=sheet.getCell(r,1).text.trim(),section=sheet.getCell(r,2).text.trim(),question=sheet.getCell(r,3).text.trim();if(!code&&!section&&!question)continue;invariant(Number(code)===result.length+1&&section&&question,'Заполните последовательный номер, раздел и критерий в строке '+r);result.push({code:Number(code),section,question})}
+ invariant(result.length>0,'Нет критериев');return result
 }

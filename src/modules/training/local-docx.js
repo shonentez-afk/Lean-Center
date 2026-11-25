@@ -84,3 +84,15 @@ export function builtinOrderDocx(order,members,{registered=false}={}){
  const names=role=>members.filter(m=>role==='internal_trainer'?m.role===role:m.role!=='internal_trainer').map((m,i)=>(i+1)+'. '+m.person_name+', '+m.position_name);
  return draftDocx([{text:registered?'КОПИЯ РЕКВИЗИТОВ · БЕЗ ПОДПИСИ':'ПРОЕКТ · БЕЗ ПОДПИСИ',bold:true,center:true},{text:order.organization,bold:true,center:true},fmt(order.order_on)+'    г. '+order.city,{text:'ПРИКАЗ № '+order.order_number,bold:true,size:28,center:true},{text:'«О назначении Инструкторов и Внутренних тренеров»',bold:true,center:true},'С целью организации, функционирования и развитие системы обучения на рабочем месте',{text:'ПРИКАЗЫВАЮ:',bold:true},'Назначить Внутренними тренерами сертифицированных по программе TWI сотрудников:',...(names('internal_trainer').length?names('internal_trainer'):['—']),'Назначить Инструкторами сертифицированных по программе TWI сотрудников:',...(names('instructor').length?names('instructor'):['—']),'Отделу персонала ознакомить назначенных Внутренних тренеров и Инструкторов с задачами по указанным ролям согласно Стандарта организации и проведения производственного обучения на рабочих местах (с использованием методики TWI).',orderPayment(order),'Директор завода        ____________ / '+order.approved_name+' /'])
 }
+
+export async function sopCriteriaFromDocx(bytes){
+ const entries=await readZip(bytes),doc=entries.find(x=>x.name==='word/document.xml');invariant(doc,'Это не DOCX');
+ const xml=parse(dec.decode(doc.bytes)),out=[];
+ for(const row of Array.from(xml.getElementsByTagNameNS(W,'tr'))){
+  const cells=Array.from(row.children).filter(x=>x.namespaceURI===W&&x.localName==='tc');if(cells.length<2)continue;
+  const value=x=>Array.from(x.getElementsByTagNameNS(W,'p')).map(pText).join(' ').trim(),number=value(cells[0]);
+  if(!/^\d{1,3}$/.test(number))continue;
+  const code=Number(number),question=value(cells[1]);invariant(code===out.length+1&&question,'Нумерация критериев должна быть последовательной');out.push({code,question})
+ }
+ invariant(out.length>0&&out.length<=100,'В таблице DOCX не найдены 1–100 пронумерованных требований');return out
+}
