@@ -1,0 +1,8 @@
+PRAGMA foreign_keys=ON;
+BEGIN;
+ALTER TABLE profession ADD COLUMN rev INTEGER NOT NULL DEFAULT 1 CHECK(rev>0);
+ALTER TABLE equipment ADD COLUMN rev INTEGER NOT NULL DEFAULT 1 CHECK(rev>0);
+ALTER TABLE person_assignment ADD COLUMN rev INTEGER NOT NULL DEFAULT 1 CHECK(rev>0);
+UPDATE meta SET value='2' WHERE key='schema_version';
+PRAGMA user_version=2;
+COMMIT;
