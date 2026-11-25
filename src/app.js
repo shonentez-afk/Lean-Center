@@ -1,3 +1,4 @@
+import {BUILTIN_SOP,previewCriteria} from './modules/training/builtin-forms.js';
 import {TRAINING_PAGES,trainingScreen,resetTrainingRoute,setTrainingRoute} from './modules/training/screens.js';
 import {directoryPeople} from './modules/master-data/people-directory.js';
 import {openPeopleDropdown,closePeopleDropdown} from './ui/people-picker.js';
@@ -205,13 +206,14 @@ function tableOf(headers,data){
  for(const r of data){const tr=el('tr');for(const v of r)tr.append(v instanceof Node?add(el('td'),v):el('td',String(v??'—')));body.append(tr)}t.append(body);return add(el('div',undefined,'tablewrap detail-table'),t)
 }
 function evaluationForm(revision,source){
- const methods=sopMethods(ws.working).filter(m=>m.state==='active');if(!methods.length)return add(el('div'),el('p','Сначала загрузите корпоративскую методику оценки СОП в разделе «Оценка СОП».','muted'),btn('Перейти к оценке СОП',()=>navigate('sop_evaluation')));
- const panel=el('div'),select=el('select');for(const m of methods){const o=el('option','Методика v'+m.version_no);o.value=m.id;select.append(o)}
+ const methods=sopMethods(ws.working).filter(m=>m.state==='active'),builtin=methods.length?null:contentEvent('checklist_version',BUILTIN_SOP);
+ if(builtin)methods.push({id:builtin.entity_id,version_no:1,builtin:true});
+ const panel=el('div'),select=el('select');for(const m of methods){const o=el('option',m.builtin?'Встроенная форма · Приложение 4':'Методика v'+m.version_no);o.value=m.id;select.append(o)}
  const actor=personPickerField('eval_actor','Оценщик',null,{optional:false}),day=fieldInput('eval_date',today(),'date'),place=fieldInput('eval_place',revision.workplace_name||''),content=el('div');
  panel.append(add(el('div',undefined,'formgrid'),inputField('Версия методики',select),personInputField('Оценщик',actor),inputField('Дата',day),inputField('Место',place)),content);
  function draw(){
-  content.replaceChildren();const criteria=sopCriteria(ws.working,select.value),values=criteria.map(c=>{const choice=el('select');choice.name='criterion_'+c.position;for(const [v,n] of [['','Не оценено'],['1','1 — выполнено'],['0','0 — не выполнено']]){const o=el('option',n);o.value=v;choice.append(o)}const note=fieldInput('note_'+c.position);note.maxLength=2000;return {c,choice,note}});
-  const progress=el('p','Оценено: 0 из 20','muted'),save=btn('Зафиксировать оценку',()=>run(async()=>{const payload={revision_id:revision.id,method_id:select.value,actor_id:actor.value,evaluated_on:day.value,place:place.value,source_sha256:source.sha256,responses:values.map(v=>({criterion_id:v.c.id,value:v.choice.value===''?null:Number(v.choice.value),note:v.note.value}))};await ws.applyContentEvents([contentEvent('sop_evaluation',payload)]);return 'Оценка СОП сохранена. Ожидает публикации.'}),'primary',true);
+  content.replaceChildren();const criteria=builtin?previewCriteria(BUILTIN_SOP,builtin.entity_id):sopCriteria(ws.working,select.value),values=criteria.map(c=>{const choice=el('select');choice.name='criterion_'+c.position;for(const [v,n] of [['','Не оценено'],['1','1 — выполнено'],['0','0 — не выполнено']]){const o=el('option',n);o.value=v;choice.append(o)}const note=fieldInput('note_'+c.position);note.maxLength=2000;return {c,choice,note}});
+  const progress=el('p','Оценено: 0 из 20','muted'),save=btn('Зафиксировать оценку',()=>run(async()=>{const payload={revision_id:revision.id,method_id:select.value,actor_id:actor.value,evaluated_on:day.value,place:place.value,source_sha256:source.sha256,responses:values.map(v=>({criterion_id:v.c.id,value:v.choice.value===''?null:Number(v.choice.value),note:v.note.value}))};await ws.applyContentEvents([...(builtin?[builtin]:[]),contentEvent('sop_evaluation',payload)]);return 'Оценка СОП сохранена. Ожидает публикации.'}),'primary',true);
   function update(){const result=evaluationResult(values.map(x=>({value:x.choice.value===''?null:Number(x.choice.value)})));progress.textContent='Оценено: '+result.rated+' из 20 · '+(result.fraction===null?'итог пока не рассчитан':(result.fraction*100).toFixed(0)+'%');save.disabled=busy||result.rated!==20||!!ws.conflicts.length}
   values.forEach(v=>v.choice.onchange=update);
   content.append(tableOf(['№','Проверяемое требование','Оценка','Комментарий'],values.map(v=>[v.c.position,v.c.question,v.choice,v.note])),progress,el('p','Результат — выполненные требования / 20. Порог зачёта не установлен; оценка не утверждает СОП автоматически.','muted'),save)
@@ -325,8 +327,9 @@ function evaluationRegistry(){
  search.oninput=draw;draw();return p
 }
 function sopEvaluationScreen(main){
- const p=pane('Методики оценки СОП',el('p','Загрузите приватный JSON из корпоративского приложения 4. Оценка СОП — отдельная форма из 20 пунктов, не аудит инструктора L1 и не 13-пунктный чек-лист Stage43.','muted'));
+ const p=pane('Методики оценки СОП',el('p','Приложение 4 встроено и регистрируется вместе с первой оценкой. Новая редакция методики загружается из JSON. Оценка СОП не является аудитом L1 или чек-листом Stage43.','muted'));
  p.append(btn('Загрузить методику JSON',()=>{const i=el('input');i.type='file';i.accept='.json';i.onchange=()=>{if(!i.files?.[0])return;run(async()=>{invariant(i.files[0].size<=128000,'Слишком большой файл методики');const m=validateChecklist(JSON.parse(await i.files[0].text()));if(!confirm(m.title+'\n20 критериев. Добавить неизменяемую версию методики?'))return 'Импорт отменён';await ws.applyContentEvents([contentEvent('checklist_version',m)]);return 'Методика добавлена, ожидает публикации.'})};i.click()},'primary',!!ws.conflicts.length));
+ if(!sopMethods(ws.working).length)p.append(tableOf(['№','Требование'],BUILTIN_SOP.criteria.map(q=>[q.code,q.question])));
  for(const m of sopMethods(ws.working)){const data=JSON.parse(m.methodology_json),d=el('details');d.append(el('summary','Версия '+m.version_no+' · '+data.title+' · '+(m.state==='active'?'Действует':'Архив')),el('p','SHA-256 исходного документа: '+data.source_sha256,'source-hash'),tableOf(['№','Требование'],sopCriteria(ws.working,m.id).map(q=>[q.position,q.question])));p.append(d)}
  const methods=el('details',undefined,'panel evaluation-methods');methods.append(el('summary','Методики оценки СОП'),p);main.append(evaluationRegistry(),methods)
 }
