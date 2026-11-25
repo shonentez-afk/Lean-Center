@@ -4,7 +4,7 @@ import {directoryPeople,personKey} from '../master-data/people-directory.js';
 import {linkedTwi} from '../library/linked-materials.js';
 import {validDate} from '../library/sop-review.js';
 export const TRAINING_TYPES=Object.freeze({
- audit_session:'Аудит инструктора',mentor_self_evaluation:'Самооценка наставника',mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
+ competency_matrix:'Матрица компетенций',audit_session:'Аудит инструктора',mentor_self_evaluation:'Самооценка наставника',mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
  training_program:'Программа обучения',training_enrollment:'Персональная программа',training_task_result:'Результат задания программы',
  training_assignment:'Назначение обучения',training_session:'Факт инструктажа',training_verification:'Проверка знаний',
  assessment_session:'Практическая оценка / квалификация',admission_decision:'Решение о допуске',
@@ -14,6 +14,7 @@ export const isLC41Event=e=>e.entity_type==='mentor_order'||(e.entity_type==='tr
 export const PRACTICAL_CODE='PRACTICAL_APP8';
 export const AUDIT_CODE='TWI_L1_RC1',SELF_CODE='TWI_SELF_APP12';
 const extraFormats=['lean-practical-checklist-v2','lean-audit-checklist-v1','lean-self-checklist-v1'];
+export const isLC43Event=e=>e.entity_type==='competency_matrix';
 export const isLC42Event=e=>['audit_session','mentor_self_evaluation'].includes(e.entity_type)||(e.entity_type==='checklist_version'&&[...extraFormats,'lean-sop-checklist-v2'].includes(e.payload?.format));
 export const isTrainingEvent=e=>Object.hasOwn(TRAINING_TYPES,e.entity_type)||(e.entity_type==='checklist_version'&&['lean-practical-checklist-v1',...extraFormats].includes(e.payload?.format));
 const exact=(p,keys)=>invariant(p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).length===keys.length&&keys.every(k=>Object.hasOwn(p,k)),'Некорректные поля LC4');
@@ -167,6 +168,41 @@ export function applyTrainingEvent(db,e,old){
   invariant(['certificate','attendance'].includes(p.kind)&&roles.includes(p.role)&&required(p.number,200)&&required(p.issuer)&&required(p.evidence)&&period(p.issued_on,p.valid_until),'Заполните реквизиты фактического документа о подготовке');
   store(db,t,{id,...p,rev:1});return
  }
+ if(t==='competency_matrix'){
+  if(old){changeOnly(e,old);exact(p,['command','reason']);invariant(old.state==='active'&&p.command==='retire'&&required(p.reason),'Укажите основание закрытия матрицы');update(db,t,id,{state:'retired'});return}
+  createOnly(e,old);exact(p,['code','title','author_id','unit_id','shift_id','scale_id','base_on','target_on','roster','columns','baseline']);
+  invariant(required(p.code,80)&&required(p.title,200)&&period(p.base_on,p.target_on)&&p.target_on&&p.base_on<=eventDay(e),'Укажите код, название, дату среза и целевую дату');
+  person(db,p.author_id);if(p.unit_id)active(db,'org_unit',p.unit_id);if(p.shift_id)active(db,'work_shift',p.shift_id);
+  const scale=active(db,'rating_scale',p.scale_id),levels=rows(db,'SELECT value,label FROM rating_level WHERE scale_id=? ORDER BY value',[p.scale_id]);
+  invariant(scale.name==='Производственная компетенция (1–4)'&&canonical(levels.map(x=>[x.value,x.label]))===canonical([[1,'Обучен'],[2,'Выполняет работу самостоятельно'],[3,'Выполняет работу мастерски'],[4,'Инструктор-наставник']]),'Для матрицы нужна точная корпоративская шкала 1–4');
+  invariant(Array.isArray(p.roster)&&p.roster.length>0&&p.roster.length<=300&&Array.isArray(p.columns)&&p.columns.length>0&&p.columns.length<=150&&p.roster.length*p.columns.length<=12000,'Выберите 1–300 сотрудников и 1–150 навыков; до 12000 ячеек');
+  const people=new Set(),skills=new Set();
+  const allowedUnits=new Set(p.unit_id?rows(db,'WITH RECURSIVE scope(id) AS (SELECT ? UNION SELECT u.id FROM org_unit u JOIN scope s ON u.parent_id=s.id) SELECT id FROM scope',[p.unit_id]).map(x=>x.id):[]);
+  for(const r of p.roster){exact(r,['person_id','name','position','instructor']);const who=person(db,r.person_id);
+   invariant(!people.has(r.person_id)&&r.name===who.display_name&&text(r.position,500)&&typeof r.instructor==='boolean','Некорректный или повторный сотрудник');people.add(r.person_id);
+   const a=one(db,'SELECT * FROM person_assignment WHERE person_id=? AND valid_from<=? AND coalesce(valid_to,\'9999-12-31\')>=? ORDER BY valid_from DESC,id LIMIT 1',[r.person_id,p.base_on,p.base_on]);
+   invariant(a&&(!p.unit_id||allowedUnits.has(a.unit_id))&&(!p.shift_id||a.shift_id===p.shift_id),'Сотрудник не входит в выбранный состав на дату матрицы');
+   const expected=one(db,'SELECT name FROM position WHERE id=?',[a.position_id])?.name||one(db,'SELECT name FROM profession WHERE id=?',[a.profession_id])?.name||'';
+   invariant(r.position===expected&&r.instructor===roleMatches(db,r.person_id,p.base_on,['instructor','mentor','internal_trainer']),'Должность или роль сотрудника изменилась');
+  }
+  for(const c of p.columns){exact(c,['skill_id','document_id','title']);const s=active(db,'skill',c.skill_id);invariant(!skills.has(c.skill_id)&&required(c.title,500),'Повтор навыка или пустой заголовок');skills.add(c.skill_id);
+   if(c.document_id){const doc=active(db,'document',c.document_id);invariant(doc.kind==='sop'&&doc.operation_id===s.operation_id&&one(db,"SELECT id FROM document_revision WHERE document_id=? AND state='effective'",[doc.id])&&c.title===doc.code+' · '+doc.title,'СОП не соответствует навыку или не введён в действие')}
+   else invariant(!s.operation_id&&c.title===s.name,'Операционный навык должен быть связан с действующим СОП');
+  }
+  // Baseline stores evidence-backed values as they were displayed, never future
+  // or manually fabricated qualification. Later assessments do not alter it.
+  const m=matrixData(db,p.base_on),n=p.roster.length*p.columns.length;
+  invariant(Array.isArray(p.baseline)&&p.baseline.length===n,'Неполный исходный срез матрицы');
+  let i=0;for(const r of p.roster)for(const c of p.columns){
+   const b=p.baseline[i++],x=m.cells.get(r.person_id+':'+c.skill_id),fact=x?.fact,doc=fact?.standard_revision_id?one(db,'SELECT document_id FROM document_revision WHERE id=?',[fact.standard_revision_id]):null;
+   const actual=x?.valid&&x.revisionCurrent&&fact.scale_id===p.scale_id&&(!c.document_id||doc?.document_id===c.document_id)&&[1,2,3,4].includes(fact.level)?fact.level:null;
+   exact(b,['person_id','skill_id','value','assessment_id']);
+   invariant(b.person_id===r.person_id&&b.skill_id===c.skill_id&&b.value===actual&&b.assessment_id===(actual===null?null:fact.session_id),'Исходный срез изменился. Обновите предпросмотр');
+  }
+  const prev=one(db,'SELECT MAX(version_no) n FROM competency_matrix WHERE code=?',[p.code])?.n||0;
+  db.run("UPDATE competency_matrix SET state='retired',rev=rev+1 WHERE code=? AND state='active'",[p.code]);
+  store(db,t,{id,code:p.code,title:p.title,author_id:p.author_id,unit_id:p.unit_id,shift_id:p.shift_id,scale_id:p.scale_id,base_on:p.base_on,target_on:p.target_on,roster_json:canonical(p.roster),columns_json:canonical(p.columns),baseline_json:canonical(p.baseline),created_at:e.occurred_at,state:'active',version_no:prev+1,rev:1});return
+ }
  if(t==='mentor_self_evaluation'){
   createOnly(e,old);exact(p,['person_id','method_id','evaluated_on','place','responses','feedback']);noFuture(p.evaluated_on,e);
   const who=person(db,p.person_id);hasRole(db,p.person_id,p.evaluated_on,['mentor','instructor','internal_trainer']);
@@ -185,8 +221,8 @@ export function applyTrainingEvent(db,e,old){
   invariant(trainingMethods(db,AUDIT_CODE).some(x=>x.id===p.method_id&&x.state==='active'),'Выберите действующую методику аудита L1');
   const criteria=practicalCriteria(db,p.method_id);invariant(Array.isArray(p.responses)&&criteria.length>0&&p.responses.length===criteria.length,'Заполните все критерии аудита');
   p.responses.forEach((x,i)=>{exact(x,['criterion_id','value','note']);invariant(x.criterion_id===criteria[i].id&&(x.value===0||x.value===1)&&text(x.note),'Некорректный ответ аудита')});
-  store(db,t,{id,version_id:p.method_id,mentor_id:a.mentor_id,auditor_id:p.auditor_id,trainee_id:a.trainee_id,operation_id:a.operation_id,standard_revision_id:a.sop_revision_id,training_session_id:fact.id,observed_at:p.observed_on,state:'final',recorded_names_json:canonical(names(db,{mentor:a.mentor_id,auditor:p.auditor_id,trainee:a.trainee_id})),assignment_id:a.id,summary:p.feedback,recorded_at:e.occurred_at,rev:1});
-  p.responses.forEach(x=>store(db,'audit_response',{id:id+':'+x.criterion_id,audit_id:id,version_id:p.method_id,criterion_id:x.criterion_id,response:x.value?'yes':'no',note:x.note}));return
+  store(db,t,{id,version_id:p.method_id,mentor_id:a.mentor_id,auditor_id:p.auditor_id,trainee_id:a.trainee_id,operation_id:a.operation_id,standard_revision_id:a.sop_revision_id,training_session_id:fact.id,observed_at:p.observed_on,state:'draft',recorded_names_json:canonical(names(db,{mentor:a.mentor_id,auditor:p.auditor_id,trainee:a.trainee_id})),assignment_id:a.id,summary:p.feedback,recorded_at:e.occurred_at,rev:1});
+  p.responses.forEach(x=>store(db,'audit_response',{id:id+':'+x.criterion_id,audit_id:id,version_id:p.method_id,criterion_id:x.criterion_id,response:x.value?'yes':'no',note:x.note}));db.run("UPDATE audit_session SET state='final' WHERE id=?",[id]);return
  }
  if(t==='mentor_order'){
   createOnly(e,old);exact(p,['order_number','order_on','organization','city','approved_by','valid_from','valid_to','supplement_from','instructor_amount','trainer_amount','evidence','members']);
