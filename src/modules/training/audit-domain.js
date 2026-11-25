@@ -64,11 +64,11 @@ export function applyLC5Event(db,e,old){
  const p=e.payload,id=e.entity_id,t=e.entity_type;
  if(t==='action_item'){
   if(!old){
-   invariant(e.operation==='create','Требуется создание мероприятия');exact(p,['response_id','title','owner_id','subject_id','due_on','kind','priority',...(Object.hasOwn(p,'source')?['source']:[])]);
+   invariant(e.operation==='create','Требуется создание мероприятия');exact(p,['response_id','title','owner_id','subject_id','due_on','kind','priority',...(Object.hasOwn(p,'source_link')?['source_link']:[])]);
    person(db,p.owner_id);if(p.subject_id!==null)person(db,p.subject_id);
    invariant(required(p.title,500)&&validDate(p.due_on)&&p.due_on>=day(e)&&Object.hasOwn(ACTION_KINDS,p.kind)&&['normal','major','critical'].includes(p.priority),'Укажите задачу, срок и приоритет');
    let finding=null,generic=null;
-   if(p.source){exact(p.source,['kind','id']);invariant(p.response_id===null,'Выберите один источник');generic=actionSource(db,p.source.kind,p.source.id);invariant(generic,'Источник мероприятия недоступен');if(p.kind==='trainee_training')invariant(generic.kind==='practical'&&p.subject_id===generic.subject_id,'Переобучение обучаемого требует отрицательного заключения практической оценки');else invariant(['corrective','development'].includes(p.kind),'Недопустимый тип для этого источника');if(generic.revision_id||generic.study_id){finding=id;insert(db,'finding',{id:finding,document_revision_id:generic.revision_id||null,study_id:generic.study_id||null,title:generic.label,severity:p.priority,created_at:e.occurred_at,state:'open'})}}
+   if(p.source_link){exact(p.source_link,['kind','id']);invariant(p.response_id===null,'Выберите один источник');generic=actionSource(db,p.source_link.kind,p.source_link.id);invariant(generic,'Источник мероприятия недоступен');if(p.kind==='trainee_training')invariant(generic.kind==='practical'&&p.subject_id===generic.subject_id,'Переобучение обучаемого требует отрицательного заключения практической оценки');else invariant(['corrective','development'].includes(p.kind),'Недопустимый тип для этого источника');if(generic.revision_id||generic.study_id){finding=id;insert(db,'finding',{id:finding,document_revision_id:generic.revision_id||null,study_id:generic.study_id||null,title:generic.label,severity:p.priority,created_at:e.occurred_at,state:'open'})}}
    if(p.response_id!==null){
     const r=one(db,"SELECT r.*,a.state,c.question FROM audit_response r JOIN audit_session a ON a.id=r.audit_id JOIN checklist_criterion c ON c.id=r.criterion_id WHERE r.id=?",[p.response_id]);
     invariant(r?.state==='final'&&r.response==='no','Источник — подтверждённое отклонение действующего аудита');
