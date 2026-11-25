@@ -9,3 +9,5 @@
 Не размещать реальные производственные данные, ФИО, базы и секреты в GitHub.
 
 Кандидат LC2: ветка feature/lc2-master-data, [описание LC2](docs/LC2_RU.md). До приёмки LC1.3 остаётся стабильной версией.
+
+[Кандидат LC2.0 ZIP](https://github.com/shonentez-afk/Lean-Center/raw/1e5d8c3d24d4766d5d05fd2c33de07340ca3fec3/releases/LeanCenter-LC2.0.zip) · [CI PASS](https://github.com/shonentez-afk/Lean-Center/actions/runs/45629903954) · [PR #3](https://github.com/shonentez-afk/Lean-Center/pull/3). Проверить перед принятием.
