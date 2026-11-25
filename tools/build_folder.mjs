@@ -6,18 +6,20 @@ import {buildSync} from 'esbuild';
 
 const root=process.cwd();
 const read=p=>fs.readFileSync(path.join(root,p),'utf8').replace(/\r\n/g,'\n');
-const version='lc1.3';
+const version='lc2.0';
 const output=path.join(root,'dist','LeanCenter');
 const releasePath='versions/'+version;
 const files=new Map();
 const put=(name,content)=>{if(files.has(name))throw Error('Duplicate file '+name);files.set(name,Buffer.isBuffer(content)?content:Buffer.from(content,'utf8'))};
 const code=(name,content)=>{new Script(content,{filename:name});put(releasePath+'/'+name,content)};
 const js=buildSync({entryPoints:['src/app.js'],bundle:true,platform:'browser',format:'iife',target:'es2020',write:false,minify:false}).outputFiles[0].text;
-const settings={schema:read('db/schema_v1.sql'),migration:read('db/migrations/002_lc1.sql'),version};
+const settings={schema:read('db/schema_v1.sql'),migration:read('db/migrations/002_lc1.sql'),migration3:read('db/migrations/003_lc2.sql'),version};
 code('app/config.js','window.LC_BUILD='+JSON.stringify(settings)+';\n');
 code('vendor/sql-wasm-data.js','window.LC_BUILD.wasm='+JSON.stringify(fs.readFileSync('node_modules/sql.js/dist/sql-wasm.wasm').toString('base64'))+';\n');
 code('vendor/sql-wasm.js',read('node_modules/sql.js/dist/sql-wasm.js'));
 code('vendor/echarts.min.js',read('node_modules/echarts/dist/echarts.min.js'));
+code('vendor/exceljs.min.js',read('baselines/sop-stage43/src/vendor/exceljs.min.js'));
+put(releasePath+'/licenses/exceljs/LICENSE.txt',read('baselines/sop-stage43/src/vendor/ExcelJS_LICENSE.txt'));
 code('app/main.js',js);
 put(releasePath+'/assets/styles.css',read('src/ui/styles.css'));
 for(const name of ['sql.js','echarts','zrender','tslib']){

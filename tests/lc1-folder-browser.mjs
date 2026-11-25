@@ -34,8 +34,8 @@ try{
  const {page,context}=await newPage();
  await page.goto(pathToFileURL(entry).href);
  await home(page);
- assert.equal(await page.evaluate(()=>window.LC_BUILD.version),'lc1.3');
- assert.equal(await page.evaluate(()=>document.querySelectorAll('script[src]').length),5);
+ assert.equal(await page.evaluate(()=>window.LC_BUILD.version),'lc2.0');
+ assert.equal(await page.evaluate(()=>document.querySelectorAll('script[src]').length),6);
  assert.equal(await page.evaluate(()=>document.querySelectorAll('script:not([src])').length),0);
  assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--tn-red').trim()),'#E30613');
  assert.match(await page.evaluate(()=>getComputedStyle(document.documentElement).fontFamily),/Proxima Nova Rg/);
@@ -45,7 +45,7 @@ try{
  await storage(page);
  await page.getByRole('button',{name:'Заполнить демо-данными'}).click();
  await page.getByText('Добавлены демонстрационные записи',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Сотрудники',exact:true}).click();
+ await page.getByRole('button',{name:'Сотрудники',exact:true}).first().click();
  await page.getByRole('cell',{name:'Учебный сотрудник 01'}).waitFor();
  await page.getByRole('button',{name:'Добавить',exact:true}).click();
  await page.locator('input[name=employee_code]').fill('QA-001');
@@ -61,10 +61,10 @@ try{
  await person(page);await page.screenshot({path:'artifacts/lc1-tn/registry.png',fullPage:true});
  // Simulate installing a new version next to the old one, switching only the
  // stable index.html, and keeping the local working state.
- const next=path.join(dest,'versions','lc1.3-test-update');
- await fs.cp(path.join(dest,'versions','lc1.3'),next,{recursive:true});
+ const next=path.join(dest,'versions','lc2.0-test-update');
+ await fs.cp(path.join(dest,'versions','lc2.0'),next,{recursive:true});
  const html=await fs.readFile(entry,'utf8');
- await fs.writeFile(entry,html.replaceAll('versions/lc1.3/','versions/lc1.3-test-update/'));
+ await fs.writeFile(entry,html.replaceAll('versions/lc2.0/','versions/lc2.0-test-update/'));
  await page.reload();await home(page);await person(page);
  await storage(page);
  const download=page.waitForEvent('download');
@@ -84,8 +84,8 @@ try{
  await second.context.close();
  assert.deepEqual(errors,[]);
  assert.equal(requests.some(u=>/^https?:/i.test(u)),false,'External HTTP dependency');
- for(const p of ['app/config.js','vendor/sql-wasm-data.js','vendor/sql-wasm.js','vendor/echarts.min.js','app/main.js','assets/styles.css'])
+ for(const p of ['app/config.js','vendor/sql-wasm-data.js','vendor/sql-wasm.js','vendor/echarts.min.js','vendor/exceljs.min.js','app/main.js','assets/styles.css'])
   assert(requests.some(u=>u.endsWith('/'+p)),'Missing local request '+p);
  assert.equal(requests.some(u=>u.endsWith('.wasm')),false,'WASM must not be fetched under file://');
- console.log('LC1.3 folder offline file:// smoke PASS: Cyrillic paths, external scripts, CRUD, reload, stable entry update, backup/restore, no HTTP');
+ console.log('LC2.0 folder offline file:// smoke PASS: Cyrillic paths, external scripts, CRUD, reload, stable entry update, backup/restore, no HTTP');
 }finally{await browser.close();await fs.rm(temp,{recursive:true,force:true})}
