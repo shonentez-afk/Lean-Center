@@ -478,7 +478,7 @@ export function trainingScreen(main,page,c){
    const x=m.cells.get(p.id+':'+s.id),fact=x.fact,actual=!fact?'Не оценено':fact.observation_state==='rated'?String(fact.level):observationLabels[fact.observation_state],target=x.goal?' / цель '+x.goal.required_level:'';
    const label=actual+target+(fact?.observation_state==='rated'&&!x.valid?' · срок истёк':'')+(!x.same&&fact?' · другая шкала':'')+(fact&&!x.revisionCurrent?' · прежняя редакция':'')+(x.admission?' · '+x.admission.status:'');
    if(forExport)return label;
-   const b=btn(label,()=>goLocal({personId:p.id,skillId:s.id}),'lc4-matrix-cell'+(x.gap?' lc4-gap':x.qualified?' lc4-met':''));b.title=label;return b
+   const b=btn(label,()=>goLocal({mode:'overview',personId:p.id,skillId:s.id}),'lc4-matrix-cell'+(x.gap?' lc4-gap':x.qualified?' lc4-met':''));b.title=label;return b
   }
   function subset(){let people=m.people.filter(p=>(!unit.value||p.unit_id===unit.value)&&(!profession.value||p.profession_id===profession.value)&&(!shift.value||p.shift_id===shift.value)&&[p.display_name,p.employee_code].join(' ').toLocaleLowerCase('ru-RU').includes(q.value.trim().toLocaleLowerCase('ru-RU'))),skills=m.skills.filter(s=>(!category.value||s.category_id===category.value)&&(!workplace.value||operations.get(s.operation_id)===workplace.value));if(gaps.input.checked)people=people.filter(p=>skills.some(s=>m.cells.get(p.id+':'+s.id).gap));return {people,skills}}
   function draw(){const all=subset();if(!all.people.length||!all.skills.length){out.replaceChildren(msg('Нет сотрудников или навыков по выбранным фильтрам. Создайте записи в справочниках.'));totals.replaceChildren(msg('Нет данных для выбранных фильтров.'));return}
