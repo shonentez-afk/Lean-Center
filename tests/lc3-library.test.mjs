@@ -121,9 +121,10 @@ test('Stage43 checklist automatically projected, edited independently, guarded b
  await w.applyContentEvents([e],readFrom(s));assert.equal(stage43Checks(w.working,d.id).length,1);
  assert.equal(one(w.working,'SELECT rev FROM document WHERE id=?',[d.entity_id]).rev,1);
  assert.equal(JSON.parse(one(w.working,'SELECT payload_json FROM document_revision WHERE id=?',[d.id]).payload_json).source.sha256,s.source.sha256);
- const next={...payload,rows:changed.map((x,i)=>i===0?{...x,score:1}:x)};
+ const next={...payload,rows:changed.map((x,i)=>i===0?{...x,score:1}:i===1?{...x,comment:'Комментарий без оценки'}:x)};
  await w.applyContentEvents([event(w,'sop_stage43_checklist',e.entity_id,next)],readFrom(s));
  assert.equal(stage43Checks(w.working,d.id)[0].rev,2);
+ assert.equal(weightedResult(JSON.parse(stage43Checks(w.working,d.id)[0].rows_json)).seed,12,'A note must not confirm a seed score');
  await assert.rejects(w.applyContentEvents([event(w,'sop_stage43_checklist',null,payload)],readFrom(s)),/уже сохранён/);
  const backupData=await backup(w),restored=await restore(SQL,backupData,readFrom(s));assert.equal(stage43Checks(restored.working,d.id)[0].rev,2);restored.close();
  raw.constructor.steps[0].action='Изменённый исходник';const s2=await pack();

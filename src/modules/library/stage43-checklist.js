@@ -24,7 +24,7 @@ export function verifyStage43Checklist(p,original){
  invariant(exact(p,['revision_id','source','rows','actor_id'])&&isId(p.revision_id)&&(p.actor_id===null||isId(p.actor_id)),'Некорректные реквизиты чек-листа');
  const proposed=validateRows(p.rows),base=stage43Checklist(original);
  invariant(base.length===13,'У исходной версии СОП нет чек-листа Stage43');
- proposed.forEach((x,i)=>{const y=base[i];invariant(x.id===y.id&&x.req===y.req&&x.weight===y.weight,'Требования и веса исходной методики неизменяемы');invariant(x.scoreSource==='manual'||canonical(x)===canonical(y),'Изменённая оценка должна быть отмечена как ручная')});
+ proposed.forEach((x,i)=>{const y=base[i];invariant(x.id===y.id&&x.req===y.req&&x.weight===y.weight,'Требования и веса исходной методики неизменяемы');invariant(x.scoreSource==='manual'||(x.scoreSource===y.scoreSource&&x.score===y.score),'Изменённая оценка должна быть отмечена как ручная')});
  return proposed
 }
 export function applyStage43Checklist(db,e,old){

@@ -240,7 +240,7 @@ function stage43Panel(doc,revision,source){
   if(!panel.isConnected)return;
   panel.replaceChildren(el('h2','Чек-лист конструктора СОП · 13 критериев'),el('p','Привязан к точному исходнику версии '+revision.version_no+'. Шкала 0 / 0,3 / 0,7 / 1 и веса сохранены. Не является 20-пунктной корпоративской оценкой.','muted'));
   const records=stage43Checks(ws.working,revision.id),old=records.find(x=>x.source_sha256===source.sha256);
-  if(!original.length){panel.append(el('p','В исходном JSON нет чек-листа. Сохраните СОП из конструктора с чек-листом.','muted'));return}
+  if(!original.length){panel.append(el('p','В исходном JSON нет чек-листа. Сохраните СОП из конструктора с чек-листом.','muted'));appendHistory();return}
   const data=old?JSON.parse(old.rows_json):original,items=[],progress=el('p',weightedLabel(data),'muted'),actor=selectRef('person','stage43_actor',old?.actor_id||null),editable=!doc.archived&&!ws.conflicts.length;
   panel.append(el('p',old?'Сохранённая правка центра · '+old.updated_at.slice(0,10)+' · '+(old.actor_name||'оценщик не указан'):'Автоматически загружен из конструктора. Изменения ещё не сохранялись в центре.','muted'));
   const table=tableOf(['№','Требование','Оценка','Вес','Балл','Комментарий','Источник'],data.map(x=>{
@@ -248,14 +248,17 @@ function stage43Panel(doc,revision,source){
    for(const v of [0,.3,.7,1]){const o=el('option',String(v).replace('.',','));o.value=String(v);select.append(o)}select.value=String(x.score);select.disabled=!editable;
    const note=fieldInput('stage43_note_'+x.id,x.comment);note.maxLength=2000;note.disabled=!editable;
    const cell=el('span',(x.score*x.weight).toFixed(2)),origin=el('span',stage43SourceLabels[x.scoreSource],'muted'),item={x,select,note,cell,origin,changed:false};items.push(item);
-   select.onchange=()=>{item.changed=true;refresh()};note.oninput=()=>{item.changed=true;refresh()};return [x.id,x.req,select,x.weight,cell,note,origin]
+   select.onchange=()=>{item.changed=true;refresh()};note.oninput=refresh;return [x.id,x.req,select,x.weight,cell,note,origin]
   }));
   const current=()=>items.map(({x,select,note,changed})=>({...x,score:Number(select.value),comment:note.value,scoreSource:changed?'manual':x.scoreSource}));
   function refresh(){const value=current();value.forEach((x,i)=>{items[i].cell.textContent=(x.score*x.weight).toFixed(2);items[i].origin.textContent=stage43SourceLabels[x.scoreSource]});progress.textContent=weightedLabel(value)}
   const save=btn('Сохранить чек-лист СОП',()=>run(async()=>{const payload={revision_id:revision.id,source,rows:current(),actor_id:actor.value||null};const e=old?{...contentEvent('sop_stage43_checklist',payload),entity_id:old.id,operation:'update',expected_revision:old.rev}:contentEvent('sop_stage43_checklist',payload);await ws.applyContentEvents([e],readContent);evaluationSelected=revision.id;page='sop_evaluation';return 'Чек-лист СОП сохранён. Ожидает публикации.'}),'primary',!editable);
   actor.disabled=!editable;panel.append(inputField('Оценщик (необязательно)',actor),table,progress,el('p','Правки оценки не изменяют исходный СОП, его паспорт или статус. Для актуального печатного чек-листа скачайте отчёт здесь; исходный XLSX Stage43 сохраняет первоначальную оценку.','muted'),add(el('div',undefined,'row'),save,btn('Скачать чек-лист XLSX',()=>run(async()=>{await stage43Xlsx(doc,revision,source,current(),actor.selectedOptions[0]?.textContent||old?.actor_name||'');return 'Чек-лист XLSX сформирован'},{save:false}))));
-  const previous=records.filter(x=>x.source_sha256!==source.sha256);
-  for(const x of previous){const data=JSON.parse(x.rows_json),d=el('details');d.append(el('summary','История · прежний исходник · '+x.updated_at.slice(0,10)),el('p',weightedLabel(data)+' · '+(x.actor_name||'оценщик не указан'),'muted'),el('p','SHA-256: '+x.source_sha256,'source-hash'),tableOf(['№','Требование','Оценка','Вес','Комментарий'],data.map(y=>[y.id,y.req,y.score,y.weight,y.comment])));panel.append(d)}
+  appendHistory();
+  function appendHistory(){
+   const previous=records.filter(x=>x.source_sha256!==source.sha256);
+   for(const x of previous){const data=JSON.parse(x.rows_json),d=el('details');d.append(el('summary','История · прежний исходник · '+x.updated_at.slice(0,10)),el('p',weightedLabel(data)+' · '+(x.actor_name||'оценщик не указан'),'muted'),el('p','SHA-256: '+x.source_sha256,'source-hash'),tableOf(['№','Требование','Оценка','Вес','Комментарий'],data.map(y=>[y.id,y.req,y.score,y.weight,y.comment])));panel.append(d)}
+  }
  }catch(e){if(panel.isConnected)panel.replaceChildren(el('h2','Чек-лист конструктора СОП'),el('p',e.message,'bad'))}})();
  return panel
 }
