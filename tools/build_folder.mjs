@@ -23,7 +23,7 @@ code('vendor/exceljs.min.js',read('baselines/sop-stage43/src/vendor/exceljs.min.
 put(releasePath+'/licenses/exceljs/LICENSE.txt',read('baselines/sop-stage43/src/vendor/ExcelJS_LICENSE.txt'));
 code('app/main.js',js);
 const bridge=read('src/modules/library/lean-bridge.js');new Script(bridge,{filename:'lean-bridge.js'});
-code('editor/Stage43-data.js','window.LC_EDITOR_HTML='+JSON.stringify(buildEditor(bridge))+';\n');
+code('editor/Stage43-data.js','window.LC_EDITOR_HTML='+JSON.stringify(buildEditor(bridge,read('src/ui/editor.css')))+';\n');
 put(releasePath+'/assets/styles.css',read('src/ui/styles.css'));
 for(const name of ['sql.js','echarts','zrender','tslib']){
  const dir=path.join(root,'node_modules',name);

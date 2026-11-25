@@ -242,6 +242,13 @@ function libraryContext(kind,id=null,revisionId=null){
  invariant(!id||row,'Запись не найдена');invariant(!revisionId||revision,'Версия не найдена');
  return {kind,id,revisionId,expected:row?.rev||0,database:meta(ws.base,'database_id'),title:row?.title||'',code:row?.code||'',operation_id:row?.operation_id||null,observed_at:row?.observed_at||'',command:!id?'create':kind==='frv'?'save':revision?.state==='draft'?'save':'revise',source:revision?JSON.parse(revision.payload_json).source:kind==='frv'&&row?JSON.parse(row.context_json).source:null};
 }
+// Current directory entries, with historical print snapshots saved in the editor source.
+function editorPeople(){
+ return rows(ws.working,`SELECT p.id,p.employee_code,p.display_name,COALESCE(pos.name,prof.name,'') position,COALESCE(u.name,'') unit FROM person p
+ LEFT JOIN person_assignment a ON a.person_id=p.id AND a.valid_from<=? AND (a.valid_to IS NULL OR a.valid_to>=?)
+ LEFT JOIN position pos ON pos.id=a.position_id LEFT JOIN profession prof ON prof.id=a.profession_id LEFT JOIN org_unit u ON u.id=a.unit_id
+ WHERE p.archived=0 ORDER BY p.display_name,p.employee_code`,[today(),today()])
+}
 function assertContext(c){invariant(c.database===meta(ws.base,'database_id'),'Открыта другая база. Исходный JSON можно сохранить отдельно.');if(c.id){const row=one(ws.working,'SELECT * FROM '+(c.kind==='sop'?'document':'frv_study')+' WHERE id=?',[c.id]);invariant(row&&row.rev===c.expected,'Запись изменена после открытия. Не перезаписывайте её; сохраните JSON и откройте актуальную версию.')}}
 function libraryEvent(c,payload,operation=c.id?'update':'create'){assertContext(c);return {id:uuid(),entity_type:c.kind==='sop'?'document':'frv_study',entity_id:c.id||uuid(),operation,expected_revision:c.expected,payload,occurred_at:new Date().toISOString()}}
 async function chooseLibraryFile(kind,ctx=libraryContext(kind)){
@@ -285,7 +292,7 @@ window.addEventListener('message',async e=>{
  const reply=message=>{if(editorSession===s)s.frame.contentWindow?.postMessage({protocol:'lean-editor-v1',session:s.session,type:'result',message},'*')};
  if(m.type==='ready'&&!s.loading&&!s.loaded){
   s.loading=true;
-  try{assertContext(s.ctx);const text=s.ctx.source?await readContent(s.ctx.source):null;if(editorSession!==s)return;const op=s.ctx.operation_id?one(ws.working,'SELECT * FROM operation WHERE id=?',[s.ctx.operation_id]):null;s.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:s.session,type:'load',text,defaults:{operation:op?.name||'',unit:op?refName('org_unit',op.unit_id):''}},'*');editorStatus(s,'Подготовка рабочей копии…')}
+  try{assertContext(s.ctx);const text=s.ctx.source?await readContent(s.ctx.source):null;if(editorSession!==s)return;const op=s.ctx.operation_id?one(ws.working,'SELECT * FROM operation WHERE id=?',[s.ctx.operation_id]):null;s.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:s.session,type:'load',text,defaults:{operation:op?.name||'',unit:op?refName('org_unit',op.unit_id):'',people:editorPeople(),theme:theme?'dark':'light'}},'*');editorStatus(s,'Подготовка рабочей копии…')}
   catch(err){clearTimeout(s.timeout);reply(err.message);editorStatus(s,err.message,true);message(err.message,true)}finally{s.loading=false}
  }else if(m.type==='loaded'){
   clearTimeout(s.timeout);s.loaded=true;editorStatus(s,'Редактор готов');message('Редактор готов. Сохранение в библиотеку — после подтверждения.');

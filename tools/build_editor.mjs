@@ -1,7 +1,7 @@
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 const BASE='baselines/sop-stage43/releases/stage43-sop-print-formats-20261125.html';
-export function buildEditor(bridge){
+export function buildEditor(bridge,editorCSS=''){
  const bytes=execFileSync('git',['show','HEAD:'+BASE],{maxBuffer:10*1024*1024});
  // Pin the exact accepted artifact (Git blob hash includes the blob header).
  const sha=createHash('sha1').update(Buffer.from('blob '+bytes.length+'\0')).update(bytes).digest('hex');
@@ -26,6 +26,7 @@ export function buildEditor(bridge){
  if(html.split('s.keyMoments.length<3').length!==3)throw Error('KM editor anchors changed');
  html=html.replaceAll('s.keyMoments.length<3','s.keyMoments.length<5');
  replace("ws.getCell(5,7).value={formula:timeCellRefs.join('+')}","ws.getCell(5,7).value={formula:timeCellRefs.join('+'),result:exportData.totalTimeSeconds/86400}");
+ replace('</head>','<style id="lc-editor-style">'+editorCSS+'</style>\n</head>');
  replace('</body>','<script>\n'+bridge.replace(/<\/script/gi,'<\\/script')+'\n</script>\n</body>');
  return html
 }
