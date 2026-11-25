@@ -3,6 +3,7 @@ import {invariant,one,rows,canonical,isId,foldKey} from '../../core/db.js';
 import {directoryPeople,personKey} from '../master-data/people-directory.js';
 import {linkedTwi} from '../library/linked-materials.js';
 import {validDate} from '../library/sop-review.js';
+import {isRC1Import,applyRC1Event} from './rc1-import.js';
 import {LC5_TYPES,applyLC5Event} from './audit-domain.js';
 export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,
  competency_matrix:'Матрица компетенций',audit_session:'Аудит инструктора',mentor_self_evaluation:'Самооценка наставника',mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
@@ -154,6 +155,7 @@ function validClock(s){return typeof s==='string'&&/^\d{4}-\d{2}-\d{2}T(?:[01]\d
 function exactAssignmentTarget(db,p,r){const skill=active(db,'skill',p.skill_id);invariant(skill.operation_id===r.operation_id,'Навык должен относиться к операции выбранного СОП');level(db,p.scale_id,p.target_level)}
 export function applyTrainingEvent(db,e,old){
  const p=e.payload,id=e.entity_id,t=e.entity_type;
+ if(isRC1Import(e))return applyRC1Event(db,e,old);
  if(Object.hasOwn(LC5_TYPES,t))return applyLC5Event(db,e,old);
  if(t==='checklist_version'){
   createOnly(e,old);const mentor=p.format==='lean-audit-checklist-v1'||p.format==='lean-self-checklist-v1';if(mentor)validateMentorMethod(p,p.format);else validatePracticalMethod(p);const code=p.format==='lean-audit-checklist-v1'?AUDIT_CODE:p.format==='lean-self-checklist-v1'?SELF_CODE:PRACTICAL_CODE,methods=trainingMethods(db,code);

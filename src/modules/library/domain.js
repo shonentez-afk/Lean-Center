@@ -1,3 +1,4 @@
+import {verifyRC1Event} from '../training/rc1-import.js';
 import {TRAINING_TYPES,isTrainingEvent,applyTrainingEvent,verifyTrainingSource} from '../training/domain.js';
 import {applyStage43Checklist,verifyStage43Checklist} from './stage43-checklist.js';
 import {applySopMethod,applySopEvaluation,reviewDue,validDate} from './sop-review.js';
@@ -88,7 +89,7 @@ export function refsForDb(db){return rows(db,'SELECT sha256,byte_size,mime FROM 
 export function unionRefs(...groups){const m=new Map();for(const refs of groups)for(const ref of refs){validateRef(ref);const old=m.get(ref.sha256);invariant(!old||canonical(old)===canonical(ref),'Несогласованные метаданные исходного файла');m.set(ref.sha256,ref)}return [...m.values()]}
 export async function verifyDomainEvents(events,readContent){
  const checked=new Map();
- for(const e of events||[]){if(!Object.hasOwn(DOMAIN_TYPES,e.entity_type)||!e.payload?.source)continue;
+ for(const e of events||[]){await verifyRC1Event(e);if(!Object.hasOwn(DOMAIN_TYPES,e.entity_type)||!e.payload?.source)continue;
   const ref=validateRef(e.payload.source);invariant(typeof readContent==='function','Пакет содержит документы; требуется полный комплект исходных файлов');
   let result=checked.get(ref.sha256);if(!result){const text=await checkContent(ref,await readContent(ref));result=await inspectSource(text,ref.kind);result.raw=JSON.parse(text);checked.set(ref.sha256,result)}
   if(isTrainingEvent(e)){verifyTrainingSource(e,result.source,result.raw);continue}

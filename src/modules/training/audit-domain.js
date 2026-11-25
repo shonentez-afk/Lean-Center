@@ -5,7 +5,7 @@ export const ACTION_KINDS={corrective:'Корректирующее меропр
 export const ACTION_STATES={open:'Открыто',in_progress:'В работе',implemented:'Ожидает проверки',verified:'Эффект подтверждён',ineffective:'Эффект не подтверждён',cancelled:'Отменено'};
 export const RESPONSE_LABELS={yes:'Да',no:'Нет',not_observed:'Не наблюдалось',not_applicable:'Не применимо',legacy:'Историческая доля'};
 export const LC5_TYPES={action_item:'Задача / мероприятие',schedule_event:'Календарное событие'};
-export const isLC5Event=e=>Object.hasOwn(LC5_TYPES,e.entity_type)||(e.entity_type==='audit_session'&&e.payload?.responses?.some(r=>typeof r.value==='string'));
+export const isLC5Event=e=>['import_rc1','import_rc1_method'].includes(e.payload?.command)||Object.hasOwn(LC5_TYPES,e.entity_type)||(e.entity_type==='audit_session'&&e.payload?.responses?.some(r=>typeof r.value==='string'));
 const required=(v,n=2000)=>typeof v==='string'&&v.trim().length>0&&v.length<=n;
 const exact=(p,k)=>invariant(p&&Object.keys(p).length===k.length&&k.every(x=>Object.hasOwn(p,x)),'Некорректные поля LC5');
 const insert=(db,t,p)=>db.run('INSERT INTO '+t+'('+Object.keys(p).join(',')+') VALUES('+Object.keys(p).map(()=>'?').join(',')+')',Object.values(p));
