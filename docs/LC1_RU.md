@@ -23,3 +23,6 @@ CI [45606327769](https://github.com/shonentez-afk/Lean-Center/actions/runs/45606
 
 ## LC1.3 — дизайн аналитики
 Согласовано разделение фирменных цветов и цветов смысловых состояний. Общий модуль аналитической палитры, нейтральный график справочников, правила будущих матриц и KPI. 5 дополнительных unit tests, проверка цветов в живом ECharts в обеих темах. Статус CI проверять по Actions. Схема v2 и протокол обмена не меняются.
+
+## Подтверждённая сборка LC1.3
+CI [45627250684](https://github.com/shonentez-afk/Lean-Center/actions/runs/45627250684): SUCCESS; Windows/Linux 17/17 Node + 5/5 Python, ZIP и браузерный smoke с проверкой цветов ECharts в обеих темах. 398 файлов baseline, db, core, storage совпадают с LC1.1 по Git blob SHA. [Архив LC1.3](https://github.com/shonentez-afk/Lean-Center/blob/da5b1e47f0d431d26299e7b99f4bf5edefc7523a/releases/LeanCenter-LC1.3-TN.zip), 795174 байт, blob 9ef4e7b0a3145f1106007673942c85868a1d3981. PR #2 draft, пользовательская приёмка внешнего вида LC1.3 впереди.

@@ -29,3 +29,6 @@ CI [45606327769](https://github.com/shonentez-afk/Lean-Center/actions/runs/45606
 
 ## LC1.3 — согласованная семантика аналитики
 Пользователь согласовал отдельную палитру аналитики: обычные количественные графики нейтральные серо-синие; красный сохраняется в интерфейсе, в аналитике только критичность. Общий модуль src/analytics/palette.js и правила docs/DESIGN_SYSTEM_RU.md. Светлая/тёмная темы, план/нет оценки/N/A различаются. Не придумывать пороги оценки; применять утверждённые методики. Сборка LeanCenter-LC1.3-TN.zip; тестировать Windows/Linux. База и сетевой обмен неизменны. PR #2 остаётся кандидатом до приёмки LC1.3.
+
+## Подтверждённая сборка LC1.3
+CI [45627250684](https://github.com/shonentez-afk/Lean-Center/actions/runs/45627250684): SUCCESS; Windows/Linux 17/17 Node + 5/5 Python, ZIP и браузерный smoke с проверкой цветов ECharts в обеих темах. 398 файлов baseline, db, core, storage совпадают с LC1.1 по Git blob SHA. [Архив LC1.3](https://github.com/shonentez-afk/Lean-Center/blob/da5b1e47f0d431d26299e7b99f4bf5edefc7523a/releases/LeanCenter-LC1.3-TN.zip), 795174 байт, blob 9ef4e7b0a3145f1106007673942c85868a1d3981. PR #2 draft, пользовательская приёмка внешнего вида LC1.3 впереди.
