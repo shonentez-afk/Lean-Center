@@ -17,6 +17,12 @@
   if(loaded||busy)return;
   busy=true;
   try{
+   if(typeof stage37DraftDecisionPending!=='undefined'&&stage37DraftDecisionPending){
+    if(!confirm('В этом рабочем окне есть сохранённый черновик. Восстановить его вместо исходной версии из центра?'))throw Error('Найден защищённый черновик. Сначала восстановите его или скачайте исходный текст через баннер.');
+    await applyDraft(JSON.parse(stage37InitialDraft.raw));stage37DraftDecisionPending=false;$('draftBanner')?.classList.add('hidden');saveDraft();
+    if(kind==='frv')document.querySelector('[data-tab="frvstudy"]')?.click();
+    loaded=true;send.disabled=false;download.disabled=false;say('Рабочая копия готова · черновик восстановлен.');tell('loaded');return
+   }
    if(text){
     const p=JSON.parse(text);
     if(kind==='sop'){
