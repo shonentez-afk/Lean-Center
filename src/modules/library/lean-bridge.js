@@ -38,7 +38,7 @@
    }else if(defaults?.operation){const d=ensureFrvStudy();d.operationId=defaults.operation;renderFrvStudy()}
    if(kind==='frv'){const tab=document.querySelector('[data-tab="frvstudy"]');tab?.click()}else document.querySelector('[data-tab="editor"]')?.click();
    loaded=true;send.disabled=false;download.disabled=false;say('Рабочая копия готова. Передача не публикует документ.');tell('loaded')
-  }catch(e){say('Ошибка загрузки: '+e.message+' · закройте окно и сохраните исходный файл');tell('error',{message:e.message})}finally{busy=false}
+  }catch(e){console.error('Lean Center editor load',e);say('Ошибка загрузки: '+e.message+' · закройте окно и сохраните исходный файл');tell('error',{message:e.message})}finally{busy=false}
  }
  async function exportText(){
   if(kind==='sop'){htmlFieldToState();if(typeof htmlToTwi==='function')htmlToTwi();const dm=state.documentManager||{},snapshot=docSnapshot();const pack=await docBuildPortableJson({id:dm.currentId||null,status:'Черновик',number:state.meta.sopNumber||'Черновик',seqNo:dm.seqNo||null,deptCode:dm.deptCode||'',year:dm.year,version:dm.version,snapshot},{preferActive:true});return JSON.stringify(pack,null,2)}

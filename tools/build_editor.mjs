@@ -8,7 +8,7 @@ export function buildEditor(){
  if(sha!=='5e35036ce243fed74ea018ac8eaf5f6c4a3c3e45')throw Error('Stage43 baseline changed: '+sha);
  let html=bytes.toString('utf8');
  const replace=(old,next)=>{if(html.split(old).length!==2)throw Error('Stage43 adapter anchor changed: '+old.slice(0,80));html=html.replace(old,()=>next)};
- replace('<head>','<head>\n<meta http-equiv="Content-Security-Policy" content="connect-src \'none\'; object-src \'none\'; base-uri \'none\'; form-action \'none\'">');
+ replace('<head>','<head>\n<meta http-equiv="Content-Security-Policy" content="connect-src data: blob:; object-src \'none\'; base-uri \'none\'; form-action \'none\'">');
  // Isolate editor working copies by session so the original standalone
  // SOP editor's draft and photo library cannot be overwritten.
  replace("const DRAFT_KEY='sop-builder-draft-v3';","const LC_EDITOR_SESSION=new URLSearchParams(location.search).get('lcSession')||'isolated';\nconst DRAFT_KEY='lean-editor-draft-'+LC_EDITOR_SESSION;");
