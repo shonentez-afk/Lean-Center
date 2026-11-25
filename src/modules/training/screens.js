@@ -1,5 +1,5 @@
 // LC4 uses the same workspace, event log, directory and corporate UI as LC3.
-import {rows,one,list,uuid,invariant} from '../../core/db.js';
+import {rows,one,list,uuid,invariant,sha256} from '../../core/db.js';
 import {directoryPeople} from '../master-data/people-directory.js';
 import {openPeopleDropdown} from '../../ui/people-picker.js';
 import {linkedTwi} from '../library/linked-materials.js';
@@ -66,7 +66,8 @@ export function trainingScreen(main,page,c){
  function currentAuths(op,at=day){return activeAuthorizations(db,op,at)}
  function asgns(){return rows(db,'SELECT * FROM training_assignment WHERE source_sha256 IS NOT NULL ORDER BY due_on,assigned_on,id')}
  function enrollmentList(){return rows(db,'SELECT * FROM training_enrollment ORDER BY due_on,start_on,id')}
- const assignmentName=a=>n('person',a.trainee_id)+' · '+revLabel(a.sop_revision_id);
+ const assignmentName=a=>(JSON.parse(a.recorded_names_json||'{}').trainee||n('person',a.trainee_id))+' · '+revLabel(a.sop_revision_id);
+ const enrollmentPage=id=>one(db,'SELECT p.kind FROM training_enrollment e JOIN training_program p ON p.id=e.program_id WHERE e.id=?',[id])?.kind==='internship'?'internship':'programs';
  const stateLabel=a=>a.state==='planned'?(a.approval_json?'Согласовано':'Ожидает согласования'):statuses[a.state]||a.state;
  const sameRevision=a=>isCurrentStandard(db,a.sop_revision_id);
  const activePlan=a=>['planned','in_progress'].includes(a.state);
@@ -118,7 +119,7 @@ export function trainingScreen(main,page,c){
    }catch(e){if(seq===epoch)sourceInfo.replaceChildren(msg(e.message,'bad'))}
   }
   rev.onchange=()=>{replaceOptions(skill,ref('skill','training_skill','','— Выберите —',s=>s.operation_id===currentStandard(db,rev.value)?.operation_id));instructor.set('');void refreshSource()};
-  assigned.onchange=()=>{instructor.set('');trainee.set('');supervisor.set('')};
+  assigned.onchange=()=>{instructor.set('');if(!preset.programTaskId){trainee.set('');supervisor.set('')}};
   if(preset.programTaskId){rev.disabled=true;skill.disabled=true;target.scale.disabled=true;target.level.disabled=true;trainee.button.disabled=true}
   const form=pane('Новое назначение обучения',row(back()),msg('Для назначения требуется действующий СОП, проверенный TWI, цель по навыку и действующее право инструктора обучать этой операции.'),f('СОП и редакция',rev),sourceInfo,review.element,grid(trainee.element,instructor.element,supervisor.element,actor.element),grid(f('Навык',skill),f('Смена',shift),f('Вид инструктажа',variant),f('Начало',assigned),f('Срок',due)),target.element,f('Основание обучения',reason),save('Сохранить назначение','training_assignment',()=>{
    const r=currentStandard(db,rev.value),auth=currentAuths(r?.operation_id,assigned.value).find(x=>x.person_id===instructor.value);
@@ -129,7 +130,7 @@ export function trainingScreen(main,page,c){
  }
  function overview(a){
   const s=currentStandard(db,a.sop_revision_id),p=progressFor(db,a),e=evidenceSummary(a),name=JSON.parse(a.recorded_names_json||'{}');
-  const panel=pane('Назначение',tableOf(['Реквизит','Значение'],[['Обучаемый',name.trainee||n('person',a.trainee_id)],['Инструктор',name.instructor||n('person',a.mentor_id)],['Наставник программы',name.supervisor||n('person',a.supervisor_id)],['СОП',revLabel(a.sop_revision_id)],['Навык и цель',n('skill',a.skill_id)+' · '+a.target_level+' · '+n('rating_scale',a.scale_id)],['Вид инструктажа',variants[a.method_variant]],['Смена',n('work_shift',a.shift_id)],['Период',a.assigned_on+' — '+a.due_on],['Причина',a.reason],['Состояние',stateLabel(a)],['Инструктаж',p.completed+' / '+p.stages.length],['Допуск',e.ad.status]]),row(btn('Карточка СОП',()=>goDocument(s.document_id,s.id)),...(a.enrollment_id?[btn('Персональная программа',()=>go('internship',{enrollmentId:a.enrollment_id}))]:[])));
+  const panel=pane('Назначение',tableOf(['Реквизит','Значение'],[['Обучаемый',name.trainee||n('person',a.trainee_id)],['Инструктор',name.instructor||n('person',a.mentor_id)],['Наставник программы',name.supervisor||n('person',a.supervisor_id)],['СОП',revLabel(a.sop_revision_id)],['Навык и цель',n('skill',a.skill_id)+' · '+a.target_level+' · '+n('rating_scale',a.scale_id)],['Вид инструктажа',variants[a.method_variant]],['Смена',n('work_shift',a.shift_id)],['Период',a.assigned_on+' — '+a.due_on],['Причина',a.reason],['Состояние',stateLabel(a)],['Инструктаж',p.completed+' / '+p.stages.length],['Допуск',e.ad.status]]),row(btn('Карточка СОП',()=>goDocument(s.document_id,s.id)),...(a.enrollment_id?[btn('Персональная программа',()=>go(enrollmentPage(a.enrollment_id),{enrollmentId:a.enrollment_id}))]:[])));
   if(!sameRevision(a))panel.append(msg('Редакция СОП больше не действует. История сохранена; требуется решение о переобучении.','warn'),btn('Переобучение',()=>go('retraining')));
   if(a.approval_json){const x=JSON.parse(a.approval_json);panel.append(msg('Согласовано '+x.approved_on+' · НР: '+x.names.responsible+' · руководитель: '+x.names.head+(x.note?' · '+x.note:'')))}
   if(activePlan(a)&&sameRevision(a)&&!a.approval_json){
@@ -165,7 +166,18 @@ export function trainingScreen(main,page,c){
   return stack(planMaterial(a),panel)
  }
  function methodsPanel(){
-  const methods=practicalMethods(db),out=pane('Методика практической оценки',msg('Загрузите приватную утверждённую форму из 11 критериев. Текст корпоративского чек-листа не входит в публичную поставку. Порог допуска здесь не устанавливается.'),action('Загрузить методику практики JSON',()=>pick('.json',async p=>{validatePracticalMethod(p);await write('checklist_version',p);return 'Методика практики зарегистрирована'} ,128000)));
+  const methods=practicalMethods(db),out=pane('Методика практической оценки',msg('Загрузите оригинальный XLSX утверждённого чек-листа либо приватный JSON из 11 критериев. Текст корпоративского чек-листа не входит в публичную поставку. Порог допуска здесь не устанавливается.'),row(action('Загрузить методику практики JSON',()=>pick('.json',async p=>{validatePracticalMethod(p);await write('checklist_version',p);return 'Методика практики зарегистрирована'} ,128000)),action('Импорт оригинального XLSX',()=>{
+   const input=el('input');input.type='file';input.accept='.xlsx';
+   input.onchange=()=>{if(!input.files?.[0])return;const file=input.files[0];run(async()=>{
+    invariant(file.size<=12*1024*1024,'Файл методики слишком большой');const bytes=new Uint8Array(await file.arrayBuffer()),book=new ExcelJS.Workbook();await book.xlsx.load(bytes);
+    const sheet=book.worksheets.find(s=>s.name.trim().toLocaleLowerCase('ru-RU')==='чек лист');invariant(sheet,'Выберите оригинальную форму с листом «Чек лист» или импортируйте JSON');
+    const criteria=[8,9,11,12,13,14,15,16,17,18,19].map((r,i)=>({code:i+1,section:r<=9?'Раздел 1':'Раздел 2',question:sheet.getCell('A'+r).text.trim()}));
+    const p=validatePracticalMethod({format:'lean-practical-checklist-v1',title:'Практическая оценка · '+file.name.slice(0,150),source_sha256:await sha256(bytes),criteria});
+    invariant(new Set(criteria.map(x=>x.question)).size===11,'Проверьте строки критериев оригинальной формы');
+    if(!confirm('Зарегистрировать новую неизменяемую методику из 11 критериев?\n\n'+criteria.map(x=>x.code+'. '+x.question).join('\n')))return 'Импорт отменён';
+    await write('checklist_version',p);return 'Методика практики зарегистрирована'
+   })};input.click()
+  })));
   for(const m of methods){const d=el('details'),p=JSON.parse(m.methodology_json);d.append(el('summary','v'+m.version_no+' · '+p.title+' · '+(m.state==='active'?'Действует':'История')),tableOf(['№','Раздел','Критерий'],practicalCriteria(db,m.id).map(q=>[q.position,q.section_code,q.question])));out.append(d)}
   return out
  }
@@ -313,19 +325,25 @@ export function trainingScreen(main,page,c){
   const d=el('details');d.append(el('summary','Покрытие по участкам и сменам'),msg('Покрытие — число работников с подтверждённым совместимым уровнем и, для операции, зарегистрированным актуальным допуском. Нулевое требование не даёт процента.'),grid(f('Подразделение',unit),f('Навык',skill),f('Смена',shift),f('Требуемое число',minimum)),target.element,action('Сохранить потребность',()=>run(async()=>{const payload={unit_id:unit.value,skill_id:skill.value,shift_code:shift.value,min_people:Number(minimum.value),scale_id:target.scale.value,required_level:target.level.value===''?null:Number(target.level.value)},old=one(db,'SELECT * FROM coverage_requirement WHERE unit_id=? AND skill_id=? AND shift_code=?',[payload.unit_id,payload.skill_id,payload.shift_code]);await write('coverage_requirement',payload,old);return 'Потребность сохранена'})),table(['Подразделение','Навык','Смена','Нужно','Есть','Дефицит'],data.map(x=>[n('org_unit',x.unit_id),n('skill',x.skill_id),x.shift_code||'Все',x.min_people,x.actual,x.deficit])));return d
  }
  function matrixPage(){
-  const m=matrixData(db,day),q=searchInput('matrix_search'),unit=ref('org_unit','matrix_unit','','Все подразделения'),category=ref('skill_category','matrix_category','','Все категории'),transpose=check('matrix_transpose','Навыки строками'),gaps=check('matrix_gaps','Только сотрудники с разрывами'),out=el('div');
+  const m=matrixData(db,day),q=searchInput('matrix_search'),unit=ref('org_unit','matrix_unit','','Все подразделения'),profession=ref('profession','matrix_profession','','Все профессии'),shift=ref('work_shift','matrix_shift','','Все смены'),workplace=ref('workplace','matrix_workplace','','Все рабочие места'),category=ref('skill_category','matrix_category','','Все категории'),transpose=check('matrix_transpose','Навыки строками'),gaps=check('matrix_gaps','Только сотрудники с разрывами'),out=el('div');
+  const operations=new Map(rows(db,'SELECT id,workplace_id FROM operation').map(o=>[o.id,o.workplace_id]));let personPage=0,skillPage=0;
   function cell(p,s,forExport=false){
    const x=m.cells.get(p.id+':'+s.id),fact=x.fact,actual=!fact?'Не оценено':fact.observation_state==='rated'?String(fact.level):observationLabels[fact.observation_state],target=x.goal?' / цель '+x.goal.required_level:'';
-   const label=actual+target+(fact?.observation_state==='rated'&&!x.valid?' · срок истёк':'')+(!x.same&&fact?' · другая шкала':'')+(x.admission?' · '+x.admission.status:'');
+   const label=actual+target+(fact?.observation_state==='rated'&&!x.valid?' · срок истёк':'')+(!x.same&&fact?' · другая шкала':'')+(fact&&!x.revisionCurrent?' · прежняя редакция':'')+(x.admission?' · '+x.admission.status:'');
    if(forExport)return label;
    const b=btn(label,()=>goLocal({personId:p.id,skillId:s.id}),'lc4-matrix-cell'+(x.gap?' lc4-gap':x.qualified?' lc4-met':''));b.title=label;return b
   }
-  function subset(){let people=m.people.filter(p=>(!unit.value||p.unit_id===unit.value)&&[p.display_name,p.employee_code].join(' ').toLocaleLowerCase('ru-RU').includes(q.value.trim().toLocaleLowerCase('ru-RU'))),skills=m.skills.filter(s=>!category.value||s.category_id===category.value);if(gaps.input.checked)people=people.filter(p=>skills.some(s=>m.cells.get(p.id+':'+s.id).gap));return {people,skills}}
-  function draw(){const {people,skills}=subset();if(!people.length||!skills.length){out.replaceChildren(msg('Нет сотрудников или навыков по выбранным фильтрам. Создайте записи в справочниках.'));return}
-   const transposeOn=transpose.input.checked,heads=transposeOn?['Навык',...people.map(p=>p.display_name)]:['Сотрудник',...skills.map(s=>s.name)],data=transposeOn?skills.map(s=>[s.name,...people.map(p=>cell(p,s))]):people.map(p=>[p.display_name,...skills.map(s=>cell(p,s))]),exported=transposeOn?skills.map(s=>[s.name,...people.map(p=>cell(p,s,true))]):people.map(p=>[p.display_name,...skills.map(s=>cell(p,s,true))]);
-   const table=tableOf(heads,data);table.classList.add('lc4-matrix');out.replaceChildren(table,exportButton('Матрица-компетенций',heads,exported))
+  function subset(){let people=m.people.filter(p=>(!unit.value||p.unit_id===unit.value)&&(!profession.value||p.profession_id===profession.value)&&(!shift.value||p.shift_id===shift.value)&&[p.display_name,p.employee_code].join(' ').toLocaleLowerCase('ru-RU').includes(q.value.trim().toLocaleLowerCase('ru-RU'))),skills=m.skills.filter(s=>(!category.value||s.category_id===category.value)&&(!workplace.value||operations.get(s.operation_id)===workplace.value));if(gaps.input.checked)people=people.filter(p=>skills.some(s=>m.cells.get(p.id+':'+s.id).gap));return {people,skills}}
+  function draw(){const all=subset();if(!all.people.length||!all.skills.length){out.replaceChildren(msg('Нет сотрудников или навыков по выбранным фильтрам. Создайте записи в справочниках.'));return}
+   personPage=Math.min(personPage,Math.floor((all.people.length-1)/40));skillPage=Math.min(skillPage,Math.floor((all.skills.length-1)/20));
+   const people=all.people.slice(personPage*40,personPage*40+40),skills=all.skills.slice(skillPage*20,skillPage*20+20);
+   const transposeOn=transpose.input.checked,heads=transposeOn?['Навык',...people.map(p=>p.display_name)]:['Сотрудник',...skills.map(s=>s.name)],data=transposeOn?skills.map(s=>[s.name,...people.map(p=>cell(p,s))]):people.map(p=>[p.display_name,...skills.map(s=>cell(p,s))]);
+   const table=tableOf(heads,data);table.classList.add('lc4-matrix');
+   const pager=row(msg('Сотрудники '+(personPage*40+1)+'–'+(personPage*40+people.length)+' из '+all.people.length),btn('‹',()=>{personPage--;draw()},'',personPage===0),btn('›',()=>{personPage++;draw()},'',personPage*40+people.length>=all.people.length),msg('Навыки '+(skillPage*20+1)+'–'+(skillPage*20+skills.length)+' из '+all.skills.length),btn('‹',()=>{skillPage--;draw()},'',skillPage===0),btn('›',()=>{skillPage++;draw()},'',skillPage*20+skills.length>=all.skills.length));
+   const download=btn('Скачать всю выборку XLSX',()=>run(async()=>{invariant(all.people.length*all.skills.length<=200000,'Уточните фильтры для экспорта');const headers=transposeOn?['Навык',...all.people.map(p=>p.display_name)]:['Сотрудник',...all.skills.map(s=>s.name)];await exportTable('Матрица-компетенций',headers,transposeOn?all.skills.map(s=>[s.name,...all.people.map(p=>cell(p,s,true))]):all.people.map(p=>[p.display_name,...all.skills.map(s=>cell(p,s,true))]));return 'Отчёт сформирован'},{save:false}));
+   out.replaceChildren(pager,table,download)
   }
-  for(const control of [unit,category,transpose.input,gaps.input])control.onchange=draw;q.oninput=draw;draw();
+  const reset=()=>{personPage=0;skillPage=0;draw()};for(const control of [unit,profession,shift,workplace,category,transpose.input,gaps.input])control.onchange=reset;q.oninput=reset;draw();
   if(route.personId&&route.skillId){
    const p=m.people.find(x=>x.id===route.personId),s=m.skills.find(x=>x.id===route.skillId);if(p&&s){const x=m.cells.get(p.id+':'+s.id),history=rows(db,"SELECT i.*,a.assessed_at,a.evaluator_id,a.standard_revision_id,a.assignment_id FROM assessment_item i JOIN assessment_session a ON a.id=i.session_id WHERE a.person_id=? AND i.skill_id=? AND a.state='confirmed' ORDER BY a.assessed_at DESC,a.recorded_at DESC",[p.id,s.id]);return pane(p.display_name+' · '+s.name,back(),msg(cell(p,s,true)),table(['Дата','Шкала','Уровень / состояние','Оценщик','СОП',''],history.map(h=>[h.assessed_at,n('rating_scale',h.scale_id),h.observation_state==='rated'?h.level:observationLabels[h.observation_state],n('person',h.evaluator_id),revLabel(h.standard_revision_id),h.assignment_id?btn('Открыть обучение',()=>go('twi',{id:h.assignment_id,tab:'practice'})):'—'])),row(btn('Назначить обучение',()=>go('twi',{mode:'new',traineeId:p.id,skillId:s.id,scaleId:x.goal?.scale_id,targetLevel:x.goal?.required_level,revisionId:revs().find(r=>r.operation_id===s.operation_id)?.id,reason:'Развитие компетенции'})),btn('План развития',()=>go('development',{mode:'new',personId:p.id}))))}
   }
@@ -333,11 +351,11 @@ export function trainingScreen(main,page,c){
    invariant(!list(db,'rating_scale').some(x=>x.name==='Производственная компетенция (1–4)'&&Number(x.version_no)===1),'Шкала уже создана');
    ws.edit('rating_scale',null,{name:'Производственная компетенция (1–4)',version_no:'1',levels:'1: Обучен\n2: Выполняет самостоятельно\n3: Уверенно выполняет\n4: Обучает других'});return 'Шкала 1–4 создана. Уровень 4 не заменяет сертификат или приказ.'
   }),'',list(db,'rating_scale').some(x=>x.name==='Производственная компетенция (1–4)'&&Number(x.version_no)===1));
-  return stack(pane('Матрица компетенций',msg('Текущий подтверждённый уровень и целевой уровень показаны отдельно. Не оценено, неприменимо, другая шкала, срок и допуск не смешиваются.'),row(btn('Навыки',()=>go('skill')),btn('Шкалы',()=>go('rating_scale')),scaleSetup),grid(f('Подразделение',unit),f('Категория навыков',category),f('Поиск сотрудника',q)),row(transpose.element,gaps.element),out),pane('Требования и покрытие',requirementsPanel(),coveragePanel(m)))
+  return stack(pane('Матрица компетенций',msg('Текущий подтверждённый уровень и целевой уровень показаны отдельно. Не оценено, неприменимо, другая шкала, срок и допуск не смешиваются.'),row(btn('Навыки',()=>go('skill')),btn('Шкалы',()=>go('rating_scale')),scaleSetup),grid(f('Подразделение',unit),f('Профессия',profession),f('Смена',shift),f('Рабочее место',workplace),f('Категория навыков',category),f('Поиск сотрудника',q)),row(transpose.element,gaps.element),out),pane('Требования и покрытие',requirementsPanel(),coveragePanel(m)))
  }
  function journalPage(){
   const a=asgns(),facts=rows(db,'SELECT * FROM training_session WHERE stage_code IS NOT NULL ORDER BY held_at DESC,recorded_at DESC'),q=searchInput('journal_search'),out=el('div'),heads=['Дата / время','Инструктор','Обучаемый','СОП','Этап','Минут','Результат'];
-  const line=(x)=>{const t=a.find(y=>y.id===x.assignment_id);return [x.held_at,n('person',x.mentor_id),n('person',t?.trainee_id),revLabel(t?.sop_revision_id),JSON.parse(x.steps_json).label,x.duration_minutes,resultLabels[x.result]]};
+  const line=(x)=>{const t=a.find(y=>y.id===x.assignment_id),names=JSON.parse(t?.recorded_names_json||'{}');return [x.held_at,names.instructor||n('person',x.mentor_id),names.trainee||n('person',t?.trainee_id),revLabel(t?.sop_revision_id),JSON.parse(x.steps_json).label,x.duration_minutes,resultLabels[x.result]]};
   filterList(out,q,facts,x=>line(x).join(' '),items=>table([...heads,''],items.map(x=>[...line(x),btn('Открыть',()=>go('instruction',{id:x.assignment_id,tab:'instruction'}),'primary')])));
   return pane('Журнал заданий и проведённых инструктажей',msg('Это факты из назначений, отдельный ввод не требуется. Повторения являются самостоятельными записями.'),q,out,exportButton('Журнал-инструктажей',heads,facts.map(line)))
  }
@@ -361,7 +379,7 @@ export function trainingScreen(main,page,c){
  }
  function myPlan(){
   const actor=person('my_plan_person','Сотрудник',route.personId||'',{onChange:id=>{route.personId=id;render()}}),id=actor.value,items=id?asgns().filter(a=>[a.trainee_id,a.mentor_id,a.supervisor_id,a.assigned_by].includes(id)):[],programs=id?enrollmentList().filter(x=>[x.trainee_id,x.mentor_id,x.manager_id].includes(id)):[];
-  return stack(pane('Мой план',msg('Выберите сотрудника. Это фильтр рабочих записей, не вход в систему и не ограничение прав доступа.'),actor.element,id?assignmentRows(items):msg('Выберите сотрудника для просмотра назначений.')),pane('Программы',table(['Программа','Обучаемый','Срок','Статус',''],programs.map(x=>[one(db,'SELECT title FROM training_program WHERE id=?',[x.program_id])?.title,n('person',x.trainee_id),x.due_on,statuses[x.state],btn('Открыть',()=>go('internship',{enrollmentId:x.id}),'primary')]))))
+  return stack(pane('Мой план',msg('Выберите сотрудника. Это фильтр рабочих записей, не вход в систему и не ограничение прав доступа.'),actor.element,id?assignmentRows(items):msg('Выберите сотрудника для просмотра назначений.')),pane('Программы',table(['Программа','Обучаемый','Срок','Статус',''],programs.map(x=>[one(db,'SELECT title FROM training_program WHERE id=?',[x.program_id])?.title,n('person',x.trainee_id),x.due_on,statuses[x.state],btn('Открыть',()=>go(enrollmentPage(x.id),{enrollmentId:x.id}),'primary')]))))
  }
  let content;
  if(page==='twi'||page==='instruction'||page==='practical'){

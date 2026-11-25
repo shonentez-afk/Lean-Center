@@ -1,6 +1,6 @@
 // LC4: explicit facts, reviewed qualifications and separately recorded admission.
 import {invariant,one,rows,canonical,isId,foldKey} from '../../core/db.js';
-import {directoryPeople,roleKind} from '../master-data/people-directory.js';
+import {directoryPeople,personKey} from '../master-data/people-directory.js';
 import {linkedTwi} from '../library/linked-materials.js';
 import {validDate} from '../library/sop-review.js';
 export const TRAINING_TYPES=Object.freeze({
@@ -18,6 +18,7 @@ const required=(x,n=500)=>text(x,n)&&x.trim().length>0;
 const integer=(x,min=0,max=100000)=>Number.isSafeInteger(x)&&x>=min&&x<=max;
 const date=x=>validDate(x);
 const period=(a,b)=>date(a)&&(b===null||date(b)&&b>=a);
+const plusDays=(day,n)=>{const v=new Date(day+'T00:00:00Z');v.setUTCDate(v.getUTCDate()+n);return v.toISOString().slice(0,10)};
 const within=(x,a,b)=>a<=x&&(!b||b>=x);
 const beforeRevocation=(x,d)=>!x||x.slice(0,10)>d;
 const sha=x=>typeof x==='string'&&/^[0-9a-f]{64}$/.test(x);
@@ -52,9 +53,14 @@ const active=(db,table,id)=>{invariant(isId(id),'Выберите запись: 
 const person=(db,id)=>active(db,'person',id);
 const optional=(db,table,id)=>id===null?null:active(db,table,id);
 const eventDay=e=>new Date(Date.parse(e.occurred_at)+14*3600000).toISOString().slice(0,10);
-function roleMatches(db,id,day,allowed){return directoryPeople(db,day).find(x=>x.id===id)?.roles.some(x=>allowed.includes(x.kind))}
+function roleMatches(db,id,day,allowed){
+ return directoryPeople(db,day).find(x=>x.id===id)?.roles.some(x=>{
+  const vt=[x.code,x.name].some(v=>['internal_trainer','internal trainer','внутренний тренер','вт'].includes(personKey(v).replaceAll('-','_')));
+  return allowed.includes(x.kind)||(allowed.includes('internal_trainer')&&vt)
+ })
+}
 function hasRole(db,id,day,allowed){person(db,id);invariant(roleMatches(db,id,day,allowed),'У сотрудника нет действующего назначения нужной роли')}
-function roleForCredential(role){return role==='mentor'?['mentor']:['instructor']}
+function roleForCredential(role){return role==='internal_trainer'?['internal_trainer']:role==='mentor'?['mentor']:['instructor']}
 function level(db,scale,levelValue){active(db,'rating_scale',scale);invariant(integer(levelValue,0,1000)&&one(db,'SELECT value FROM rating_level WHERE scale_id=? AND value=?',[scale,levelValue]),'Уровень отсутствует в выбранной шкале')}
 export function currentStandard(db,revisionId){
  const r=one(db,'SELECT r.*,d.operation_id,d.code,d.title,d.archived FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=? AND d.kind=?',[revisionId,'sop']);
@@ -100,15 +106,20 @@ export function latestQualification(db,personId,skillId,day='9999-12-31'){
  FROM assessment_item i JOIN assessment_session s ON s.id=i.session_id
  WHERE s.person_id=? AND i.skill_id=? AND s.state='confirmed' AND substr(s.assessed_at,1,10)<=? ORDER BY s.assessed_at DESC,coalesce(s.recorded_at,'') DESC,s.id DESC LIMIT 1`,[personId,skillId,day])
 }
-export function admissionStatus(db,personId,operationId,day){
- const a=latest(db,'admission_decision','person_id=? AND operation_id=? AND decided_on<=?',[personId,operationId,day],'decided_on');
+function admissionRecordStatus(db,a,day){
  if(!a)return {record:null,status:'Нет решения',current:false};
  if(a.decision==='denied')return {record:a,status:'Не допущен',current:false};
  if(!beforeRevocation(a.revoked_at,day))return {record:a,status:'Отозван',current:false};
  if(a.valid_until&&a.valid_until<day)return {record:a,status:'Срок истёк',current:false};
  const current=isCurrentStandard(db,a.revision_id);
- return {record:a,status:current?'Допуск зарегистрирован':'Допуск по прежней версии · требуется анализ',current}
+ if(!current)return {record:a,status:'Допуск по прежней версии · требуется анализ',current:false};
+ const item=one(db,'SELECT * FROM assessment_item WHERE session_id=?',[a.qualification_id]);
+ if(item?.valid_until&&item.valid_until<day)return {record:a,status:'Срок квалификации истёк · требуется анализ',current:false};
+ const q=latestAssessment(db,a.assignment_id,'qualification'),p=latestAssessment(db,a.assignment_id,'practical'),s=latestVerification(db,a.assignment_id,'safety'),t=latestVerification(db,a.assignment_id,'theory');
+ if(q?.id!==a.qualification_id||p?.id!==a.practical_id||s?.id!==a.safety_id||t?.id!==a.theory_id)return {record:a,status:'Подтверждения изменились · требуется решение',current:false};
+ return {record:a,status:'Допуск зарегистрирован',current:true}
 }
+export function admissionStatus(db,personId,operationId,day){return admissionRecordStatus(db,latest(db,'admission_decision','person_id=? AND operation_id=? AND decided_on<=?',[personId,operationId,day],'decided_on'),day)}
 export function enrollmentTasks(db,enrollment){
  return rows(db,'SELECT * FROM training_program_task WHERE program_id=? ORDER BY position',[enrollment.program_id]).map(task=>{
   const a=latestTaskAssignment(db,enrollment.id,task.id),result=latest(db,'training_task_result','enrollment_id=? AND task_id=?',[enrollment.id,task.id],'held_on');
@@ -172,6 +183,7 @@ export function applyTrainingEvent(db,e,old){
    else invariant(x.skill_id===null&&x.scale_id===null&&x.target_level===null,'Для задания с целевой компетенцией выберите СОП')
   });
   const previous=rows(db,'SELECT * FROM training_program').filter(x=>foldKey(x.code)===foldKey(p.code));
+  invariant(previous.every(x=>x.kind===p.kind),'Код уже принадлежит другому виду программы');
   const version=Math.max(0,...previous.map(x=>x.version_no))+1,code=previous[0]?.code||p.code.trim();
   for(const x of previous.filter(x=>x.state==='active'))update(db,t,x.id,{state:'retired'});
   store(db,t,{id,code,version_no:version,kind:p.kind,title:p.title.trim(),profession_id:p.profession_id,position_id:p.position_id,created_by:p.created_by,created_at:e.occurred_at,state:'active',rev:1});
@@ -181,6 +193,7 @@ export function applyTrainingEvent(db,e,old){
   if(!old){
    createOnly(e,old);exact(p,['program_id','trainee_id','mentor_id','manager_id','start_on','due_on','reason']);
    const program=one(db,'SELECT * FROM training_program WHERE id=? AND state=?',[p.program_id,'active']);invariant(program&&period(p.start_on,p.due_on)&&p.due_on&&required(p.reason),'Выберите активную программу, сроки и причину');
+   invariant(rows(db,'SELECT day_offset FROM training_program_task WHERE program_id=?',[program.id]).every(x=>plusDays(p.start_on,x.day_offset)<=p.due_on),'Срок персональной программы должен включать все задания');
    hasRole(db,p.trainee_id,p.start_on,['trainee']);hasRole(db,p.mentor_id,p.start_on,['mentor','instructor']);person(db,p.manager_id);invariant(p.trainee_id!==p.mentor_id,'Сотрудник не может обучать себя');
    const a=one(db,"SELECT * FROM person_assignment WHERE person_id=? AND valid_from<=? AND coalesce(valid_to,'9999-12-31')>=? ORDER BY valid_from DESC LIMIT 1",[p.trainee_id,p.start_on,p.start_on]);
    invariant((!program.profession_id||a?.profession_id===program.profession_id)&&(!program.position_id||a?.position_id===program.position_id),'Программа не соответствует действующему назначению сотрудника');
@@ -211,7 +224,7 @@ export function applyTrainingEvent(db,e,old){
    optional(db,'work_shift',p.shift_id);exactAssignmentTarget(db,p,r);
    if(p.enrollment_id!==null||p.program_task_id!==null){
     const n=one(db,'SELECT * FROM training_enrollment WHERE id=?',[p.enrollment_id]),task=one(db,'SELECT * FROM training_program_task WHERE id=?',[p.program_task_id]);
-    invariant(n?.state==='active'&&n.trainee_id===p.trainee_id&&task?.program_id===n.program_id&&task.sop_revision_id===r.id&&task.skill_id===p.skill_id&&task.scale_id===p.scale_id&&task.target_level===p.target_level&&p.assigned_on>=n.start_on&&!latestTaskAssignment(db,n.id,task.id),'Назначение не соответствует заданию персональной программы')
+    invariant(n?.state==='active'&&n.trainee_id===p.trainee_id&&task?.program_id===n.program_id&&task.sop_revision_id===r.id&&task.skill_id===p.skill_id&&task.scale_id===p.scale_id&&task.target_level===p.target_level&&p.assigned_on>=n.start_on&&p.due_on<=n.due_on&&!latestTaskAssignment(db,n.id,task.id),'Назначение не соответствует заданию персональной программы')
    }
    invariant(!one(db,"SELECT id FROM training_assignment WHERE trainee_id=? AND sop_revision_id=? AND skill_id=? AND state IN('planned','in_progress')",[p.trainee_id,r.id,p.skill_id]),'У сотрудника уже есть открытое назначение по этому навыку и редакции');
    store(db,t,{id,trainee_id:p.trainee_id,mentor_id:p.mentor_id,supervisor_id:p.supervisor_id,operation_id:r.operation_id,sop_revision_id:r.id,twi_revision_id:r.id,due_on:p.due_on,state:'planned',rev:1,source_sha256:r.source.sha256,skill_id:p.skill_id,scale_id:p.scale_id,target_level:p.target_level,assigned_by:p.assigned_by,assigned_on:p.assigned_on,reason:p.reason,method_variant:p.variant,method_version:'JI-1',authorization_id:p.authorization_id,shift_id:p.shift_id,enrollment_id:p.enrollment_id,program_task_id:p.program_task_id,recorded_names_json:canonical(names(db,{trainee:p.trainee_id,instructor:p.mentor_id,supervisor:p.supervisor_id,assignedBy:p.assigned_by}))});
@@ -325,18 +338,25 @@ export function matrixData(db,day){
  const people=rows(db,`SELECT p.id,p.display_name,p.employee_code,a.profession_id,a.position_id,a.unit_id,a.shift_id,a.shift_code FROM person p LEFT JOIN person_assignment a ON a.id=(SELECT id FROM person_assignment a2 WHERE a2.person_id=p.id AND valid_from<=? AND coalesce(valid_to,'9999-12-31')>=? ORDER BY valid_from DESC,id LIMIT 1) WHERE p.archived=0 ORDER BY p.display_name,p.employee_code`,[day,day]);
  const skills=rows(db,'SELECT s.*,c.name category FROM skill s JOIN skill_category c ON c.id=s.category_id WHERE s.archived=0 AND c.archived=0 ORDER BY c.name,s.name');
  const requirements=rows(db,"SELECT * FROM role_requirement WHERE valid_from<=? AND coalesce(valid_to,'9999-12-31')>=?",[day,day]);
+ const req=new Map(requirements.map(x=>[x.profession_id+':'+x.skill_id,x]));
+ const facts=rows(db,`SELECT * FROM (SELECT i.*,s.person_id,s.assessed_at,s.standard_revision_id,s.evaluator_id,s.assignment_id,s.recorded_at,
+ ROW_NUMBER() OVER(PARTITION BY s.person_id,i.skill_id ORDER BY s.assessed_at DESC,coalesce(s.recorded_at,'') DESC,s.id DESC) rn
+ FROM assessment_item i JOIN assessment_session s ON s.id=i.session_id WHERE s.state='confirmed' AND substr(s.assessed_at,1,10)<=?) WHERE rn=1`,[day]);
+ const observed=new Map(facts.map(x=>[x.person_id+':'+x.skill_id,x]));
+ const records=rows(db,`SELECT * FROM (SELECT a.*,ROW_NUMBER() OVER(PARTITION BY person_id,operation_id ORDER BY decided_on DESC,recorded_at DESC,id DESC) rn FROM admission_decision a WHERE decided_on<=?) WHERE rn=1`,[day]);
+ const admissions=new Map(records.map(a=>[a.person_id+':'+a.operation_id,admissionRecordStatus(db,a,day)]));
+ const current=new Set(rows(db,"SELECT r.id FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='effective' AND d.archived=0").map(x=>x.id));
  const cells=new Map();for(const p of people)for(const s of skills){
-  const goal=requirements.find(x=>x.profession_id===p.profession_id&&x.skill_id===s.id)||null;
-  const fact=latestQualification(db,p.id,s.id,day),same=!goal||fact?.scale_id===goal.scale_id;
-  const valid=!!(fact?.observation_state==='rated'&&(!fact.valid_until||fact.valid_until>=day));
-  const adm=s.operation_id?admissionStatus(db,p.id,s.operation_id,day):null;
-  cells.set(p.id+':'+s.id,{goal,fact,same,valid,admission:adm,gap:!!(goal&&(!valid||!same||fact.level<goal.required_level)),qualified:!!(valid&&same&&(!goal||fact.level>=goal.required_level)&&(!adm||adm.current))})
+  const goal=req.get(p.profession_id+':'+s.id)||null,fact=observed.get(p.id+':'+s.id)||null,same=!goal||fact?.scale_id===goal.scale_id;
+  const valid=!!(fact?.observation_state==='rated'&&(!fact.valid_until||fact.valid_until>=day)),revisionCurrent=!s.operation_id||!!(fact?.standard_revision_id&&current.has(fact.standard_revision_id));
+  const adm=s.operation_id?(admissions.get(p.id+':'+s.operation_id)||{record:null,status:'Нет решения',current:false}):null;
+  cells.set(p.id+':'+s.id,{goal,fact,same,valid,revisionCurrent,admission:adm,gap:!!(goal&&(!valid||!same||!revisionCurrent||fact.level<goal.required_level)),qualified:!!(valid&&same&&revisionCurrent&&(!goal||fact.level>=goal.required_level)&&(!adm||adm.current&&adm.record.revision_id===fact.standard_revision_id))})
  }return {people,skills,cells}
 }
 export function coverageData(db,day,matrix=matrixData(db,day)){
  return rows(db,'SELECT * FROM coverage_requirement ORDER BY unit_id,skill_id,shift_code').map(r=>{
   const skill=matrix.skills.find(s=>s.id===r.skill_id),scope=matrix.people.filter(p=>p.unit_id===r.unit_id&&(!r.shift_code||p.shift_code===r.shift_code||one(db,'SELECT code FROM work_shift WHERE id=?',[p.shift_id])?.code===r.shift_code));
-  const actual=scope.filter(p=>{const c=matrix.cells.get(p.id+':'+r.skill_id);return c?.valid&&c.fact.scale_id===r.scale_id&&c.fact.level>=r.required_level&&(!skill?.operation_id||c.admission?.current)}).length;
+  const actual=scope.filter(p=>{const c=matrix.cells.get(p.id+':'+r.skill_id);return c?.valid&&c.revisionCurrent&&c.fact.scale_id===r.scale_id&&c.fact.level>=r.required_level&&(!skill?.operation_id||c.admission?.current&&c.admission.record.revision_id===c.fact.standard_revision_id)}).length;
   return {...r,actual,deficit:Math.max(0,r.min_people-actual),fraction:r.min_people?actual/r.min_people:null,scope:scope.length}
  })
 }
