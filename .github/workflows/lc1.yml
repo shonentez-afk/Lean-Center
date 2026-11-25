@@ -1,7 +1,7 @@
 name: LC1 offline foundation
 on:
   push:
-    branches: [feature/lc1-offline-foundation]
+    branches: [feature/lc1-tn-design]
     paths: ['src/**','db/**','tests/**','tools/build_lc1.mjs','tools/build_folder.mjs','tools/package_folder.py','docs/DEPLOY_NETWORK_RU.md','package.json','.github/workflows/lc1.yml']
   workflow_dispatch:
 permissions:
@@ -36,12 +36,17 @@ jobs:
       - run: npm run smoke
       - uses: actions/upload-artifact@v4
         with:
-          name: LeanCenter-LC1-folder-${{ runner.os }}
-          path: releases/LeanCenter-LC1-folder.zip
+          name: LeanCenter-LC1.2-TN-${{ runner.os }}
+          path: releases/LeanCenter-LC1.2-TN.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LC1.2-screenshots-${{ runner.os }}
+          path: artifacts/lc1-tn
           if-no-files-found: error
   publish:
     needs: verify
-    if: github.ref == 'refs/heads/feature/lc1-offline-foundation'
+    if: github.ref == 'refs/heads/feature/lc1-tn-design'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -49,14 +54,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: LeanCenter-LC1-folder-Linux
+          name: LeanCenter-LC1.2-TN-Linux
           path: releases
       - name: Publish verified folder candidate
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add releases/LeanCenter-LC1-folder.zip
+          git add releases/LeanCenter-LC1.2-TN.zip
           if ! git diff --cached --quiet; then
-            git commit -m "Build: verified LC1.1 network folder candidate"
-            git push origin HEAD:feature/lc1-offline-foundation
+            git commit -m "Build: verified LC1.2 TN design candidate"
+            git push origin HEAD:feature/lc1-tn-design
           fi
