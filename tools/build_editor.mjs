@@ -25,6 +25,7 @@ export function buildEditor(){
  replace("s.keyMoments.map(String).slice(0,3)","s.keyMoments.map(String).slice(0,5)");
  if(html.split('s.keyMoments.length<3').length!==3)throw Error('KM editor anchors changed');
  html=html.replaceAll('s.keyMoments.length<3','s.keyMoments.length<5');
+ replace("ws.getCell(5,7).value={formula:timeCellRefs.join('+')}","ws.getCell(5,7).value={formula:timeCellRefs.join('+'),result:exportData.totalTimeSeconds/86400}");
  replace('</body>','<script src="lean-bridge.js"></script>\n</body>');
  return html
 }
