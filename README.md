@@ -7,3 +7,5 @@
 [Начало работы](START_NEW_CHAT_RU.md) · [Архитектура](docs/ARCHITECTURE_RU.md) · [Функциональная карта](docs/FUNCTIONAL_MAP_RU.md) · [База](docs/DATABASE_RU.md) · [Дизайн-система](docs/DESIGN_SYSTEM_RU.md) · [Размещение](docs/DEPLOY_NETWORK_RU.md) · [Дорожная карта](docs/ROADMAP_RU.md)
 
 Не размещать реальные производственные данные, ФИО, базы и секреты в GitHub.
+
+Кандидат LC2: ветка feature/lc2-master-data, [описание LC2](docs/LC2_RU.md). До приёмки LC1.3 остаётся стабильной версией.
