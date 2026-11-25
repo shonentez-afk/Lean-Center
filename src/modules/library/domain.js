@@ -1,8 +1,9 @@
+import {TRAINING_TYPES,isTrainingEvent,applyTrainingEvent,verifyTrainingSource} from '../training/domain.js';
 import {applyStage43Checklist,verifyStage43Checklist} from './stage43-checklist.js';
 import {applySopMethod,applySopEvaluation,reviewDue,validDate} from './sop-review.js';
 // LC3: aggregate events + detached original Stage43 content.
 import {invariant,isId,one,rows,canonical,sha256,foldKey} from '../../core/db.js';
-export const DOMAIN_TYPES=Object.freeze({document:'Библиотека СОП',frv_study:'Исследования ФРВ',checklist_version:'Методика оценки СОП',sop_evaluation:'Оценка СОП',sop_stage43_checklist:'Чек-лист Stage43'});
+export const DOMAIN_TYPES=Object.freeze({document:'Библиотека СОП',frv_study:'Исследования ФРВ',checklist_version:'Методика оценки СОП',sop_evaluation:'Оценка СОП',sop_stage43_checklist:'Чек-лист Stage43',...TRAINING_TYPES});
 export const MAX_CONTENT=30*1024*1024;
 const MIME={sop:'application/vnd.lean.stage43.sop+json',frv:'application/vnd.lean.stage43.frv+json'};
 const encoder=new TextEncoder();
@@ -90,6 +91,7 @@ export async function verifyDomainEvents(events,readContent){
  for(const e of events||[]){if(!Object.hasOwn(DOMAIN_TYPES,e.entity_type)||!e.payload?.source)continue;
   const ref=validateRef(e.payload.source);invariant(typeof readContent==='function','Пакет содержит документы; требуется полный комплект исходных файлов');
   let result=checked.get(ref.sha256);if(!result){const text=await checkContent(ref,await readContent(ref));result=await inspectSource(text,ref.kind);result.raw=JSON.parse(text);checked.set(ref.sha256,result)}
+  if(isTrainingEvent(e)){verifyTrainingSource(e,result.source,result.raw);continue}
   if(e.entity_type==='sop_stage43_checklist'){invariant(ref.kind==='sop'&&canonical(result.source)===canonical(ref),'Неверный исходник чек-листа');verifyStage43Checklist(e.payload,result.raw.constructor);continue}
   invariant(canonical(result.source)===canonical(ref)&&canonical(result.projection)===canonical(e.payload.projection),'Проекция не совпадает с исходным файлом');
  }
@@ -108,6 +110,7 @@ function newRevision(db,e,p,version){
 }
 export function applyDomainEvent(db,e,old){
  const p=e.payload,id=e.entity_id;
+ if(isTrainingEvent(e))return applyTrainingEvent(db,e,old);
  if(e.entity_type==='checklist_version')return applySopMethod(db,e,old);
  if(e.entity_type==='sop_evaluation')return applySopEvaluation(db,e,old);
  if(e.entity_type==='sop_stage43_checklist')return applyStage43Checklist(db,e,old);
