@@ -1,0 +1,39 @@
+name: LC0 pinned baseline and schema verification
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'db/**'
+      - 'tests/**'
+      - 'tools/import_sop_baseline.py'
+      - 'baselines/sop-stage43/source-manifest.json'
+      - '.github/workflows/lc0.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: lc0-baseline-main
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s tests -v
+      - run: python tools/import_sop_baseline.py
+      - run: python tools/import_sop_baseline.py --verify-only
+      - working-directory: baselines/sop-stage43
+        run: python tools/build_stage43.py --verify-release
+      - name: Publish verified pinned source snapshot
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add baselines/sop-stage43
+          if ! git diff --cached --quiet; then
+            git commit -m 'Import pinned Stage43 source and regression suite'
+            git push origin HEAD:main
+          fi

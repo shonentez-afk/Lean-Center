@@ -1,0 +1,1926 @@
+{
+  "repository": "shonentez-afk/SOP-generanjr",
+  "commit": "97b35313e77242747922a5227e2eb61eb98e1a15",
+  "files": [
+    {
+      "path": "proxy/index.py",
+      "sha": "02194536917dcf100885b4dc9d6174c3ba265a3b",
+      "size": 9192
+    },
+    {
+      "path": "proxy/tests/test_proxy.py",
+      "sha": "538c405e9ab7c48225618caf3cea0f540123d7a0",
+      "size": 3647
+    },
+    {
+      "path": "qa/mock_storage.js",
+      "sha": "edd593f5cf386cfb650afcc2dba8404b36963db7",
+      "size": 2694
+    },
+    {
+      "path": "qa/qa_image_check.py",
+      "sha": "919413679df0a196a446c9876a1852e0cb4f41f8",
+      "size": 600
+    },
+    {
+      "path": "qa/stage14_browser_smoke.py",
+      "sha": "aa2e7e1fc70fd0fee9e462f2f9af72ac3ed5e40d",
+      "size": 5213
+    },
+    {
+      "path": "qa/stage15_real_offline_icons.py",
+      "sha": "30da59840a9fac916eb64c9205365af61427c505",
+      "size": 2816
+    },
+    {
+      "path": "qa/stage16_real_excel_photos.py",
+      "sha": "4d3b36e7d3dc735bca51517472cb12e7c4ee39d7",
+      "size": 9342
+    },
+    {
+      "path": "qa/stage18_real_mentor_reply.py",
+      "sha": "709e99c6db60fb016fa11a2462f0aadbd423df43",
+      "size": 5977
+    },
+    {
+      "path": "qa/stage19_browser_smoke.py",
+      "sha": "53e4b0617af8b0958791f27e5c1f06eb3e3db2a3",
+      "size": 1384
+    },
+    {
+      "path": "qa/stage20_browser_smoke.py",
+      "sha": "b5341f8d133e40b541e772a3ba804a9f5bff6c41",
+      "size": 4728
+    },
+    {
+      "path": "qa/stage21_browser_smoke.py",
+      "sha": "4dfd1f0112a240d84caf36a0424d2ab3547d41ef",
+      "size": 4556
+    },
+    {
+      "path": "qa/stage22_browser_smoke.py",
+      "sha": "7cb07b8ccaf3215c3fcf0b418881a14058cbd65e",
+      "size": 10502
+    },
+    {
+      "path": "qa/stage23_browser_smoke.py",
+      "sha": "a49e4455e4a9b64ac40948a3b153cd168b0a3528",
+      "size": 6252
+    },
+    {
+      "path": "qa/stage24_browser_smoke.py",
+      "sha": "655a15cde906c333ca6895c87e5d2cd4c3b7a08a",
+      "size": 11686
+    },
+    {
+      "path": "qa/stage25_browser_smoke.py",
+      "sha": "5f9770621a9df7eecb550d9da0240a1ea16082c6",
+      "size": 16887
+    },
+    {
+      "path": "qa/stage26_browser_smoke.py",
+      "sha": "aebd749118defe51753bea5fe24420e25c474480",
+      "size": 12069
+    },
+    {
+      "path": "qa/stage26_windows_smoke.py",
+      "sha": "d0480323f0d4333e664479172d02947d8948ba50",
+      "size": 3848
+    },
+    {
+      "path": "qa/stage27_browser_smoke.py",
+      "sha": "74a7ac1cc277dd46198481409915fdaa3e998921",
+      "size": 17055
+    },
+    {
+      "path": "qa/stage28_browser_smoke.py",
+      "sha": "362208e0a37a0fb02c5fac9ef923a4132d149f7e",
+      "size": 10283
+    },
+    {
+      "path": "qa/stage29_browser_smoke.py",
+      "sha": "726deab2432d5bd8eab81e880c2eb338717437ad",
+      "size": 9968
+    },
+    {
+      "path": "qa/stage30_browser_smoke.py",
+      "sha": "922a4cd6d89ec89e09d0ae5abf3d2a36b06f24bf",
+      "size": 7647
+    },
+    {
+      "path": "qa/stage31_browser_smoke.py",
+      "sha": "501f8139eb40a27f86dbf015e9cf6657eb248519",
+      "size": 4933
+    },
+    {
+      "path": "qa/stage32_excel_photo_cell_fit.py",
+      "sha": "30fbabd01c3fa66ddc6e0248010748a7c1858952",
+      "size": 9605
+    },
+    {
+      "path": "qa/stage33_browser_smoke.py",
+      "sha": "34ad537f1a63f699ee733fbef0c88e8bd35648b4",
+      "size": 9833
+    },
+    {
+      "path": "qa/stage34_browser_smoke.py",
+      "sha": "ebd1ab68157b6e36c70b5fd954b1b129d28c9da5",
+      "size": 16217
+    },
+    {
+      "path": "qa/stage35_browser_smoke.py",
+      "sha": "54788e82feeea5ed9f3acdcc04525b161fb18474",
+      "size": 10693
+    },
+    {
+      "path": "qa/stage36_1_twi_print_browser.py",
+      "sha": "b99799bda1e9127f535f1cc151c07ab4099d2ed6",
+      "size": 9070
+    },
+    {
+      "path": "qa/stage36_browser_smoke.py",
+      "sha": "6ac1277c795d657da1e7ab3ff33e87662a33a792",
+      "size": 8675
+    },
+    {
+      "path": "qa/stage37_desktop_audit_browser.py",
+      "sha": "f4cd21d359c058e39bf4fef7ce73ae3ac6ff092a",
+      "size": 11262
+    },
+    {
+      "path": "qa/stage38_numbered_reasons_browser.py",
+      "sha": "48f442d8558d54da5d6364e5655a7ded5dd5051d",
+      "size": 14235
+    },
+    {
+      "path": "qa/stage39_1_ai_reasons_frv_browser.py",
+      "sha": "9355263e2e38de79b2c932eb61700eb15d6d48af",
+      "size": 12378
+    },
+    {
+      "path": "qa/stage39_1_reason_cleanup_browser.py",
+      "sha": "476cd9a506607881f180310f49709e78276d2025",
+      "size": 6186
+    },
+    {
+      "path": "qa/stage39_1_reason_grounding_browser.py",
+      "sha": "a88afd564be986da01ee001dd1145e622e08beb1",
+      "size": 9598
+    },
+    {
+      "path": "qa/stage39_1_reason_star_browser.py",
+      "sha": "9a04a27fb85d76eeea9bc46d2b3653eeaf732461",
+      "size": 8582
+    },
+    {
+      "path": "qa/stage39_1_twi_why_browser.py",
+      "sha": "56d3ea17ea28787c8cb3fd6ff02dd4affcae82dc",
+      "size": 6919
+    },
+    {
+      "path": "qa/stage39_step_management_browser.py",
+      "sha": "c0fc78906011c1872b4322501bbc4abeae3a0624",
+      "size": 10108
+    },
+    {
+      "path": "qa/stage40_compat_browser.py",
+      "sha": "2d6fb8a8e5a9e7eafdced58eceed565d5c52ab18",
+      "size": 943
+    },
+    {
+      "path": "qa/stage40_inline_review_browser.py",
+      "sha": "fe327df57e5f7a7bd65ee79039c942a6cf641921",
+      "size": 9808
+    },
+    {
+      "path": "qa/stage41_ai_quality_browser.py",
+      "sha": "056337268be64231ee45c6b1fcfb62a525057e90",
+      "size": 11071
+    },
+    {
+      "path": "qa/stage41_compat_browser.py",
+      "sha": "a91d90691d37ce3924cad25a050f8da47ddc5410",
+      "size": 952
+    },
+    {
+      "path": "qa/stage42_enterprise_real_layout_browser.py",
+      "sha": "57b96dad13911fab12c603d6b6ae76204aeffb05",
+      "size": 11060
+    },
+    {
+      "path": "qa/stage42_import_wizard_browser.py",
+      "sha": "bd579c18b6d617db0d77e6b880d9b8a1fecbac02",
+      "size": 17083
+    },
+    {
+      "path": "qa/stage42_key_moments_browser.py",
+      "sha": "4b7f83240f607aeb9b15169509988092b0d31370",
+      "size": 10328
+    },
+    {
+      "path": "qa/stage42_sheet_selection_ux_browser.py",
+      "sha": "8ba3e127cc680bf46e39c57925cc5615167752ff",
+      "size": 8311
+    },
+    {
+      "path": "qa/stage43_print_formats_browser.py",
+      "sha": "099e528736b37387dafc4cc1781e676bd07cfdb7",
+      "size": 7151
+    },
+    {
+      "path": "releases/stage11-photo-editor.html",
+      "sha": "688742645bda102cfe87305b787a3ff094c0f7da",
+      "size": 318674
+    },
+    {
+      "path": "releases/stage12-local-exceljs-photo-studio.html",
+      "sha": "41bd9d2501bd56a90160affb561b1342d05137c8",
+      "size": 1290521
+    },
+    {
+      "path": "releases/stage13-layered-photo-editor.html",
+      "sha": "73588ab491e1e160b041e9ab4f9c51f25470d46f",
+      "size": 1297047
+    },
+    {
+      "path": "releases/stage14-desktop-ux-data-integrity.html",
+      "sha": "026404ed68cb8fb043bbade63fc86b18aab8cc27",
+      "size": 1338294
+    },
+    {
+      "path": "releases/stage15-local-iso7010-icons.html",
+      "sha": "0e2e564bd8a0cf5d787ddaf0cdc9728fa3599a76",
+      "size": 1537194
+    },
+    {
+      "path": "releases/stage16-excel-photos-and-editor-fixed.html",
+      "sha": "143a52fd056128c035b098ae65f10f84ba44b76e",
+      "size": 1543481
+    },
+    {
+      "path": "releases/stage17-mentor-json-recovery.html",
+      "sha": "db1af45190a03a1f5f7135e84b05f5e4bba0f608",
+      "size": 1545992
+    },
+    {
+      "path": "releases/stage18-mentor-reply-cleanup.html",
+      "sha": "3c932659c3e1baf1bb0d9c6ff314eccc20d1688d",
+      "size": 1546909
+    },
+    {
+      "path": "releases/stage19-modular-runtime.html",
+      "sha": "3c932659c3e1baf1bb0d9c6ff314eccc20d1688d",
+      "size": 1546909
+    },
+    {
+      "path": "releases/stage20-a2-safe-export.html",
+      "sha": "df6f2b9abbc1c66c9c91119612d7af23b0b6d186",
+      "size": 1550163
+    },
+    {
+      "path": "releases/stage21-review-history.html",
+      "sha": "159a127ad18709dcb61b0bfd1e4bd75351a0c086",
+      "size": 1553351
+    },
+    {
+      "path": "releases/stage22-a3-ai-guard.html",
+      "sha": "c1fa480867174fe47cb8032ff79593ffe0e23038",
+      "size": 1557623
+    },
+    {
+      "path": "releases/stage23-a3-review-fixes.html",
+      "sha": "e1e58a63592055b0744d10586d4c4093ad5503cc",
+      "size": 1560570
+    },
+    {
+      "path": "releases/stage24-a3-a4-twi-protected.html",
+      "sha": "0513645b3b0fb78f9c36c17ac19cb61e813d3f30",
+      "size": 1574819
+    },
+    {
+      "path": "releases/stage25-ai-safe-replacement.html",
+      "sha": "c15f602653c887e162a04dbef5f1555cf2162bbb",
+      "size": 1589203
+    },
+    {
+      "path": "releases/stage26-final-browser-candidate.html",
+      "sha": "8eb608e9a8647f08261814121497222d63b4a520",
+      "size": 1602581
+    },
+    {
+      "path": "releases/stage27-intelligent-assistant-browser-candidate.html",
+      "sha": "15b8e46df18f0df7b75955f517fc786f2ec02921",
+      "size": 1661871
+    },
+    {
+      "path": "releases/stage28-evidence-mentor-browser-candidate.html",
+      "sha": "07723498653676abeabe489b5ec48541180466e8",
+      "size": 1687988
+    },
+    {
+      "path": "releases/stage29-sop-twi-quality-browser-candidate.html",
+      "sha": "4882b0a9ea1185ea1993ec34528d3c86d39fb463",
+      "size": 1705354
+    },
+    {
+      "path": "releases/stage30-photo-editor-browser-candidate.html",
+      "sha": "2af77bf07ac87eae291cf6341acae022d721b09a",
+      "size": 1710852
+    },
+    {
+      "path": "releases/stage31-photo-precision-browser-candidate.html",
+      "sha": "d217d0b8f250b66968d9ca01d8174e8347e970a7",
+      "size": 1712673
+    },
+    {
+      "path": "releases/stage32-excel-photo-fill-browser-candidate.html",
+      "sha": "51eeb21d1fed174f3c53b884e48c8555b90fc794",
+      "size": 1723345
+    },
+    {
+      "path": "releases/stage33-frv-research-to-sop-browser-candidate.html",
+      "sha": "2eb91339e2fa8bfdea8cbe02b2e2d1805f7a77d8",
+      "size": 1745165
+    },
+    {
+      "path": "releases/stage34-frv-study-library-analysis-browser-candidate.html",
+      "sha": "b9e3b47b90d20c893d1b6669b9207a8a22f60e58",
+      "size": 1797505
+    },
+    {
+      "path": "releases/stage35-frv-ux-functional-audit-browser-candidate.html",
+      "sha": "0e32390c3545b51727a650bfb88bb53968b8b10c",
+      "size": 1806705
+    },
+    {
+      "path": "releases/stage36-1-twi-print-xlsx-browser-candidate.html",
+      "sha": "a67fc3d21cfb392393b5834935478204d8c29b6d",
+      "size": 1847333
+    },
+    {
+      "path": "releases/stage36-library-safety-browser-candidate.html",
+      "sha": "debe9de544cb29a9fce63508247a8084dfd03c21",
+      "size": 1829003
+    },
+    {
+      "path": "releases/stage37-desktop-audit-browser-candidate.html",
+      "sha": "8dab4ed470125fa1b680c258381cc7af021934f3",
+      "size": 1854494
+    },
+    {
+      "path": "releases/stage38-numbered-reasons-corporate-xlsx-browser-candidate.html",
+      "sha": "f586fb0e68e20b8bc388dafbad7e76ab5fcefa34",
+      "size": 1861572
+    },
+    {
+      "path": "releases/stage39-1-ai-reasons-frv-browser-candidate.html",
+      "sha": "0ba632b97365f3b662f1c7afaa2a62e60cc3dc7b",
+      "size": 1915073
+    },
+    {
+      "path": "releases/stage39-1-manual-km-cleanup-20261123.html",
+      "sha": "0ba632b97365f3b662f1c7afaa2a62e60cc3dc7b",
+      "size": 1915073
+    },
+    {
+      "path": "releases/stage39-1-preview-buttons-fixed-20261123.html",
+      "sha": "0ba632b97365f3b662f1c7afaa2a62e60cc3dc7b",
+      "size": 1915073
+    },
+    {
+      "path": "releases/stage39-1-reason-ai-preview-20261123.html",
+      "sha": "0ba632b97365f3b662f1c7afaa2a62e60cc3dc7b",
+      "size": 1915073
+    },
+    {
+      "path": "releases/stage39-1-reason-direct-20261123.html",
+      "sha": "0ba632b97365f3b662f1c7afaa2a62e60cc3dc7b",
+      "size": 1915073
+    },
+    {
+      "path": "releases/stage39-1-reason-grounded-20261123.html",
+      "sha": "0ba632b97365f3b662f1c7afaa2a62e60cc3dc7b",
+      "size": 1915073
+    },
+    {
+      "path": "releases/stage39-1-reverted-reason-star-20261123.html",
+      "sha": "8ca255b73ab70419055ef2863166510aa21e98ff",
+      "size": 1898938
+    },
+    {
+      "path": "releases/stage39-step-management-browser-candidate.html",
+      "sha": "1e2762eaaea4156d98c5e6891580571487608456",
+      "size": 1875209
+    },
+    {
+      "path": "releases/stage40-inline-review-20261123.html",
+      "sha": "92f76201c2d05fbf8c088e87eb67e532e9c0e146",
+      "size": 1922652
+    },
+    {
+      "path": "releases/stage40-inline-review-browser-candidate.html",
+      "sha": "92f76201c2d05fbf8c088e87eb67e532e9c0e146",
+      "size": 1922652
+    },
+    {
+      "path": "releases/stage41-ai-quality-20261123.html",
+      "sha": "1b12218790b48078666e4122b96c1f9f01184fd8",
+      "size": 1929536
+    },
+    {
+      "path": "releases/stage41-ai-quality-browser-candidate.html",
+      "sha": "1b12218790b48078666e4122b96c1f9f01184fd8",
+      "size": 1929536
+    },
+    {
+      "path": "releases/stage42-import-wizard-20261125.html",
+      "sha": "23d0843b3eeb62cfe19644a84b2cfdb89b037bc6",
+      "size": 2013842
+    },
+    {
+      "path": "releases/stage42-import-wizard-browser-candidate.html",
+      "sha": "23d0843b3eeb62cfe19644a84b2cfdb89b037bc6",
+      "size": 2013842
+    },
+    {
+      "path": "releases/stage43-sop-print-formats-20261125.html",
+      "sha": "5e35036ce243fed74ea018ac8eaf5f6c4a3c3e45",
+      "size": 2025170
+    },
+    {
+      "path": "src/README.md",
+      "sha": "c0b31534763dc2ca89969678340224104e81dfa0",
+      "size": 3622
+    },
+    {
+      "path": "src/app/parts.json",
+      "sha": "02a0812b1f3ca7f4cfb4cc06693954462ee3c1be",
+      "size": 325
+    },
+    {
+      "path": "src/app/stage19-after-runtime.html",
+      "sha": "6295c690eef6df78777b9a6f9126a94cc6fbcf2a",
+      "size": 28
+    },
+    {
+      "path": "src/app/stage19-before-vendor.html",
+      "sha": "73dfb89177af4ab62c45182f03e94ebe7381543f",
+      "size": 26283
+    },
+    {
+      "path": "src/app/stage19-between-icons-runtime.html",
+      "sha": "ea5e0705d75774312f71c12d7084c4579f823928",
+      "size": 1252
+    },
+    {
+      "path": "src/app/stage19-between-vendor-icons.html",
+      "sha": "3f3877c5dbd0af1194247f6ff50ef1c7ec361930",
+      "size": 58481
+    },
+    {
+      "path": "src/app/stage19-parts.json",
+      "sha": "6d073b41a98f9ce05fc90bd4bc1a616373358e3d",
+      "size": 2873
+    },
+    {
+      "path": "src/app/stage20-parts.json",
+      "sha": "ebab6854aa63e06b015753cb81aa1186a01bef26",
+      "size": 2966
+    },
+    {
+      "path": "src/app/stage21-parts.json",
+      "sha": "c47d603d2efdc2a37c4aa8d24d4e4cfc70b4a1c1",
+      "size": 3018
+    },
+    {
+      "path": "src/app/stage22-parts.json",
+      "sha": "3b8eeb7c0ff54825b5372ad8e3a241436440cd87",
+      "size": 3062
+    },
+    {
+      "path": "src/app/stage23-parts.json",
+      "sha": "349d0b6a64013f8183fc87bc8963a1b57eff7f5f",
+      "size": 3111
+    },
+    {
+      "path": "src/app/stage24-between-vendor-icons.html",
+      "sha": "e79ac3762f620ced9f512b8d24b5b992fa24c22b",
+      "size": 58503
+    },
+    {
+      "path": "src/app/stage24-parts.json",
+      "sha": "ec816ad86580b7ca7b2bdedc9fef918245c85e05",
+      "size": 3248
+    },
+    {
+      "path": "src/app/stage25-parts.json",
+      "sha": "0597e33fb3f2872b4ecf5ac219dca6631492c7f4",
+      "size": 3333
+    },
+    {
+      "path": "src/app/stage26-parts.json",
+      "sha": "e9c801673c0a1d7a008f576420109fadf9615d93",
+      "size": 3381
+    },
+    {
+      "path": "src/app/stage27-parts.json",
+      "sha": "207aa7b67d89e884a5e73bc7b8582b767fbc941c",
+      "size": 3571
+    },
+    {
+      "path": "src/app/stage28-parts.json",
+      "sha": "d69e2e61e13c237ad6673cf47c687f112542405a",
+      "size": 3623
+    },
+    {
+      "path": "src/app/stage29-parts.json",
+      "sha": "a46ab515b2d4e1903493c679345a7fcba6b4f3a0",
+      "size": 3704
+    },
+    {
+      "path": "src/app/stage30-parts.json",
+      "sha": "b7f75e844c596843d516334e1fca5e0d78cba331",
+      "size": 3746
+    },
+    {
+      "path": "src/app/stage31-parts.json",
+      "sha": "a56327bcd7f80b23b2697bde20878b51a4f07872",
+      "size": 3746
+    },
+    {
+      "path": "src/app/stage32-parts.json",
+      "sha": "b74b175263703f03ffadc0548e4875ec9ad692a6",
+      "size": 3750
+    },
+    {
+      "path": "src/app/stage33-between-vendor-icons.html",
+      "sha": "686178b4ffef08c62573ca72c99918ed98dd701c",
+      "size": 61703
+    },
+    {
+      "path": "src/app/stage33-parts.json",
+      "sha": "7cbdea4af567a07d25aedaf6f5a986a3fab0e9db",
+      "size": 3754
+    },
+    {
+      "path": "src/app/stage34-between-vendor-icons.html",
+      "sha": "b65b1de7bf8e8c731afb843803ced11e588b88fa",
+      "size": 63726
+    },
+    {
+      "path": "src/app/stage34-parts.json",
+      "sha": "fca594b5e30536f44b2c2173f5f294e32ea66a28",
+      "size": 3937
+    },
+    {
+      "path": "src/app/stage35-between-vendor-icons.html",
+      "sha": "d73012fce475aebcd1460e73671072421a99017d",
+      "size": 64444
+    },
+    {
+      "path": "src/app/stage35-parts.json",
+      "sha": "eb2de1abba63f8c25d1eb843a35d327cc3048cf0",
+      "size": 3941
+    },
+    {
+      "path": "src/app/stage36-1-between-vendor-icons.html",
+      "sha": "426627ed78b3473a96e7b2d2d4159f78dedb746e",
+      "size": 66681
+    },
+    {
+      "path": "src/app/stage36-1-parts.json",
+      "sha": "c932cf432a3afcb3aeef0f2a294c80578109d9d8",
+      "size": 4018
+    },
+    {
+      "path": "src/app/stage36-between-vendor-icons.html",
+      "sha": "d2feaedec29f4dcdd7e0fe4856629c1af76665a5",
+      "size": 66215
+    },
+    {
+      "path": "src/app/stage36-parts.json",
+      "sha": "6047a5bb494c4d56a0db4ea2d8cd1e2566e5b93a",
+      "size": 3976
+    },
+    {
+      "path": "src/app/stage37-between-vendor-icons.html",
+      "sha": "65292602e10ba45bf7c860355b2ab9aa01352d84",
+      "size": 67030
+    },
+    {
+      "path": "src/app/stage37-parts.json",
+      "sha": "f0a7659c1806b2e125ed9bec4fa254adeb71a9a9",
+      "size": 4072
+    },
+    {
+      "path": "src/app/stage38-between-vendor-icons.html",
+      "sha": "4a3046b14a8568d36fbd8a017b15ba46eae156ac",
+      "size": 67030
+    },
+    {
+      "path": "src/app/stage38-parts.json",
+      "sha": "f362c9ee3b1afb62bcc3dd2f362df4a665228cad",
+      "size": 4143
+    },
+    {
+      "path": "src/app/stage39-1-parts.json",
+      "sha": "db9aef9e9c479b3f1b296e3d4fa71ce2e1df8bee",
+      "size": 4398
+    },
+    {
+      "path": "src/app/stage39-parts.json",
+      "sha": "e24243f52ff4bb4200cd0197f2996c040977e3c0",
+      "size": 4195
+    },
+    {
+      "path": "src/app/stage40-parts.json",
+      "sha": "884806cb99787d3503d368514def22ad55a28066",
+      "size": 4437
+    },
+    {
+      "path": "src/app/stage41-parts.json",
+      "sha": "220b79c8651c623afb31bce77b5c98a417a16c70",
+      "size": 4473
+    },
+    {
+      "path": "src/app/stage42-parts.json",
+      "sha": "2632eaeed781a26d63851e299c896d6aba3a81bc",
+      "size": 4600
+    },
+    {
+      "path": "src/app/stage43-parts.json",
+      "sha": "8ad2422af5fbda3a174cd50ae86f7c202ef71167",
+      "size": 4651
+    },
+    {
+      "path": "src/app/template.html",
+      "sha": "d0f1bb016236528e61e2986a1e4ffaef427c9938",
+      "size": 42391
+    },
+    {
+      "path": "src/assets/safety/LICENSE_UPSTREAM_MIT.txt",
+      "sha": "c73e27a8596e11e23779cd31b1ebfc750a6a32ea",
+      "size": 1068
+    },
+    {
+      "path": "src/assets/safety/iso7010-part01.json",
+      "sha": "48586395274da823df25f1eb67d5d422180c39cb",
+      "size": 18417
+    },
+    {
+      "path": "src/assets/safety/iso7010-part02.json",
+      "sha": "11908e29b52741eabf63f061213b7005bd8eae7e",
+      "size": 23710
+    },
+    {
+      "path": "src/assets/safety/iso7010-part03.json",
+      "sha": "891934c8a7b17f814cdf4efe14ad2271bccff340",
+      "size": 42394
+    },
+    {
+      "path": "src/assets/safety/iso7010-part04.json",
+      "sha": "fa4330b0e57ef22f316d607824b921e7f8148243",
+      "size": 39484
+    },
+    {
+      "path": "src/assets/safety/iso7010-part05.json",
+      "sha": "fdebafc65df1fc26eb904c33d6cd0d5fb40c501f",
+      "size": 36463
+    },
+    {
+      "path": "src/assets/safety/iso7010-part06.json",
+      "sha": "702cea16675356ec0e1a8dbf7ea7571791d63485",
+      "size": 17769
+    },
+    {
+      "path": "src/assets/safety/iso7010-part07.json",
+      "sha": "b241660d5a2067d0aaa26145363fb448897b2ec9",
+      "size": 28606
+    },
+    {
+      "path": "src/legacy/inline-script-01.html",
+      "sha": "a0d43a75024a7c3a35367932f6b6e45ea84cbe8b",
+      "size": 51
+    },
+    {
+      "path": "src/legacy/inline-script-02.html",
+      "sha": "ed939da3ab24cf346924f6d730b6be6d6507b7d1",
+      "size": 86
+    },
+    {
+      "path": "src/legacy/inline-script-03.html",
+      "sha": "5e6e75892f9aac3bd324314d54f81caea4871a27",
+      "size": 260300
+    },
+    {
+      "path": "src/modules/STAGE19_MAP_RU.md",
+      "sha": "8a6a79ee9c522ad66915c4be342cd45f285081bc",
+      "size": 2788
+    },
+    {
+      "path": "src/modules/ai/stage17-mentor-dispute-recovery.js",
+      "sha": "ec299bcbdf6097c6cdf06d1feae4465c79e97c2e",
+      "size": 3896
+    },
+    {
+      "path": "src/modules/ai/stage18-mentor-reply-presentation.js",
+      "sha": "1a3a98b58da7849bc2c280786e7c6f0184c49b6e",
+      "size": 1626
+    },
+    {
+      "path": "src/modules/ai/stage19-dispute.js",
+      "sha": "cf4541ea85d5103924392cdfc99c53c97fd5e330",
+      "size": 4426
+    },
+    {
+      "path": "src/modules/ai/stage19-field-editor.js",
+      "sha": "a9714fcdffc66f309b599ab5064b09f5e780480d",
+      "size": 1574
+    },
+    {
+      "path": "src/modules/ai/stage19-generate-sop.js",
+      "sha": "13efc280f948479f4d09e6e9d1bf77496f4ae8ab",
+      "size": 2902
+    },
+    {
+      "path": "src/modules/ai/stage19-prompts.js",
+      "sha": "c9547610ee7b9875da31b11bba3c328299f4fc94",
+      "size": 25634
+    },
+    {
+      "path": "src/modules/ai/stage19-protocol.js",
+      "sha": "dcefe872344d074e2b029764b0f9186eaf42fe23",
+      "size": 4032
+    },
+    {
+      "path": "src/modules/ai/stage19-review-task.js",
+      "sha": "8f828272eb64d1605286ec1be308b932507ea8b0",
+      "size": 1830
+    },
+    {
+      "path": "src/modules/ai/stage19-transport.js",
+      "sha": "1c2d036d84dbac57569d8f47fc03b23b5ec13b3f",
+      "size": 3449
+    },
+    {
+      "path": "src/modules/ai/stage22-context-guard.js",
+      "sha": "c252391b70607993fc1afd1f1401db3b64a2a33b",
+      "size": 3191
+    },
+    {
+      "path": "src/modules/ai/stage22-dispute.js",
+      "sha": "599385941bd667da62cb655d7bc5ccd3c4f5fe43",
+      "size": 4876
+    },
+    {
+      "path": "src/modules/ai/stage22-field-editor.js",
+      "sha": "1a948fb736672fd4160a060df461008a32758bea",
+      "size": 1637
+    },
+    {
+      "path": "src/modules/ai/stage22-generate-sop.js",
+      "sha": "7913842c7264a35a55842faebd3a3412b92f95de",
+      "size": 3028
+    },
+    {
+      "path": "src/modules/ai/stage22-review-task.js",
+      "sha": "63cce035c00d3f57ee7e4ee1c3845df0c4ba9e54",
+      "size": 1952
+    },
+    {
+      "path": "src/modules/ai/stage23-dispute.js",
+      "sha": "0b69740072d5001597c2b767ead6a54f16728d4d",
+      "size": 4926
+    },
+    {
+      "path": "src/modules/ai/stage23-protocol.js",
+      "sha": "925a993ce9bff67453862eb5f1ba68963c7f07fc",
+      "size": 4003
+    },
+    {
+      "path": "src/modules/ai/stage24-generate-sop.js",
+      "sha": "138209c12628750493ac943302e0909374699e7a",
+      "size": 3036
+    },
+    {
+      "path": "src/modules/ai/stage24-review-task.js",
+      "sha": "c558f8c4f6c42e5b3cb39a078ca8950cfa3cd09a",
+      "size": 1954
+    },
+    {
+      "path": "src/modules/ai/stage24-task-response.js",
+      "sha": "7f86f345d89294e50d7c44089540b1d0554829f8",
+      "size": 2875
+    },
+    {
+      "path": "src/modules/ai/stage25-errors.js",
+      "sha": "6b30109eef7da88e47e63590bca213e51e4befe1",
+      "size": 3710
+    },
+    {
+      "path": "src/modules/ai/stage25-generate-sop.js",
+      "sha": "2c08cc11e41ed9cf1c6b6fc98e98d20d762bc8ff",
+      "size": 4593
+    },
+    {
+      "path": "src/modules/ai/stage25-preview.js",
+      "sha": "e6a044e6c0250c9c9e58d0b649acc445df0bd1b3",
+      "size": 8418
+    },
+    {
+      "path": "src/modules/ai/stage25-transport.js",
+      "sha": "5a830e816aea1ecc3aa9ebc3b3a3cc3a99f12572",
+      "size": 2657
+    },
+    {
+      "path": "src/modules/ai/stage26-errors.js",
+      "sha": "21d780b71c6b8e19994987b7ec2245c01fc5459a",
+      "size": 4319
+    },
+    {
+      "path": "src/modules/ai/stage26-transport.js",
+      "sha": "0a61783a5f4b4f2ddfeb86a5ed768310076e94a3",
+      "size": 4604
+    },
+    {
+      "path": "src/modules/ai/stage27-analogs-history.js",
+      "sha": "5c81a618c85deaa751d7b3055bd9be297fcfb035",
+      "size": 11232
+    },
+    {
+      "path": "src/modules/ai/stage27-core.js",
+      "sha": "83948a8223a12507447053987dc8c0c699884c38",
+      "size": 10479
+    },
+    {
+      "path": "src/modules/ai/stage27-intelligence.js",
+      "sha": "87001fbad83d0f398f4cc56c23154fe1efc9dc58",
+      "size": 15710
+    },
+    {
+      "path": "src/modules/ai/stage28-review-task.js",
+      "sha": "312d77c5032ca0a98cb2782001ec0df4bc732ea2",
+      "size": 10960
+    },
+    {
+      "path": "src/modules/ai/stage29-generate-sop.js",
+      "sha": "7de2c732154abff0415c5c05f8da080c5e00384a",
+      "size": 4792
+    },
+    {
+      "path": "src/modules/ai/stage29-prompts.js",
+      "sha": "02beb22a7807a043341676febce9b4e9d1e9e6e0",
+      "size": 4748
+    },
+    {
+      "path": "src/modules/ai/stage29-quality-core.js",
+      "sha": "31374063ee0bfac1a4b4d9d6079a6405b685882f",
+      "size": 12191
+    },
+    {
+      "path": "src/modules/ai/stage38-base-prompts.js",
+      "sha": "41c0b5e28824d584d628a1b28cc133eb74763b77",
+      "size": 26537
+    },
+    {
+      "path": "src/modules/ai/stage38-prompts.js",
+      "sha": "7740019aa16b37de0443dd2faeb94ee36f9ded1a",
+      "size": 5679
+    },
+    {
+      "path": "src/modules/ai/stage38-quality-core.js",
+      "sha": "b43bd344196fd9094f3dc19e13a4e58f7d13b754",
+      "size": 12317
+    },
+    {
+      "path": "src/modules/ai/stage39-1-base-prompts.js",
+      "sha": "f8e8240f1a3a39efa3eaf8db43e238205944bc2b",
+      "size": 29344
+    },
+    {
+      "path": "src/modules/ai/stage39-1-field-editor.js",
+      "sha": "d10b349a64152fbd4105ab9b3cbba67da1113be7",
+      "size": 4700
+    },
+    {
+      "path": "src/modules/ai/stage39-1-intelligence.js",
+      "sha": "5eb47b93f7786c2ad2f2f218755c2c7b298df594",
+      "size": 16357
+    },
+    {
+      "path": "src/modules/ai/stage39-1-reason-proposal.js",
+      "sha": "e3dee831c645d2f693fec066dc8fb89a08a9bc31",
+      "size": 11322
+    },
+    {
+      "path": "src/modules/ai/stage39-1-review-task.js",
+      "sha": "d01aab0e00ae6c6ce091771096a5a0b4ebd1c242",
+      "size": 13201
+    },
+    {
+      "path": "src/modules/ai/stage41-quality.js",
+      "sha": "699a1662eb74786e964e388143051d7301e70a6f",
+      "size": 6884
+    },
+    {
+      "path": "src/modules/app/stage19-bootstrap.js",
+      "sha": "8c2926d1dcd7173bfb86c4a0e93d448f19925e8d",
+      "size": 11842
+    },
+    {
+      "path": "src/modules/app/stage27-ui.js",
+      "sha": "945c1b3c6df1f0e03fab4ac89e89842932d04038",
+      "size": 21572
+    },
+    {
+      "path": "src/modules/app/stage28-ui.js",
+      "sha": "0cc756f51609c45bd413b14dd43d8aedaf78a062",
+      "size": 21714
+    },
+    {
+      "path": "src/modules/app/stage39-1-identity.js",
+      "sha": "22d0ddea7e6b5325623d8a6edfc04bb73696c901",
+      "size": 488
+    },
+    {
+      "path": "src/modules/core/stage19-config.js",
+      "sha": "6d8c8378e9ebce60a96287f9a4a2dbb6eb4c8bfb",
+      "size": 10140
+    },
+    {
+      "path": "src/modules/core/stage19-step-shape.js",
+      "sha": "238331ffecbcc69f158479fdd37dcea67c9d44bd",
+      "size": 1435
+    },
+    {
+      "path": "src/modules/core/stage20-export-snapshot.js",
+      "sha": "261237c4ce185ca37168489a19fec8f1ed00e492",
+      "size": 2962
+    },
+    {
+      "path": "src/modules/demo/stage19-demo.js",
+      "sha": "c2312de7e69ef5325301e167a9d92c90cb621f2b",
+      "size": 9091
+    },
+    {
+      "path": "src/modules/documents/portable-backup-stage14.js",
+      "sha": "7ada17c678b691855b5d4c1103a8ba65d8f9d211",
+      "size": 5841
+    },
+    {
+      "path": "src/modules/documents/stage19-db.js",
+      "sha": "9b25c4d56c424551baf2c58f625aeecb36be39ba",
+      "size": 3720
+    },
+    {
+      "path": "src/modules/documents/stage19-draft.js",
+      "sha": "e737152ebea0ab9a58110be6335df17b1b6f5c1b",
+      "size": 5638
+    },
+    {
+      "path": "src/modules/documents/stage19-library-audit.js",
+      "sha": "431c8da76735f047a0e3b7d8b886ac00cf381503",
+      "size": 9715
+    },
+    {
+      "path": "src/modules/documents/stage19-library.js",
+      "sha": "9824b044d95334765e427c4d03307164e0982534",
+      "size": 17743
+    },
+    {
+      "path": "src/modules/documents/stage19-network-io.js",
+      "sha": "14731807febbacbbf038aa4ab384f48e32783c02",
+      "size": 6271
+    },
+    {
+      "path": "src/modules/documents/stage19-network-sync.js",
+      "sha": "d8939036c41f03862b8ca14e55e87eb9534ccd62",
+      "size": 8495
+    },
+    {
+      "path": "src/modules/documents/stage19-portable-photos.js",
+      "sha": "1d98262501d15e7401433f512445b94b3836929e",
+      "size": 5734
+    },
+    {
+      "path": "src/modules/documents/stage21-db.js",
+      "sha": "8c21994a5f77f85dc923856df65ca11d059e1e57",
+      "size": 3756
+    },
+    {
+      "path": "src/modules/documents/stage21-draft.js",
+      "sha": "1b596a046982d49c7ff766d3481060d1ec4a242d",
+      "size": 5579
+    },
+    {
+      "path": "src/modules/documents/stage21-library.js",
+      "sha": "4c291b76fc4dc8fb578bf25c8bd9e8cebb337b70",
+      "size": 18058
+    },
+    {
+      "path": "src/modules/documents/stage21-review-state.js",
+      "sha": "cc5ae25a765b593d88545d21f151c94aa8509b7e",
+      "size": 2896
+    },
+    {
+      "path": "src/modules/documents/stage23-review-state.js",
+      "sha": "d59baaa67f6b09f929f10ec19970c1c5a5f7c3a8",
+      "size": 2885
+    },
+    {
+      "path": "src/modules/documents/stage27-db.js",
+      "sha": "93c752289de9ae10bee80ef80b121bd3d8e288a4",
+      "size": 3785
+    },
+    {
+      "path": "src/modules/documents/stage27-draft.js",
+      "sha": "cf7b4f6a7d6a2449f6499c69d8e62f00a46902c7",
+      "size": 5696
+    },
+    {
+      "path": "src/modules/documents/stage27-library.js",
+      "sha": "62c58d4d297e0b5bb61059ca7528337d343a2add",
+      "size": 18209
+    },
+    {
+      "path": "src/modules/documents/stage28-review-state.js",
+      "sha": "9713384d374e0e91d3c1147b5fb0413b0957d855",
+      "size": 3386
+    },
+    {
+      "path": "src/modules/documents/stage33-draft.js",
+      "sha": "430d57c172e7daea69b18d7fb018f97347997777",
+      "size": 5724
+    },
+    {
+      "path": "src/modules/documents/stage36-backup.js",
+      "sha": "0f269d5bbee9d36fe6cfa5e3fadf96f35ef3dd18",
+      "size": 15745
+    },
+    {
+      "path": "src/modules/documents/stage37-data-loss-safety.js",
+      "sha": "0c8f5fde94d6fd6366a451497b6091d5af9d40c2",
+      "size": 6812
+    },
+    {
+      "path": "src/modules/editor/accessibility-stage14.js",
+      "sha": "de7ea62f17b850acc930b568b5d2c5fe3faf7ed9",
+      "size": 3306
+    },
+    {
+      "path": "src/modules/editor/stage19-steps.js",
+      "sha": "894732e1362c3a9f457e8b28d34adf0b0f0e260a",
+      "size": 8993
+    },
+    {
+      "path": "src/modules/editor/stage34-steps.js",
+      "sha": "687f8569f676de038c4b1c425983345326f2d69e",
+      "size": 9310
+    },
+    {
+      "path": "src/modules/editor/stage38-steps.js",
+      "sha": "9d5e5253c71ad02d1c70b962d51807d989574e42",
+      "size": 9469
+    },
+    {
+      "path": "src/modules/editor/stage39-1-reason-cleanup.js",
+      "sha": "a28e4a109e5059fa0e53c416eb8ddd34dc14fe14",
+      "size": 2203
+    },
+    {
+      "path": "src/modules/editor/stage39-step-actions.js",
+      "sha": "eb4781341caf96a0d8a00b81d42a72b847555b41",
+      "size": 13637
+    },
+    {
+      "path": "src/modules/excel/stage16-step-photo-export.js",
+      "sha": "7ed8d662917b4abc530a95363a10b1c013349ef9",
+      "size": 5658
+    },
+    {
+      "path": "src/modules/excel/stage19-export-setup.js",
+      "sha": "776ad41e9041bc3e0ae6fa193400a469057577c4",
+      "size": 3188
+    },
+    {
+      "path": "src/modules/excel/stage19-export.js",
+      "sha": "78d127eee5c911755104588ebcb4e573dcfa5fe5",
+      "size": 26795
+    },
+    {
+      "path": "src/modules/excel/stage19-import.js",
+      "sha": "b9322c16e91e3086bfc9f7a46d8ac7817276595f",
+      "size": 16313
+    },
+    {
+      "path": "src/modules/excel/stage20-export.js",
+      "sha": "6fb87a7476dc547c1b911d6167478dd75a7127a6",
+      "size": 26112
+    },
+    {
+      "path": "src/modules/excel/stage32-export.js",
+      "sha": "0d1dfa2b08da8cd3e71a56086e110290ead49224",
+      "size": 36784
+    },
+    {
+      "path": "src/modules/excel/stage33-export.js",
+      "sha": "2f55e5ca32217963aec0f7de408c7df299507913",
+      "size": 37003
+    },
+    {
+      "path": "src/modules/excel/stage34-export.js",
+      "sha": "34d9b0cfa3c3f27d9a7a66950f082ef70c6a87c8",
+      "size": 38447
+    },
+    {
+      "path": "src/modules/excel/stage38-export.js",
+      "sha": "4a65df31b41af5b367e0a67b64f03484ba7f8a04",
+      "size": 38516
+    },
+    {
+      "path": "src/modules/excel/stage42-apply.js",
+      "sha": "20d392458961773fdd1e045fb733774d9825a42e",
+      "size": 8438
+    },
+    {
+      "path": "src/modules/excel/stage42-parse.js",
+      "sha": "ab3231eef041368b65c230c4a7f3ed4b931ea78b",
+      "size": 23916
+    },
+    {
+      "path": "src/modules/excel/stage42-wizard.js",
+      "sha": "0bb118decc17c78b02d2d7e6c6cdb315d93c04ee",
+      "size": 51952
+    },
+    {
+      "path": "src/modules/excel/stage43-export.js",
+      "sha": "877c14a2115fe18b40bc59310fd910fe6425481e",
+      "size": 38816
+    },
+    {
+      "path": "src/modules/excel/stage43-landscape-export.js",
+      "sha": "03dc5bb90f36aa8edd8476f29a8cb67e1f4a7fcf",
+      "size": 11028
+    },
+    {
+      "path": "src/modules/frv/stage19-measurements.js",
+      "sha": "9bf7777703aa5c121cb4fee8ba7464c3c942e46e",
+      "size": 3027
+    },
+    {
+      "path": "src/modules/frv/stage19-study-ai.js",
+      "sha": "ba49f5f734b15f38e37b1486ed658863d1a59449",
+      "size": 12270
+    },
+    {
+      "path": "src/modules/frv/stage19-study-io.js",
+      "sha": "de08d6993f268c440ffb05eaba6d237e6efb8242",
+      "size": 5363
+    },
+    {
+      "path": "src/modules/frv/stage19-study-model.js",
+      "sha": "72f117c4ff3c941d1b6323afea3f3d10e8e45858",
+      "size": 14051
+    },
+    {
+      "path": "src/modules/frv/stage19-study.js",
+      "sha": "ae48a0bb5488a2374c938a4bcccec09cc71753e6",
+      "size": 4125
+    },
+    {
+      "path": "src/modules/frv/stage20-measurements.js",
+      "sha": "caedfa0908918c7d7d58dc650c1a0203327676f7",
+      "size": 3038
+    },
+    {
+      "path": "src/modules/frv/stage22-study-ai.js",
+      "sha": "821f4d89599446cb2be301b1e76e882b8d71be17",
+      "size": 12507
+    },
+    {
+      "path": "src/modules/frv/stage25-study-ai.js",
+      "sha": "df4a9efed380da2676eeee5e266305686e31406b",
+      "size": 13998
+    },
+    {
+      "path": "src/modules/frv/stage26-proposals.js",
+      "sha": "c1caaddbc4df98a5eb506f7a3819954cc690cfd8",
+      "size": 9393
+    },
+    {
+      "path": "src/modules/frv/stage26-study-ai.js",
+      "sha": "de9e27e8d159633ac88a7fea5592a97cb5ae108c",
+      "size": 13270
+    },
+    {
+      "path": "src/modules/frv/stage33-measurements.js",
+      "sha": "04e4309f1cd7f89dc05cb0efda60eeac4a0b7a53",
+      "size": 5170
+    },
+    {
+      "path": "src/modules/frv/stage33-study-ai.js",
+      "sha": "8d448dde13962b635f1c3604fd8c17316755bd26",
+      "size": 11665
+    },
+    {
+      "path": "src/modules/frv/stage33-study-io.js",
+      "sha": "28de13a7dc0f5db54c62829b79cf24b1ad207172",
+      "size": 6602
+    },
+    {
+      "path": "src/modules/frv/stage33-study-model.js",
+      "sha": "e10aa820aa6abe58e66f6aca4762f294baba6a6c",
+      "size": 20975
+    },
+    {
+      "path": "src/modules/frv/stage33-study.js",
+      "sha": "ae23ed7d6863448f8bc85ec2ec951c1bbd6b852f",
+      "size": 13808
+    },
+    {
+      "path": "src/modules/frv/stage34-analytics.js",
+      "sha": "013e9807ff1c655c98ff248f206f1e9cc82aebba",
+      "size": 11620
+    },
+    {
+      "path": "src/modules/frv/stage34-library.js",
+      "sha": "74fb5c91cc46936b1a5fbd67e2dc80be9581dc0b",
+      "size": 14788
+    },
+    {
+      "path": "src/modules/frv/stage34-measurements.js",
+      "sha": "6df1ae5d5e20246544f7ffedc574fcc01af0584b",
+      "size": 5392
+    },
+    {
+      "path": "src/modules/frv/stage34-sop-frv-guard.js",
+      "sha": "91a7c16bb934d97864a0c7a97b57d4aa33867029",
+      "size": 5326
+    },
+    {
+      "path": "src/modules/frv/stage34-study-ai.js",
+      "sha": "702188c4a61043832411095e20457abd8ee7c843",
+      "size": 15561
+    },
+    {
+      "path": "src/modules/frv/stage34-study-io.js",
+      "sha": "8515897dc03389ff7aef99bf55e0f97deb262300",
+      "size": 6856
+    },
+    {
+      "path": "src/modules/frv/stage34-study-model.js",
+      "sha": "657eedfbd9f06dd6ca342f51ee404f37daa2b8db",
+      "size": 22969
+    },
+    {
+      "path": "src/modules/frv/stage34-study.js",
+      "sha": "131c6dfc748e54d76a8182670b60029328818ec1",
+      "size": 14455
+    },
+    {
+      "path": "src/modules/frv/stage34-xlsx.js",
+      "sha": "837414cb6016b2ddca48b43d9829aff4c4d0b58b",
+      "size": 9809
+    },
+    {
+      "path": "src/modules/frv/stage35-analytics.js",
+      "sha": "e41de51e4034e43630e538dc3c30e24a25a00fb4",
+      "size": 12980
+    },
+    {
+      "path": "src/modules/frv/stage35-library.js",
+      "sha": "64b47ad212630724fd03ade4e8ae94c139646424",
+      "size": 19188
+    },
+    {
+      "path": "src/modules/frv/stage35-study-ai.js",
+      "sha": "a66c2815f0dc364c43b6417c8d1d138c780cdaca",
+      "size": 16306
+    },
+    {
+      "path": "src/modules/frv/stage35-study-model.js",
+      "sha": "48183b8f86d39292013e4943240e9af71a41d12e",
+      "size": 24909
+    },
+    {
+      "path": "src/modules/frv/stage35-study.js",
+      "sha": "271d5c1284ada7c2c6d928cd8fa0ed09fa03ff01",
+      "size": 14492
+    },
+    {
+      "path": "src/modules/frv/stage36-library.js",
+      "sha": "72c9170cac8019c00bd411a4f7e136bdf9a1b168",
+      "size": 23970
+    },
+    {
+      "path": "src/modules/frv/stage39-1-study-ai.js",
+      "sha": "4a79adaed3c74fe970c66d23e5f9677c34259b3d",
+      "size": 18700
+    },
+    {
+      "path": "src/modules/frv/stage39-1-study-model.js",
+      "sha": "09c8d962f12d3eb2072afb100f6a32978d6ed03b",
+      "size": 25314
+    },
+    {
+      "path": "src/modules/frv/stage39-1-study.js",
+      "sha": "90761a17b6381ce1cc58622c945b72b78905b604",
+      "size": 14786
+    },
+    {
+      "path": "src/modules/photos/illustration-studio.js",
+      "sha": "741da122f242b1bafe96f6223b6598c500588594",
+      "size": 27598
+    },
+    {
+      "path": "src/modules/photos/stage13-photo-section.js",
+      "sha": "a3160fb864d608acc93673071934a2df8bf355b5",
+      "size": 36310
+    },
+    {
+      "path": "src/modules/photos/stage19-idb.js",
+      "sha": "44be7baadd7e2e114ee992646cf277f574a5ee83",
+      "size": 2550
+    },
+    {
+      "path": "src/modules/photos/stage19-illustration-editor.js",
+      "sha": "987bcb91d3fd9fb695721b5c11aa90d051cdd65f",
+      "size": 30120
+    },
+    {
+      "path": "src/modules/photos/stage19-repository.js",
+      "sha": "5388bc6b414b15ea0e373749b5e9a2ea5e9390a9",
+      "size": 4347
+    },
+    {
+      "path": "src/modules/photos/stage20-photo-read.js",
+      "sha": "118bceedb1b4d6c8aa03638ffc2e006ba83adc78",
+      "size": 964
+    },
+    {
+      "path": "src/modules/photos/stage30-history.js",
+      "sha": "9d2e894b16166028058fb25f52cd6d9e61c10cfc",
+      "size": 1197
+    },
+    {
+      "path": "src/modules/photos/stage30-illustration-editor.js",
+      "sha": "c53b061c333f3dad9bf605e29a9cadc6cc0ebfb0",
+      "size": 34421
+    },
+    {
+      "path": "src/modules/photos/stage31-illustration-editor.js",
+      "sha": "bc1d6a31d6988f0158a8509aa3c91cfbacd25d81",
+      "size": 36242
+    },
+    {
+      "path": "src/modules/photos/xlsx-import-persistence-stage14.js",
+      "sha": "da590bd85fd42abcea64afaf281b579c27b4544c",
+      "size": 1105
+    },
+    {
+      "path": "src/modules/preview/stage19-preview.js",
+      "sha": "14c4718b79a4c54da1ec8f36753c5f5327659c47",
+      "size": 11276
+    },
+    {
+      "path": "src/modules/quality/stage38-reasons.js",
+      "sha": "2517f807e1042e27fba45500d205a3148e65f193",
+      "size": 4668
+    },
+    {
+      "path": "src/modules/quality/stage39-1-ai-guards.js",
+      "sha": "2798b335f3e3078e7229e515a0b70da6c5bf8c88",
+      "size": 13124
+    },
+    {
+      "path": "src/modules/review/stage19-checklist.js",
+      "sha": "357e111d0c865cc3d4e2b75a442097abeb9eaa39",
+      "size": 1590
+    },
+    {
+      "path": "src/modules/review/stage19-deterministic.js",
+      "sha": "d0d28157d12e50435e41770cf0ece7e31219de7c",
+      "size": 5837
+    },
+    {
+      "path": "src/modules/review/stage19-render.js",
+      "sha": "386bf6f7ed2019217dc30fe33b0d6ce703161f37",
+      "size": 9461
+    },
+    {
+      "path": "src/modules/review/stage23-render.js",
+      "sha": "645e4b8952138e7205603123f8c438299f8523c6",
+      "size": 9573
+    },
+    {
+      "path": "src/modules/review/stage23-safe-fixes.js",
+      "sha": "f4caccc6092d5ca315980f2228bb1ef95de69f26",
+      "size": 2825
+    },
+    {
+      "path": "src/modules/review/stage26-deterministic.js",
+      "sha": "16c080e07a7a85023bf0aaf9f90887d6e73c29bc",
+      "size": 7994
+    },
+    {
+      "path": "src/modules/review/stage28-core.js",
+      "sha": "45a6a6b0dff9312a90e9ad022169ec5c3e9be42a",
+      "size": 12238
+    },
+    {
+      "path": "src/modules/review/stage28-render.js",
+      "sha": "33341f64077cd3b7d94b2a11b6f76d4034f2250a",
+      "size": 13803
+    },
+    {
+      "path": "src/modules/review/stage38-review-core.js",
+      "sha": "b3efbc9889c8a038ee7ba19bacb698c4e7ca2a81",
+      "size": 12304
+    },
+    {
+      "path": "src/modules/review/stage39-1-checklist.js",
+      "sha": "9bee465184be8250559c19e239a96afce37166f0",
+      "size": 1956
+    },
+    {
+      "path": "src/modules/review/stage39-1-safe-fixes.js",
+      "sha": "5ee65956454c04fb8075487efc0ba5af3123d7dc",
+      "size": 3335
+    },
+    {
+      "path": "src/modules/review/stage40-inline-review.js",
+      "sha": "ab4551d176998ecaf5c5091b683a326250eef1ad",
+      "size": 7579
+    },
+    {
+      "path": "src/modules/safety/local-iso7010-export-stage15.js",
+      "sha": "4d53d08bdef42ddd8a5b075e77df1bb3292c8789",
+      "size": 1209
+    },
+    {
+      "path": "src/modules/safety/local-iso7010-loader-stage15.js",
+      "sha": "59e5ebe166ebd349ac60f3084e6705e73ffe8068",
+      "size": 1281
+    },
+    {
+      "path": "src/modules/safety/stage19-icons-logo.js",
+      "sha": "29419b3942d945604a7b77d02e69d236805c04dc",
+      "size": 3245
+    },
+    {
+      "path": "src/modules/shared/stage19-blob-to-dataurl.js",
+      "sha": "0be6117f9af7c502dfde54d9c0a4f34f663ba482",
+      "size": 252
+    },
+    {
+      "path": "src/modules/shared/stage19-dataurl-to-blob.js",
+      "sha": "c68e4f133db267c8acfdc19c6ec02648b02742f4",
+      "size": 96
+    },
+    {
+      "path": "src/modules/shared/stage19-ui-helpers.js",
+      "sha": "773e1323c0fc6adf9344dec35e8c127f0777a8dd",
+      "size": 7758
+    },
+    {
+      "path": "src/modules/twi/stage19-from-sop.js",
+      "sha": "a4b21a32c194df27c249f03114b432aa425c1004",
+      "size": 4455
+    },
+    {
+      "path": "src/modules/twi/stage22-from-sop.js",
+      "sha": "8483624175b24f7d5e52579a88f012ff835e314a",
+      "size": 4538
+    },
+    {
+      "path": "src/modules/twi/stage24-from-sop.js",
+      "sha": "e31d21c05c52370479a00f338cb75442994d4e2b",
+      "size": 6010
+    },
+    {
+      "path": "src/modules/twi/stage24-merge.js",
+      "sha": "e93dc274804f351910e5b1352aa10685d9b134a4",
+      "size": 4977
+    },
+    {
+      "path": "src/modules/twi/stage24-preview.js",
+      "sha": "041c7711c1995ef1c3cb78c0618c7ccaab0f6074",
+      "size": 4893
+    },
+    {
+      "path": "src/modules/twi/stage29-from-sop.js",
+      "sha": "3891f29547941cfe32439a15c94989d66091c8c7",
+      "size": 6238
+    },
+    {
+      "path": "src/modules/twi/stage36-1-print-xlsx.js",
+      "sha": "28494d0454ae81e3d12ff06f9e0430e01ee056be",
+      "size": 17864
+    },
+    {
+      "path": "src/modules/twi/stage38-print-xlsx.js",
+      "sha": "3ac3c2ed541f105d34a59aea749c752fdd9f3c59",
+      "size": 18020
+    },
+    {
+      "path": "src/patches/stage13-integrations.json",
+      "sha": "3377508bbb8e6ffbefc53f5ec1155ebe9ea54b1b",
+      "size": 19427
+    },
+    {
+      "path": "src/patches/stage14-integrations.json",
+      "sha": "18daf0cecf304250a6c38ae614939a127350208d",
+      "size": 69011
+    },
+    {
+      "path": "src/styles/inline-01.html",
+      "sha": "b9e8d10b360ea2fa6864a41cd0c2343eda785d22",
+      "size": 4968
+    },
+    {
+      "path": "src/styles/inline-02.html",
+      "sha": "28c8b4077544f87c92fd009ae354e2b74e684ae5",
+      "size": 539
+    },
+    {
+      "path": "src/styles/inline-03.html",
+      "sha": "55b7f69847767abe7c83536dafa280c7b7398a75",
+      "size": 6137
+    },
+    {
+      "path": "src/styles/inline-04.html",
+      "sha": "4ab5f92267e54dc76ba1bc11403b6586a68e3629",
+      "size": 471
+    },
+    {
+      "path": "src/styles/inline-05.html",
+      "sha": "5a66ed353986086189c57480cf6397686851785b",
+      "size": 3902
+    },
+    {
+      "path": "src/styles/tailwind-4.1.10-local.css",
+      "sha": "8b8cd74ea767c848001dc03350b0af763f7d5e29",
+      "size": 26063
+    },
+    {
+      "path": "src/vendor/ExcelJS_LICENSE.txt",
+      "sha": "e3aa07e7d910aa2e216eb4a58c89100ee6e615fd",
+      "size": 1083
+    },
+    {
+      "path": "src/vendor/exceljs.min.js",
+      "sha": "db8015d619026253d574bed2a01865c05baec99a",
+      "size": 947663
+    },
+    {
+      "path": "tests/test_build.py",
+      "sha": "c97b0f361854af92ae8a8a2d491b1aa33abb0f09",
+      "size": 696
+    },
+    {
+      "path": "tests/test_stage12.py",
+      "sha": "7b79aca46b35db1be08d15cdc4df72c2679c8ded",
+      "size": 1511
+    },
+    {
+      "path": "tests/test_stage13.py",
+      "sha": "728db4b36809e399f2cec9c393abda7e7fedc482",
+      "size": 1409
+    },
+    {
+      "path": "tests/test_stage14.py",
+      "sha": "573c46664703026313445af1c71d269e843644a4",
+      "size": 2861
+    },
+    {
+      "path": "tests/test_stage15.py",
+      "sha": "097b2efbf7dd9792da2e7264902ad555d4a58da5",
+      "size": 3068
+    },
+    {
+      "path": "tests/test_stage16.py",
+      "sha": "d92d1d1371d2dbc3cae2f0e5fd24fc5fb1739998",
+      "size": 3780
+    },
+    {
+      "path": "tests/test_stage17.py",
+      "sha": "30a0ec96994b122bc98dca07aed405ac60134470",
+      "size": 3160
+    },
+    {
+      "path": "tests/test_stage18.py",
+      "sha": "916ddcf0375a1caa6e944f264fb5fcf1dd14c253",
+      "size": 4470
+    },
+    {
+      "path": "tests/test_stage19.py",
+      "sha": "bed09621c3ddf67da330eebce523ff9479dd046e",
+      "size": 3837
+    },
+    {
+      "path": "tests/test_stage20.py",
+      "sha": "a8e9fa71b90fa76a45111ccc3459b969f0163328",
+      "size": 5082
+    },
+    {
+      "path": "tests/test_stage21.py",
+      "sha": "835c9b6e8805617c71abd6301e518eb1384cd9d9",
+      "size": 5691
+    },
+    {
+      "path": "tests/test_stage22.py",
+      "sha": "32c030cd0e3ea37e669cd8279f22195958efbbb8",
+      "size": 6817
+    },
+    {
+      "path": "tests/test_stage23.py",
+      "sha": "db08a62d00e598593e0df3dae93e5925e5da959b",
+      "size": 7687
+    },
+    {
+      "path": "tests/test_stage24.py",
+      "sha": "5914d617e66bf6d5c216c8168c3c106087922fef",
+      "size": 8089
+    },
+    {
+      "path": "tests/test_stage25.py",
+      "sha": "49c57a791831914b7a1aa14fee61ffbfe10d5221",
+      "size": 6889
+    },
+    {
+      "path": "tests/test_stage26.py",
+      "sha": "f9f4f698890725ad068ea5edf2f54455db749d63",
+      "size": 12582
+    },
+    {
+      "path": "tests/test_stage27.py",
+      "sha": "cad8daeb7e4ecf34d305188c14c898140ac68392",
+      "size": 6193
+    },
+    {
+      "path": "tests/test_stage28.py",
+      "sha": "dc33b1551210f9dc6d84fc0a45489581a8d2a455",
+      "size": 8325
+    },
+    {
+      "path": "tests/test_stage29.py",
+      "sha": "3b13e4af455c9e1fe7b0d61079479d8cc771cad0",
+      "size": 7722
+    },
+    {
+      "path": "tests/test_stage30.py",
+      "sha": "6d4570478b8821fa67bc2feae22618183f6f58e9",
+      "size": 5022
+    },
+    {
+      "path": "tests/test_stage31.py",
+      "sha": "1fe78947b76b7b9bb916fee14ceb2109e58af2db",
+      "size": 2385
+    },
+    {
+      "path": "tests/test_stage32.py",
+      "sha": "e2ba2bb48ffade824846e994cdfc1925b4219d54",
+      "size": 5242
+    },
+    {
+      "path": "tests/test_stage33.py",
+      "sha": "da16dd95193665ed5bc0b93019af8037fd01aeda",
+      "size": 6564
+    },
+    {
+      "path": "tests/test_stage34.py",
+      "sha": "08a425b9a04e00224bb38ffd28f9d2eef15148ea",
+      "size": 8196
+    },
+    {
+      "path": "tests/test_stage35.py",
+      "sha": "1932e7297ab7d00ee3c31a842d599d2101b2decd",
+      "size": 5336
+    },
+    {
+      "path": "tests/test_stage36.py",
+      "sha": "058d7207af7adbdc7ed3fe7903baf613fbf58f74",
+      "size": 1977
+    },
+    {
+      "path": "tests/test_stage36_1.py",
+      "sha": "3ee728f44599d80729c502760ae987542b9ed6dc",
+      "size": 2291
+    },
+    {
+      "path": "tests/test_stage37.py",
+      "sha": "bcf6650e9c0e4295e769ddddeacceda265e3ddff",
+      "size": 2792
+    },
+    {
+      "path": "tests/test_stage38.py",
+      "sha": "a2f336d716d0f1197cde9f7c9fb18b3f5365d17e",
+      "size": 4977
+    },
+    {
+      "path": "tests/test_stage39.py",
+      "sha": "c04f044adc1d55ac26822c52a03dc87c4eaaf154",
+      "size": 2549
+    },
+    {
+      "path": "tests/test_stage39_1.py",
+      "sha": "54fae8a9a9f4e13c1017fe395d27f8a3d204e7e1",
+      "size": 6117
+    },
+    {
+      "path": "tests/test_stage40.py",
+      "sha": "ec356ada523c21e7fff72731f04fe1e1c8d6c293",
+      "size": 2613
+    },
+    {
+      "path": "tests/test_stage41.py",
+      "sha": "b7f6119c52dc97a2b0b63ba78819ca84b6581624",
+      "size": 2758
+    },
+    {
+      "path": "tests/test_stage42.py",
+      "sha": "89c9a7606db6a8841a43a63f8dbd4a77901eebd2",
+      "size": 5072
+    },
+    {
+      "path": "tests/test_stage43.py",
+      "sha": "42dc1ff4041ea1c39b23c59fd2e29fbeeea174e3",
+      "size": 1816
+    },
+    {
+      "path": "tools/build.py",
+      "sha": "8332d1cf73b91674536617e74fcd38cf6ae41ac2",
+      "size": 2079
+    },
+    {
+      "path": "tools/build_stage12.py",
+      "sha": "85b3564d8b6962b85a37c47a7db7e13b4ba89949",
+      "size": 2983
+    },
+    {
+      "path": "tools/build_stage13.py",
+      "sha": "dd0d8ce921bd2159f670017cba8175dd7c9827ff",
+      "size": 2339
+    },
+    {
+      "path": "tools/build_stage14.py",
+      "sha": "eb40fb53934a2356c51f5d12d49a7b716706c00a",
+      "size": 3133
+    },
+    {
+      "path": "tools/build_stage15.py",
+      "sha": "3f52e71058ec752df9cb5bcbf842446ca8afa2dd",
+      "size": 5683
+    },
+    {
+      "path": "tools/build_stage16.py",
+      "sha": "203207eb30a205e1d344f35858db5ff567f86d43",
+      "size": 8735
+    },
+    {
+      "path": "tools/build_stage17.py",
+      "sha": "6f9af62d899206634efe358ae34ed82f9769db1e",
+      "size": 1424
+    },
+    {
+      "path": "tools/build_stage18.py",
+      "sha": "3d40dfb968c4650b0aa110f127bf8b4838407527",
+      "size": 2076
+    },
+    {
+      "path": "tools/build_stage19.py",
+      "sha": "a3309249ea2db9f301e3bb564b450d0bedbd1db9",
+      "size": 4326
+    },
+    {
+      "path": "tools/build_stage20.py",
+      "sha": "978b3de46bc7b1f307286473c1c788e5172bbf8d",
+      "size": 2077
+    },
+    {
+      "path": "tools/build_stage21.py",
+      "sha": "22115cabd7a9f2bff99f5d8965b1ec085c2212af",
+      "size": 2030
+    },
+    {
+      "path": "tools/build_stage22.py",
+      "sha": "bd2e95156dd8ac8154e00fee142e330e8ed86618",
+      "size": 2377
+    },
+    {
+      "path": "tools/build_stage23.py",
+      "sha": "e9bccd20706cb570dfaed24c9cae28b371bf2077",
+      "size": 2846
+    },
+    {
+      "path": "tools/build_stage24.py",
+      "sha": "2341612dcfe69757ecad62d07325a5408197d1c2",
+      "size": 3797
+    },
+    {
+      "path": "tools/build_stage25.py",
+      "sha": "c980b8b8140ade04cc7da326b136a60fe6544be1",
+      "size": 2984
+    },
+    {
+      "path": "tools/build_stage26.py",
+      "sha": "0ced6c7677eda5fda039b431936646a241807c1b",
+      "size": 3013
+    },
+    {
+      "path": "tools/build_stage27.py",
+      "sha": "12e981f3fc7d5aebbebde246b75f5175354a50fc",
+      "size": 3053
+    },
+    {
+      "path": "tools/build_stage28.py",
+      "sha": "02bd3828ceb31c7580795626a46efa7391c664c2",
+      "size": 3247
+    },
+    {
+      "path": "tools/build_stage29.py",
+      "sha": "231c9f0163dbaf6c08a3ef985fce188e3ccaf644",
+      "size": 3328
+    },
+    {
+      "path": "tools/build_stage30.py",
+      "sha": "20ac2e9ab99fb6e670316c048955f7498aed47d0",
+      "size": 3427
+    },
+    {
+      "path": "tools/build_stage31.py",
+      "sha": "5fdf5dd2364f41b16b2eb295446b65e2d79320cb",
+      "size": 3742
+    },
+    {
+      "path": "tools/build_stage32.py",
+      "sha": "8fbdd97a5f4f5583a713e4182787f3073259e7b8",
+      "size": 4089
+    },
+    {
+      "path": "tools/build_stage33.py",
+      "sha": "df8dd129eed4335ec2ceb5123007dc4d8f49daab",
+      "size": 5477
+    },
+    {
+      "path": "tools/build_stage34.py",
+      "sha": "8fd32c2fb16cae0e90ed8d4abfa10a1120c232cb",
+      "size": 5703
+    },
+    {
+      "path": "tools/build_stage35.py",
+      "sha": "b2c29f60596d3650ae3fb0c18d35c567a8fe0fed",
+      "size": 5707
+    },
+    {
+      "path": "tools/build_stage36.py",
+      "sha": "a125c1388785e43e83c6fa259bb8000cd8ab374f",
+      "size": 5610
+    },
+    {
+      "path": "tools/build_stage36_1.py",
+      "sha": "f37b171d3fb2ce9f56bbb54d7290491e74188c13",
+      "size": 5693
+    },
+    {
+      "path": "tools/build_stage37.py",
+      "sha": "6331272d264937b8273a060419576ccf61ab85d9",
+      "size": 5700
+    },
+    {
+      "path": "tools/build_stage38.py",
+      "sha": "39529d1876c79adff3d72e3e2cdaceb0bfdfa394",
+      "size": 6550
+    },
+    {
+      "path": "tools/build_stage39.py",
+      "sha": "df320273fcea8efda5256269e1e3f0af0fe085f3",
+      "size": 2764
+    },
+    {
+      "path": "tools/build_stage39_1.py",
+      "sha": "3e36d7ddd291baf694fffeb8ef52e6f4770f1696",
+      "size": 4616
+    },
+    {
+      "path": "tools/build_stage40.py",
+      "sha": "b872dd895dc9a141bc079f23a437cae959c03b05",
+      "size": 2768
+    },
+    {
+      "path": "tools/build_stage41.py",
+      "sha": "de1f01ab14a91baf1868abedf7eadd6cabb14f86",
+      "size": 2716
+    },
+    {
+      "path": "tools/build_stage42.py",
+      "sha": "5f40709ea81701984c8a1090a66ffdf3b9f0b197",
+      "size": 2934
+    },
+    {
+      "path": "tools/build_stage43.py",
+      "sha": "f3560a756779f2801282ef54627ff866180163be",
+      "size": 1785
+    }
+  ]
+}
