@@ -51,7 +51,7 @@ export function progressFor(db,a){
 const active=(db,table,id)=>{invariant(isId(id),'Выберите запись: '+table);const x=one(db,'SELECT * FROM '+table+' WHERE id=?',[id]);invariant(x&&!x.archived,'Запись недоступна: '+table);return x};
 const person=(db,id)=>active(db,'person',id);
 const optional=(db,table,id)=>id===null?null:active(db,table,id);
-const eventDay=e=>e.occurred_at.slice(0,10);
+const eventDay=e=>new Date(Date.parse(e.occurred_at)+14*3600000).toISOString().slice(0,10);
 function roleMatches(db,id,day,allowed){return directoryPeople(db,day).find(x=>x.id===id)?.roles.some(x=>allowed.includes(x.kind))}
 function hasRole(db,id,day,allowed){person(db,id);invariant(roleMatches(db,id,day,allowed),'У сотрудника нет действующего назначения нужной роли')}
 function roleForCredential(role){return role==='mentor'?['mentor']:['instructor']}
@@ -95,10 +95,10 @@ function latest(db,table,where,args,dayColumn){
 }
 export function latestVerification(db,id,kind){return latest(db,'training_verification','assignment_id=? AND kind=?',[id,kind],'evaluated_on')}
 export function latestAssessment(db,id,kind){return latest(db,'assessment_session',"assignment_id=? AND assessment_kind=? AND state='confirmed'",[id,kind],'assessed_at')}
-export function latestQualification(db,personId,skillId){
+export function latestQualification(db,personId,skillId,day='9999-12-31'){
  return one(db,`SELECT i.*,s.person_id,s.assessed_at,s.standard_revision_id,s.evaluator_id,s.assignment_id,s.recorded_at
  FROM assessment_item i JOIN assessment_session s ON s.id=i.session_id
- WHERE s.person_id=? AND i.skill_id=? AND s.state='confirmed' ORDER BY s.assessed_at DESC,coalesce(s.recorded_at,'') DESC,s.id DESC LIMIT 1`,[personId,skillId])
+ WHERE s.person_id=? AND i.skill_id=? AND s.state='confirmed' AND substr(s.assessed_at,1,10)<=? ORDER BY s.assessed_at DESC,coalesce(s.recorded_at,'') DESC,s.id DESC LIMIT 1`,[personId,skillId,day])
 }
 export function admissionStatus(db,personId,operationId,day){
  const a=latest(db,'admission_decision','person_id=? AND operation_id=? AND decided_on<=?',[personId,operationId,day],'decided_on');
@@ -283,7 +283,7 @@ export function applyTrainingEvent(db,e,old){
   const a=freshAssignment(db,p);person(db,p.actor_id);noFuture(p.decided_on,e);
   invariant(a.state!=='cancelled'&&a.approval_json&&isCurrentStandard(db,a.sop_revision_id)&&p.actor_id!==a.trainee_id&&p.decided_on>=a.assigned_on&&period(p.decided_on,p.valid_until)&&['granted','denied'].includes(p.decision)&&required(p.evidence)&&required(p.feedback),'Допуск требует явного решения ответственного, даты, основания и обратной связи');
   const q=latestAssessment(db,a.id,'qualification'),pr=latestAssessment(db,a.id,'practical'),s=latestVerification(db,a.id,'safety'),th=latestVerification(db,a.id,'theory');
-  const previous=admissionStatus(db,a.trainee_id,a.operation_id,p.decided_on).record;
+  const previous=latest(db,'admission_decision','person_id=? AND operation_id=?',[a.trainee_id,a.operation_id],'decided_on');
   invariant(!previous||p.decided_on>=previous.decided_on,'Нельзя подменить историю более ранним решением');
   if(p.decision==='granted'){
    const item=q&&one(db,'SELECT * FROM assessment_item WHERE session_id=?',[q.id]);
@@ -327,7 +327,7 @@ export function matrixData(db,day){
  const requirements=rows(db,"SELECT * FROM role_requirement WHERE valid_from<=? AND coalesce(valid_to,'9999-12-31')>=?",[day,day]);
  const cells=new Map();for(const p of people)for(const s of skills){
   const goal=requirements.find(x=>x.profession_id===p.profession_id&&x.skill_id===s.id)||null;
-  const fact=latestQualification(db,p.id,s.id),same=!goal||fact?.scale_id===goal.scale_id;
+  const fact=latestQualification(db,p.id,s.id,day),same=!goal||fact?.scale_id===goal.scale_id;
   const valid=!!(fact?.observation_state==='rated'&&(!fact.valid_until||fact.valid_until>=day));
   const adm=s.operation_id?admissionStatus(db,p.id,s.operation_id,day):null;
   cells.set(p.id+':'+s.id,{goal,fact,same,valid,admission:adm,gap:!!(goal&&(!valid||!same||fact.level<goal.required_level)),qualified:!!(valid&&same&&(!goal||fact.level>=goal.required_level)&&(!adm||adm.current))})

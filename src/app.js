@@ -1,3 +1,4 @@
+import {TRAINING_PAGES,trainingScreen,resetTrainingRoute,setTrainingRoute} from './modules/training/screens.js';
 import {directoryPeople} from './modules/master-data/people-directory.js';
 import {openPeopleDropdown,closePeopleDropdown} from './ui/people-picker.js';
 import {stage43Checklist,weightedResult,stage43Checks} from './modules/library/stage43-checklist.js';
@@ -27,7 +28,7 @@ const navGroups=[
  ['Управление центром',['org_unit','import_xlsx','storage']],
  ['Справочники',['profession','position','work_shift','equipment','operation','person_assignment','business_role','role_assignment','skill_category','skill','rating_scale']]
 ];
-const implemented=new Set(['home','sop','sop_constructor','frv','twi_plans','sop_evaluation','storage','import_xlsx',...Object.keys(definitions)]);
+const implemented=new Set(['home','sop','sop_constructor','frv','twi_plans','sop_evaluation','storage','import_xlsx',...TRAINING_PAGES,...Object.keys(definitions)]);
 const collapsedNav=new Set(['Производственное обучение','Наставники и ВТ','Аналитика','Справочники']);
 let librarySelected=null,libraryRevisionSelected=null,evaluationSelected=null,evaluationTab='weighted',evaluationSearch='';
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n}
@@ -38,8 +39,9 @@ function message(s,bad=false){status=s;error=bad;const n=document.getElementById
 function navigate(p){
  if(busy)return;
  if(editorSession&&!editorSession.host.hidden)hideEditor(editorSession);
- closePeopleDropdown();page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;libraryRevisionSelected=null;if(p==='sop_evaluation'){evaluationSelected=null;evaluationTab='weighted';evaluationSearch=''}render()
+ closePeopleDropdown();resetTrainingRoute();page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;libraryRevisionSelected=null;if(p==='sop_evaluation'){evaluationSelected=null;evaluationTab='weighted';evaluationSearch=''}render()
 }
+function goTraining(p,options={}){navigate(p);setTrainingRoute(p,options);render()}
 function openImport(type){importState={type,book:null,sheet:0,header:1,mapping:{},allowUpdates:false,plan:null,file:''};navigate('import_xlsx')}
 function openHistory(id){navigate('person_assignment');historyPerson=id;archiveFilter='all';render()}
 async function persist(){if(cache)generation=await local.saveWorkspace(cache,generation,ws.state())}
@@ -88,6 +90,9 @@ function home(main){
  const todayIso=today(),overdue=one(ws.working,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='effective' AND d.archived=0 AND r.review_due<?",[todayIso]).n;
  const without=one(ws.working,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='draft' AND d.archived=0 AND (r.print_format IS NULL OR r.workplace_id IS NULL)").n;
  const needs=pane('Требует внимания',add(el('div',undefined,'attention-row'),el('strong',String(overdue),overdue?'bad':'muted'),el('span','Просроченный пересмотр действующих СОП'),btn('Открыть',()=>{navigate('sop');libraryFilter='overdue';render()})),add(el('div',undefined,'attention-row'),el('strong',String(without),without?'warn':'muted'),el('span','Черновики без подтверждённого паспорта'),btn('Открыть',()=>{navigate('sop');libraryFilter='missing_passport';render()})));
+ const overdueTraining=one(ws.working,"SELECT count(*) n FROM training_assignment WHERE source_sha256 IS NOT NULL AND state IN('planned','in_progress') AND due_on<?",[todayIso]).n;
+ const revisedTraining=one(ws.working,"SELECT count(*) n FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1)").n;
+ needs.append(add(el('div',undefined,'attention-row'),el('strong',String(overdueTraining),overdueTraining?'warn':'muted'),el('span','Просроченные назначения обучения'),btn('Открыть',()=>goTraining('twi',{filter:'overdue'}))),add(el('div',undefined,'attention-row'),el('strong',String(revisedTraining),revisedTraining?'warn':'muted'),el('span','Обучение по прежним редакциям СОП'),btn('Открыть',()=>goTraining('retraining'))));
  main.append(needs);
  main.append(sectionHeading('Справочники предприятия','Активные записи'));
  const g=el('div',undefined,'kpi-grid');
@@ -97,7 +102,7 @@ function home(main){
  const c=el('div',undefined,'chart');c.style.height=Math.max(290,Object.keys(definitions).length*29)+'px';main.append(pane('Структура справочников',c));
  if(window.echarts){chart=echarts.init(c,theme?'dark':null);chart.setOption(registryCountChart(Object.values(definitions).map(x=>x.label),Object.keys(definitions).map(k=>counts[k]),theme))}
  const links=el('div',undefined,'workspace-grid');for(const [k,n] of Object.entries(planned).filter(([k])=>implemented.has(k))){const b=btn('',()=>navigate(k),'workspace-link');b.append(icon(k),el('span',n));links.append(b)}
- main.append(pane('Рабочие модули',el('p','СОП, ФРВ, TWI, компетенции, наставничество и аудит — равноправные модули центра. Доступны база, справочники, библиотека СОП и ФРВ. Остальные функциональные модули будут подключаться последовательно.','muted'),links))
+ main.append(pane('Рабочие модули',el('p','СОП, ФРВ, TWI, компетенции, наставничество и аудит — равноправные модули центра. Доступны база, справочники, библиотека СОП, ФРВ, обучение, компетенции и наставники. Аудит L1 и расширенная аналитика подключаются отдельно.','muted'),links))
 }
 function form(type,v){
  const d=definitions[type],f=el('form'),grid=el('div',undefined,'formgrid'),controls={};
@@ -384,6 +389,7 @@ function relatedPanel(doc,rev,kind){
   }catch(e){out.replaceChildren(el('p',e.message,'bad'));open.disabled=false}
  });
  const buttons=add(el('div',undefined,'row'),open,btn('Карточка СОП',()=>goDocument(doc.id,rev.id)));
+ if(kind==='twi'&&rev.state==='effective'&&!doc.archived)buttons.append(btn('Назначить обучение',()=>goTraining('twi',{mode:'new',revisionId:rev.id}),'primary',!!ws.conflicts.length));
  if(editableRevision(doc,rev))buttons.append(btn(rev.state==='draft'?(kind==='frv'?'Редактировать ФРВ по СОП':'Открыть план TWI'):'Создать новую редакцию СОП',()=>openRelated(c,kind),'primary',!!ws.conflicts.length));
  return add(el('div'),buttons,out)
 }
@@ -623,7 +629,7 @@ function render(){
  if(ws.conflicts.length)main.append(el('p','Есть конфликты локальных изменений. Откройте «База и обмен».','bad'));
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));main.inert=!!editorSession&&!editorSession.host.hidden;if(editorSession?.loaded)editorSession.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'theme',theme:theme?'dark':'light'},'*');
- if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(page==='twi')main.append(pane('TWI в составе СОП',el('p','План TWI сохраняется вместе с версией СОП и доступен в редакторе Stage43. Назначения обучения и практические оценки будут реализованы на LC4.','muted'),btn('Открыть библиотеку СОП',()=>navigate('sop'),'primary')));else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
+ if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,readContent,pick,downloadBytes});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
  main.append(el('p','LC3.7 · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
