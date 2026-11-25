@@ -59,10 +59,23 @@ export function readMatrixRange(sheet,{headerRow,firstRow,lastRow,personCol,firs
  invariant(people.length&&cols.length&&people.length*cols.length<=12000,'Нет данных или превышен лимит 12000 ячеек');return {people,cols}
 }
 export function suggestMatrixRange(sheet){
- let headerRow=5,personCol=2;
- for(let r=1;r<=Math.min(25,sheet.rowCount);r++)for(let c=1;c<=Math.min(12,sheet.columnCount);c++){const text=normalizeMatrixText(sheet.getCell(r,c).text).replace(/\./g,'');if(['фио','ф и о','сотрудник','фамилия имя отчество'].includes(text)){headerRow=r;personCol=c;r=26;break}}
- const lastSkill=Math.min(sheet.columnCount,personCol+151);
- return {headerRow,personCol,firstRow:Math.min(sheet.rowCount,headerRow+2),lastRow:Math.min(sheet.rowCount,headerRow+1+300),firstSkill:personCol+2,lastSkill}
+ let headerRow=5,personCol=2,found=false;
+ const isName=v=>['фио','ф и о','сотрудник','фамилия имя отчество'].includes(normalizeMatrixText(v).replace(/\./g,''));
+ for(let r=1;r<=Math.min(25,sheet.rowCount)&&!found;r++)for(let c=1;c<=Math.min(12,sheet.columnCount);c++)if(isName(sheet.getCell(r,c).text)){headerRow=r;personCol=c;found=true;break}
+ const firstSkill=personCol+(/должност|професси/.test(normalizeMatrixText(sheet.getCell(headerRow,personCol+1).text))?2:1);
+ let lastSkill=firstSkill-1;
+ for(let c=firstSkill;c<=Math.min(sheet.columnCount,firstSkill+149);c++){
+  const label=normalizeMatrixText(sheet.getCell(headerRow,c).text);
+  if(!label||/компетенци[ияй].*сотрудник|потребност|суммарн|^итого|^состояние/.test(label))break;lastSkill=c
+ }
+ if(lastSkill<firstSkill)lastSkill=Math.max(firstSkill,Math.min(sheet.columnCount,firstSkill+149));
+ let firstRow=headerRow+1;
+ for(;firstRow<=Math.min(sheet.rowCount,headerRow+8);firstRow++){const name=sheet.getCell(firstRow,personCol).text.trim();if(name&&!isName(name)&&!/^должност|^дата|^инструкторы$/i.test(name))break}
+ let lastRow=firstRow-1;
+ for(let r=firstRow;r<=Math.min(sheet.rowCount,firstRow+299);r++){const name=normalizeMatrixText(sheet.getCell(r,personCol).text),left=Array.from({length:personCol},(_,i)=>normalizeMatrixText(sheet.getCell(r,i+1).text)).join(' ');
+  if(!name||/состояние подразделения|состояние процесса|потребности|^итого|^целевое состояние|^легенда/.test(left.trim()))break;lastRow=r
+ }
+ return {headerRow,personCol,firstRow,lastRow:Math.max(firstRow,lastRow),firstSkill,lastSkill}
 }
 export function reconcileMatrix(source,personMap,columnMap,projection){
  const people=source.people.filter(p=>personMap.get(p.row)),cols=source.cols.filter(c=>columnMap.get(c.col));
