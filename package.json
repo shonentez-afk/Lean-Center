@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "node tools/build_folder.mjs && python tools/package_folder.py",
-    "test": "node --test tests/lc1-core.test.mjs tests/lc1-analytics.test.mjs tests/lc2-master.test.mjs",
-    "smoke": "node tests/lc1-folder-browser.mjs && node tests/lc2-browser.mjs"
+    "test": "node --test tests/lc1-core.test.mjs tests/lc1-analytics.test.mjs tests/lc2-master.test.mjs tests/lc3-library.test.mjs",
+    "smoke": "node tests/lc1-folder-browser.mjs && node tests/lc2-browser.mjs && node tests/lc3-browser.mjs"
   },
   "dependencies": {
     "sql.js": "1.13.0",

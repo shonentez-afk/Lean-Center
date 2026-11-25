@@ -5,7 +5,7 @@ const MAX_EXPANDED=100*1024*1024;
 const normalized=s=>foldKey(s).replace(/[^\p{L}\p{N}]+/gu,'');
 export function fieldLabel(type,key){
  const f=definitions[type].fields[key];
- if(f.ref){if(f.ref==='person')return 'Табельный номер сотрудника';if(f.ref==='skill_category')return 'Название категории';if(f.ref==='equipment')return 'Код оборудования';if(f.ref==='operation')return 'Код операции (подразделение/код)';return 'Код '+({org_unit:key==='parent_id'?'родительского подразделения':'подразделения',profession:'профессии',position:'должности',work_shift:'смены',business_role:'роли'})[f.ref]}
+ if(f.ref){if(f.ref==='person')return 'Табельный номер сотрудника';if(f.ref==='skill_category')return 'Название категории';if(f.ref==='equipment')return 'Код оборудования';if(f.ref==='operation')return 'Код операции (подразделение/код)';return 'Код '+({org_unit:key==='parent_id'?'родительского подразделения':'подразделения',profession:'профессии',position:'должности',work_shift:'смены',business_role:'роли',workplace:'рабочего места'})[f.ref]}
  return f.label;
 }
 export function importFields(type){return Object.entries(definitions[type].fields).filter(([,f])=>!f.legacy)}
@@ -67,7 +67,7 @@ function cellText(v,f,key){
 function findRef(db,ref,value,unitId){
  if(!value)return null;
  let matches=list(db,ref).filter(x=>!x.archived);
- if(ref==='equipment'||ref==='operation'){
+ if(['equipment','operation','workplace'].includes(ref)){
   let code=value,unit=unitId;const split=value.indexOf('/');
   if(split>=0){const u=value.slice(0,split);const found=list(db,'org_unit').filter(x=>!x.archived&&foldKey(x.code)===foldKey(u));invariant(found.length===1,'Неоднозначный/неизвестный код подразделения: '+u);unit=found[0].id;code=value.slice(split+1)}
   matches=matches.filter(x=>(!unit||x.unit_id===unit)&&foldKey(x.code)===foldKey(code));
@@ -103,7 +103,7 @@ export function planImport(ws,type,source,{allowUpdates=false}={}){
      p[k]=f.ref?findRef(db,f.ref,item.v[k],p.unit_id):item.v[k]
     }
     // Stable identities are mandatory even in an update import.
-    const keys=type==='person'?['employee_code']:type==='person_assignment'?['person_id','valid_from']:type==='role_assignment'?['person_id','role_id','valid_from']:type==='skill_category'?['name']:type==='skill'?['category_id','name']:type==='rating_scale'?['name','version_no']:['equipment','operation'].includes(type)?['unit_id','code']:['code'];
+    const keys=type==='person'?['employee_code']:type==='person_assignment'?['person_id','valid_from']:type==='role_assignment'?['person_id','role_id','valid_from']:type==='skill_category'?['name']:type==='skill'?['category_id','name']:type==='rating_scale'?['name','version_no']:['equipment','operation','workplace'].includes(type)?['unit_id','code']:['code'];
     invariant(keys.every(k=>p[k]!=null),'Не заполнен ключ: '+keys.map(k=>fieldLabel(type,k)).join(', '));
     const key=identityKey(type,p);
     if(seen.has(key)){const previous=seen.get(key);previous.status='error';previous.message='Дубликат ключа в файле (строка '+item.row+')';throw Error('Дубликат ключа в файле (строка '+previous.row+')')}

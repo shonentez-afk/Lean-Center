@@ -23,3 +23,7 @@ tests/test_schema.py проверяет SQL, внешние ключи, смеш
 
 ## LC2, схема v3
 [003_lc2.sql](../db/migrations/003_lc2.sql) добавляет position, work_shift, business_role и role_assignment, поля назначения, ревизии skill/category/rating_scale; уровни шкал хранятся в существующей rating_level. Старая таблица person_role зарезервирована legacy и не использовалась LC1; при наличии строк нужна отдельная миграция. Сервисные проверки, совместимость v2 и импорт описаны в [LC2_RU.md](LC2_RU.md).
+
+
+## LC3.1, схема v5
+[004_lc3.sql](../db/migrations/004_lc3.sql) включает detached Stage43 source/версионирование; [005_lc3_requirements.sql](../db/migrations/005_lc3_requirements.sql) добавляет workplace, operation.workplace_id, паспорт document_revision, sop_evaluation/response, sop_frv_origin и ревизию checklist_version. Методика SOP_APP4 отделена от L1, одна действующая версия, старые архивируются без изменения критериев/оценок. Исторические оценки привязаны к методике, версии СОП и SHA256 исходника. Просрочка от фактической даты изменения +12 календарных месяцев; при редактировании черновика паспорт сбрасывается. Подробности и границы: [LC3_RU.md](LC3_RU.md).

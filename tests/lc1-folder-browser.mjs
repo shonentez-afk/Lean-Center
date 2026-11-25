@@ -19,7 +19,7 @@ async function newPage(){
  return {page,context};
 }
 async function home(page){
- await page.getByRole('heading',{name:'Обзор центра',exact:true}).waitFor();
+ await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();
  assert.equal(await page.evaluate(()=>typeof window.echarts?.init),'function');
  assert.equal(await page.evaluate(()=>typeof window.initSqlJs),'function');
  await page.locator('.chart canvas').first().waitFor();
@@ -28,14 +28,14 @@ async function chartColor(page,expected){
  const actual=await page.evaluate(()=>window.echarts.getInstanceByDom(document.querySelector('.chart')).getOption().series[0].itemStyle.color);
  assert.equal(actual,expected);
 }
-async function storage(page){await page.getByRole('button',{name:'База и обмен',exact:true}).click()}
+async function storage(page){await page.getByRole('button',{name:'Настройки и обмен',exact:true}).click()}
 async function person(page){await page.getByRole('button',{name:'Сотрудники',exact:true}).first().click();await page.getByRole('cell',{name:'QA Employee'}).waitFor()}
 try{
  const {page,context}=await newPage();
  await page.goto(pathToFileURL(entry).href);
  await home(page);
- assert.equal(await page.evaluate(()=>window.LC_BUILD.version),'lc2.0');
- assert.equal(await page.evaluate(()=>document.querySelectorAll('script[src]').length),6);
+ assert.equal(await page.evaluate(()=>window.LC_BUILD.version),'lc3.2');
+ assert.equal(await page.evaluate(()=>document.querySelectorAll('script[src]').length),7);
  assert.equal(await page.evaluate(()=>document.querySelectorAll('script:not([src])').length),0);
  assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--tn-red').trim()),'#E30613');
  assert.match(await page.evaluate(()=>getComputedStyle(document.documentElement).fontFamily),/Proxima Nova Rg/);
@@ -61,10 +61,10 @@ try{
  await person(page);await page.screenshot({path:'artifacts/lc1-tn/registry.png',fullPage:true});
  // Simulate installing a new version next to the old one, switching only the
  // stable index.html, and keeping the local working state.
- const next=path.join(dest,'versions','lc2.0-test-update');
- await fs.cp(path.join(dest,'versions','lc2.0'),next,{recursive:true});
+ const next=path.join(dest,'versions','lc3.2-test-update');
+ await fs.cp(path.join(dest,'versions','lc3.2'),next,{recursive:true});
  const html=await fs.readFile(entry,'utf8');
- await fs.writeFile(entry,html.replaceAll('versions/lc2.0/','versions/lc2.0-test-update/'));
+ await fs.writeFile(entry,html.replaceAll('versions/lc3.2/','versions/lc3.2-test-update/'));
  await page.reload();await home(page);await person(page);
  await storage(page);
  const download=page.waitForEvent('download');
@@ -84,8 +84,8 @@ try{
  await second.context.close();
  assert.deepEqual(errors,[]);
  assert.equal(requests.some(u=>/^https?:/i.test(u)),false,'External HTTP dependency');
- for(const p of ['app/config.js','vendor/sql-wasm-data.js','vendor/sql-wasm.js','vendor/echarts.min.js','vendor/exceljs.min.js','app/main.js','assets/styles.css'])
+ for(const p of ['app/config.js','vendor/sql-wasm-data.js','vendor/sql-wasm.js','vendor/echarts.min.js','vendor/exceljs.min.js','app/main.js','editor/Stage43-data.js','assets/styles.css'])
   assert(requests.some(u=>u.endsWith('/'+p)),'Missing local request '+p);
  assert.equal(requests.some(u=>u.endsWith('.wasm')),false,'WASM must not be fetched under file://');
- console.log('LC2.0 folder offline file:// smoke PASS: Cyrillic paths, external scripts, CRUD, reload, stable entry update, backup/restore, no HTTP');
+ console.log('LC3.2 folder offline file:// smoke PASS: Cyrillic paths, external scripts, CRUD, reload, stable entry update, backup/restore, no HTTP');
 }finally{await browser.close();await fs.rm(temp,{recursive:true,force:true})}

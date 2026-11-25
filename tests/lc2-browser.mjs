@@ -7,9 +7,9 @@ import {pathToFileURL} from 'node:url';
 const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'LC2 импорт '));const browser=await chromium.launch({headless:true});
 try{
  const ctx=await browser.newContext({offline:true,acceptDownloads:true});const page=await ctx.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
- await page.goto(pathToFileURL(path.resolve('dist/LeanCenter/index.html')).href);await page.getByRole('heading',{name:'Обзор центра',exact:true}).waitFor();
+ await page.goto(pathToFileURL(path.resolve('dist/LeanCenter/index.html')).href);await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();
  assert.equal(await page.evaluate(()=>typeof window.ExcelJS?.Workbook),'function');
- await page.getByRole('button',{name:'Импорт Excel',exact:true}).click();
+ await page.getByRole('button',{name:'Импорт данных',exact:true}).click();
  await page.locator('select[name=import_type]').selectOption('person');
  const dl=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать шаблон XLSX'}).click();const download=await dl;assert.match(download.suggestedFilename(),/\.xlsx$/);await download.saveAs(path.join(tmp,'template.xlsx'));
  const bytes=await page.evaluate(async()=>{const b=new ExcelJS.Workbook(),s=b.addWorksheet('Люди');s.addRow(['Табельный номер','ФИО']);s.addRow(['0007','Учебный импорт']);s.addRow(['0008','Вторая запись']);return Array.from(new Uint8Array(await b.xlsx.writeBuffer()))});
@@ -20,9 +20,9 @@ try{
  await page.getByText('Создать: 2',{exact:true}).waitFor();await fs.mkdir('artifacts/lc2',{recursive:true});await page.screenshot({path:'artifacts/lc2/import-preview.png',fullPage:true});
  await page.getByRole('button',{name:'Импортировать 2 изменений'}).click();await page.getByText('Импортировано изменений: 2',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Сотрудники',exact:true}).click();await page.getByRole('cell',{name:'0007',exact:true}).waitFor();
- await page.getByRole('cell',{name:'Учебный импорт',exact:true}).waitFor();await page.reload();await page.getByRole('heading',{name:'Обзор центра',exact:true}).waitFor();await page.getByRole('button',{name:'Сотрудники',exact:true}).click();await page.getByRole('cell',{name:'0007',exact:true}).waitFor();
- await page.getByRole('button',{name:'Импорт Excel',exact:true}).first().click();await page.locator('input[name=import_file]').setInputFiles(xlsx);await page.getByText('Excel открыт. Настройте соответствие колонок.',{exact:true}).waitFor();await page.getByRole('button',{name:'Предварительная проверка'}).click();await page.getByText('Без изменений: 2',{exact:true}).waitFor();assert(await page.getByRole('button',{name:'Импортировать 0 изменений'}).isDisabled());
- await page.getByRole('button',{name:'Шкалы оценивания',exact:true}).click();await page.getByRole('button',{name:'Добавить',exact:true}).click();await page.locator('input[name=name]').fill('Учебная шкала');await page.locator('textarea[name=levels]').fill('0: Не владеет\n1: Владеет');await page.getByRole('button',{name:'Сохранить',exact:true}).click();await page.getByRole('cell',{name:'Учебная шкала',exact:true}).waitFor();await page.screenshot({path:'artifacts/lc2/scales.png',fullPage:true});
+ await page.getByRole('cell',{name:'Учебный импорт',exact:true}).waitFor();await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'Сотрудники',exact:true}).click();await page.getByRole('cell',{name:'0007',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Импорт данных',exact:true}).first().click();await page.locator('input[name=import_file]').setInputFiles(xlsx);await page.getByText('Excel открыт. Настройте соответствие колонок.',{exact:true}).waitFor();await page.getByRole('button',{name:'Предварительная проверка'}).click();await page.getByText('Без изменений: 2',{exact:true}).waitFor();assert(await page.getByRole('button',{name:'Импортировать 0 изменений'}).isDisabled());
+ await page.locator('summary').filter({hasText:'Справочники'}).first().click();await page.getByRole('button',{name:'Шкалы оценивания',exact:true}).click();await page.getByRole('button',{name:'Добавить',exact:true}).click();await page.locator('input[name=name]').fill('Учебная шкала');await page.locator('textarea[name=levels]').fill('0: Не владеет\n1: Владеет');await page.getByRole('button',{name:'Сохранить',exact:true}).click();await page.getByRole('cell',{name:'Учебная шкала',exact:true}).waitFor();await page.screenshot({path:'artifacts/lc2/scales.png',fullPage:true});
  assert.deepEqual(errors,[]);console.log('LC2 browser PASS: local ExcelJS template, XLSX mapping and preview, atomic import, leading zeros, reload, deduplication, scale');
  await ctx.close();
 }finally{await browser.close();await fs.rm(tmp,{recursive:true,force:true})}
