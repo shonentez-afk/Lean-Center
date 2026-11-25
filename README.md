@@ -2,8 +2,8 @@
 
 Единый автономный центр СОП, ФРВ, TWI, компетенций, наставничества, аудита L1, планирования и аналитики.
 
-LC0: архитектура, физическая модель и исходные контрольные версии перенесены. [CI LC0](https://github.com/shonentez-afk/Lean-Center/actions/runs/45597397426) PASS. SQLite WASM без установки согласован; сетевой доступ и обмен LC1 предстоит реализовать и проверить.
+**Актуальная принятая версия — LC1.3** (25.11.2026): SQLite WASM, сетевое хранение, справочники, общая оболочка и утверждённый корпоративский дизайн в стиле ТЕХНОНИКОЛЬ. [Скачать ZIP](https://github.com/shonentez-afk/Lean-Center/raw/da5b1e47f0d431d26299e7b99f4bf5edefc7523a/releases/LeanCenter-LC1.3-TN.zip) · [CI Windows/Linux — PASS](https://github.com/shonentez-afk/Lean-Center/actions/runs/45627250684). Запись и чтение сетевой базы подтверждены пользователем; двусторонний обмен на реальных ПК ещё не проверен. Следующий этап LC2 — справочники и XLSX. Остальные рабочие модули пока не интегрированы.
 
-[Начало работы](START_NEW_CHAT_RU.md) · [Архитектура](docs/ARCHITECTURE_RU.md) · [Функциональная карта](docs/FUNCTIONAL_MAP_RU.md) · [База](docs/DATABASE_RU.md) · [Дорожная карта](docs/ROADMAP_RU.md)
+[Начало работы](START_NEW_CHAT_RU.md) · [Архитектура](docs/ARCHITECTURE_RU.md) · [Функциональная карта](docs/FUNCTIONAL_MAP_RU.md) · [База](docs/DATABASE_RU.md) · [Дизайн-система](docs/DESIGN_SYSTEM_RU.md) · [Размещение](docs/DEPLOY_NETWORK_RU.md) · [Дорожная карта](docs/ROADMAP_RU.md)
 
 Не размещать реальные производственные данные, ФИО, базы и секреты в GitHub.

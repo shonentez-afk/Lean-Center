@@ -6,7 +6,7 @@ import {buildSync} from 'esbuild';
 
 const root=process.cwd();
 const read=p=>fs.readFileSync(path.join(root,p),'utf8').replace(/\r\n/g,'\n');
-const version='lc1.1';
+const version='lc1.3';
 const output=path.join(root,'dist','LeanCenter');
 const releasePath='versions/'+version;
 const files=new Map();

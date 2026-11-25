@@ -1,4 +1,4 @@
-# Lean Center — размещение на сетевом диске (LC1.1)
+# Lean Center — размещение на сетевом диске (LC1.3)
 
 ## Первый запуск
 1. Распаковать ZIP полностью в сетевую папку. Не запускать index.html из окна архива.
@@ -11,10 +11,10 @@
 
 ## Состав поставки
 index.html — неизменный адрес ярлыка;
-versions/lc1.1/app/ — код приложения и конфигурация схемы;
-versions/lc1.1/vendor/ — SQLite WASM и ECharts;
-versions/lc1.1/assets/ — стили;
-versions/lc1.1/licenses/ — лицензии библиотек;
+versions/lc1.3/app/ — код приложения и конфигурация схемы;
+versions/lc1.3/vendor/ — SQLite WASM и ECharts;
+versions/lc1.3/assets/ — стили;
+versions/lc1.3/licenses/ — лицензии библиотек;
 app-manifest.json — размеры и SHA-256 программных файлов;
 README_DEPLOY_RU.txt — настоящая инструкция.
 В ZIP нет пользовательской базы, документов, пакетов изменений и резервных копий.
