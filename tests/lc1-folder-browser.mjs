@@ -51,7 +51,7 @@ try{
  await page.screenshot({path:'artifacts/lc1-tn/dashboard.png',fullPage:true});
  await page.getByRole('button',{name:'Тёмная тема',exact:true}).click();await page.screenshot({path:'artifacts/lc1-tn/dashboard-dark.png',fullPage:true});
  await page.getByRole('button',{name:'Светлая тема',exact:true}).click();
- await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),true);await page.screenshot({path:'artifacts/lc1-tn/dashboard-mobile.png',fullPage:true});await page.setViewportSize({width:1280,height:720});
+ await page.setViewportSize({width:390,height:844});try{await page.waitForFunction(()=>document.documentElement.scrollWidth<=innerWidth+2,{},{timeout:4000})}catch(e){console.error(await page.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth,overflow:[...document.querySelectorAll('body *')].filter(n=>n.getBoundingClientRect().right>innerWidth+2).slice(0,12).map(n=>[n.tagName,n.className?.baseVal||n.className,Math.round(n.getBoundingClientRect().right)])})));throw e}assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),true);await page.screenshot({path:'artifacts/lc1-tn/dashboard-mobile.png',fullPage:true});await page.setViewportSize({width:1280,height:720});
  await person(page);await page.screenshot({path:'artifacts/lc1-tn/registry.png',fullPage:true});
  // Simulate installing a new version next to the old one, switching only the
  // stable index.html, and keeping the local working state.

@@ -32,7 +32,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .brand-mark{width:6px;height:34px;background:var(--tn-red);flex:none}
 .brand{font-size:22px;font-weight:700;letter-spacing:.015em;white-space:nowrap;line-height:1.05}
 .brand-sub{color:var(--muted);font-size:11px;letter-spacing:.04em;margin-top:4px;text-transform:uppercase;white-space:nowrap}
-.header-meta{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+.header-meta{min-width:0;display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
 .header-meta button{min-height:32px;padding:7px 10px;font-size:12px}
 .version{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.035em}
 .sidebar{grid-row:2;align-self:start;position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow:auto;overscroll-behavior:contain;background:var(--nav-bg);color:var(--nav-text);padding:13px 10px 22px;scrollbar-width:thin}
@@ -54,7 +54,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .panel h2{font-size:16px;font-weight:700;margin:0 0 12px;line-height:1.3}
 .panel p{overflow-wrap:anywhere}
 .panel .panel{margin:14px 0;padding:14px;background:var(--surface-alt);box-shadow:none}
-.section-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 10px}
+.section-heading{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin:0 0 10px}
 .section-heading h2{font-size:16px;margin:0;line-height:1.3}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:12px;margin-bottom:16px}
 .kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
@@ -86,7 +86,7 @@ input[type=checkbox]{accent-color:var(--tn-red)}
 .formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:12px;margin:10px 0}
 .warn{color:var(--warn)}.bad{color:var(--danger)}
 .pill{font-size:11px;background:var(--surface-alt);border:1px solid var(--line);border-radius:var(--radius);padding:4px 8px;white-space:nowrap}
-.chart{height:290px;width:100%;min-width:0}
+.chart{height:290px;width:100%;min-width:0;overflow:hidden}
 .empty{color:var(--muted);padding:25px;text-align:center}
 .archive{opacity:.65}
 .foot{margin-top:16px;color:var(--muted);font-size:12px}
