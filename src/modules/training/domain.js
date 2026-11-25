@@ -218,6 +218,7 @@ export function applyTrainingEvent(db,e,old){
    createOnly(e,old);exact(p,['trainee_id','mentor_id','supervisor_id','authorization_id','revision_id','source','skill_id','scale_id','target_level','assigned_by','assigned_on','due_on','reason','variant','shift_id','enrollment_id','program_task_id','plan_reviewed']);
    const r=effective(db,p.revision_id);invariant(canonical(r.source)===canonical(p.source)&&p.plan_reviewed===true,'Исходник назначения должен соответствовать действующей редакции и проверенному TWI');
    invariant(period(p.assigned_on,p.due_on)&&p.due_on&&required(p.reason)&&Object.hasOwn(variants,p.variant),'Укажите даты, вид и основание обучения');
+   invariant(r.effective_at&&p.assigned_on>=r.effective_at.slice(0,10),'Начало обучения не может предшествовать вступлению СОП в действие');
    hasRole(db,p.trainee_id,p.assigned_on,['trainee']);person(db,p.assigned_by);invariant(p.trainee_id!==p.mentor_id,'Инструктор и обучаемый должны различаться');
    const auth=one(db,'SELECT * FROM mentor_authorization WHERE id=?',[p.authorization_id]);invariant(auth?.person_id===p.mentor_id&&auth.operation_id===r.operation_id&&authorizationValid(db,auth.id,p.assigned_on),'Выберите инструктора с действующим правом обучать этой операции');
    if(p.supervisor_id){hasRole(db,p.supervisor_id,p.assigned_on,['mentor','instructor']);invariant(p.supervisor_id!==p.trainee_id,'Наставник и обучаемый должны различаться')}
@@ -233,11 +234,12 @@ export function applyTrainingEvent(db,e,old){
   changeOnly(e,old);invariant(old.source_sha256&&['planned','in_progress'].includes(old.state),'Назначение закрыто или относится к legacy');
   if(p.command==='approve'){
    exact(p,['command','responsible_id','head_id','approved_on','note']);person(db,p.responsible_id);person(db,p.head_id);noFuture(p.approved_on,e);
-   invariant(p.approved_on>=old.assigned_on&&text(p.note)&&!old.approval_json&&isCurrentStandard(db,old.sop_revision_id),'План должен быть актуальным и ещё не согласован');
+   const r=effective(db,old.sop_revision_id);invariant(r.effective_at&&p.approved_on>=r.effective_at.slice(0,10)&&text(p.note)&&!old.approval_json,'План должен быть актуальным и ещё не согласован. Согласование допускается до планового начала обучения.');
    update(db,t,id,{approval_json:canonical({...p,names:names(db,{responsible:p.responsible_id,head:p.head_id})})});return
   }
   if(p.command==='reschedule'){
    exact(p,['command','due_on','reason']);invariant(date(p.due_on)&&p.due_on>=old.assigned_on&&required(p.reason),'Укажите новый срок и причину');
+   if(old.enrollment_id){const n=one(db,'SELECT * FROM training_enrollment WHERE id=?',[old.enrollment_id]);invariant(n?.state==='active'&&p.due_on<=n.due_on,'Срок назначения не может выходить за пределы персональной программы')}
    update(db,t,id,{due_on:p.due_on,change_reason:p.reason,approval_json:null});return
   }
   exact(p,['command','reason']);invariant(p.command==='cancel'&&required(p.reason),'Укажите причину отмены');update(db,t,id,{state:'cancelled',change_reason:p.reason});return
@@ -253,7 +255,7 @@ export function applyTrainingEvent(db,e,old){
   invariant(p.mentor_ack===true&&p.trainee_ack===true,'Нужны отметки подтверждения обеих сторон (не электронная подпись)');
   const witness=optional(db,'person',p.witness_id);
   if(a.method_variant==='special'&&stage.phase==='presentation')invariant(witness&&witness.id!==a.trainee_id,'Укажите демонстратора');
-  if(a.method_variant==='hazardous'&&stage.phase==='practice')invariant(latestVerification(db,a.id,'safety')?.result==='pass','Сначала зарегистрируйте подтверждение обязательной проверки безопасности');
+  if(a.method_variant==='hazardous'&&stage.phase==='practice'){const safety=latestVerification(db,a.id,'safety');invariant(safety?.result==='pass'&&safety.evaluated_on<=day,'Сначала зарегистрируйте подтверждение обязательной проверки безопасности')}
   store(db,t,{id,assignment_id:a.id,mentor_id:a.mentor_id,held_at:p.held_at,notes:p.notes,result:p.result,steps_json:canonical({version:a.method_version,variant:a.method_variant,stage:stage.code,label:stage.label,repeat:pr.done.has(stage.code)}),rev:1,stage_code:stage.code,duration_minutes:p.duration_minutes,witness_id:p.witness_id,witness_name:witness?.display_name||null,mentor_ack:1,trainee_ack:1,recorded_at:e.occurred_at});
   const done=progressFor(db,a);update(db,'training_assignment',a.id,{state:done.complete?'completed':'in_progress'});
   if(a.enrollment_id){const n=one(db,'SELECT * FROM training_enrollment WHERE id=?',[a.enrollment_id]);if(n?.state==='active')update(db,'training_enrollment',n.id,{state:n.state})}return
@@ -261,14 +263,14 @@ export function applyTrainingEvent(db,e,old){
  if(t==='training_verification'){
   createOnly(e,old);exact(p,['assignment_id','assignment_rev','kind','evaluator_id','evaluated_on','result','evidence','feedback']);
   const a=freshAssignment(db,p);person(db,p.evaluator_id);noFuture(p.evaluated_on,e);
-  invariant(a.state!=='cancelled'&&a.approval_json&&isCurrentStandard(db,a.sop_revision_id)&&p.evaluator_id!==a.trainee_id&&p.evaluated_on>=a.assigned_on&&['safety','theory'].includes(p.kind)&&['pass','fail'].includes(p.result)&&required(p.evidence)&&required(p.feedback),'Проверка требует согласованного назначения, отдельного оценщика, даты, результата и основания');
+  invariant(a.state!=='cancelled'&&a.approval_json&&isCurrentStandard(db,a.sop_revision_id)&&p.evaluator_id!==a.trainee_id&&p.evaluated_on>=a.assigned_on&&p.evaluated_on>=JSON.parse(a.approval_json).approved_on&&['safety','theory'].includes(p.kind)&&['pass','fail'].includes(p.result)&&required(p.evidence)&&required(p.feedback),'Проверка требует согласованного назначения, отдельного оценщика, даты, результата и основания');
   const prev=latestVerification(db,a.id,p.kind);invariant(!prev||p.evaluated_on>=prev.evaluated_on,'Нельзя подменить историю более ранней проверкой');
   const {assignment_rev,...data}=p;store(db,t,{id,...data,recorded_at:e.occurred_at,rev:1});update(db,'training_assignment',a.id,{state:a.state});return
  }
  if(t==='assessment_session'){
   createOnly(e,old);
   const a=freshAssignment(db,p);person(db,p.evaluator_id);noFuture(p.assessed_on,e);
-  invariant(a.state!=='cancelled'&&a.approval_json&&isCurrentStandard(db,a.sop_revision_id)&&p.evaluator_id!==a.trainee_id&&p.assessed_on>=a.assigned_on&&required(p.feedback),'Нужна актуальная согласованная запись, отдельный оценщик и обратная связь');
+  invariant(a.state!=='cancelled'&&a.approval_json&&isCurrentStandard(db,a.sop_revision_id)&&p.evaluator_id!==a.trainee_id&&p.assessed_on>=a.assigned_on&&p.assessed_on>=JSON.parse(a.approval_json).approved_on&&required(p.feedback),'Нужна актуальная согласованная запись, отдельный оценщик и обратная связь');
   const prev=latestAssessment(db,a.id,p.command);invariant(!prev||p.assessed_on>=prev.assessed_at.slice(0,10),'Нельзя подменить историю более ранней оценкой');
   const pr=progressFor(db,a),latestTrial=pr.facts.filter(x=>x.stage_code.startsWith('try')&&x.result==='completed').at(-1);
   invariant(pr.intro&&latestTrial&&p.assessed_on>=latestTrial.held_at.slice(0,10),'Сначала завершите вводную часть инструктажа и практические пробы');
@@ -294,7 +296,7 @@ export function applyTrainingEvent(db,e,old){
   if(old){changeOnly(e,old);exact(p,['command','reason']);invariant(p.command==='revoke'&&old.decision==='granted'&&!old.revoked_at&&required(p.reason),'Укажите основание отзыва допуска');update(db,t,id,{revoked_at:e.occurred_at,revoke_reason:p.reason});return}
   createOnly(e,old);exact(p,['assignment_id','assignment_rev','actor_id','decided_on','valid_until','decision','evidence','feedback']);
   const a=freshAssignment(db,p);person(db,p.actor_id);noFuture(p.decided_on,e);
-  invariant(a.state!=='cancelled'&&a.approval_json&&isCurrentStandard(db,a.sop_revision_id)&&p.actor_id!==a.trainee_id&&p.decided_on>=a.assigned_on&&period(p.decided_on,p.valid_until)&&['granted','denied'].includes(p.decision)&&required(p.evidence)&&required(p.feedback),'Допуск требует явного решения ответственного, даты, основания и обратной связи');
+  invariant(a.state!=='cancelled'&&a.approval_json&&isCurrentStandard(db,a.sop_revision_id)&&p.actor_id!==a.trainee_id&&p.decided_on>=a.assigned_on&&p.decided_on>=JSON.parse(a.approval_json).approved_on&&period(p.decided_on,p.valid_until)&&['granted','denied'].includes(p.decision)&&required(p.evidence)&&required(p.feedback),'Допуск требует явного решения ответственного, даты, основания и обратной связи');
   const q=latestAssessment(db,a.id,'qualification'),pr=latestAssessment(db,a.id,'practical'),s=latestVerification(db,a.id,'safety'),th=latestVerification(db,a.id,'theory');
   const previous=latest(db,'admission_decision','person_id=? AND operation_id=?',[a.trainee_id,a.operation_id],'decided_on');
   invariant(!previous||p.decided_on>=previous.decided_on,'Нельзя подменить историю более ранним решением');

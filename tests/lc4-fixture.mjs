@@ -22,7 +22,8 @@ export async function makeSop(action='Учебная операция',outdated=
 }
 export async function fixture(){
  const w=new Workspace(SQL,createDb(SQL,schema,migrations[0])),sources=new Map(),readContent=async r=>sources.get(r.sha256)?.text;
- const save=async(t,p,id=null)=>{const old=id?one(w.working,'SELECT * FROM '+t+' WHERE id=?',[id]):null,e={id:uuid(),entity_type:t,entity_id:id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload:p,occurred_at:new Date().toISOString()};await w.applyContentEvents([e],readContent);return e};
+ let clock=Date.parse(date+'T00:00:00Z');
+ const save=async(t,p,id=null)=>{const old=id?one(w.working,'SELECT * FROM '+t+' WHERE id=?',[id]):null,e={id:uuid(),entity_type:t,entity_id:id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload:p,occurred_at:new Date(clock++).toISOString()};await w.applyContentEvents([e],readContent);return e};
  const unit=w.edit('org_unit',null,{code:'QA',name:'Учебный участок',kind:'Участок',parent_id:null}),workplace=w.edit('workplace',null,{unit_id:unit,code:'QA-WP',name:'Стенд'}),operation=w.edit('operation',null,{unit_id:unit,workplace_id:workplace,equipment_id:null,code:'QA-OP',name:'Учебная операция',criticality:'normal'});
  const trainee=w.edit('person',null,{employee_code:'LC4-001',display_name:'Ученик Тестовый'}),mentor=w.edit('person',null,{employee_code:'LC4-002',display_name:'Инструктор Тестовый'}),actor=w.edit('person',null,{employee_code:'LC4-003',display_name:'Ответственный Тестовый'}),other=w.edit('person',null,{employee_code:'LC4-004',display_name:'Без полномочий'});
  const profession=w.edit('profession',null,{code:'QA-PR',name:'Учебная профессия'}),shift=w.edit('work_shift',null,{code:'QA-A',name:'Учебная смена А'});

@@ -97,7 +97,7 @@ export function trainingScreen(main,page,c){
   const items=asgns(),q=searchInput(),out=el('div'),filter=select('training_filter',[['all','Все'],['open','Открытые'],['overdue','Просроченные'],['completed','Завершённые'],['changed','Изменилась редакция СОП']],route.filter||'all',null);
   const display=()=>{const text=q.value.toLocaleLowerCase('ru-RU').trim();const filtered=items.filter(a=>(filter.value==='all'||filter.value==='open'&&activePlan(a)||filter.value==='overdue'&&expired(a)||filter.value==='completed'&&a.state==='completed'||filter.value==='changed'&&!sameRevision(a))&&assignmentName(a).toLocaleLowerCase('ru-RU').includes(text));out.replaceChildren(assignmentRows(filtered));route.filter=filter.value};
   q.oninput=display;filter.onchange=display;display();
-  const controls=row(action('Назначить обучение',()=>goLocal({mode:'new'})),btn('Программы подготовки',()=>go('programs')),btn('Инструктажи TWI',()=>go('instruction')),q,filter);
+  const controls=row(action('Назначить обучение',()=>go('twi',{mode:'new'})),btn('Программы подготовки',()=>go('programs')),btn('Инструктажи TWI',()=>go('instruction')),q,filter);
   return pane(page==='instruction'?'Реестр инструктажей TWI':'План производственного обучения',msg('Один список назначений. Факт инструктажа, практическая проверка, компетенция и допуск учитываются независимо.'),controls,out,exportButton('План-обучения',['Сотрудник','СОП','Инструктор','Навык','Цель','Начало','Срок','Статус'],items.map(a=>[n('person',a.trainee_id),revLabel(a.sop_revision_id),n('person',a.mentor_id),n('skill',a.skill_id),a.target_level,a.assigned_on,a.due_on,stateLabel(a)])))
  }
  function assignmentForm(){

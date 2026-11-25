@@ -16,6 +16,7 @@ test('role/certificate/order authorization and exact SOP source, no unreviewed o
  assert.equal(authorizationValid(f.w.working,f.auth,date),true);
  await assert.rejects(f.addAssignment({mentor_id:f.other}),/правом/);
  await assert.rejects(f.addAssignment({plan_reviewed:false}),/актуальный план/);
+ await assert.rejects(f.addAssignment({assigned_on:'2026-01-19'}),/вступлению СОП/);
  const id=await f.addAssignment();await assert.rejects(f.addAssignment(),/уже есть/);
  await assert.rejects(f.stage(id,'prepare'),/согласуйте/);
  await f.approve(id);await assert.rejects(f.stage(id,'show1'),/предыдущий/);
@@ -82,6 +83,9 @@ test('program templates and personal task evidence: no duplicate assignment, exp
  assert.equal(get().state,'completed');assert.equal(one(f.w.working,'SELECT count(*) n FROM admission_decision').n,0);
  const newp=await f.save('training_program',{...payload,title:'Новая версия'});assert.equal(one(f.w.working,'SELECT state FROM training_program WHERE id=?',[p]).state,'retired');assert.equal(get().program_id,p);assert.equal(one(f.w.working,'SELECT version_no FROM training_program WHERE id=?',[newp.entity_id]).version_no,2)
  }finally{f.w.close()}
+});
+test('a future plan may be approved before its start, while facts cannot precede it',async()=>{
+ const f=await fixture();try{const id=await f.addAssignment({assigned_on:'2026-01-21'});await f.approve(id);assert(f.getAssignment(id).approval_json);await assert.rejects(f.stage(id,'prepare'),/фактическую дату/)}finally{f.w.close()}
 });
 test('four JI variants, safety gate and attendance is not authorization',async()=>{
  const f=await fixture();try{
