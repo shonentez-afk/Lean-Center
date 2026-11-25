@@ -134,3 +134,26 @@ body.editor-active{overflow:hidden}.editor-host{position:fixed;inset:0;z-index:2
 .lc4-matrix-cell.lc4-gap{border-color:var(--warn);color:var(--warn)}
 .lc4-matrix-cell.lc4-met{border-color:var(--success);color:var(--success)}
 [data-lc4-page] .tablewrap td:has(details){min-width:135px}
+
+/* LC4.3 corporate matrix: compact numeric cells, fixed identity columns, scroll. */
+.matrix-choice-list{max-height:250px;overflow:auto;border:1px solid var(--line);padding:8px;border-radius:5px}
+.corporate-matrix-wrap{max-height:72vh;overflow:auto}
+.corporate-matrix{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:12px}
+.corporate-matrix th,.corporate-matrix td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:5px;text-align:center;vertical-align:middle;white-space:normal}
+.corporate-matrix thead th{position:sticky;top:0;background:var(--surface);z-index:3}
+.corporate-matrix thead tr:first-child th{height:180px}.corporate-matrix thead tr:nth-child(2) th{top:180px;height:32px}
+.corporate-matrix th.matrix-skill-head{width:54px;min-width:54px;max-width:54px;height:212px;padding:8px 5px}
+.matrix-skill-head span{display:inline-block;writing-mode:vertical-rl;transform:rotate(180deg);max-height:195px;overflow:hidden;overflow-wrap:anywhere;text-align:left;font-weight:600}
+.corporate-matrix .matrix-fixed{position:sticky;background:var(--surface);z-index:2;text-align:left}
+.corporate-matrix thead .matrix-fixed{z-index:5}
+.corporate-matrix .matrix-fixed-0{left:0;width:40px;min-width:40px;max-width:40px;text-align:center}
+.corporate-matrix .matrix-fixed-1{left:40px;width:190px;min-width:190px;max-width:190px}
+.corporate-matrix .matrix-fixed-2{left:230px;width:145px;min-width:145px;max-width:145px}
+.matrix-person-link{border:0;background:transparent;color:inherit;text-align:left;padding:3px;text-decoration:underline;white-space:normal}
+.matrix-instructor{font-weight:700}.matrix-value-cell{padding:2px!important}
+.matrix-value{width:46px;min-width:46px;height:36px;padding:2px;border:1px solid var(--line);text-align:center;font-size:16px;font-weight:650}
+.matrix-level-1{background:#d9e2f3!important;color:#172331!important}.matrix-level-2{background:#ffff00!important;color:#252525!important}.matrix-level-3{background:#ffd966!important;color:#252525!important}.matrix-level-4{background:#ff7c80!important;color:#252525!important}
+.matrix-value.matrix-deficit{border:2px solid #cf2525}.matrix-total{min-width:100px;font-weight:600}
+.corporate-matrix .matrix-need{background:#f3d9ed;color:#392337;font-weight:600;min-width:100px}
+.corporate-matrix tfoot{font-weight:600}.corporate-matrix tfoot td,.corporate-matrix tfoot th{background:var(--surface)}
+.matrix-legend{display:inline-flex;align-items:center;gap:5px;font-size:12px}.matrix-legend>span:first-child{width:24px;height:24px;display:grid;place-items:center;border:1px solid var(--line);font-weight:700}
