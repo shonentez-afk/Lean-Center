@@ -17,7 +17,7 @@ try{
  // with a synthetic response, never send test or corporate content to the cloud.
  const proxy='https://functions.yandexcloud.net/d4ehdpoue3sve6s0f92b',aiTasks=[],unexpected=[];
  const mockPlan={prepare:{purpose:'Учебная цель ИИ',known:'Уточнить опыт',prep:'Подготовить место',interest:'Объяснить цель'},present:{round1:'Показать работу',round2:'Показать ключевые моменты',round3:'Объяснить причины'},tryOut:{perform:'Повторить работу',explain:'Назвать действия',check:'Проверить результат',correct:'Исправить ошибки'},followUp:{help:'Назначить наставника',control:'Уточнить сроки',observe:'Наблюдать выполнение',close:'Зафиксировать результат'}};
- await ctx.route(/^https?:\\/\\//,async route=>{
+ await ctx.route(/^https?:/,async route=>{
   const req=route.request();
   if(req.url()!==proxy){unexpected.push(req.url());return route.abort()}
   const headers={'access-control-allow-origin':'*','access-control-allow-methods':'POST, OPTIONS','access-control-allow-headers':'content-type, accept','content-type':'application/json'};
