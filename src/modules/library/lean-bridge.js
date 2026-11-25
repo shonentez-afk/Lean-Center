@@ -4,7 +4,7 @@
  const bar=document.createElement('div');bar.id='lc-editor-bar';bar.style.cssText='position:sticky;top:0;z-index:10000;background:#242e40;color:white;border-top:4px solid #e30613;padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font:14px Arial,sans-serif';
  const title=document.createElement('strong');title.textContent='LEAN CENTER · '+(kind==='sop'?'Редактор СОП / TWI':'Редактор ФРВ')+' · Stage43';bar.append(title);
  const make=(id,label)=>{const b=document.createElement('button');b.id=id;b.type='button';b.textContent=label;b.style.cssText='padding:7px 12px;border:1px solid #bfc0c0;background:white;color:#242e40;border-radius:3px;cursor:pointer';bar.append(b);return b};
- const send=make('lc-editor-send','Передать в Lean Center'),download=make('lc-editor-download','Скачать JSON'),status=document.createElement('span');status.id='lc-editor-status';status.textContent='Ожидание загрузки…';bar.append(status);document.body.prepend(bar);
+ const send=make('lc-editor-send',kind==='frv'?'Сохранить ФРВ':context.tab==='twi'?'Сохранить план и СОП':context.tab==='frv'?'Сохранить ФРВ и СОП':'Сохранить СОП в каталог'),download=make('lc-editor-download','Скачать JSON'),status=document.createElement('span');status.id='lc-editor-status';status.textContent='Ожидание загрузки…';bar.append(status);document.body.prepend(bar);
  let loaded=false,busy=false,people=[],links=[],selected=null;
  const staticFields={
   'meta-approver-name':{slot:'approver',label:'Утверждающий',post:'meta-approver-post'},
@@ -73,7 +73,17 @@
  for(const id of ['respContainer','agreedContainer']){const c=document.getElementById(id);if(c)new MutationObserver(attachPickers).observe(c,{childList:true,subtree:true})}
  function applyTheme(mode){document.documentElement.dataset.lcTheme=mode==='dark'?'dark':'light'}
 
- if(kind==='frv'){for(const el of document.querySelectorAll('.tab-btn:not([data-tab="frvstudy"])'))el.style.display='none'}
+ const targetTab=kind==='frv'?'frvstudy':['twi','frv'].includes(context.tab)?context.tab:'editor';
+ const allowed=kind==='frv'||context.tab?new Set([targetTab]):new Set(['editor','frv','preview','checklist','twi']);
+ for(const b of document.querySelectorAll('.tab-btn'))if(!allowed.has(b.dataset.tab))b.style.display='none';
+ const tabs=document.querySelector('[role=tablist]');if(allowed.size===1&&tabs)tabs.style.display='none';
+ const frvTab=document.querySelector('[data-tab="frv"]');if(frvTab)frvTab.textContent='ФРВ по СОП';
+ const twiTab=document.querySelector('[data-tab="twi"]');if(twiTab)twiTab.textContent='План TWI';
+ // Independent research is owned by the center. Internal local-library commands
+ // are not another authoritative library.
+ for(const id of ['frvStudyNewBtn','frvStudyOpenBtn','frv36SaveConflictCopyBtn','frvStudyRestoreBtn','frvStudyRestoreJsonBtn']){const x=document.getElementById(id);if(x)x.style.display='none'}
+ const transferBtn=document.getElementById('frvStudySendSopBtn');if(transferBtn){transferBtn.textContent='Сохранить ФРВ для передачи в СОП';transferBtn.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();act(true)},true)}
+
  send.disabled=true;download.disabled=true;
  const tell=(type,extra={})=>host.postMessage({protocol:'lean-editor-v1',session,type,...extra},'*');
  const say=(s)=>{status.textContent=s};
@@ -105,12 +115,12 @@
     if(defaults?.operation){state.meta.operation=defaults.operation;setVal('meta-operation',defaults.operation)}
     if(defaults?.unit){state.meta.department=defaults.unit;setVal('meta-department',defaults.unit)}
    }else if(defaults?.operation){const d=ensureFrvStudy();d.operationId=defaults.operation;renderFrvStudy()}
-   if(kind==='frv'){const tab=document.querySelector('[data-tab="frvstudy"]');tab?.click();const passport=document.getElementById('frvs-studyId')?.closest('details');if(passport)passport.open=true}else document.querySelector('[data-tab="editor"]')?.click();
+   if(kind==='frv'){const tab=document.querySelector('[data-tab="frvstudy"]');tab?.click();const passport=document.getElementById('frvs-studyId')?.closest('details');if(passport)passport.open=true}else document.querySelector('[data-tab="'+targetTab+'"]')?.click();
    attachPickers();loaded=true;send.disabled=false;download.disabled=false;say('Рабочая копия готова. Передача не публикует документ.');tell('loaded')
   }catch(e){console.error('Lean Center editor load',e);say('Ошибка загрузки: '+e.message+' · закройте окно и сохраните исходный файл');tell('error',{message:e.message})}finally{busy=false}
  }
  async function exportText(){
-  if(kind==='sop'){htmlFieldToState();if(typeof htmlToTwi==='function')htmlToTwi();const dm=state.documentManager||{},snapshot=docSnapshot();snapshot.leanCenterPeople=currentLinks();const pack=await docBuildPortableJson({id:dm.currentId||null,status:'Черновик',number:state.meta.sopNumber||'Черновик',seqNo:dm.seqNo||null,deptCode:dm.deptCode||'',year:dm.year,version:dm.version,snapshot},{preferActive:true});return JSON.stringify(pack,null,2)}
+  if(kind==='sop'){htmlFieldToState();if(typeof htmlToTwi==='function')htmlToTwi();const dm=state.documentManager||{},snapshot=docSnapshot();if(snapshot.twi)snapshot.twi.enabled=twiHasGeneratedContent(snapshot.twi);snapshot.leanCenterPeople=currentLinks();const pack=await docBuildPortableJson({id:dm.currentId||null,status:'Черновик',number:state.meta.sopNumber||'Черновик',seqNo:dm.seqNo||null,deptCode:dm.deptCode||'',year:dm.year,version:dm.version,snapshot},{preferActive:true});return JSON.stringify(pack,null,2)}
   frvStudySyncFields();await frvStudyFlush();const pack=frvStudyExport();pack.study.leanCenterPeople=currentLinks();return JSON.stringify(pack,null,2)
  }
  async function act(toCenter){
@@ -119,7 +129,28 @@
    else{const u=URL.createObjectURL(new Blob([text],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='LeanCenter-'+kind+'-'+session+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);say('JSON сформирован. Проверьте загрузку файла.')}
   }catch(e){say('Не удалось передать: '+e.message)}finally{busy=false;send.disabled=false;download.disabled=false}
  }
+ // Local, transparent TWI draft from SOP only. No network request; keep the
+ // proven Stage43 per-field proposal comparison and manual-edit preservation.
+ async function localTwi(){
+  if(!loaded)return;
+  htmlFieldToState();const src=twiSopInput(),steps=src.steps.filter(s=>String(s.action||'').trim());
+  if(!steps.length){say('Сначала заполните шаги СОП.');return}
+  const action=steps.map(s=>s.stepNumber+'. '+s.action).join('\n');
+  const keys=steps.map(s=>s.stepNumber+'. '+s.action+' — '+(s.keyPoints.join('; ')||'Ключевые моменты уточнить')).join('\n');
+  const reasons=steps.map(s=>s.stepNumber+'. '+s.action+' — '+(s.reason||'Причину уточнить')).join('\n');
+  const current=state.twi||{};
+  const proposal={
+   prepare:{purpose:'Научить правильно выполнять операцию «'+(src.operation||'по СОП')+'».',known:'Уточнить опыт и исходные навыки обучаемого.',prep:[src.workplace?'Рабочее место: '+src.workplace:'Уточнить рабочее место.',src.safety?'Требования СОП: '+src.safety:'Уточнить требования безопасности.',state.meta?.tools?'Инструмент: '+state.meta.tools:'',state.meta?.material?'Материал: '+state.meta.material:''].filter(Boolean).join('\n'),interest:'Объяснить назначение операции и ожидаемый результат.'},
+   present:{round1:'Показать операцию целиком в нормальном темпе:\n'+action,round2:'Показать и назвать основные шаги и ключевые моменты:\n'+keys,round3:'Повторить демонстрацию с объяснением причин:\n'+reasons},
+   tryOut:{perform:'Дать обучаемому выполнить операцию. Затем повторить, называя шаги:\n'+action,explain:'При следующих повторениях обучаемый называет ключевые моменты и объясняет причины:\n'+keys+'\n'+reasons,check:'Проверить выполнение всех шагов и ключевых моментов СОП. Зафиксировать фактический результат, не допускать автоматически.',correct:'Остановить опасное или неправильное действие, показать верный способ и дать повторить.'},
+   followUp:{help:'Назначить ответственного за поддержку.',control:'Указать график последующих проверок в плане обучения.',observe:'Наблюдать соблюдение требований СОП и устойчивость самостоятельного выполнения.',close:'Зафиксировать фактический результат проверки и решение ответственного.'}
+  };
+  let chosen=new Set(TWI_GENERATED_FIELDS.map(twiFieldId));
+  if(twiHasGeneratedContent(current)){const diff=twiProposalDiff(current,proposal);if(diff.length){const picked=await twiShowPreview(diff);if(!picked)return;chosen=picked}else chosen=new Set()}
+  state.twi=twiCommitProposal(current,proposal,chosen);twiToHtml();saveDraft();say('Черновик плана TWI сформирован по СОП. Проверьте и дополните его перед сохранением.')
+ }
+ const gen=document.getElementById('generateTwiBtn');if(gen){gen.textContent='Сформировать план из СОП';gen.addEventListener('click',async e=>{e.preventDefault();e.stopImmediatePropagation();gen.disabled=true;try{await localTwi()}catch(err){say(err.message)}finally{gen.disabled=false}},true)}
  send.onclick=()=>act(true);download.onclick=()=>act(false);
- window.addEventListener('message',e=>{const m=e.data;if(e.source!==host||m?.protocol!=='lean-editor-v1'||m.session!==session)return;if(m.type==='load')load(m.text,m.defaults);if(m.type==='result')say(String(m.message||''));if(m.type==='theme')applyTheme(m.theme)});
+ window.addEventListener('message',e=>{const m=e.data;if(e.source!==host||m?.protocol!=='lean-editor-v1'||m.session!==session)return;if(m.type==='load')load(m.text,m.defaults);if(m.type==='result')say(String(m.message||''));if(m.type==='theme')applyTheme(m.theme);if(m.type==='directory'){people=Array.isArray(m.people)?m.people:[];applyTheme(m.theme);if(picker.open)drawPeople()}});
  tell('ready');
 })();
