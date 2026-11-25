@@ -9,3 +9,6 @@ CI 45597397426 SUCCESS, 384/384 исходников совпадают, 5 те�
 
 ## LC1 кандидат
 Ветка feature/lc1-offline-foundation, PR #1. Рабочее ядро, справочники, обмен и оболочка в src/, миграция 002_lc1.sql, автономная сборка npm run build. Документ [LC1_RU.md](docs/LC1_RU.md). Проверить CI ветки, не считать результат принятым до подтверждения пользователя; реальный сетевой диск не проверен. Следующие задачи после приёмки: реальные сетевые сценарии, импорт справочников XLSX, интеграция Stage43 в общую базу. LC0 main и baselines сохранены.
+
+## Проверка кандидата LC1 — 25.11.2026
+CI [45604284850](https://github.com/shonentez-afk/Lean-Center/actions/runs/45604284850): SUCCESS. 12/12 Node (включая имитацию файлового обмена), 5/5 Python, автономный HTML, Chromium file:// в режиме offline (создание демо, CRUD, перезапуск, резервная копия, ECharts): PASS. Сборка [LeanCenter-LC1.html](https://github.com/shonentez-afk/Lean-Center/blob/3809b9bdb6a595eee2dca80cb2086d0b34754d41/releases/LeanCenter-LC1.html) — 2 079 376 байт, Git blob 05901dd5b148c18da537d595a3b4b4324d0c65c8. PR #1 draft; пользовательская приёмка не проведена. Реальный сетевой диск и Windows/корпоративный Edge требуют проверки. Другие функциональные модули пока заглушки. Существующие baselines не изменены.
