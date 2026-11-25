@@ -11,14 +11,27 @@ const root=document.getElementById('app');
 let SQL,ws,cache,folder,generation=0,busy=false,master=false,page='home',theme=false,status='Готово',error=false,chart=null,edit=null,query='',incoming=[],importState=null,historyPerson=null,archiveFilter='active',libraryDraft=null,editorSession=null,libraryFilter='all';
 const contentStore=new ContentStore(()=>cache,()=>folder),readContent=ref=>contentStore.get(ref);
 const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
-const planned={sop:'СОП и библиотека',frv:'ФРВ',twi:'TWI и обучение',skills:'Компетенции',mentoring:'Наставничество',audit:'Аудит первого уровня',calendar:'Планирование',actions:'Мероприятия',analytics:'Аналитика',ai:'ИИ-помощник'};
-const labels={home:'Обзор центра',...Object.fromEntries(Object.entries(definitions).map(([k,v])=>[k,v.label])),...planned,import_xlsx:'Импорт Excel',storage:'База и обмен'};
+const planned={sop:'Каталог СОП',frv:'ФРВ',sop_evaluation:'Оценка СОП',my_plan:'Мой план',twi:'План производственного обучения',programs:'Ввод в профессию',internship:'Программы стажировки',instruction:'Инструктажи TWI',retraining:'Переобучение',journal:'Журнал заданий',skills:'Матрица компетенций',practical:'Практические оценки',development:'Планы развития',mentoring:'Наставники и ВТ',self_eval:'Самооценка',certification:'Сертификация',appointments:'Назначения',audit:'Аудиты 1-го уровня',calendar:'Календарь',actions:'Мероприятия',analytics:'Аналитика центра',metrics:'Дерево метрик',roi:'ROI-модель',ai:'ИИ-помощник'};
+const labels={home:'Дашборд',...Object.fromEntries(Object.entries(definitions).map(([k,v])=>[k,v.label])),...planned,org_unit:'Структура предприятия',import_xlsx:'Импорт данных',storage:'Настройки и обмен'};
+const navGroups=[
+ ['Ежедневная работа',['home','my_plan','calendar','actions']],
+ ['Стандартизация и улучшения',['sop','frv','sop_evaluation']],
+ ['Производственное обучение',['twi','programs','internship','instruction','retraining','journal']],
+ ['Люди и компетенции',['person','workplace','skills','practical','development']],
+ ['Наставники и ВТ',['mentoring','self_eval','certification','appointments','audit']],
+ ['Аналитика',['analytics','metrics','roi']],
+ ['Управление центром',['org_unit','import_xlsx','storage']],
+ ['Справочники',['profession','position','work_shift','equipment','operation','person_assignment','business_role','role_assignment','skill_category','skill','rating_scale']]
+];
+const implemented=new Set(['home','sop','frv','sop_evaluation','storage','import_xlsx',...Object.keys(definitions)]);
+const collapsedNav=new Set(['Производственное обучение','Наставники и ВТ','Аналитика','Справочники']);
+let librarySelected=null;
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n}
 function add(parent,...children){parent.append(...children);return parent}
 function btn(label,fn,cls='',disabled=false){const n=el('button',label,cls);n.type='button';n.disabled=disabled||busy;n.addEventListener('click',fn);return n}
 function pane(title,...children){return add(el('section',undefined,'panel'),el('h2',title),...children)}
 function message(s,bad=false){status=s;error=bad;const n=document.getElementById('status');if(n){n.textContent=s;n.className='status'+(bad?' error':'')}}
-function navigate(p){page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';render()}
+function navigate(p){page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;render()}
 function openImport(type){importState={type,book:null,sheet:0,header:1,mapping:{},allowUpdates:false,plan:null,file:''};navigate('import_xlsx')}
 function openHistory(id){navigate('person_assignment');historyPerson=id;archiveFilter='all';render()}
 async function persist(){if(cache)generation=await local.saveWorkspace(cache,generation,ws.state())}
@@ -60,17 +73,21 @@ function icon(key,cls='nav-icon'){
  for(const d of ICON_PATHS[key]||ICON_PATHS.home){const p=document.createElementNS(ns,'path');p.setAttribute('d',d);svg.append(p)}
  return svg
 }
-function navButton(k){const n=btn('',()=>navigate(k),'nav'+(page===k?' active':''));n.append(icon(k),el('span',labels[k]));if(page===k)n.setAttribute('aria-current','page');return n}
+function navButton(k){const n=btn('',()=>navigate(k),'nav'+(page===k?' active':'')+(!implemented.has(k)?' nav-planned':''));n.append(icon(k),el('span',labels[k]));if(page===k)n.setAttribute('aria-current','page');if(!implemented.has(k)){n.title='Запланировано на следующие этапы';const dot=el('span','', 'planned-dot');dot.setAttribute('aria-hidden','true');n.append(dot)}return n}
 function sectionHeading(title,caption){return add(el('div',undefined,'section-heading'),el('h2',title),el('span',caption,'muted'))}
 function home(main){
+ const todayIso=today(),overdue=one(ws.working,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='effective' AND d.archived=0 AND r.review_due<?",[todayIso]).n;
+ const without=one(ws.working,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='draft' AND d.archived=0 AND (r.print_format IS NULL OR r.workplace_id IS NULL)").n;
+ const needs=pane('Требует внимания',add(el('div',undefined,'attention-row'),el('strong',String(overdue),overdue?'bad':'muted'),el('span','Просроченный пересмотр действующих СОП'),btn('Открыть',()=>{navigate('sop');libraryFilter='overdue';render()})),add(el('div',undefined,'attention-row'),el('strong',String(without),without?'warn':'muted'),el('span','Черновики без подтверждённого паспорта'),btn('Открыть',()=>{navigate('sop');libraryFilter='missing_passport';render()})));
+ main.append(needs);
  main.append(sectionHeading('Справочники предприятия','Активные записи'));
  const g=el('div',undefined,'kpi-grid');
  const counts=Object.fromEntries(Object.keys(definitions).map(k=>[k,list(ws.working,k).filter(x=>activeRecord(definitions[k],x)).length]));
- for(const k of ['org_unit','person','profession','position','equipment','operation']){const d=definitions[k],n=btn('',()=>navigate(k),'tile');n.setAttribute('aria-label',d.label+': '+counts[k]);add(n,add(el('div',undefined,'tile-head'),el('span',d.label,'muted'),icon(k,'tile-icon')),el('b',String(counts[k])),el('span','Открыть справочник →','tile-link'));g.append(n)}
+ for(const k of ['org_unit','person','workplace','equipment','operation','profession']){const d=definitions[k],n=btn('',()=>navigate(k),'tile');n.setAttribute('aria-label',d.label+': '+counts[k]);add(n,add(el('div',undefined,'tile-head'),el('span',d.label,'muted'),icon(k,'tile-icon')),el('b',String(counts[k])),el('span','Открыть справочник →','tile-link'));g.append(n)}
  main.append(g);main.append(add(el('div',undefined,'row registry-shortcuts'),btn('Импорт справочников из Excel',()=>openImport('person'),'primary'),btn('Назначения сотрудников',()=>navigate('person_assignment')),btn('Шкалы оценивания',()=>navigate('rating_scale'))));
  const c=el('div',undefined,'chart');c.style.height=Math.max(290,Object.keys(definitions).length*29)+'px';main.append(pane('Структура справочников',c));
  if(window.echarts){chart=echarts.init(c,theme?'dark':null);chart.setOption(registryCountChart(Object.values(definitions).map(x=>x.label),Object.keys(definitions).map(k=>counts[k]),theme))}
- const links=el('div',undefined,'workspace-grid');for(const [k,n] of Object.entries(planned)){const b=btn('',()=>navigate(k),'workspace-link');b.append(icon(k),el('span',n));links.append(b)}
+ const links=el('div',undefined,'workspace-grid');for(const [k,n] of Object.entries(planned).filter(([k])=>implemented.has(k))){const b=btn('',()=>navigate(k),'workspace-link');b.append(icon(k),el('span',n));links.append(b)}
  main.append(pane('Рабочие модули',el('p','СОП, ФРВ, TWI, компетенции, наставничество и аудит — равноправные модули центра. Доступны база, справочники, библиотека СОП и ФРВ. Остальные функциональные модули будут подключаться последовательно.','muted'),links))
 }
 function form(type,v){
@@ -272,7 +289,7 @@ function libraryPreview(main,kind){
  form.onsubmit=e=>{e.preventDefault();run(async()=>{assertContext(c);const payload={command:c.command,title:title.value.trim(),operation_id:op.value||null,source:d.source,projection:p};if(kind==='sop'){if(c.command==='create')payload.code=code.value.trim();else payload.revision_id=c.command==='save'?c.revisionId:null}else payload.observed_at=observed.value;
    // The complete original content is durable before its reference is written.
    await contentStore.put(d.source,d.text);const ev=libraryEvent(c,payload);const events=[ev];if(d.origin){invariant(c.command==='create','Проект из ФРВ должен быть новым документом');events.push({id:uuid(),entity_type:'document',entity_id:ev.entity_id,operation:'update',expected_revision:1,payload:{command:'origin',revision_id:ev.id,...d.origin},occurred_at:new Date().toISOString()})}await ws.applyContentEvents(events,readContent);await persist();
-   libraryDraft=null;if(d.editor&&editorSession&&!editorSession.popup.closed){editorSession.popup.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'result',message:'Черновик сохранён в Lean Center. Скачайте JSON при необходимости. Для следующей правки откройте актуальный черновик из библиотеки.'},'*')}
+   libraryDraft=null;librarySelected=ev.entity_id;if(d.editor&&editorSession&&!editorSession.popup.closed){editorSession.popup.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'result',message:'Черновик сохранён в Lean Center. Скачайте JSON при необходимости. Для следующей правки откройте актуальный черновик из библиотеки.'},'*')}
    return 'Черновик сохранён. Ожидает общей публикации базы.';
  },{save:false})};
  main.append(pane('Проверенный исходный файл',el('p',sourceSummary(d)),el('p','Исходный статус Stage43: '+(p.legacy_status||'не указан')+' · Номер: '+(p.number||'не указан')+' · '+Math.ceil(d.source.size/1024)+' КБ','muted'),el('p','Исходный статус не считается согласованием в Lean Center. Содержимое и фотографии сохраняются полностью; исходный JSON хранится отдельно по SHA-256.','muted'),add(form,grid,add(el('div',undefined,'row'),confirm,btn('Скачать исходный JSON',()=>downloadRaw('Stage43-'+kind+'.json',d.text)),btn('Отменить предпросмотр',()=>{if(window.confirm('Отменить неподтверждённый импорт? Исходный файл не изменится.')){libraryDraft=null;render()}})))));
@@ -286,7 +303,7 @@ function rawButton(source,name){return btn('Скачать JSON',()=>run(async()
 function sourceDetails(data){const details=el('details'),summary=el('summary','Сведения об исходнике'),p=data.projection;details.append(summary,el('p',sourceSummary(data),'muted'),el('p','SHA-256: '+data.source.sha256,'source-hash'),el('p','Stage43: '+(p.legacy_id||'без ID')+' / '+(p.legacy_version||'—')+' / '+(p.legacy_status||'—'),'muted'));return details}
 function libraryHeader(main,kind){
  const search=fieldInput('library_search',query,'search');search.placeholder='Поиск по названию, коду, операции';
- const filter=el('select');filter.name='library_filter';for(const [v,n] of [['all','Все записи'],['active','Без архива'],['archive','Архив']]){const o=el('option',n);o.value=v;filter.append(o)}filter.value=libraryFilter;
+ const filter=el('select');filter.name='library_filter';for(const [v,n] of [['all','Все записи'],['active','Без архива'],['archive','Архив'],...(kind==='sop'?[['overdue','Просрочен пересмотр'],['missing_passport','Нет паспорта']]:[])]){const o=el('option',n);o.value=v;filter.append(o)}filter.value=libraryFilter;
  const controls=add(el('div',undefined,'row'),btn(kind==='sop'?'Создать СОП в редакторе':'Создать исследование в редакторе',()=>launchEditor(libraryContext(kind)),'primary',!!ws.conflicts.length),btn('Импорт JSON Stage43',()=>chooseLibraryFile(kind),'',!!ws.conflicts.length),search,filter);
  const p=pane(kind==='sop'?'Общая библиотека СОП':'Общая библиотека ФРВ',el('p','Редактор Stage43 открывается отдельным рабочим окном. Печать, фотографии, TWI и прежние форматы XLSX сохранены в его исходном механизме. ИИ в интегрированном редакторе пока отключён; согласование и общая публикация выполняются в Lean Center.','muted'),controls);main.append(p);libraryPreview(main,kind);
  const out=el('div',undefined,'stack');main.append(out);return {search,filter,out}
@@ -295,9 +312,15 @@ function libraryScreen(main,kind){
  const {search,filter,out}=libraryHeader(main,kind);
  function draw(){
   out.replaceChildren();const items=rows(ws.working,kind==='sop'?'SELECT * FROM document ORDER BY code':'SELECT * FROM frv_study ORDER BY observed_at DESC,title');
-  const filtered=items.filter(v=>{const a=kind==='sop'?!!v.archived:v.state==='archived';return (libraryFilter==='all'||(libraryFilter==='active'?!a:a))&&[v.title,v.code,refName('operation',v.operation_id)].some(x=>String(x||'').toLowerCase().includes(query.toLowerCase()))});
+  const filtered=items.filter(v=>{const a=kind==='sop'?!!v.archived:v.state==='archived';let visible=libraryFilter==='all'||(libraryFilter==='active'&&!a)||(libraryFilter==='archive'&&a);
+   if(kind==='sop'&&!a&&libraryFilter==='overdue')visible=!!one(ws.working,"SELECT id FROM document_revision WHERE document_id=? AND state='effective' AND review_due<?",[v.id,today()]);
+   if(kind==='sop'&&!a&&libraryFilter==='missing_passport')visible=!!one(ws.working,"SELECT id FROM document_revision WHERE document_id=? AND state='draft' AND (print_format IS NULL OR workplace_id IS NULL)",[v.id]);
+   return visible&&[v.title,v.code,refName('operation',v.operation_id)].some(x=>String(x||'').toLowerCase().includes(query.toLowerCase()))});
   if(!filtered.length){out.append(pane('Нет записей',el('p','Создайте документ в редакторе или импортируйте переносимый JSON Stage43.','muted')));return}
-  for(const v of filtered){
+  if(!filtered.some(x=>x.id===librarySelected))librarySelected=null;
+  if(!librarySelected){out.append(pane(kind==='sop'?'Каталог документов':'Журнал исследований',tableOf(['Код / дата','Название','Операция','Статус',''],filtered.map(v=>{const rev=kind==='sop'?one(ws.working,"SELECT * FROM document_revision WHERE document_id=? ORDER BY CASE WHEN state='effective' THEN 0 ELSE 1 END,version_no DESC LIMIT 1",[v.id]):null;return [v.code||v.observed_at,v.title,refName('operation',v.operation_id),v.archived?'Архив':revisionLabels[rev?.state||v.state]||'—',btn('Открыть',()=>{librarySelected=v.id;draw()},'primary')]}))));return}
+  out.append(add(el('div',undefined,'row'),btn('К списку',()=>{librarySelected=null;draw()})));
+  for(const v of filtered.filter(x=>x.id===librarySelected)){
    const p=pane((kind==='sop'?v.code+' · ':'')+v.title,el('p','Операция: '+refName('operation',v.operation_id)+' · Ревизия записи: '+v.rev,'muted'));
    if(kind==='sop'){
     const versions=rows(ws.working,'SELECT * FROM document_revision WHERE document_id=? ORDER BY version_no DESC',[v.id]);
@@ -358,14 +381,15 @@ main.append(pane('Демонстрация',el('p','Только в пустой
 function render(){
  chart?.dispose();chart=null;document.documentElement.classList.toggle('dark',theme);
  const header=el('header',undefined,'corp-header');
- const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div'),el('div','LEAN CENTER','brand'),el('div','Центр производственной системы','brand-sub')));
- const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.0','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
+ const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div'),el('div','LEAN CENTER','brand'),el('div','Обучение на рабочем месте · TWI','brand-sub')));
+ const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.1','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
  header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.setAttribute('aria-label','Навигация');
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};
- group('Рабочее пространство',['home',...Object.keys(planned)]);group('Предприятие',['org_unit','person','profession','position','work_shift','equipment','operation']);group('Назначения и роли',['person_assignment','business_role','role_assignment']);group('Справочники оценивания',['skill_category','skill','rating_scale']);group('Система',['import_xlsx','storage']);
+ for(const [name,keys] of navGroups){const d=el('details',undefined,'nav-section');d.open=!collapsedNav.has(name)||keys.includes(page);d.append(el('summary',name,'navgroup'));for(const k of keys)d.append(navButton(k));d.addEventListener('toggle',()=>{if(d.open)collapsedNav.delete(name);else collapsedNav.add(name)});side.append(d)}
+ side.append(el('p','●  Запланированные разделы','nav-hint'));
  const main=el('main',undefined,'main');
- const section=page==='home'?'Рабочее пространство':['storage','import_xlsx'].includes(page)?'Система':Object.hasOwn(definitions,page)?'Справочники':'Рабочее пространство';
+ const section=navGroups.find(([,keys])=>keys.includes(page))?.[0]||'Рабочее пространство';
  const top=add(el('div',undefined,'top'),add(el('div'),el('div',section,'eyebrow'),el('h1',labels[page]),el('div','Локальная база · '+ws.pending.length+' ожидающих изменений','muted')),el('span',folder?'Сетевая папка выбрана':'Локальная рабочая копия','pill'));
  main.append(top);const stat=el('div',status,'status'+(error?' error':''));stat.id='status';stat.setAttribute('role','status');main.append(stat);
  if(!cache)main.append(el('p','IndexedDB недоступен. Изменения только в памяти — скачивайте резервную копию до закрытия.','bad'));
@@ -373,7 +397,7 @@ function render(){
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));
  if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(page==='twi')main.append(pane('TWI в составе СОП',el('p','План TWI сохраняется вместе с версией СОП и доступен в редакторе Stage43. Назначения обучения и практические оценки будут реализованы на LC4.','muted'),btn('Открыть библиотеку СОП',()=>navigate('sop'),'primary')));else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
- main.append(el('p','LC3.0 · автономная рабочая копия · общий сетевой обмен','foot'))
+ main.append(el('p','LC3.1 · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
 async function init(){configureMigrations(LC_BUILD.migration3,LC_BUILD.migration4,LC_BUILD.migration5);SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await net.latestSnapshot(folder,SQL);if(remote){await useSnapshot(remote.db);await persist();message(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки')}}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message('Сетевая база не обновлена: '+e.message,true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}
