@@ -70,3 +70,8 @@ export function reconcileMatrix(source,personMap,columnMap,projection){
  invariant(new Set(people.map(p=>personMap.get(p.row))).size===people.length&&new Set(cols.map(c=>columnMap.get(c.col))).size===cols.length,'Повтор сопоставления сотрудника или столбца');
  return people.flatMap(p=>cols.map(c=>{const src=p.values.find(v=>v.col===c.col),personId=personMap.get(p.row),skillId=columnMap.get(c.col),actual=projection?.cells.get(matrixKey(personId,skillId))?.actual??null;return {personId,skillId,person:p.label,skill:c.label,raw:src.raw,imported:src.value,actual,status:src.invalid?'Неверное значение':src.value===null?'Пусто':actual===src.value?'Совпадает':actual===null?'Нет подтверждения':'Расхождение'}}))
 }
+
+export function matrixGroupLabels(db,columns){
+ const entries=new Map(rows(db,'SELECT s.id,c.name category,w.name workplace,e.name equipment FROM skill s JOIN skill_category c ON c.id=s.category_id LEFT JOIN operation o ON o.id=s.operation_id LEFT JOIN workplace w ON w.id=o.workplace_id LEFT JOIN equipment e ON e.id=o.equipment_id').map(x=>[x.id,x]));
+ return new Map(columns.map(c=>{const x=entries.get(c.skill_id||c.id);return [c.skill_id||c.id,{workplace:x?.workplace||'Без рабочего места',equipment:x?.equipment||'Без оборудования',category:x?.category||'Без категории'}]}))
+}
