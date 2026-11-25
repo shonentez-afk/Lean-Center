@@ -248,31 +248,55 @@ async function chooseLibraryFile(kind,ctx=libraryContext(kind)){
  if(libraryDraft){message('Сначала завершите или отмените текущий предпросмотр.',true);return}
  const i=el('input');i.type='file';i.accept='.json,application/json';i.onchange=()=>{const file=i.files?.[0];if(file)run(async()=>{invariant(file.size<=MAX_CONTENT,'JSON до 30 МБ');const text=await file.text(),inspected=await inspectSource(text,kind);assertContext(ctx);libraryDraft={ctx,text,...inspected,editor:false};page=kind==='sop'?'sop':'frv';return 'Исходный файл проверен. Укажите связи и подтвердите запись.'},{save:false})};i.click()
 }
+// The editor is a trusted pinned local HTML payload loaded in an in-page frame.
+ // No window.open, network fetch, file URL query or cross-window navigation.
+function editorStatus(s,text,bad=false){if(editorSession!==s)return;s.note.textContent=text;s.note.classList.toggle('bad',bad)}
+function showEditor(s){if(editorSession!==s)return;s.host.hidden=false;root.inert=true;document.body.classList.add('editor-active');s.close.focus()}
+function hideEditor(s){if(editorSession!==s)return;s.host.hidden=true;root.inert=false;document.body.classList.remove('editor-active')}
+function disposeEditor(s,confirmed=false){
+ if(editorSession!==s)return false;
+ if(!confirmed&&!window.confirm('Закрыть рабочую копию редактора? Непереданные изменения могут быть потеряны. Сначала скачайте JSON или передайте в Lean Center.'))return false;
+ clearTimeout(s.timeout);hideEditor(s);s.host.remove();editorSession=null;return true
+}
 function launchEditor(ctx){
  if(libraryDraft){message('Сначала завершите или отмените текущий предпросмотр.',true);return}
- if(editorSession&&!editorSession.popup.closed){editorSession.popup.focus();message('Сначала завершите открытый редактор или скачайте его JSON.',true);return}
- assertContext(ctx);
- const session=uuid(),url='versions/'+LC_BUILD.version+'/editor/Stage43.html?lcSession='+session+'&lcKind='+ctx.kind;
- const popup=window.open(url,'lean-editor-'+session,'popup,width=1400,height=900');
- if(!popup){message('Браузер заблокировал окно редактора. Разрешите всплывающие окна.',true);return}
- editorSession={session,popup,ctx,loading:false};
- message('Редактор Stage43 открыт; сохранение в общую библиотеку выполняется после подтверждения.');
+ if(editorSession){showEditor(editorSession);message('Возвращение к открытой рабочей копии редактора.');return}
+ try{
+  assertContext(ctx);
+  const template=window.LC_EDITOR_HTML,marker='window.LC_EDITOR_CONTEXT=null;/* LC_EMBED_CONTEXT */';
+  invariant(typeof template==='string'&&template.split(marker).length===2,'Файл редактора не загружен. Распакуйте весь ZIP: index.html и папка versions должны находиться рядом.');
+  const session=uuid(),host=el('section',undefined,'editor-host'),bar=el('div',undefined,'editor-host-bar'),frame=el('iframe'),note=el('span','Загрузка конструктора…','editor-host-note');
+  host.id='lc-editor-host';host.setAttribute('aria-label','Рабочая область редактора');host.setAttribute('role','dialog');host.setAttribute('aria-modal','true');
+  frame.id='lc-editor-frame';frame.title=ctx.kind==='sop'?'Редактор СОП и TWI':'Редактор ФРВ';
+  const s={session,host,frame,note,ctx,loading:false,loaded:false,timeout:null,close:null};
+  const back=btn('К библиотеке',()=>{hideEditor(s);render()});
+  const close=btn('Закрыть редактор',()=>{if(disposeEditor(s)){message('Редактор закрыт. База не изменена.');render()}});
+  s.close=close;
+  bar.append(el('strong',frame.title),note,back,close);host.append(bar,frame);
+  editorSession=s;document.body.append(host);showEditor(s);
+  s.timeout=setTimeout(()=>{if(!s.loaded){editorStatus(s,'Редактор не подтвердил загрузку. Закройте его и проверьте комплект файлов и ограничения браузера.',true);message('Редактор не подтвердил готовность. Данные не изменены.',true)}},30000);
+  frame.srcdoc=template.replace(marker,()=> 'window.LC_EDITOR_CONTEXT='+JSON.stringify({session,kind:ctx.kind})+';/* LC_EMBED_CONTEXT */');
+  message('Загрузка конструктора. Ожидание подтверждения готовности.');
+ }catch(e){if(editorSession)disposeEditor(editorSession,true);message(e.message,true)}
 }
 window.addEventListener('message',async e=>{
  const s=editorSession,m=e.data;
- if(!s||e.source!==s.popup||m?.protocol!=='lean-editor-v1'||m.session!==s.session)return;
- const reply=message=>s.popup.postMessage({protocol:'lean-editor-v1',session:s.session,type:'result',message},'*');
- if(m.type==='ready'&&!s.loading){
+ if(!s||e.source!==s.frame.contentWindow||m?.protocol!=='lean-editor-v1'||m.session!==s.session)return;
+ const reply=message=>{if(editorSession===s)s.frame.contentWindow?.postMessage({protocol:'lean-editor-v1',session:s.session,type:'result',message},'*')};
+ if(m.type==='ready'&&!s.loading&&!s.loaded){
   s.loading=true;
-  try{assertContext(s.ctx);const text=s.ctx.source?await readContent(s.ctx.source):null;const op=s.ctx.operation_id?one(ws.working,'SELECT * FROM operation WHERE id=?',[s.ctx.operation_id]):null;s.popup.postMessage({protocol:'lean-editor-v1',session:s.session,type:'load',text,defaults:{operation:op?.name||'',unit:op?refName('org_unit',op.unit_id):''}},'*')}
-  catch(err){reply(err.message);message(err.message,true)}finally{s.loading=false}
+  try{assertContext(s.ctx);const text=s.ctx.source?await readContent(s.ctx.source):null;if(editorSession!==s)return;const op=s.ctx.operation_id?one(ws.working,'SELECT * FROM operation WHERE id=?',[s.ctx.operation_id]):null;s.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:s.session,type:'load',text,defaults:{operation:op?.name||'',unit:op?refName('org_unit',op.unit_id):''}},'*');editorStatus(s,'Подготовка рабочей копии…')}
+  catch(err){clearTimeout(s.timeout);reply(err.message);editorStatus(s,err.message,true);message(err.message,true)}finally{s.loading=false}
+ }else if(m.type==='loaded'){
+  clearTimeout(s.timeout);s.loaded=true;editorStatus(s,'Редактор готов');message('Редактор готов. Сохранение в библиотеку — после подтверждения.');
  }else if(m.type==='source'){
+  if(!s.loaded){reply('Редактор ещё не готов.');return}
   if(busy){reply('Центр занят. Повторите передачу или скачайте JSON.');return}
   if(m.kind!==s.ctx.kind||typeof m.text!=='string'||m.text.length>MAX_CONTENT){reply('Неверный исходный файл');return}
   if(libraryDraft){reply('В центре уже есть неподтверждённый исходный файл. Завершите его сохранение или отмените предпросмотр.');return}
-  await run(async()=>{assertContext(s.ctx);const inspected=await inspectSource(m.text,s.ctx.kind);libraryDraft={ctx:s.ctx,text:m.text,...inspected,editor:true};page=s.ctx.kind==='sop'?'sop':'frv';return 'Редактор передал исходный файл. Подтвердите сохранение в библиотеку.'},{save:false});
-  if(error)reply(status);else reply('Предпросмотр готов. Подтвердите сохранение в основном окне.');
- }else if(m.type==='error')message('Редактор: '+String(m.message||'ошибка'),true)
+  await run(async()=>{assertContext(s.ctx);const inspected=await inspectSource(m.text,s.ctx.kind);invariant(editorSession===s,'Редактор закрыт');libraryDraft={ctx:s.ctx,text:m.text,...inspected,editor:true};page=s.ctx.kind==='sop'?'sop':'frv';return 'Редактор передал исходный файл. Подтвердите сохранение в библиотеку.'},{save:false});
+  if(error)reply(status);else{reply('Предпросмотр готов. Подтвердите сохранение в Lean Center.');hideEditor(s)}
+ }else if(m.type==='error'){clearTimeout(s.timeout);editorStatus(s,'Ошибка: '+String(m.message||'ошибка'),true);message('Редактор: '+String(m.message||'ошибка'),true)}
 });
 function sourceSummary(d){
  const p=d.projection;return d.source.kind==='sop'?'Шагов: '+p.steps.length+' · Фото: '+p.photos+' · TWI: '+(p.twi?'есть':'нет'):'Циклов: '+p.cycles+' · Полных: '+p.complete+' · Измерений: '+p.measurements.length+' · Без измерения/действия: '+p.unmeasured
@@ -289,7 +313,7 @@ function libraryPreview(main,kind){
  form.onsubmit=e=>{e.preventDefault();run(async()=>{assertContext(c);const payload={command:c.command,title:title.value.trim(),operation_id:op.value||null,source:d.source,projection:p};if(kind==='sop'){if(c.command==='create')payload.code=code.value.trim();else payload.revision_id=c.command==='save'?c.revisionId:null}else payload.observed_at=observed.value;
    // The complete original content is durable before its reference is written.
    await contentStore.put(d.source,d.text);const ev=libraryEvent(c,payload);const events=[ev];if(d.origin){invariant(c.command==='create','Проект из ФРВ должен быть новым документом');events.push({id:uuid(),entity_type:'document',entity_id:ev.entity_id,operation:'update',expected_revision:1,payload:{command:'origin',revision_id:ev.id,...d.origin},occurred_at:new Date().toISOString()})}await ws.applyContentEvents(events,readContent);await persist();
-   libraryDraft=null;librarySelected=ev.entity_id;if(d.editor&&editorSession&&!editorSession.popup.closed){editorSession.popup.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'result',message:'Черновик сохранён в Lean Center. Скачайте JSON при необходимости. Для следующей правки откройте актуальный черновик из библиотеки.'},'*')}
+   libraryDraft=null;librarySelected=ev.entity_id;if(d.editor&&editorSession)disposeEditor(editorSession,true);
    return 'Черновик сохранён. Ожидает общей публикации базы.';
  },{save:false})};
  main.append(pane('Проверенный исходный файл',el('p',sourceSummary(d)),el('p','Исходный статус Stage43: '+(p.legacy_status||'не указан')+' · Номер: '+(p.number||'не указан')+' · '+Math.ceil(d.source.size/1024)+' КБ','muted'),el('p','Исходный статус не считается согласованием в Lean Center. Содержимое и фотографии сохраняются полностью; исходный JSON хранится отдельно по SHA-256.','muted'),add(form,grid,add(el('div',undefined,'row'),confirm,btn('Скачать исходный JSON',()=>downloadRaw('Stage43-'+kind+'.json',d.text)),btn('Отменить предпросмотр',()=>{if(window.confirm('Отменить неподтверждённый импорт? Исходный файл не изменится.')){libraryDraft=null;render()}})))));
@@ -305,7 +329,7 @@ function libraryHeader(main,kind){
  const search=fieldInput('library_search',query,'search');search.placeholder='Поиск по названию, коду, операции';
  const filter=el('select');filter.name='library_filter';for(const [v,n] of [['all','Все записи'],['active','Без архива'],['archive','Архив'],...(kind==='sop'?[['overdue','Просрочен пересмотр'],['missing_passport','Нет паспорта']]:[])]){const o=el('option',n);o.value=v;filter.append(o)}filter.value=libraryFilter;
  const controls=add(el('div',undefined,'row'),btn(kind==='sop'?'Создать СОП в редакторе':'Создать исследование в редакторе',()=>launchEditor(libraryContext(kind)),'primary',!!ws.conflicts.length),btn('Импорт JSON Stage43',()=>chooseLibraryFile(kind),'',!!ws.conflicts.length),search,filter);
- const p=pane(kind==='sop'?'Общая библиотека СОП':'Общая библиотека ФРВ',el('p','Редактор Stage43 открывается отдельным рабочим окном. Печать, фотографии, TWI и прежние форматы XLSX сохранены в его исходном механизме. ИИ в интегрированном редакторе пока отключён; согласование и общая публикация выполняются в Lean Center.','muted'),controls);main.append(p);libraryPreview(main,kind);
+ const p=pane(kind==='sop'?'Общая библиотека СОП':'Общая библиотека ФРВ',el('p','Редактор Stage43 открывается внутри Lean Center, без всплывающих окон. Печать, фотографии, TWI и прежние форматы XLSX сохранены в его исходном механизме. ИИ в интегрированном редакторе пока отключён; согласование и общая публикация выполняются в Lean Center.','muted'),controls);main.append(p);libraryPreview(main,kind);
  const out=el('div',undefined,'stack');main.append(out);return {search,filter,out}
 }
 function libraryScreen(main,kind){
@@ -382,8 +406,8 @@ function render(){
  chart?.dispose();chart=null;document.documentElement.classList.toggle('dark',theme);
  const header=el('header',undefined,'corp-header');
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div'),el('div','LEAN CENTER','brand'),el('div','Обучение на рабочем месте · TWI','brand-sub')));
- const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.1','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
- header.append(brand,metaPanel);
+ const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.2','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
+ if(editorSession&&editorSession.host.hidden&&!libraryDraft)metaPanel.append(btn('Вернуться в редактор',()=>showEditor(editorSession),'primary'));header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.setAttribute('aria-label','Навигация');
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};
  for(const [name,keys] of navGroups){const d=el('details',undefined,'nav-section');d.open=!collapsedNav.has(name)||keys.includes(page);d.append(el('summary',name,'navgroup'));for(const k of keys)d.append(navButton(k));d.addEventListener('toggle',()=>{if(d.open)collapsedNav.delete(name);else collapsedNav.add(name)});side.append(d)}
@@ -395,9 +419,9 @@ function render(){
  if(!cache)main.append(el('p','IndexedDB недоступен. Изменения только в памяти — скачивайте резервную копию до закрытия.','bad'));
  if(ws.conflicts.length)main.append(el('p','Есть конфликты локальных изменений. Откройте «База и обмен».','bad'));
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
- root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));
+ root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));root.inert=!!editorSession&&!editorSession.host.hidden;
  if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(page==='twi')main.append(pane('TWI в составе СОП',el('p','План TWI сохраняется вместе с версией СОП и доступен в редакторе Stage43. Назначения обучения и практические оценки будут реализованы на LC4.','muted'),btn('Открыть библиотеку СОП',()=>navigate('sop'),'primary')));else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
- main.append(el('p','LC3.1 · автономная рабочая копия · общий сетевой обмен','foot'))
+ main.append(el('p','LC3.2 · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
 async function init(){configureMigrations(LC_BUILD.migration3,LC_BUILD.migration4,LC_BUILD.migration5);SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await net.latestSnapshot(folder,SQL);if(remote){await useSnapshot(remote.db);await persist();message(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки')}}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message('Сетевая база не обновлена: '+e.message,true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}

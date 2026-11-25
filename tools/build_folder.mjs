@@ -7,7 +7,7 @@ import {buildEditor} from './build_editor.mjs';
 
 const root=process.cwd();
 const read=p=>fs.readFileSync(path.join(root,p),'utf8').replace(/\r\n/g,'\n');
-const version='lc3.1';
+const version='lc3.2';
 const output=path.join(root,'dist','LeanCenter');
 const releasePath='versions/'+version;
 const files=new Map();
@@ -22,8 +22,8 @@ code('vendor/echarts.min.js',read('node_modules/echarts/dist/echarts.min.js'));
 code('vendor/exceljs.min.js',read('baselines/sop-stage43/src/vendor/exceljs.min.js'));
 put(releasePath+'/licenses/exceljs/LICENSE.txt',read('baselines/sop-stage43/src/vendor/ExcelJS_LICENSE.txt'));
 code('app/main.js',js);
-put(releasePath+'/editor/Stage43.html',buildEditor());
-code('editor/lean-bridge.js',read('src/modules/library/lean-bridge.js'));
+const bridge=read('src/modules/library/lean-bridge.js');new Script(bridge,{filename:'lean-bridge.js'});
+code('editor/Stage43-data.js','window.LC_EDITOR_HTML='+JSON.stringify(buildEditor(bridge))+';\n');
 put(releasePath+'/assets/styles.css',read('src/ui/styles.css'));
 for(const name of ['sql.js','echarts','zrender','tslib']){
  const dir=path.join(root,'node_modules',name);
