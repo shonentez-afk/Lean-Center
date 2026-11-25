@@ -29,8 +29,20 @@ try{
  await page.locator('select[name=training_skill]').selectOption(ids.skill);await page.locator('select[name=training_target_scale]').selectOption(ids.scale);await page.locator('select[name=training_target_level]').selectOption('2');await page.locator('select[name=training_shift]').selectOption(ids.shift);await page.locator('textarea[name=training_reason]').fill('Учебное назначение');
  await saved('Сохранить назначение');await choose('Ответственный за СОП (НР)','LC4-003');await choose('Руководитель подразделения','LC4-003');await page.locator('input[name=approved_on]').fill(date);await saved('Зафиксировать согласование');
  await page.locator('.library-tabs').getByRole('button',{name:'Инструктаж',exact:true}).click();await page.getByRole('button',{name:'Показать план TWI и шаги СОП'}).click();await page.getByText('Учебный КМ',{exact:true}).waitFor();
- for(const code of ['prepare','show1','show2','show3','try1','try2','try3','try4']){
-  await page.locator('select[name=session_stage]').selectOption(code);await page.locator('input[name=session_when]').fill(date+'T08:00');await page.locator('textarea[name=session_notes]').fill('Учебное наблюдение '+code);await page.locator('input[name=mentor_ack]').check();await page.locator('input[name=trainee_ack]').check();await saved('Записать этап')
+ // The form defaults to 15 minutes, not the 10-minute core fixture.
+ // Enter distinct durations explicitly and independently verify every saved fact.
+ const stages=['prepare','show1','show2','show3','try1','try2','try3','try4'];
+ const stageMinutes=[15,5,10,20,7,8,12,13],totalMinutes=stageMinutes.reduce((a,b)=>a+b,0);
+ assert.equal(totalMinutes,90);
+ let elapsed=0;
+ for(const [i,code] of stages.entries()){
+  await page.locator('select[name=session_stage]').selectOption(code);
+  const minutes=page.locator('input[name=session_minutes]');
+  if(i===0)assert.equal(await minutes.inputValue(),'15');
+  await minutes.fill(String(stageMinutes[i]));
+  const hh=String(8+Math.floor(elapsed/60)).padStart(2,'0'),mm=String(elapsed%60).padStart(2,'0');
+  await page.locator('input[name=session_when]').fill(date+'T'+hh+':'+mm);elapsed+=stageMinutes[i];
+  await page.locator('textarea[name=session_notes]').fill('Учебное наблюдение '+code);await page.locator('input[name=mentor_ack]').check();await page.locator('input[name=trainee_ack]').check();await saved('Записать этап')
  }
  await fs.mkdir('artifacts/lc4',{recursive:true});await page.screenshot({path:'artifacts/lc4/instruction.png',fullPage:true});
  await page.locator('.library-tabs').getByRole('button',{name:'Практика и допуск',exact:true}).click();
@@ -46,8 +58,25 @@ try{
  await nav('Матрица компетенций');await page.getByRole('button',{name:/2 · Допуск зарегистрирован/}).waitFor();await page.screenshot({path:'artifacts/lc4/matrix.png',fullPage:true});await page.getByRole('button',{name:/2 · Допуск зарегистрирован/}).click();await page.getByRole('heading',{name:'Ученик Тестовый · Учебный навык',exact:true}).waitFor();
  await nav('Журнал заданий');await page.getByRole('cell',{name:'Подготовка',exact:true}).waitFor();
  const planDownload=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать план / факт XLSX',exact:true}).click();const planFile=path.join(tmp,'plan.xlsx');await (await planDownload).saveAs(planFile);
- const exportedPlan=await page.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const s=w.getWorksheet('План и реализация');return {title:s.getCell('A1').value,date:s.getCell('F7').value,duration:s.getCell('H7').value instanceof Date?(s.getCell('H7').value.getTime()/86400000+25569):s.getCell('H7').value,signature:s.getCell('I7').value,detail:w.getWorksheet('Назначения и факты').rowCount}},Array.from(await fs.readFile(planFile)));
- assert.equal(exportedPlan.date,date);assert(Math.abs(exportedPlan.duration-80/1440)<1e-8);assert(!exportedPlan.signature);assert.equal(exportedPlan.detail,9);await page.screenshot({path:'artifacts/lc4/journal.png',fullPage:true});
+ const planBytes=new Uint8Array(await fs.readFile(planFile));
+ const exportedPlan=await page.evaluate(async a=>{
+  const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));
+  const s=w.getWorksheet('План и реализация'),d=w.getWorksheet('Назначения и факты'),cell=s.getCell('H7'),value=cell.value;
+  return {title:s.getCell('A1').value,date:s.getCell('F7').value,start:s.getCell('G7').value,duration:value instanceof Date?(value.getTime()-Date.UTC(1899,11,30))/86400000:value,durationType:value instanceof Date?'Date':typeof value,format:cell.numFmt,signature:s.getCell('I7').value,traineeSignature:s.getCell('J7').value,detail:d.rowCount,minutes:Array.from({length:d.rowCount-1},(_,i)=>d.getCell(i+2,9).value),notes:Array.from({length:d.rowCount-1},(_,i)=>d.getCell(i+2,10).value)}
+ },Array.from(planBytes));
+ console.log('LC4.1 duration QA',JSON.stringify(exportedPlan));
+ assert.equal(exportedPlan.date,date);assert.equal(exportedPlan.start,'08:00');assert.equal(exportedPlan.format,'[h]:mm');
+ assert.equal(exportedPlan.detail,9);assert.deepEqual(exportedPlan.minutes,stageMinutes);
+ assert.deepEqual(exportedPlan.notes,stages.map(code=>'Учебное наблюдение '+code));
+ assert.equal(exportedPlan.minutes.reduce((a,b)=>a+b,0),totalMinutes);
+ assert(Math.abs(exportedPlan.duration-totalMinutes/1440)<1e-8,'Duration roundtrip: '+JSON.stringify(exportedPlan));
+ assert(!exportedPlan.signature);assert(!exportedPlan.traineeSignature);
+ // Independently inspect the actual OOXML numeric value, not just ExcelJS's
+ // interpretation of duration as a Date on a second read.
+ const planParts=await readZip(planBytes),sheetXml=new TextDecoder().decode(planParts.find(x=>x.name==='xl/worksheets/sheet1.xml').bytes);
+ const rawCell=sheetXml.match(/<c\b[^>]*\br="H7"[^>]*>\s*<v>([^<]+)<\/v>\s*<\/c>/);
+ assert(rawCell,'Missing numeric duration H7 in XLSX XML');assert(Math.abs(Number(rawCell[1])-totalMinutes/1440)<1e-12,'Incorrect raw Excel duration: '+rawCell[1]);
+ await page.screenshot({path:'artifacts/lc4/journal.png',fullPage:true});
  await nav('Наставники и ВТ');await page.getByRole('cell',{name:'Инструктор Тестовый',exact:true}).waitFor();
  await nav('Назначения');await page.getByRole('button',{name:'Групповой приказ',exact:true}).click();
  await page.locator('input[name=order_organization]').fill('Учебная организация');await page.locator('input[name=order_city]').fill('Учебный город');await page.locator('input[name=order_number]').fill('QA-GROUP');await page.locator('input[name=order_on]').fill(date);await page.locator('input[name=order_start]').fill(date);await choose('Директор / утверждающий','LC4-003');

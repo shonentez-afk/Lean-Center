@@ -136,3 +136,14 @@ test('LC4.1 separate internship and entry periods preserve original template and
  const e=await f.save('training_enrollment',base),row=one(f.w.working,'SELECT * FROM training_enrollment WHERE id=?',[e.entity_id]);assert.equal(row.internship_end,'2026-01-25');assert.equal(row.entry_end,'2026-02-20')
  }finally{f.w.close()}
 });
+
+test('LC4.1 daily duration preserves all minutes including repeat facts, multiple days and elapsed time over 24 hours',()=>{
+ const a={id:'a',trainee_id:'p',mentor_id:'m',sop_revision_id:'s'},b={id:'b'};
+ const facts=[{assignment_id:'a',held_at:'2026-01-21T08:00',duration_minutes:15},{assignment_id:'a',held_at:'2026-01-20T08:00',duration_minutes:1440},{assignment_id:'a',held_at:'2026-01-20T08:00',duration_minutes:75},{assignment_id:'a',held_at:'2026-01-21T08:15',duration_minutes:5}];
+ const result=productionRows([a,b],facts,{unit:()=>'',person:id=>id,revision:id=>id});
+ assert.equal(result.length,3);assert.deepEqual(result.map(r=>r.facts.length),[2,2,0]);
+ assert.deepEqual(result.map(r=>r.values[4]),['2026-01-20','2026-01-21',null]);
+ assert.deepEqual(result.map(r=>r.values[6]),[1515/1440,20/1440,null]);
+ assert.equal(result.flatMap(r=>r.facts).reduce((n,f)=>n+f.duration_minutes,0),1535);
+ assert(result.every(r=>r.values[7]===''&&r.values[8]===''));
+});
