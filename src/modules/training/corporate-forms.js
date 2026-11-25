@@ -17,6 +17,13 @@ export function calendarData(start,tasks){
  const days=[...new Set(tasks.map(t=>t.day_offset))].sort((a,b)=>a-b).map(i=>({offset:i,date:plusDays(start,i),hours:tasks.filter(t=>t.day_offset===i).reduce((n,t)=>n+t.hours,0)}));
  return {days,total:tasks.reduce((n,t)=>n+t.hours,0)}
 }
+// Actual work is grouped by the date of each recorded fact, never by the
+// originally scheduled day. Repetitions remain separate facts.
+export function calendarFacts(start,tasks,facts=[]){
+ const plan=calendarData(start,tasks),map=new Map(plan.days.map(d=>[d.date,{date:d.date,planned:d.hours,actual:0,plannedTasks:tasks.filter(t=>t.day_offset===d.offset).map(t=>t.title),actualTasks:[]}]));
+ for(const x of facts){if(!map.has(x.date))map.set(x.date,{date:x.date,planned:0,actual:0,plannedTasks:[],actualTasks:[]});const d=map.get(x.date);d.actual+=x.minutes/60;if(!d.actualTasks.includes(x.title))d.actualTasks.push(x.title)}
+ return [...map.values()].sort((a,b)=>a.date.localeCompare(b.date))
+}
 export function matrixPoints(matrix,people,skills,scaleId,personalGoals=[]){
  const goals=new Map();
  for(const g of personalGoals){if(g.scale_id!==scaleId)continue;const k=g.person_id+':'+g.skill_id;goals.set(k,Math.max(goals.get(k)??0,g.target_level))}
@@ -36,7 +43,7 @@ export function matrixPoints(matrix,people,skills,scaleId,personalGoals=[]){
  return {cells,byPerson,bySkill}
 }
 export function personalTargets(db,day,horizon){
- return rows(db,"SELECT p.person_id,g.skill_id,g.target_json FROM development_goal g JOIN development_plan p ON p.id=g.plan_id WHERE p.state='active' AND g.state='open' AND p.start_on<=? AND g.due_on>=? AND g.due_on<=? AND g.skill_id IS NOT NULL",[day,day,horizon]).map(x=>({person_id:x.person_id,skill_id:x.skill_id,...JSON.parse(x.target_json)}))
+ return rows(db,"SELECT p.person_id,g.skill_id,g.target_json FROM development_goal g JOIN development_plan p ON p.id=g.plan_id WHERE p.state='active' AND g.state='open' AND p.start_on<=? AND g.due_on<=? AND g.skill_id IS NOT NULL",[day,horizon]).map(x=>({person_id:x.person_id,skill_id:x.skill_id,...JSON.parse(x.target_json)}))
 }
 export const productionHeaders=['№ п/п','Подразделение','Ф.И.О. инструктора','Название СОП','Ф.И.О. обучаемого','Дата обучения','Время обучения','Продолжительность, ч:мм','Инструктор','Обучаемый'];
 // Plan and facts are two projections. Each fact is emitted once; empty plan rows
@@ -47,8 +54,11 @@ export function productionRows(assignments,facts,label){
  for(const a of assignments){
   const names=JSON.parse(a.recorded_names_json||'{}'),base=[label.unit(a),names.instructor||label.person(a.mentor_id),label.revision(a.sop_revision_id),names.trainee||label.person(a.trainee_id)];
   const events=map.get(a.id)||[];
-  if(!events.length)out.push({assignment:a,fact:null,values:[...base,null,null,null,'','']});
-  else for(const e of events.slice().sort((x,y)=>x.held_at.localeCompare(y.held_at)))out.push({assignment:a,fact:e,values:[...base,e.held_at.slice(0,10),e.held_at.slice(11,16),e.duration_minutes/1440,'','']})
+  if(!events.length)out.push({assignment:a,fact:null,facts:[],values:[...base,null,null,null,'','']});
+  else{
+   const byDay=new Map();for(const e of events.slice().sort((x,y)=>x.held_at.localeCompare(y.held_at))){const d=e.held_at.slice(0,10);if(!byDay.has(d))byDay.set(d,[]);byDay.get(d).push(e)}
+   for(const [date,facts] of byDay){const first=facts[0];out.push({assignment:a,fact:first,facts,values:[...base,date,first.held_at.slice(11,16),facts.reduce((n,f)=>n+f.duration_minutes,0)/1440,'','']})}
+  }
  }
  return out
 }
@@ -67,13 +77,13 @@ export function productionWorkbook(ExcelJS,records,{title='План произв
  merge(s,5,1,5,'План',true);merge(s,5,6,10,'Реализация',true);header(s,5,10);
  productionHeaders.forEach((x,i)=>s.getCell(6,i+1).value=i>=8?'Подпись '+x.toLocaleLowerCase('ru-RU'):x);header(s,6,10);
  records.forEach((x,i)=>{cells(s,i+7,[i+1,...x.values]);s.getCell(i+7,8).numFmt='[h]:mm'});
- s.pageSetup.printTitlesRow='5:6';s.pageSetup.printArea='A1:J'+Math.max(7,records.length+7);s.views=[{state:'frozen',ySplit:6}];
- merge(s,records.length+8,1,10,'Подписи оставлены пустыми. Отметки подтверждения и фактические этапы находятся в журнале центра.');
+ s.pageSetup.printTitlesRow='5:6';s.pageSetup.printArea='A1:J'+(records.length+8);s.views=[{state:'frozen',ySplit:6}];
+ merge(s,records.length+8,1,10,'Строка факта — назначение за день: первое время и сумма зарегистрированных минут. Подписи пустые. Отдельные этапы — на втором листе.');
  const detail=sheet(w,'Назначения и факты',[25,25,42,15,15,23,23,15,15,45,16,16]);cells(detail,1,['Инструктор','Обучаемый','СОП и версия','Начало плана','Срок плана','Статус','Фактический этап','Дата и время','Минут','Наблюдение','Подтверждение инструктора','Подтверждение обучаемого']);header(detail,1,12);
- records.forEach((x,i)=>cells(detail,i+2,[x.values[1],x.values[3],x.values[2],x.assignment.assigned_on,x.assignment.due_on,x.assignment.state,x.fact?JSON.parse(x.fact.steps_json).label:'',x.fact?.held_at||'',x.fact?.duration_minutes??null,x.fact?.notes||'',x.fact?.mentor_ack?'Да':'',x.fact?.trainee_ack?'Да':'']));
+ let detailRow=2;for(const x of records)for(const fact of x.facts.length?x.facts:[null])cells(detail,detailRow++,[x.values[1],x.values[3],x.values[2],x.assignment.assigned_on,x.assignment.due_on,x.assignment.state,fact?JSON.parse(fact.steps_json).label:'',fact?.held_at||'',fact?.duration_minutes??null,fact?.notes||'',fact?.mentor_ack?'Да':'',fact?.trainee_ack?'Да':'']);
  return w
 }
-export function entryWorkbook(ExcelJS,program,enrollment,tasks,{organization='',scope='',trainee='',mentor='',manager='',revision=()=>'',responsible=()=>''}={}){
+export function entryWorkbook(ExcelJS,program,enrollment,tasks,{organization='',scope='',trainee='',mentor='',manager='',revision=()=>'',responsible=()=>'',facts=[]}={}){
  const cal=calendarData(enrollment.start_on,tasks),w=new ExcelJS.Workbook(),dayCount=Math.max(1,cal.days.length),last=3+dayCount+1;
  const s=sheet(w,'План ввода',[7,45,40,...Array(dayCount).fill(13),16],8);
  merge(s,1,1,last,'План ввода в профессию · '+program.title,true);merge(s,2,1,last,organization+' · '+scope);merge(s,3,1,last,'ФИО: '+trainee+' · Инструктор-наставник: '+mentor+' · Руководитель: '+manager);
@@ -87,6 +97,8 @@ export function entryWorkbook(ExcelJS,program,enrollment,tasks,{organization='',
  s.pageSetup.printTitlesRow='6:7';s.views=[{state:'frozen',xSplit:3,ySplit:7}];
  const detail=sheet(w,'Задания и результаты',[22,47,38,16,15,25,22,43,20,20]);cells(detail,1,['Часть программы','Задание','СОП','Срок','Часы','Ответственный (факт)','Результат','Основание / обратная связь','Подпись ответственного','Подпись обучаемого']);header(detail,1,10);
  tasks.forEach((t,i)=>cells(detail,i+2,[t.part,t.title,t.sop_revision_id?revision(t.sop_revision_id):'',plusDays(enrollment.start_on,t.day_offset),t.hours,responsible(t),t.done?'Выполнено':'Не завершено',t.result?.evidence||'','','']));
+ const factSheet=sheet(w,'Календарь план и факт',[15,45,15,45,15]);cells(factSheet,1,['Дата','Плановые задания','План, ч','Фактические задания','Факт, ч']);header(factSheet,1,5);
+ calendarFacts(enrollment.start_on,tasks,facts).forEach((x,i)=>cells(factSheet,i+2,[x.date,x.plannedTasks.join('; '),x.planned,x.actualTasks.join('; '),Math.round(x.actual*100)/100]));
  return w
 }
 export function practicalWorkbook(ExcelJS,method,assessments,{trainee='',title='Чек-лист оценки выполнения операций стажёром'}={}){

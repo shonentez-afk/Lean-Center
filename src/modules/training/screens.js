@@ -1,4 +1,4 @@
-import {SCALE_NAME,CORPORATE_LEVELS,practicalCriteriaFromSheet,calendarData,matrixPoints,personalTargets,productionHeaders,productionRows,productionWorkbook,entryWorkbook,practicalWorkbook} from './corporate-forms.js';
+import {SCALE_NAME,CORPORATE_LEVELS,practicalCriteriaFromSheet,calendarData,calendarFacts,matrixPoints,personalTargets,productionHeaders,productionRows,productionWorkbook,entryWorkbook,practicalWorkbook} from './corporate-forms.js';
 import {fillOrderTemplate,draftDocx,orderPayment} from './local-docx.js';
 // LC4 uses the same workspace, event log, directory and corporate UI as LC3.
 import {rows,one,list,uuid,invariant,sha256} from '../../core/db.js';
@@ -283,10 +283,11 @@ export function trainingScreen(main,page,c){
    else if(x.state==='active')controls.append(action('Записать результат',()=>goLocal({enrollmentId:x.id,taskId:t.id})));
    return [parts[t.part],t.title,due,t.hours,t.done?'Выполнено':t.assignment?stateLabel(t.assignment):t.result?resultLabels[t.result.result]:'Не выполнено',controls]
   })));
-  const cal=calendarData(x.start_on,tasks),calendar=pane('Календарный план',msg('Плановые часы из заданий выбранной версии. Дни отсчитываются от начала программы; факты и отметки ведутся отдельно.'),tableOf(['День','Дата','Должностные функции / задания','План, ч','Факт, ч'],cal.days.map(d=>[d.offset+1,d.date,tasks.filter(t=>t.day_offset===d.offset).map(t=>t.title).join(' · '),d.hours,Math.round(tasks.filter(t=>t.day_offset===d.offset).reduce((sum,t)=>sum+(t.assignment?rows(db,'SELECT duration_minutes FROM training_session WHERE assignment_id=? AND stage_code IS NOT NULL',[t.assignment.id]).reduce((n,s)=>n+(s.duration_minutes||0),0):rows(db,'SELECT minutes FROM training_task_result WHERE enrollment_id=? AND task_id=?',[x.id,t.id]).reduce((n,s)=>n+s.minutes,0)),0)/60*100)/100])),msg('Всего плановых часов: '+cal.total));
+  const facts=tasks.flatMap(t=>t.assignment?rows(db,'SELECT held_at,duration_minutes FROM training_session WHERE assignment_id=? AND stage_code IS NOT NULL',[t.assignment.id]).map(v=>({date:v.held_at.slice(0,10),minutes:v.duration_minutes,title:t.title})):rows(db,'SELECT held_on,minutes FROM training_task_result WHERE enrollment_id=? AND task_id=?',[x.id,t.id]).map(v=>({date:v.held_on,minutes:v.minutes,title:t.title})));
+  const cal=calendarData(x.start_on,tasks),dates=calendarFacts(x.start_on,tasks,facts),calendar=pane('Календарный план',msg('Плановые даты берутся из версии программы, факты — из фактических дат записей. Повторения учитываются отдельно.'),tableOf(['Дата','Плановые задания','План, ч','Фактические задания','Факт, ч'],dates.map(d=>[d.date,d.plannedTasks.join(' · '),d.planned,d.actualTasks.join(' · '),Math.round(d.actual*100)/100])),msg('Всего плановых часов: '+cal.total));
   if(p.kind==='internship')calendar.append(msg(x.internship_start?'Стажировка: '+x.internship_start+' — '+x.internship_end+' · Ввод: '+x.entry_start+' — '+x.entry_end:'Периоды стажировки и ввода в старой записи не указаны.'));
   const scope=directoryPeople(db,x.start_on).find(v=>v.id===x.trainee_id);
-  calendar.append(btn('Скачать календарный план XLSX',()=>run(async()=>saveWorkbook('План-ввода-'+p.code,entryWorkbook(ExcelJS,p,x,tasks,{scope:scope?.unit||'',trainee:n('person',x.trainee_id),mentor:n('person',x.mentor_id),manager:n('person',x.manager_id),revision:revLabel,responsible:t=>t.assignment?n('person',t.assignment.mentor_id):t.result?n('person',t.result.actor_id):''})),{save:false})));
+  calendar.append(btn('Скачать календарный план XLSX',()=>run(async()=>saveWorkbook('План-ввода-'+p.code,entryWorkbook(ExcelJS,p,x,tasks,{scope:scope?.unit||'',trainee:n('person',x.trainee_id),mentor:n('person',x.mentor_id),manager:n('person',x.manager_id),revision:revLabel,facts,responsible:t=>t.assignment?n('person',t.assignment.mentor_id):t.result?n('person',t.result.actor_id):''})),{save:false})));
   panel.append(calendar);
   const t=tasks.find(q=>q.id===route.taskId);
   if(t&&!t.sop_revision_id&&x.state==='active'){
@@ -313,10 +314,12 @@ export function trainingScreen(main,page,c){
   function candidates(){return rows(db,"SELECT * FROM mentor_credential WHERE kind='certificate' ORDER BY issued_on DESC").filter(x=>certificateValid(db,x.id,start.value))}
   function addMember(){
    const role=select('group_member_role',[['','Все сертифицированные'],['instructor','Инструкторы-наставники'],['internal_trainer','Внутренние тренеры']],'',null),cert=select('group_member_cert',[]),ack=date('group_member_ack',day),description=msg('Выберите действующий сертификат'),block=el('div',undefined,'lc4-task');
-   const selected=()=>candidates().find(x=>x.id===cert.value);
+   const matching=()=>candidates().filter(x=>!role.value||(role.value==='internal_trainer'?x.role==='internal_trainer':x.role!=='internal_trainer'));
+   const who=person('group_member_person','Сертифицированный сотрудник','',{at:()=>start.value,filter:p=>matching().some(x=>x.person_id===p.id),onChange:refresh});
+   const selected=()=>matching().find(x=>x.id===cert.value&&x.person_id===who.value);
    function show(){const x=selected(),p=x&&directoryPeople(db,start.value).find(y=>y.id===x.person_id);description.textContent=x?n('person',x.person_id)+' · '+(p?.position||'Должность не назначена')+' · '+roleLabel(x):'Выберите действующий сертификат'}
-   function refresh(){const before=cert.value;replaceOptions(cert,select(cert.name,candidates().filter(x=>!role.value||(role.value==='internal_trainer'?x.role==='internal_trainer':x.role!=='internal_trainer')).map(x=>[x.id,n('person',x.person_id)+' · '+roleLabel(x)+' · '+x.number]),before));show()}
-   role.onchange=refresh;cert.onchange=show;const item={cert,ack,block,selected,refresh};members.push(item);block.append(grid(f('Группа приказа',role),f('Сертификат',cert),f('Ознакомлен',ack)),description,btn('Удалить сотрудника',()=>{members.splice(members.indexOf(item),1);block.remove()}));listEl.append(block);refresh()
+   function refresh(){if(who.value&&!matching().some(x=>x.person_id===who.value))who.set('');const before=cert.value,available=matching().filter(x=>x.person_id===who.value);replaceOptions(cert,select(cert.name,available.map(x=>[x.id,roleLabel(x)+' · '+x.number]),available.some(x=>x.id===before)?before:available.length===1?available[0].id:''));show()}
+   role.onchange=refresh;cert.onchange=show;const item={cert,ack,block,selected,refresh};members.push(item);block.append(grid(f('Группа приказа',role),who.element,f('Сертификат',cert),f('Ознакомлен',ack)),description,btn('Удалить сотрудника',()=>{members.splice(members.indexOf(item),1);block.remove()}));listEl.append(block);refresh()
   }
   start.onchange=()=>members.forEach(m=>m.refresh());addMember();
   function collect(registered){
@@ -376,7 +379,7 @@ export function trainingScreen(main,page,c){
    const b=btn(label,()=>goLocal({personId:p.id,skillId:s.id}),'lc4-matrix-cell'+(x.gap?' lc4-gap':x.qualified?' lc4-met':''));b.title=label;return b
   }
   function subset(){let people=m.people.filter(p=>(!unit.value||p.unit_id===unit.value)&&(!profession.value||p.profession_id===profession.value)&&(!shift.value||p.shift_id===shift.value)&&[p.display_name,p.employee_code].join(' ').toLocaleLowerCase('ru-RU').includes(q.value.trim().toLocaleLowerCase('ru-RU'))),skills=m.skills.filter(s=>(!category.value||s.category_id===category.value)&&(!workplace.value||operations.get(s.operation_id)===workplace.value));if(gaps.input.checked)people=people.filter(p=>skills.some(s=>m.cells.get(p.id+':'+s.id).gap));return {people,skills}}
-  function draw(){const all=subset();if(!all.people.length||!all.skills.length){out.replaceChildren(msg('Нет сотрудников или навыков по выбранным фильтрам. Создайте записи в справочниках.'));return}
+  function draw(){const all=subset();if(!all.people.length||!all.skills.length){out.replaceChildren(msg('Нет сотрудников или навыков по выбранным фильтрам. Создайте записи в справочниках.'));totals.replaceChildren(msg('Нет данных для выбранных фильтров.'));return}
    personPage=Math.min(personPage,Math.floor((all.people.length-1)/40));skillPage=Math.min(skillPage,Math.floor((all.skills.length-1)/20));
    const people=all.people.slice(personPage*40,personPage*40+40),skills=all.skills.slice(skillPage*20,skillPage*20+20);
    const transposeOn=transpose.input.checked,heads=transposeOn?['Навык',...people.map(p=>p.display_name)]:['Сотрудник',...skills.map(s=>s.name)],data=transposeOn?skills.map(s=>[s.name,...people.map(p=>cell(p,s))]):people.map(p=>[p.display_name,...skills.map(s=>cell(p,s))]);
