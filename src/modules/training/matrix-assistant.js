@@ -75,7 +75,7 @@ export function suggestMatrixRange(sheet){
  for(;firstRow<=Math.min(sheet.rowCount,headerRow+8);firstRow++){const name=sheet.getCell(firstRow,personCol).text.trim();if(name&&!isName(name)&&!/^должност|^дата|^инструкторы$/i.test(name))break}
  let lastRow=firstRow-1;
  for(let r=firstRow;r<=Math.min(sheet.rowCount,firstRow+299);r++){const name=normalizeMatrixText(sheet.getCell(r,personCol).text),left=Array.from({length:personCol},(_,i)=>normalizeMatrixText(sheet.getCell(r,i+1).text)).join(' ');
-  if(!name||/состояние подразделения|состояние процесса|потребности|^итого|^целевое состояние|^легенда/.test(left.trim()))break;lastRow=r
+  if(!name||/состояние(?: компетенций)? (?:подразделения|процесса)|потребности|^итого|^целевое состояние|^легенда/.test(left.trim()))break;lastRow=r
  }
  return {headerRow,personCol,firstRow,lastRow:Math.max(firstRow,lastRow),firstSkill,lastSkill}
 }
