@@ -13,6 +13,19 @@ const p={schemaVersion:2,document:{id:'SOP-qa',status:'Опубликован',n
 const raw=JSON.stringify({...p,integrity:{algorithm:'SHA-256',sha256:createHash('sha256').update(JSON.stringify(p)).digest('hex')}},null,2);
 try{
  const ctx=await browser.newContext({offline:true,acceptDownloads:true}),page=await ctx.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+ // All HTTP(S) is intercepted: verify the real browser CSP + Stage43 transport
+ // with a synthetic response, never send test or corporate content to the cloud.
+ const proxy='https://functions.yandexcloud.net/d4ehdpoue3sve6s0f92b',aiTasks=[],unexpected=[];
+ const mockPlan={prepare:{purpose:'Учебная цель ИИ',known:'Уточнить опыт',prep:'Подготовить место',interest:'Объяснить цель'},present:{round1:'Показать работу',round2:'Показать ключевые моменты',round3:'Объяснить причины'},tryOut:{perform:'Повторить работу',explain:'Назвать действия',check:'Проверить результат',correct:'Исправить ошибки'},followUp:{help:'Назначить наставника',control:'Уточнить сроки',observe:'Наблюдать выполнение',close:'Зафиксировать результат'}};
+ await ctx.route(/^https?:\\/\\//,async route=>{
+  const req=route.request();
+  if(req.url()!==proxy){unexpected.push(req.url());return route.abort()}
+  const headers={'access-control-allow-origin':'*','access-control-allow-methods':'POST, OPTIONS','access-control-allow-headers':'content-type, accept','content-type':'application/json'};
+  if(req.method()==='OPTIONS')return route.fulfill({status:204,headers});
+  assert.equal(req.method(),'POST');const payload=req.postDataJSON();aiTasks.push(payload.task);
+  const content=payload.task==='twi_generate'?JSON.stringify(mockPlan):'OK';
+  return route.fulfill({status:200,headers,body:JSON.stringify({choices:[{message:{content}}]})});
+ });
  await page.addInitScript(()=>{window.open=()=>{throw Error('Unexpected popup: editor must not call window.open')}});
  let popups=0;page.on('popup',()=>popups++);
  async function editorFrame(){const frame=page.locator('#lc-editor-frame');await frame.waitFor();const editor=await (await frame.elementHandle()).contentFrame();assert(editor);await editor.locator('#lc-editor-status').waitFor({timeout:30000});await editor.waitForFunction(()=>{const t=document.getElementById('lc-editor-status')?.textContent||'';return t.includes('Рабочая копия готова')||t.includes('Ошибка загрузки:')},{},{timeout:30000});assert.match(await editor.locator('#lc-editor-status').textContent(),/Рабочая копия готова/);await page.getByText('Редактор готов',{exact:true}).waitFor();return editor}
@@ -27,6 +40,21 @@ try{
  await page.getByRole('button',{name:'Создать СОП',exact:true}).click();
  const emptyEditor=await editorFrame();
  assert.equal(await page.locator('.sidebar').isVisible(),true);assert.equal(await page.locator('.sidebar .nav.active').textContent(),'Конструктор СОП');
+ assert.equal(aiTasks.length,0,'No automatic AI requests');
+ await ctx.setOffline(false);
+ await emptyEditor.locator('#aiTestBtn').click();
+ await emptyEditor.getByText('AI: доступен',{exact:true}).waitFor();
+ assert.deepEqual(aiTasks,['healthcheck']);
+ const violations=await emptyEditor.evaluate(async()=>{
+  const seen=[];const record=e=>{if(e.violatedDirective==='connect-src')seen.push(e.blockedURI)};
+  document.addEventListener('securitypolicyviolation',record);
+  for(const url of ['https://example.invalid/lc-probe','https://functions.yandexcloud.net/lc-not-allowed']){
+   try{await fetch(url)}catch{}
+  }
+  await new Promise(r=>setTimeout(r,100));document.removeEventListener('securitypolicyviolation',record);return seen
+ });
+ assert.equal(violations.length,2,'CSP must block unrelated host and proxy path');assert.deepEqual(unexpected,[]);
+ await ctx.setOffline(true);
  await emptyEditor.locator('#meta-operation').fill('Черновик проверки нового редактора');
  await page.getByRole('button',{name:'К библиотеке',exact:true}).click();
  await page.getByRole('button',{name:'Вернуться в редактор',exact:true}).click();
@@ -68,7 +96,16 @@ try{
  await choosePerson(editor,'Утверждающий');assert.equal(await editor.locator('#meta-approver-name').inputValue(),'Учебный оценщик');
  await choosePerson(editor,'Участник рабочей группы');assert.equal(await editor.locator('[data-resp]').first().inputValue(),'Учебный оценщик');
  await editor.locator('[data-tab="frv"]').click();await editor.locator('[data-frv="m1"]').first().fill('3');await editor.locator('[data-frv="vdc"]').first().check();
- await editor.locator('[data-tab="twi"]').click();await editor.locator('#generateTwiBtn').click();await editor.waitForFunction(()=>!!document.getElementById('twi-purpose')?.value);
+ await editor.locator('[data-tab="twi"]').click();
+ await ctx.setOffline(false);
+ await editor.locator('#lc-generate-twi-ai').click();
+ await editor.waitForFunction(()=>document.getElementById('twi-purpose')?.value==='Учебная цель ИИ');
+ assert(aiTasks.includes('twi_generate'));assert.deepEqual(unexpected,[]);
+ await editor.locator('#clearTwiBtn').click();
+ await ctx.setOffline(true);
+ const callsBeforeLocal=aiTasks.length;
+ await editor.locator('#generateTwiBtn').click();await editor.waitForFunction(()=>!!document.getElementById('twi-purpose')?.value);
+ assert.equal(aiTasks.length,callsBeforeLocal,'Local TWI must not use cloud');
  await choosePerson(editor,'Инструктор / наставник');assert.equal(await editor.locator('#twi-trainer').inputValue(),'Учебный оценщик');
  await page.screenshot({path:'artifacts/lc3/twi-editor.png',fullPage:true});
  await editor.locator('#lc-editor-send').click();await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();await page.getByRole('button',{name:'Сохранить изменения черновика'}).click();await page.getByText('Черновик сохранён. Ожидает общей публикации базы.',{exact:true}).waitFor();

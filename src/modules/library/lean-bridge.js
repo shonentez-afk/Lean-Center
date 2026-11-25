@@ -5,6 +5,13 @@
  const title=document.createElement('strong');title.textContent='LEAN CENTER · '+(kind==='sop'?'Редактор СОП / TWI':'Редактор ФРВ')+' · Stage43';bar.append(title);
  const make=(id,label)=>{const b=document.createElement('button');b.id=id;b.type='button';b.textContent=label;b.style.cssText='padding:7px 12px;border:1px solid #bfc0c0;background:white;color:#242e40;border-radius:3px;cursor:pointer';bar.append(b);return b};
  const send=make('lc-editor-send',kind==='frv'?'Сохранить ФРВ':context.tab==='twi'?'Сохранить план и СОП':context.tab==='frv'?'Сохранить ФРВ и СОП':'Сохранить СОП в каталог'),download=make('lc-editor-download','Скачать JSON'),status=document.createElement('span');status.id='lc-editor-status';status.textContent='Ожидание загрузки…';bar.append(status);document.body.prepend(bar);
+ // The old Stage43 header is hidden by the center theme. Move the original
+ // controls (and their existing listeners) into the integrated toolbar.
+ const aiModel=document.getElementById('modelSelector'),aiBadge=document.getElementById('aiConnectivityBadge'),aiTest=document.getElementById('aiTestBtn');
+ if(aiModel){aiModel.setAttribute('aria-label','Модель ИИ');aiModel.style.cssText='padding:6px 8px;border:1px solid var(--lc-line);border-radius:4px;background:var(--lc-surface);color:var(--lc-ink)';bar.insertBefore(aiModel,status)}
+ if(aiBadge){aiBadge.setAttribute('role','status');bar.insertBefore(aiBadge,status)}
+ if(aiTest){aiTest.type='button';bar.insertBefore(aiTest,status)}
+ const aiNotice=document.createElement('span');aiNotice.textContent='ИИ: Yandex Cloud по команде';aiNotice.title='При запуске функции ИИ необходимые данные текущей задачи отправляются в Yandex Cloud. Используйте только разрешённые организацией данные.';aiNotice.style.cssText='font-size:11px;color:var(--lc-muted)';bar.insertBefore(aiNotice,status);
  let loaded=false,busy=false,people=[],links=[],selected=null;
  const staticFields={
   'meta-approver-name':{slot:'approver',label:'Утверждающий',post:'meta-approver-post'},
@@ -146,10 +153,16 @@
    followUp:{help:'Назначить ответственного за поддержку.',control:'Указать график последующих проверок в плане обучения.',observe:'Наблюдать соблюдение требований СОП и устойчивость самостоятельного выполнения.',close:'Зафиксировать фактический результат проверки и решение ответственного.'}
   };
   let chosen=new Set(TWI_GENERATED_FIELDS.map(twiFieldId));
-  if(twiHasGeneratedContent(current)){const diff=twiProposalDiff(current,proposal);if(diff.length){const picked=await twiShowPreview(diff);if(!picked)return;chosen=picked}else chosen=new Set()}
+  if(twiHasGeneratedContent(current)){const diff=twiProposalDiff(current,proposal);if(diff.length){const pending=twiShowPreview(diff);for(const el of document.querySelectorAll('#twiGenerationPreview b,#twiGenerationPreview p'))el.textContent=el.textContent.replaceAll('Предложение ИИ','Локальное предложение').replaceAll('предложения ИИ','предложения');const picked=await pending;if(!picked||!picked.size)return;chosen=picked}else chosen=new Set()}
   state.twi=twiCommitProposal(current,proposal,chosen);twiToHtml();saveDraft();say('Черновик плана TWI сформирован по СОП. Проверьте и дополните его перед сохранением.')
  }
- const gen=document.getElementById('generateTwiBtn');if(gen){gen.textContent='Сформировать план из СОП';gen.addEventListener('click',async e=>{e.preventDefault();e.stopImmediatePropagation();gen.disabled=true;try{await localTwi()}catch(err){say(err.message)}finally{gen.disabled=false}},true)}
+ const gen=document.getElementById('generateTwiBtn');
+ if(gen){
+  gen.textContent='Сформировать план из СОП (без ИИ)';
+  const cloud=document.createElement('button');cloud.id='lc-generate-twi-ai';cloud.type='button';cloud.className=gen.className;cloud.textContent='Сформировать с ИИ';gen.after(cloud);
+  gen.addEventListener('click',async e=>{e.preventDefault();e.stopImmediatePropagation();if(!loaded)return;gen.disabled=true;cloud.disabled=true;try{await localTwi()}catch(err){say(err.message)}finally{gen.disabled=false;cloud.disabled=false}},true);
+  cloud.onclick=async()=>{if(!loaded||gen.disabled||cloud.disabled)return;cloud.disabled=true;gen.disabled=true;try{htmlFieldToState();htmlToTwi();await generateTwiPlan()}catch(err){say(err.message)}finally{gen.disabled=false;cloud.disabled=false}};
+ }
  send.onclick=()=>act(true);download.onclick=()=>act(false);
  window.addEventListener('message',e=>{const m=e.data;if(e.source!==host||m?.protocol!=='lean-editor-v1'||m.session!==session)return;if(m.type==='load')load(m.text,m.defaults);if(m.type==='result')say(String(m.message||''));if(m.type==='theme')applyTheme(m.theme);if(m.type==='directory'){people=Array.isArray(m.people)?m.people:[];applyTheme(m.theme);if(picker.open)drawPeople()}});
  tell('ready');
