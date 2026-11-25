@@ -1,4 +1,4 @@
-import {definitions,foldKey,identityKey,recordPayload,openDb,bytesOf,rows,list,one,meta,uuid,now,canonical,tx,applyEvent,invariant} from '../core/db.js';
+import {definitions,foldKey,identityKey,recordPayload,openDb,bytesOf,rows,list,one,meta,uuid,now,canonical,tx,applyEvent,invariant} from '../../core/db.js';
 
 export const MAX_ROWS=1000, MAX_COLUMNS=100, MAX_XLSX=20*1024*1024;
 const MAX_EXPANDED=100*1024*1024;
@@ -76,6 +76,12 @@ function findRef(db,ref,value,unitId){
  return matches[0].id;
 }
 export function workspaceToken(ws){return canonical({database:meta(ws.base,'database_id'),publication:meta(ws.base,'publication_id'),count:one(ws.base,'SELECT count(*) n FROM change_event').n,pending:ws.pending.map(e=>e.id),dirty:ws.dirty})}
+function previewValue(db,f,value){
+ if(value==null)return null;
+ if(!f.ref)return value;
+ const v=one(db,'SELECT * FROM '+f.ref+' WHERE id=?',[value]);if(!v)return value;
+ return (v.employee_code||v.code? (v.employee_code||v.code)+' — ':'')+(v.display_name||v.name||value);
+}
 const statusLabels={create:'Создать',update:'Обновить',same:'Без изменений',error:'Ошибка'};
 export function planImport(ws,type,source,{allowUpdates=false}={}){
  invariant(Object.hasOwn(definitions,type),'Выберите справочник');invariant(!ws.conflicts.length,'Сначала разрешите локальные конфликты');invariant(Array.isArray(source)&&source.length>0&&source.length<=MAX_ROWS,'Нет строк или превышен лимит 1000');
@@ -109,7 +115,7 @@ export function planImport(ws,type,source,{allowUpdates=false}={}){
     if(old)for(const k of Object.keys(d.fields))if(!Object.hasOwn(item.v,k))p[k]=oldPayload[k];
     if(type==='rating_scale'&&p.levels){p.levels=p.levels.split(/\r?\n/).filter(x=>x.trim()).map(x=>x.trim()).join('\n')}
     if(old&&canonical(p)===canonical(oldPayload)){result.status='same';result.message='Совпадает с записью базы';continue}
-    result.changes=Object.entries(p).filter(([k,v])=>!old||oldPayload[k]!==v).map(([k,v])=>({field:fieldLabel(type,k),before:oldPayload?.[k]??null,after:v}));
+    result.changes=Object.entries(p).filter(([k,v])=>!old||oldPayload[k]!==v).map(([k,v])=>({field:fieldLabel(type,k),before:previewValue(db,d.fields[k],oldPayload?.[k]??null),after:previewValue(db,d.fields[k],v)}));
     invariant(!old||allowUpdates,'Ключ уже существует, данные отличаются. Включите обновление после проверки.');
     const e={id:uuid(),entity_type:type,entity_id:old?.id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload:p,occurred_at:now()};
     tx(db,()=>applyEvent(db,e));events.push(e);result.status=e.operation;result.message=old?'Проверено изменение существующей записи':'Проверена новая запись';

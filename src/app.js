@@ -23,7 +23,7 @@ function pick(accept,fn,max=150*1024*1024){const i=el('input');i.type='file';i.a
 const empty=()=>!ws.pending.length&&!ws.dirty&&!meta(ws.base,'publication_id')&&Object.keys(definitions).every(t=>list(ws.base,t).length===0);
 function refName(type,id){if(!id)return '—';const v=one(ws.working,'SELECT * FROM '+type+' WHERE id=?',[id]);return v?.display_name||v?.name||id}
 function refOption(type,v){return (v.employee_code||v.code? (v.employee_code||v.code)+' — ':'')+(v.display_name||v.name||v.id)+(v.unit_id?' · '+refName('org_unit',v.unit_id):'')+(v.archived?' (архив)':'')}
-const today=()=>new Date().toISOString().slice(0,10);
+const today=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-')};
 function activeRecord(d,v){return !v.archived&&(!d.history||(v.valid_from<=today()&&(!v.valid_to||v.valid_to>=today())))}
 function showVal(k,f,v){if(f.ref)return k==='shift_id'&&!v[k]&&v.shift_code?v.shift_code+' (LC1)':refName(f.ref,v[k]);if(k==='criticality')return ({normal:'Обычная',important:'Важная',critical:'Критическая'})[v[k]]||v[k];return v[k]??'—'}
 
