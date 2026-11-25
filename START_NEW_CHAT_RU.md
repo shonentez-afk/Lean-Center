@@ -12,3 +12,6 @@ CI 45597397426 SUCCESS, 384/384 исходников совпадают, 5 те�
 
 ## Проверка кандидата LC1 — 25.11.2026
 CI [45604284850](https://github.com/shonentez-afk/Lean-Center/actions/runs/45604284850): SUCCESS. 12/12 Node (включая имитацию файлового обмена), 5/5 Python, автономный HTML, Chromium file:// в режиме offline (создание демо, CRUD, перезапуск, резервная копия, ECharts): PASS. Сборка [LeanCenter-LC1.html](https://github.com/shonentez-afk/Lean-Center/blob/3809b9bdb6a595eee2dca80cb2086d0b34754d41/releases/LeanCenter-LC1.html) — 2 079 376 байт, Git blob 05901dd5b148c18da537d595a3b4b4324d0c65c8. PR #1 draft; пользовательская приёмка не проведена. Реальный сетевой диск и Windows/корпоративный Edge требуют проверки. Другие функциональные модули пока заглушки. Существующие baselines не изменены.
+
+## LC1.1 — актуальное решение, 25.11.2026
+Пользователь подтвердил размещение Lean Center на сетевом диске и ярлык на index.html. Отказ от единого HTML как основного выпуска; отдельные локальные JS/CSS/WASM-data, versioned app bundle, ZIP без рабочих данных. Постоянный вход index.html; обновлять version dir первым, index последним. См. [DEPLOY_NETWORK_RU.md](docs/DEPLOY_NETWORK_RU.md). Не считать старый HTML актуальной поставкой. CI проверяет Linux/Windows; реальный UNC и корпоративская политика требуют отдельного пилота. PR #1 не сливать до пользовательской приёмки.
