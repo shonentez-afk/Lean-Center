@@ -88,3 +88,21 @@ test('FRV statistics preserve seconds, incomplete cycles, approved comparisons a
  assert.equal(one(w.working,'SELECT sum(duration_seconds) n FROM frv_measurement').n,6000);await w.acceptOwn(readFrom(s,draft));
  raw.standard.outdated=true;await assert.rejects(draftFromFrv(JSON.stringify(raw)),/актуальный проект/);
 });
+
+import {linkedFrv,linkedTwi,sopTwiSignature} from '../src/modules/library/linked-materials.js';
+test('SOP-linked FRV projects the same revision; no fictitious measured rows or double counted categories',()=>{
+ const s={steps:[{action:'A',durationSeconds:12,keyMoments:[],frv:{vdc:true,m1:'3',m2:'2',move:'1.5'}},{action:'B',durationSeconds:8,keyMoments:[],frv:{}},{action:'C',durationSeconds:5,frv:{m1:'6'}}]};
+ const a=linkedFrv(s);assert.equal(a.totals.seconds,25);assert.equal(a.totals.vdc,7);assert.equal(a.totals.m1,3);assert.equal(a.totals.m2,2);assert.equal(a.totals.unclassified,8);assert.equal(a.totals.distance,1.5);assert.equal(a.invalid,1);assert.equal(a.rows[2].m1,null);assert.equal(a.rows[1].start,12);
+});
+test('TWI registry distinguishes empty, historical manual and outdated plan; SOP changes invalidate signature',()=>{
+ const s={meta:{operation:'Тест'},steps:[{action:'A',keyMoments:['K'],reason:'R'}],twi:{enabled:true,trainer:'Тренер'}};
+ assert.equal(linkedTwi(s).exists,false);s.twi.prepare={purpose:'Цель'};assert.equal(linkedTwi(s).status,'Требует проверки');
+ s.twi.sourceSignature=sopTwiSignature(s);assert.equal(linkedTwi(s).status,'Сформирован');s.steps[0].reason='Новая причина';assert.equal(linkedTwi(s).outdated,true);
+});
+test('Employee snapshots stay in immutable original, validate against printed fields and reject false identity attachment',async()=>{
+ const old=await sop(),raw=JSON.parse(old.text),p=uuid();
+ raw.constructor.meta.approverName='Учебный сотрудник';raw.constructor.meta.approverPost='Мастер';
+ raw.constructor.leanCenterPeople=[{slot:'approver',person_id:p,employee_code:'Q-1',display_name:'Учебный сотрудник',position:'Мастер',unit:'Учебный участок'}];
+ const pack=async()=>{const {integrity,...base}=raw;return JSON.stringify({...base,integrity:{algorithm:'SHA-256',sha256:await sha256(JSON.stringify(base))}})};
+ const text=await pack();assert((await inspectSource(text,'sop')).source.sha256);raw.constructor.meta.approverName='Другое имя';await assert.rejects(inspectSource(await pack(),'sop'),/не соответствует/);
+});
