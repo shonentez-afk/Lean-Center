@@ -1,0 +1,13 @@
+
+/* Shared searchable directory dropdown; theme follows either the center or the iframe. */
+.lc-person-button,.lc-directory-trigger{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;max-width:100%;min-height:32px;border:1px solid var(--lc-line,var(--line,#dadddf))!important;border-radius:4px!important;background:var(--lc-surface,var(--surface,#fff))!important;color:var(--lc-ink,var(--ink,#242e40))!important;padding:6px 10px!important;text-align:left;white-space:normal}
+.lc-directory-trigger{width:100%}
+.lc-picker-popup{position:fixed;z-index:10050;box-sizing:border-box;display:flex;flex-direction:column;gap:7px;padding:10px;border:1px solid var(--lc-line,var(--line,#dadddf));border-radius:5px;background:var(--lc-surface,var(--surface,#fff));color:var(--lc-ink,var(--ink,#242e40));box-shadow:0 8px 28px #242e4033;font:13px/1.4 var(--lc-font,"Proxima Nova","Proxima Nova Rg",Arial,sans-serif);overflow:hidden}
+.lc-picker-popup .lc-picker-heading{font-weight:700;font-size:13px}
+.lc-picker-popup input,.lc-picker-popup select{width:100%;flex:none;min-width:0;min-height:34px;box-sizing:border-box;border:1px solid var(--lc-line,var(--line,#dadddf));border-radius:4px;background:var(--lc-surface,var(--surface,#fff));color:var(--lc-ink,var(--ink,#242e40));padding:6px 8px;font:inherit}
+.lc-picker-results{min-height:0;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:3px}
+.lc-picker-popup .lc-person-option{flex:none;display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;white-space:normal;text-align:left;overflow-wrap:anywhere;padding:8px;border:1px solid transparent;border-radius:3px;background:var(--lc-surface,var(--surface,#fff));color:inherit;font:inherit;cursor:pointer}
+.lc-picker-popup .lc-person-option:hover,.lc-picker-popup .lc-person-option:focus-visible,.lc-picker-popup .lc-person-current{border-color:var(--lc-red,var(--tn-red,#e30613));outline:0;background:var(--lc-bg,var(--bg,#f4f5f6))}
+.lc-picker-meta,.lc-picker-empty{font-size:11px;color:var(--lc-muted,var(--muted,#5b626e));overflow-wrap:anywhere}
+.lc-picker-footer{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex:none}
+.lc-picker-footer button{padding:5px 9px;min-height:28px;font:inherit;border:1px solid var(--lc-line,var(--line,#dadddf));border-radius:4px;background:var(--lc-surface,var(--surface,#fff));color:inherit;cursor:pointer}

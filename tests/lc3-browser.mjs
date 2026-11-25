@@ -42,6 +42,23 @@ try{
  await page.locator('input[name=display_name]').fill('Учебный оценщик');
  await page.getByRole('button',{name:'Сохранить',exact:true}).click();
  await page.getByText('Запись сохранена локально. Изменение ожидает публикации.',{exact:true}).waitFor();
+ // Actual active directory roles, with a second person to prove role filtering.
+ await page.getByRole('button',{name:'Добавить',exact:true}).click();
+ await page.locator('input[name=employee_code]').fill('QA-002');
+ await page.locator('input[name=display_name]').fill('Учебный обучаемый');
+ await page.getByRole('button',{name:'Сохранить',exact:true}).click();
+ await page.getByText('Запись сохранена локально. Изменение ожидает публикации.',{exact:true}).waitFor();
+ const refs=page.locator('.nav-section').filter({has:page.locator('summary',{hasText:'Справочники'})});if(!(await refs.evaluate(x=>x.open)))await refs.locator('summary').click();
+ for(const [code,name] of [['INSTRUCTOR','Инструктор'],['TRAINEE','Обучаемый']]){
+  await page.getByRole('button',{name:'Роли сотрудников',exact:true}).click();await page.getByRole('button',{name:'Добавить',exact:true}).click();
+  await page.locator('input[name=code]').fill(code);await page.locator('input[name=name]').fill(name);
+  await page.getByRole('button',{name:'Сохранить',exact:true}).click();await page.getByText('Запись сохранена локально. Изменение ожидает публикации.',{exact:true}).waitFor();
+ }
+ for(const [person,role] of [['QA-001 — Учебный оценщик','INSTRUCTOR — Инструктор'],['QA-002 — Учебный обучаемый','TRAINEE — Обучаемый']]){
+  await page.getByRole('button',{name:'Назначения ролей',exact:true}).click();await page.getByRole('button',{name:'Добавить',exact:true}).click();
+  await page.locator('select[name=person_id]').selectOption({label:person});await page.locator('select[name=role_id]').selectOption({label:role});
+  await page.getByRole('button',{name:'Сохранить',exact:true}).click();await page.getByText('Запись сохранена локально. Изменение ожидает публикации.',{exact:true}).waitFor();
+ }
  await page.getByRole('button',{name:'Конструктор СОП',exact:true}).first().click();
  await page.getByRole('button',{name:'Создать СОП',exact:true}).click();
  const emptyEditor=await editorFrame();
@@ -105,7 +122,7 @@ try{
  assert.equal(await editor.locator('[data-step-field=action]').first().inputValue(),'Проверить');
 
  await editor.locator('[data-step-field=action]').first().fill('Проверить повторно');
- async function choosePerson(frame,label){await frame.getByRole('button',{name:'Выбрать: '+label,exact:true}).first().click();await frame.getByRole('searchbox',{name:'Поиск сотрудника'}).fill('QA-001');await frame.locator('#lc-person-results .lc-person-option').click()}
+ async function choosePerson(frame,label,query='QA-001'){await frame.getByRole('button',{name:'Выбрать: '+label,exact:true}).first().click();await frame.getByRole('searchbox',{name:'Поиск сотрудника'}).fill(query);await frame.locator('.lc-picker-popup .lc-person-option').click()}
  await choosePerson(editor,'Утверждающий');assert.equal(await editor.locator('#meta-approver-name').inputValue(),'Учебный оценщик');
  await choosePerson(editor,'Участник рабочей группы');assert.equal(await editor.locator('[data-resp]').first().inputValue(),'Учебный оценщик');
  await editor.locator('[data-tab="frv"]').click();await editor.locator('[data-frv="m1"]').first().fill('3');await editor.locator('[data-frv="vdc"]').first().check();
@@ -119,34 +136,49 @@ try{
  const callsBeforeLocal=aiTasks.length;
  await editor.locator('#generateTwiBtn').click();await editor.waitForFunction(()=>!!document.getElementById('twi-purpose')?.value);
  assert.equal(aiTasks.length,callsBeforeLocal,'Local TWI must not use cloud');
- await choosePerson(editor,'Инструктор / наставник');assert.equal(await editor.locator('#twi-trainer').inputValue(),'Учебный оценщик');
+ await editor.getByRole('button',{name:'Выбрать: Инструктор / наставник',exact:true}).click();
+ await editor.getByRole('searchbox',{name:'Поиск сотрудника'}).fill('Уч');
+ assert.equal(await editor.locator('.lc-picker-popup .lc-person-option').count(),1);
+ assert.match(await editor.locator('.lc-picker-popup .lc-person-option').textContent(),/Учебный оценщик/);
+ await editor.getByRole('combobox',{name:'Роль сотрудника'}).selectOption('mentor');assert.equal(await editor.locator('.lc-picker-popup .lc-person-option').count(),0);
+ await editor.getByRole('combobox',{name:'Роль сотрудника'}).selectOption('instructor');await editor.locator('.lc-picker-popup .lc-person-option').click();
+ assert.equal(await editor.locator('#twi-trainer').inputValue(),'Учебный оценщик');
+ await choosePerson(editor,'Обучаемый','Уч обу');assert.equal(await editor.locator('#twi-trainee').inputValue(),'Учебный обучаемый');
  await page.screenshot({path:'artifacts/lc3/twi-editor.png',fullPage:true});
  await editor.locator('[data-tab="checklist"]').click();await editor.locator('[data-score="1"]').selectOption('0.7');await editor.locator('[data-comment="1"]').fill('Учебный комментарий из конструктора');
  await editor.locator('#lc-editor-send').click();await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();await page.getByRole('button',{name:'Сохранить изменения черновика'}).click();await page.getByText('Черновик сохранён. Ожидает общей публикации базы.',{exact:true}).waitFor();
  await page.locator('#lc-editor-host').waitFor({state:'detached'});
  await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();await page.getByRole('heading',{name:'QA-SOP · Проверить учебный стенд'}).waitFor();
- const dl2=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать JSON',exact:true}).click();await (await dl2).saveAs(path.join(tmp,'edited.json'));const edited=JSON.parse(await fs.readFile(path.join(tmp,'edited.json'),'utf8'));assert.equal(edited.constructor.steps[0].action,'Проверить повторно');assert(edited.photoAssets['1'].original.startsWith('data:image/'));assert.equal(edited.constructor.leanCenterPeople.length,3);assert.equal(edited.constructor.leanCenterPeople[0].display_name,'Учебный оценщик');assert.match(edited.constructor.leanCenterPeople[0].person_id,/^[0-9a-f-]{36}$/);assert.equal(edited.constructor.twi.trainer,'Учебный оценщик');assert(edited.constructor.twi.prepare.purpose);assert.equal(Number(edited.constructor.steps[0].frv.m1),3);
+ const dl2=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать JSON',exact:true}).click();await (await dl2).saveAs(path.join(tmp,'edited.json'));const edited=JSON.parse(await fs.readFile(path.join(tmp,'edited.json'),'utf8'));assert.equal(edited.constructor.steps[0].action,'Проверить повторно');assert(edited.photoAssets['1'].original.startsWith('data:image/'));assert.equal(edited.constructor.leanCenterPeople.length,4);assert.equal(edited.constructor.leanCenterPeople[0].display_name,'Учебный оценщик');assert.match(edited.constructor.leanCenterPeople[0].person_id,/^[0-9a-f-]{36}$/);assert.equal(edited.constructor.twi.trainer,'Учебный оценщик');assert(edited.constructor.twi.prepare.purpose);assert.equal(Number(edited.constructor.steps[0].frv.m1),3);
 
  // Linked FRV and TWI must be exposed from the same SOP version.
  await page.locator('.library-tabs').getByRole('button',{name:'ФРВ',exact:true}).click();await page.getByRole('button',{name:'Показать ФРВ по СОП',exact:true}).click();
  await page.getByText('Расчёт по шагам СОП, версия 1. Это не самостоятельные фактические замеры.',{exact:true}).waitFor();
  await page.locator('.library-tabs').getByRole('button',{name:'План TWI',exact:true}).click();await page.getByRole('button',{name:'Показать план инструктажа TWI',exact:true}).click();
- await page.getByText('Инструктор: Учебный оценщик · Обучаемый: не указан',{exact:true}).waitFor();
+ await page.getByText('Инструктор: Учебный оценщик · Обучаемый: Учебный обучаемый',{exact:true}).waitFor();
  const group=page.locator('.nav-section').filter({has:page.locator('summary',{hasText:'Производственное обучение'})});if(!(await group.evaluate(x=>x.open)))await group.locator('summary').click();
  await page.getByRole('button',{name:'Планы инструктажа TWI',exact:true}).first().click();await page.getByRole('heading',{name:'Реестр планов инструктажа TWI'}).waitFor();
  await page.getByRole('button',{name:'Открыть',exact:true}).click();await page.getByRole('button',{name:'Показать план инструктажа TWI',exact:true}).click();
- await page.getByText('Инструктор: Учебный оценщик · Обучаемый: не указан',{exact:true}).waitFor();
+ await page.getByText('Инструктор: Учебный оценщик · Обучаемый: Учебный обучаемый',{exact:true}).waitFor();
  // The weighted checklist is immediately available in the assessment registry.
  await page.getByRole('button',{name:'Оценка СОП',exact:true}).first().click();
+ await page.getByRole('heading',{name:'Реестр оценок СОП'}).waitFor();
+ assert.equal(await page.locator('select[name=stage43_score_1]').count(),0,'Registry must not open assessment automatically');
+ await page.locator('input[name=evaluation_search]').fill('Нет совпадений');await page.getByText('Нет СОП по заданному поиску.',{exact:true}).waitFor();
+ await page.locator('input[name=evaluation_search]').fill('QA-SOP');
+ await page.getByRole('button',{name:'Открыть',exact:true}).click();
  await page.locator('select[name=stage43_score_1]').waitFor();
  assert.equal(await page.locator('select[name=stage43_score_1]').inputValue(),'0.7');
  assert.equal(await page.locator('input[name=stage43_note_1]').inputValue(),'Учебный комментарий из конструктора');
  await page.locator('select[name=stage43_score_1]').selectOption('1');
  await page.locator('input[name=stage43_note_1]').fill('Уточнено в центре');
+ await choosePerson(page,'Оценщик чек-листа','Уч оц');
  await page.getByRole('button',{name:'Сохранить чек-лист СОП',exact:true}).click();
  await page.getByText('Чек-лист СОП сохранён. Ожидает публикации.',{exact:true}).waitFor();
  await page.locator('select[name=stage43_score_1]').waitFor();assert.equal(await page.locator('select[name=stage43_score_1]').inputValue(),'1');
+ await page.getByRole('button',{name:'К списку оценок',exact:true}).click();assert.equal(await page.locator('select[name=stage43_score_1]').count(),0);
  await page.reload();await page.getByRole('button',{name:'Оценка СОП',exact:true}).first().click();
+ await page.getByRole('button',{name:'Открыть',exact:true}).click();
  await page.locator('input[name=stage43_note_1]').waitFor();assert.equal(await page.locator('input[name=stage43_note_1]').inputValue(),'Уточнено в центре');
  await page.screenshot({path:'artifacts/lc3/stage43-checklist-registry.png',fullPage:true});
  const wd=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать чек-лист XLSX',exact:true}).click();const wf=path.join(tmp,'weighted.xlsx');await (await wd).saveAs(wf);
@@ -155,18 +187,21 @@ try{
  // New corporate SOP assessment is distinct from Stage43 weighted checklist.
  const method={format:'lean-sop-checklist-v1',title:'Учебная методика',source_sha256:'a'.repeat(64),criteria:Array.from({length:20},(_,i)=>({code:i+1,question:'Учебное требование '+(i+1)}))};
  const mf=path.join(tmp,'method.json');await fs.writeFile(mf,JSON.stringify(method));
+ await page.locator('details.evaluation-methods > summary').click();
  const mc=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Загрузить методику JSON'}).click();await (await mc).setFiles(mf);
  await page.getByText('Методика добавлена, ожидает публикации.',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();
  await page.locator('.library-tabs').getByRole('button',{name:'Оценка СОП',exact:true}).click();
  await page.locator('input[name=stage43_note_1]').waitFor();assert.equal(await page.locator('input[name=stage43_note_1]').inputValue(),'Уточнено в центре');
- await page.locator('select[name=eval_actor]').selectOption({index:1});
+ await page.getByRole('button',{name:'Корпоративская оценка (20 критериев)',exact:true}).click();
+ await choosePerson(page,'Оценщик','Уч оц');
  await page.locator('input[name=eval_place]').fill('Учебное место');
  const saveEval=page.getByRole('button',{name:'Зафиксировать оценку'});assert.equal(await saveEval.isDisabled(),true);
  for(let i=1;i<=20;i++)await page.locator('select[name=criterion_'+i+']').selectOption(i<=17?'1':'0');
  assert.equal(await saveEval.isDisabled(),false);await saveEval.click();
  await page.getByText('Оценка СОП сохранена. Ожидает публикации.',{exact:true}).waitFor();
  await page.locator('.library-tabs').getByRole('button',{name:'Оценка СОП',exact:true}).click();
+ await page.getByRole('button',{name:'Корпоративская оценка (20 критериев)',exact:true}).click();
  await page.getByText('17/20 · 85%',{exact:true}).waitFor();
  const reportDl=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать XLSX',exact:true}).click();
  const report=await reportDl,rf=path.join(tmp,'evaluation.xlsx');await report.saveAs(rf);

@@ -36,3 +36,6 @@ body>.max-w-7xl{max-width:none!important;width:100%!important;margin:0!important
 #toastContainer{position:fixed!important;top:var(--lc-toast-top,120px)!important;right:12px!important;left:auto!important;bottom:auto!important;z-index:10001!important;display:flex!important;flex-direction:column-reverse!important;gap:8px;width:max-content;max-width:min(460px,calc(100vw - 24px));max-height:max(0px,calc(100vh - var(--lc-toast-top,120px) - 12px));overflow:hidden;pointer-events:none}
 #toastContainer .toast{flex-shrink:0;min-width:0;max-width:100%;overflow-wrap:anywhere;white-space:normal;font:13px/1.45 var(--lc-font)}
 #toastContainer .toast>span:last-child{min-width:0;overflow-wrap:anywhere}
+
+/* Role-selected names remain readable, and the dropdown is the editing action. */
+#twi-trainer[readonly],#twi-trainee[readonly]{cursor:default}

@@ -118,3 +118,5 @@ body.editor-active{overflow:hidden}.editor-host{position:fixed;inset:0;z-index:2
 
 /* LC3.3 editor is a workspace, not a full-screen modal. The main navigation and header stay accessible. */
 .editor-host{inset:var(--header) 0 0 var(--side);z-index:25;border-left:1px solid var(--line)}.editor-host-bar{border-top:0}.editor-host iframe{background:var(--bg)}.editor-active .sidebar{z-index:26}.editor-active .main{visibility:hidden}@media(max-width:760px){.editor-host{inset:0;z-index:2000}.editor-active .main{visibility:visible}}
+
+.evaluation-tabs{margin-top:10px}.evaluation-content>[hidden]{display:none!important}.evaluation-content .tablewrap{max-height:none}.evaluation-methods>summary{cursor:pointer;font-weight:600}.evaluation-methods>.panel{border:0;padding:8px 0;box-shadow:none}.evaluation-content .field:has(.lc-directory-trigger){max-width:460px}

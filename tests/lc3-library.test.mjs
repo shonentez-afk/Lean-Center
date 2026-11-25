@@ -137,3 +137,20 @@ test('Stage43 checklist automatically projected, edited independently, guarded b
 test('existing v5 snapshot migrates to v6 without changing master identity or legacy checklist data',()=>{
  const d=new SQL.Database();d.run(schema);d.run(m2);d.run(m3);d.run(m4);d.run(fs.readFileSync('db/migrations/005_lc3_requirements.sql','utf8'));setMeta(d,'database_id',uuid());const p=uuid();d.run('INSERT INTO person(id,employee_code,display_name) VALUES(?,?,?)',[p,'0001','Учебный']);const n=openDb(SQL,bytesOf(d));assert.equal(meta(d,'schema_version'),'5');assert.equal(meta(n,'schema_version'),'6');assert.equal(one(n,'SELECT id FROM person').id,p);assert.equal(one(n,'SELECT count(*) n FROM sop_stage43_checklist').n,0);assert.deepEqual(rows(n,'PRAGMA foreign_key_check'),[]);n.close();d.close()
 });
+
+import {directoryPeople,roleKind} from '../src/modules/master-data/people-directory.js';
+import {matchesPerson,filterPeople} from '../src/ui/people-picker.js';
+test('directory picker uses active role assignments, exact role aliases, distinct persons and prefix search',()=>{
+ const w=fresh(),p=w.edit('person',null,{employee_code:'QA-1',display_name:'Иванов Пётр'}),q=w.edit('person',null,{employee_code:'QA-2',display_name:'Иванова Анна'}),u=w.edit('person',null,{employee_code:'QA-3',display_name:'Сидоров Пётр'});
+ const a=w.edit('business_role',null,{code:'INSTRUCTOR',name:'Инструктор'}),m=w.edit('business_role',null,{code:'MENTOR',name:'Наставник'}),t=w.edit('business_role',null,{code:'TRAINEE',name:'Обучаемый'});
+ w.edit('role_assignment',null,{person_id:p,role_id:a,valid_from:'2026-01-01',valid_to:null});
+ w.edit('role_assignment',null,{person_id:p,role_id:m,valid_from:'2026-01-01',valid_to:'2026-02-01'});
+ w.edit('role_assignment',null,{person_id:q,role_id:t,valid_from:'2026-01-01',valid_to:null});
+ w.edit('role_assignment',null,{person_id:u,role_id:a,valid_from:'2027-01-01',valid_to:null});
+ const list=directoryPeople(w.working,'2026-11-25');
+ assert.deepEqual(filterPeople(list,'Ив',['instructor','mentor']).map(x=>x.id),[p]);
+ assert.deepEqual(filterPeople(list,'Ив ан',['trainee']).map(x=>x.id),[q]);
+ assert.equal(filterPeople(list,'',['mentor']).length,0);assert.equal(filterPeople(list,'ван').length,0);
+ assert.equal(matchesPerson(list.find(x=>x.id===p),'ив пе'),true);assert.equal(roleKind('TRAINER','Наставник'),'mentor');
+ assert.equal(new Set(list.map(x=>x.id)).size,3);w.close()
+});

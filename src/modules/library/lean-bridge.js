@@ -20,12 +20,12 @@
  if(typeof ResizeObserver==='function')new ResizeObserver(syncToastPosition).observe(bar);
  window.addEventListener('resize',syncToastPosition);
  window.addEventListener('scroll',syncToastPosition,{passive:true});
- let loaded=false,busy=false,people=[],links=[],selected=null;
+ let loaded=false,busy=false,people=[],links=[];
  const staticFields={
   'meta-approver-name':{slot:'approver',label:'Утверждающий',post:'meta-approver-post'},
   'frv-observers':{slot:'sop_observer',label:'Наблюдатель ФРВ',multiple:true},
-  'twi-trainer':{slot:'trainer',label:'Инструктор / наставник'},
-  'twi-trainee':{slot:'trainee',label:'Обучаемый'},
+  'twi-trainer':{slot:'trainer',label:'Инструктор / наставник',roles:['instructor','mentor']},
+  'twi-trainee':{slot:'trainee',label:'Обучаемый',roles:['trainee']},
   'frvs-operator':{slot:'operator',label:'Исполнитель'},
   'frvs-observer':{slot:'observer',label:'Наблюдатель'}
  };
@@ -48,35 +48,24 @@
    return (spec.multiple?f.value.split(/\r?\n/).includes(x.display_name):f.value===x.display_name)&&(!postField(spec)||postField(spec).value===x.position)
   })
  }
- const picker=document.createElement('dialog');picker.id='lc-person-dialog';picker.className='lc-person-dialog';
- const heading=document.createElement('h2'),search=document.createElement('input'),results=document.createElement('div'),closePicker=document.createElement('button');
- search.type='search';search.placeholder='ФИО, табельный номер, подразделение';search.setAttribute('aria-label','Поиск сотрудника');results.id='lc-person-results';closePicker.type='button';closePicker.textContent='Отмена';closePicker.onclick=()=>picker.close();
- picker.append(heading,search,results,closePicker);document.body.append(picker);
  function setField(f,v){f.value=v;f.dispatchEvent(new Event('input',{bubbles:true}));f.dispatchEvent(new Event('change',{bubbles:true}))}
- function choosePerson(p){
-  if(!selected?.field.isConnected){picker.close();return}
-  const {field,spec}=selected;links=currentLinks();
+ function choosePerson(field,spec,p){
+  if(!field.isConnected)return;links=currentLinks();
+  if(!p){if(spec.multiple)return;links=links.filter(x=>x.slot!==spec.slot);setField(field,'');const post=postField(spec);if(post)setField(post,'');say('Выбор сотрудника очищен.');return}
   if(spec.multiple){
-   if(field.value.split(/\r?\n/).includes(p.display_name)){if(!links.some(x=>x.slot===spec.slot&&x.person_id===p.id)){say('Такое ФИО уже есть в списке. Уточните сотрудника вручную.');picker.close();return}}
+   if(field.value.split(/\r?\n/).includes(p.display_name)){if(!links.some(x=>x.slot===spec.slot&&x.person_id===p.id)){say('Такое ФИО уже есть в списке. Уточните сотрудника вручную.');return}}
    else setField(field,[field.value.trim(),p.display_name].filter(Boolean).join('\n'));
   }else{links=links.filter(x=>x.slot!==spec.slot);setField(field,p.display_name)}
   const post=postField(spec);if(post)setField(post,p.position||'');
   if(!links.some(x=>x.slot===spec.slot&&x.person_id===p.id))links.push({slot:spec.slot,person_id:p.id,employee_code:p.employee_code,display_name:p.display_name,position:p.position||'',unit:p.unit||''});
-  say('Выбран сотрудник: '+p.display_name);picker.close();
+  say('Выбран сотрудник: '+p.display_name);
  }
- function drawPeople(){
-  results.replaceChildren();const q=search.value.toLocaleLowerCase('ru-RU').trim();
-  const found=people.filter(p=>[p.display_name,p.employee_code,p.position,p.unit].join(' ').toLocaleLowerCase('ru-RU').includes(q));
-  if(!found.length){const t=document.createElement('p');t.textContent=people.length?'Ничего не найдено.':'Нет активных сотрудников. Добавьте их в справочник центра.';results.append(t)}
-  for(const p of found.slice(0,100)){const b=document.createElement('button');b.type='button';b.className='lc-person-option';b.dataset.personId=p.id;b.textContent=p.display_name+' · '+p.employee_code+[p.position,p.unit].filter(Boolean).map(x=>' · '+x).join('');b.onclick=()=>choosePerson(p);results.append(b)}
-  if(found.length>100){const t=document.createElement('p');t.textContent='Уточните поиск: показаны первые 100 из '+found.length;results.append(t)}
- }
- search.oninput=drawPeople;
  function attachPickers(){
   for(const field of document.querySelectorAll('#meta-approver-name,#frv-observers,#twi-trainer,#twi-trainee,#frvs-operator,#frvs-observer,[data-resp],[data-agn]')){
-   if(!fieldSpec(field)||field.dataset.lcPersonPicker)continue;
-   field.dataset.lcPersonPicker='1';const b=document.createElement('button');b.type='button';b.className='lc-person-button';b.textContent='Из справочника';b.setAttribute('aria-label','Выбрать: '+fieldSpec(field).label);
-   b.onclick=()=>{selected={field,spec:fieldSpec(field)};heading.textContent='Выбор сотрудника · '+selected.spec.label;search.value='';drawPeople();picker.showModal();search.focus()};field.after(b)
+   const spec=fieldSpec(field);if(!spec||field.dataset.lcPersonPicker)continue;
+   field.dataset.lcPersonPicker='1';const b=document.createElement('button');b.type='button';b.className='lc-person-button';b.textContent='Выбрать ▾';b.setAttribute('aria-label','Выбрать: '+spec.label);b.setAttribute('aria-haspopup','dialog');b.setAttribute('aria-expanded','false');
+   if(spec.roles){field.readOnly=true;field.title='Выбор из действующих назначений ролей центра. Импортированное ФИО сохраняется до явного изменения.'}
+   b.onclick=()=>{if(field.disabled)return;LCPeoplePicker.openPeopleDropdown(b,{people:()=>people,allowed:spec.roles||null,optional:!spec.multiple,label:spec.label,selectedId:currentLinks().find(x=>x.slot===spec.slot)?.person_id||'',onChoose:p=>choosePerson(field,spec,p)})};field.after(b)
   }
  }
  // A manual edit invalidates the corresponding selection even if a name is retyped.
@@ -172,6 +161,6 @@
   cloud.onclick=async()=>{if(!loaded||gen.disabled||cloud.disabled)return;cloud.disabled=true;gen.disabled=true;try{htmlFieldToState();htmlToTwi();await generateTwiPlan()}catch(err){say(err.message)}finally{gen.disabled=false;cloud.disabled=false}};
  }
  send.onclick=()=>act(true);download.onclick=()=>act(false);
- window.addEventListener('message',e=>{const m=e.data;if(e.source!==host||m?.protocol!=='lean-editor-v1'||m.session!==session)return;if(m.type==='load')load(m.text,m.defaults);if(m.type==='result')say(String(m.message||''));if(m.type==='theme')applyTheme(m.theme);if(m.type==='directory'){people=Array.isArray(m.people)?m.people:[];applyTheme(m.theme);if(picker.open)drawPeople()}});
+ window.addEventListener('message',e=>{const m=e.data;if(e.source!==host||m?.protocol!=='lean-editor-v1'||m.session!==session)return;if(m.type==='load')load(m.text,m.defaults);if(m.type==='result')say(String(m.message||''));if(m.type==='theme')applyTheme(m.theme);if(m.type==='directory'){people=Array.isArray(m.people)?m.people:[];applyTheme(m.theme);LCPeoplePicker.refreshPeopleDropdown()}});
  tell('ready');
 })();

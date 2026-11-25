@@ -1,3 +1,5 @@
+import {directoryPeople} from './modules/master-data/people-directory.js';
+import {openPeopleDropdown,closePeopleDropdown} from './ui/people-picker.js';
 import {stage43Checklist,weightedResult,stage43Checks} from './modules/library/stage43-checklist.js';
 import {linkedFrv,linkedTwi} from './modules/library/linked-materials.js';
 import {frvSummary,draftFromFrv} from './modules/library/frv-summary.js';
@@ -27,7 +29,7 @@ const navGroups=[
 ];
 const implemented=new Set(['home','sop','sop_constructor','frv','twi_plans','sop_evaluation','storage','import_xlsx',...Object.keys(definitions)]);
 const collapsedNav=new Set(['Производственное обучение','Наставники и ВТ','Аналитика','Справочники']);
-let librarySelected=null,evaluationSelected=null;
+let librarySelected=null,evaluationSelected=null,evaluationTab='weighted',evaluationSearch='';
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n}
 function add(parent,...children){parent.append(...children);return parent}
 function btn(label,fn,cls='',disabled=false){const n=el('button',label,cls);n.type='button';n.disabled=disabled||busy;n.addEventListener('click',fn);return n}
@@ -36,7 +38,7 @@ function message(s,bad=false){status=s;error=bad;const n=document.getElementById
 function navigate(p){
  if(busy)return;
  if(editorSession&&!editorSession.host.hidden)hideEditor(editorSession);
- page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;render()
+ closePeopleDropdown();page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;if(p==='sop_evaluation'){evaluationSelected=null;evaluationTab='weighted';evaluationSearch=''}render()
 }
 function openImport(type){importState={type,book:null,sheet:0,header:1,mapping:{},allowUpdates:false,plan:null,file:''};navigate('import_xlsx')}
 function openHistory(id){navigate('person_assignment');historyPerson=id;archiveFilter='all';render()}
@@ -183,6 +185,14 @@ function selectRef(type,name,id=null,optional=true){
  const s=el('select');s.name=name;if(optional){const o=el('option','— Не выбрано —');o.value='';s.append(o)}
  for(const v of list(ws.working,type).filter(x=>!x.archived||x.id===id)){const o=el('option',refOption(type,v));o.value=v.id;s.append(o)}s.value=id||'';return s
 }
+function personPickerField(name,label,id=null,{optional=true,historicalName='',allowed=null}={}){
+ const wrap=el('div'),trigger=btn('Выбрать сотрудника ▾',()=>openPeopleDropdown(trigger,{people:editorPeople,allowed,optional,selectedId:value,label,onChoose:p=>{value=p?.id||'';selectedName=p?.display_name||'';update()}}),'lc-directory-trigger');
+ trigger.name=name;trigger.setAttribute('aria-label','Выбрать: '+label);trigger.setAttribute('aria-haspopup','dialog');trigger.setAttribute('aria-expanded','false');
+ let value=id||'',selectedName=id?(one(ws.working,'SELECT display_name FROM person WHERE id=?',[id])?.display_name||historicalName):'';
+ function update(){trigger.textContent=(selectedName||'Выбрать сотрудника')+' ▾'}
+ Object.defineProperties(wrap,{value:{get:()=>value},selectedName:{get:()=>selectedName},disabled:{get:()=>trigger.disabled,set:v=>{trigger.disabled=!!v}}});wrap.append(trigger);update();return wrap
+}
+function personInputField(label,picker){return add(el('div',undefined,'field'),el('span',label),picker)}
 function downloadRaw(name,text){const url=URL.createObjectURL(new Blob([text],{type:'application/json;charset=utf-8'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function contentEvent(type,payload){return {id:uuid(),entity_type:type,entity_id:uuid(),operation:'create',expected_revision:0,payload,occurred_at:new Date().toISOString()}}
 function tableOf(headers,data){
@@ -192,8 +202,8 @@ function tableOf(headers,data){
 function evaluationForm(revision,source){
  const methods=sopMethods(ws.working).filter(m=>m.state==='active');if(!methods.length)return add(el('div'),el('p','Сначала загрузите корпоративскую методику оценки СОП в разделе «Оценка СОП».','muted'),btn('Перейти к оценке СОП',()=>navigate('sop_evaluation')));
  const panel=el('div'),select=el('select');for(const m of methods){const o=el('option','Методика v'+m.version_no);o.value=m.id;select.append(o)}
- const actor=selectRef('person','eval_actor'),day=fieldInput('eval_date',today(),'date'),place=fieldInput('eval_place',revision.workplace_name||''),content=el('div');
- panel.append(add(el('div',undefined,'formgrid'),inputField('Версия методики',select),inputField('Оценщик',actor),inputField('Дата',day),inputField('Место',place)),content);
+ const actor=personPickerField('eval_actor','Оценщик',null,{optional:false}),day=fieldInput('eval_date',today(),'date'),place=fieldInput('eval_place',revision.workplace_name||''),content=el('div');
+ panel.append(add(el('div',undefined,'formgrid'),inputField('Версия методики',select),personInputField('Оценщик',actor),inputField('Дата',day),inputField('Место',place)),content);
  function draw(){
   content.replaceChildren();const criteria=sopCriteria(ws.working,select.value),values=criteria.map(c=>{const choice=el('select');choice.name='criterion_'+c.position;for(const [v,n] of [['','Не оценено'],['1','1 — выполнено'],['0','0 — не выполнено']]){const o=el('option',n);o.value=v;choice.append(o)}const note=fieldInput('note_'+c.position);note.maxLength=2000;return {c,choice,note}});
   const progress=el('p','Оценено: 0 из 20','muted'),save=btn('Зафиксировать оценку',()=>run(async()=>{const payload={revision_id:revision.id,method_id:select.value,actor_id:actor.value,evaluated_on:day.value,place:place.value,source_sha256:source.sha256,responses:values.map(v=>({criterion_id:v.c.id,value:v.choice.value===''?null:Number(v.choice.value),note:v.note.value}))};await ws.applyContentEvents([contentEvent('sop_evaluation',payload)]);return 'Оценка СОП сохранена. Ожидает публикации.'}),'primary',true);
@@ -241,7 +251,7 @@ function stage43Panel(doc,revision,source){
   panel.replaceChildren(el('h2','Чек-лист конструктора СОП · 13 критериев'),el('p','Привязан к точному исходнику версии '+revision.version_no+'. Шкала 0 / 0,3 / 0,7 / 1 и веса сохранены. Не является 20-пунктной корпоративской оценкой.','muted'));
   const records=stage43Checks(ws.working,revision.id),old=records.find(x=>x.source_sha256===source.sha256);
   if(!original.length){panel.append(el('p','В исходном JSON нет чек-листа. Сохраните СОП из конструктора с чек-листом.','muted'));appendHistory();return}
-  const data=old?JSON.parse(old.rows_json):original,items=[],progress=el('p',weightedLabel(data),'muted'),actor=selectRef('person','stage43_actor',old?.actor_id||null),editable=!doc.archived&&!ws.conflicts.length;
+  const data=old?JSON.parse(old.rows_json):original,items=[],progress=el('p',weightedLabel(data),'muted'),actor=personPickerField('stage43_actor','Оценщик чек-листа',old?.actor_id||null,{historicalName:old?.actor_name||''}),editable=!doc.archived&&!ws.conflicts.length;
   panel.append(el('p',old?'Сохранённая правка центра · '+old.updated_at.slice(0,10)+' · '+(old.actor_name||'оценщик не указан'):'Автоматически загружен из конструктора. Изменения ещё не сохранялись в центре.','muted'));
   const table=tableOf(['№','Требование','Оценка','Вес','Балл','Комментарий','Источник'],data.map(x=>{
    const select=el('select');select.name='stage43_score_'+x.id;
@@ -252,8 +262,8 @@ function stage43Panel(doc,revision,source){
   }));
   const current=()=>items.map(({x,select,note,changed})=>({...x,score:Number(select.value),comment:note.value,scoreSource:changed?'manual':x.scoreSource}));
   function refresh(){const value=current();value.forEach((x,i)=>{items[i].cell.textContent=(x.score*x.weight).toFixed(2);items[i].origin.textContent=stage43SourceLabels[x.scoreSource]});progress.textContent=weightedLabel(value)}
-  const save=btn('Сохранить чек-лист СОП',()=>run(async()=>{const payload={revision_id:revision.id,source,rows:current(),actor_id:actor.value||null};const e=old?{...contentEvent('sop_stage43_checklist',payload),entity_id:old.id,operation:'update',expected_revision:old.rev}:contentEvent('sop_stage43_checklist',payload);await ws.applyContentEvents([e],readContent);evaluationSelected=revision.id;page='sop_evaluation';return 'Чек-лист СОП сохранён. Ожидает публикации.'}),'primary',!editable);
-  actor.disabled=!editable;panel.append(inputField('Оценщик (необязательно)',actor),table,progress,el('p','Правки оценки не изменяют исходный СОП, его паспорт или статус. Для актуального печатного чек-листа скачайте отчёт здесь; исходный XLSX Stage43 сохраняет первоначальную оценку.','muted'),add(el('div',undefined,'row'),save,btn('Скачать чек-лист XLSX',()=>run(async()=>{await stage43Xlsx(doc,revision,source,current(),actor.selectedOptions[0]?.textContent||old?.actor_name||'');return 'Чек-лист XLSX сформирован'},{save:false}))));
+  const save=btn('Сохранить чек-лист СОП',()=>run(async()=>{const payload={revision_id:revision.id,source,rows:current(),actor_id:actor.value||null};const e=old?{...contentEvent('sop_stage43_checklist',payload),entity_id:old.id,operation:'update',expected_revision:old.rev}:contentEvent('sop_stage43_checklist',payload);await ws.applyContentEvents([e],readContent);evaluationSelected=revision.id;evaluationTab='weighted';page='sop_evaluation';return 'Чек-лист СОП сохранён. Ожидает публикации.'}),'primary',!editable);
+  actor.disabled=!editable;panel.append(personInputField('Оценщик (необязательно)',actor),table,progress,el('p','Правки оценки не изменяют исходный СОП, его паспорт или статус. Для актуального печатного чек-листа скачайте отчёт здесь; исходный XLSX Stage43 сохраняет первоначальную оценку.','muted'),add(el('div',undefined,'row'),save,btn('Скачать чек-лист XLSX',()=>run(async()=>{await stage43Xlsx(doc,revision,source,current(),actor.selectedName);return 'Чек-лист XLSX сформирован'},{save:false}))));
   appendHistory();
   function appendHistory(){
    const previous=records.filter(x=>x.source_sha256!==source.sha256);
@@ -262,20 +272,58 @@ function stage43Panel(doc,revision,source){
  }catch(e){if(panel.isConnected)panel.replaceChildren(el('h2','Чек-лист конструктора СОП'),el('p',e.message,'bad'))}})();
  return panel
 }
+function evaluationDetail(doc,v,source,{registry=false}={}){
+ const root=el('div'),tabs=el('div',undefined,'library-tabs evaluation-tabs'),content=el('div',undefined,'evaluation-content'),panels=new Map(),buttons=new Map();
+ function show(kind){
+  if(registry)evaluationTab=kind;
+  if(!panels.has(kind)){const body=kind==='weighted'?stage43Panel(doc,v,source):pane('Корпоративская оценка · 20 критериев',evaluationHistory(v,source),...(!v.archived?[evaluationForm(v,source)]:[]));panels.set(kind,body);content.append(body)}
+  for(const [k,body] of panels)body.hidden=k!==kind;
+  for(const [k,b] of buttons){b.classList.toggle('selected',k===kind);b.setAttribute('aria-pressed',String(k===kind))}
+ }
+ for(const [kind,name] of [['weighted','Чек-лист (13 критериев)'],['corporate','Корпоративская оценка (20 критериев)']]){const b=btn(name,()=>show(kind),'library-tab');buttons.set(kind,b);tabs.append(b)}
+ root.append(tabs,content);show(registry?evaluationTab:'weighted');return root
+}
 function evaluationRegistry(){
- const p=pane('Реестр оценок СОП'),options=relatedRevisions(),select=el('select'),out=el('div');
- select.name='evaluation_revision';select.setAttribute('aria-label','СОП и версия');
- if(!options.length){p.append(el('p','Сохраните СОП в каталоге, чтобы оценивать его версии.','muted'));return p}
- for(const x of options){const o=el('option',x.code+' · '+x.title+' · v'+x.version_no+' · '+(x.archived?'Архив':revisionLabels[x.state]||x.state));o.value=x.id;select.append(o)}
- if(options.some(x=>x.id===evaluationSelected))select.value=evaluationSelected;
- function draw(){evaluationSelected=select.value;const v=options.find(x=>x.id===select.value);const doc={...v,id:v.doc_id},source=JSON.parse(v.payload_json).source;out.replaceChildren(btn('Карточка СОП',()=>goDocument(doc.id)),stage43Panel(doc,v,source),pane('Корпоративская оценка · 20 критериев',evaluationHistory(v,source),...(!v.archived?[evaluationForm(v,source)]:[])))}
- select.onchange=draw;p.append(inputField('СОП и версия',select),out);draw();return p
+ const p=pane('Реестр оценок СОП'),options=relatedRevisions(),v=options.find(x=>x.id===evaluationSelected);
+ if(v){
+  const doc={...v,id:v.doc_id},source=JSON.parse(v.payload_json).source;
+  p.append(add(el('div',undefined,'row'),btn('К списку оценок',()=>{evaluationSelected=null;evaluationTab='weighted';render()}),btn('Карточка СОП',()=>goDocument(doc.id))),el('h2',v.code+' · '+v.title+' · версия '+v.version_no),el('p','Операция: '+refName('operation',v.operation_id)+' · '+(v.archived?'Архив':revisionLabels[v.state]||v.state),'muted'),evaluationDetail(doc,v,source,{registry:true}));return p
+ }
+ const search=fieldInput('evaluation_search',evaluationSearch,'search'),out=el('div');search.placeholder='Поиск по коду, названию или операции';
+ p.append(el('p','Откройте нужную редакцию СОП. Чек-лист конструктора и корпоративская оценка ведутся отдельно.','muted'),search,out);
+ let generation=0;
+ function draw(){
+  const epoch=++generation,q=search.value.trim().toLocaleLowerCase('ru-RU');evaluationSearch=search.value;
+  const list=options.filter(x=>[x.code,x.title,refName('operation',x.operation_id)].some(s=>String(s||'').toLocaleLowerCase('ru-RU').includes(q))),entries=[];
+  if(!list.length){out.replaceChildren(el('p',options.length?'Нет СОП по заданному поиску.':'Сохраните СОП в каталоге, чтобы оценивать его версии.','muted'));return}
+  const t=tableOf(['СОП','Операция','Версия','Статус СОП','Чек-лист (13)','Корпоративская оценка (20)',''],list.map(v=>{
+   const source=JSON.parse(v.payload_json).source,cell=el('span','Проверяется…','muted');
+   const latest=one(ws.working,'SELECT * FROM sop_evaluation WHERE revision_id=? AND source_sha256=? ORDER BY evaluated_on DESC,recorded_at DESC LIMIT 1',[v.id,source.sha256]);
+   const old=latest?null:one(ws.working,'SELECT id FROM sop_evaluation WHERE revision_id=? LIMIT 1',[v.id]);
+   const result=latest?evaluationResult(rows(ws.working,'SELECT value FROM sop_evaluation_response WHERE evaluation_id=?',[latest.id])):null;
+   const corporate=latest?result.yes+'/20 · '+(result.fraction*100).toFixed(0)+'%':old?'Только прежний исходник':'Не оценён';
+   entries.push({v,source,cell});
+   return [v.code+' · '+v.title,refName('operation',v.operation_id),v.version_no,v.archived?'Архив':revisionLabels[v.state]||v.state,cell,corporate,btn('Открыть',()=>{evaluationSelected=v.id;evaluationTab='weighted';render()},'primary')]
+  }));
+  out.replaceChildren(t);
+  void(async()=>{for(const {v,source,cell} of entries){
+   if(epoch!==generation||!out.isConnected)break;
+   try{
+    const saved=stage43Checks(ws.working,v.id).find(x=>x.source_sha256===source.sha256);
+    const data=saved?JSON.parse(saved.rows_json):stage43Checklist(JSON.parse(await readContent(source)).constructor);
+    if(epoch!==generation||!cell.isConnected)break;
+    if(!data.length){cell.textContent='Нет чек-листа';continue}
+    const result=weightedResult(data);cell.textContent=(result.fraction*100).toFixed(1)+'% · '+(result.seed?'Предварительно':saved?'Сохранён':'Из конструктора');
+   }catch(e){cell.textContent='Исходник недоступен';cell.className='bad'}
+  }})()
+ }
+ search.oninput=draw;draw();return p
 }
 function sopEvaluationScreen(main){
  const p=pane('Методики оценки СОП',el('p','Загрузите приватный JSON из корпоративского приложения 4. Оценка СОП — отдельная форма из 20 пунктов, не аудит инструктора L1 и не 13-пунктный чек-лист Stage43.','muted'));
  p.append(btn('Загрузить методику JSON',()=>{const i=el('input');i.type='file';i.accept='.json';i.onchange=()=>{if(!i.files?.[0])return;run(async()=>{invariant(i.files[0].size<=128000,'Слишком большой файл методики');const m=validateChecklist(JSON.parse(await i.files[0].text()));if(!confirm(m.title+'\n20 критериев. Добавить неизменяемую версию методики?'))return 'Импорт отменён';await ws.applyContentEvents([contentEvent('checklist_version',m)]);return 'Методика добавлена, ожидает публикации.'})};i.click()},'primary',!!ws.conflicts.length));
  for(const m of sopMethods(ws.working)){const data=JSON.parse(m.methodology_json),d=el('details');d.append(el('summary','Версия '+m.version_no+' · '+data.title+' · '+(m.state==='active'?'Действует':'Архив')),el('p','SHA-256 исходного документа: '+data.source_sha256,'source-hash'),tableOf(['№','Требование'],sopCriteria(ws.working,m.id).map(q=>[q.position,q.question])));p.append(d)}
- main.append(evaluationRegistry(),p)
+ const methods=el('details',undefined,'panel evaluation-methods');methods.append(el('summary','Методики оценки СОП'),p);main.append(evaluationRegistry(),methods)
 }
 function passportForm(c,revision){
  const form=el('form'),format=el('select');format.name='print_format';for(const [v,n] of [['','— Выберите —'],['portrait','А3 книжный (9 шагов)'],['landscape','А3 альбомный (12 шагов)']]){const o=el('option',n);o.value=v;format.append(o)}format.value=revision.print_format||'';
@@ -370,12 +418,7 @@ function libraryContext(kind,id=null,revisionId=null){
  return {kind,id,revisionId,expected:row?.rev||0,database:meta(ws.base,'database_id'),title:row?.title||'',code:row?.code||'',operation_id:row?.operation_id||null,observed_at:row?.observed_at||'',command:!id?'create':kind==='frv'?'save':revision?.state==='draft'?'save':'revise',source:revision?JSON.parse(revision.payload_json).source:kind==='frv'&&row?JSON.parse(row.context_json).source:null};
 }
 // Current directory entries, with historical print snapshots saved in the editor source.
-function editorPeople(){
- return rows(ws.working,`SELECT p.id,p.employee_code,p.display_name,COALESCE(pos.name,prof.name,'') position,COALESCE(u.name,'') unit FROM person p
- LEFT JOIN person_assignment a ON a.person_id=p.id AND a.valid_from<=? AND (a.valid_to IS NULL OR a.valid_to>=?)
- LEFT JOIN position pos ON pos.id=a.position_id LEFT JOIN profession prof ON prof.id=a.profession_id LEFT JOIN org_unit u ON u.id=a.unit_id
- WHERE p.archived=0 ORDER BY p.display_name,p.employee_code`,[today(),today()])
-}
+function editorPeople(){return directoryPeople(ws.working,today())}
 function assertContext(c){invariant(c.database===meta(ws.base,'database_id'),'Открыта другая база. Исходный JSON можно сохранить отдельно.');if(c.id){const row=one(ws.working,'SELECT * FROM '+(c.kind==='sop'?'document':'frv_study')+' WHERE id=?',[c.id]);invariant(row&&row.rev===c.expected,'Запись изменена после открытия. Не перезаписывайте её; сохраните JSON и откройте актуальную версию.')}}
 function libraryEvent(c,payload,operation=c.id?'update':'create'){assertContext(c);return {id:uuid(),entity_type:c.kind==='sop'?'document':'frv_study',entity_id:c.id||uuid(),operation,expected_revision:c.expected,payload,occurred_at:new Date().toISOString()}}
 async function chooseLibraryFile(kind,ctx=libraryContext(kind)){
@@ -499,7 +542,7 @@ function libraryScreen(main,kind){
      const tabs=el('div',undefined,'library-tabs'),body=el('div',undefined,'library-tab-body');
      const steps=()=>tableOf(['№','Действие','Сек','Ключевые моменты','Почему важно'],data.projection.steps.map((s,i)=>[i+1,s.action,s.seconds,s.key_points.join('\n'),s.reason]));
      const passport=()=>add(el('div'),el('p','Рабочее место: '+(revision.workplace_name||'—')+' · Оборудование: '+(revision.equipment_name||'—')+' · Дата изменения: '+(revision.changed_on||'—')),sourcePassport(data),...(!v.archived&&revision.state==='draft'?[passportForm(c,revision)]:[]));
-     const assessments=()=>add(el('div'),btn('Перейти в реестр оценок СОП',()=>goEvaluation(revision.id)),stage43Panel(v,revision,data.source),pane('Корпоративская оценка · 20 критериев',evaluationHistory(revision,data.source),...(!v.archived?[evaluationForm(revision,data.source)]:[])));
+     const assessments=()=>add(el('div'),btn('Перейти в реестр оценок СОП',()=>goEvaluation(revision.id)),evaluationDetail(v,revision,data.source));
      const materials=()=>materialsPanel(data);
      const history=()=>{const origin=one(ws.working,'SELECT * FROM sop_frv_origin WHERE revision_id=?',[revision.id]);return add(el('div'),tableOf(['Версия','Статус','Создана','Пересмотр'],versions.map(x=>[x.version_no,revisionLabels[x.state]||x.state,x.created_at.slice(0,10),x.review_due])),...(origin?[el('p','Создано из исследования ФРВ: '+origin.study_id+' · SHA-256 '+origin.source_sha256,'source-hash')]:[]))};
      const stages=el('div',undefined,'lifecycle');for(const [k,n] of [['draft','Черновик'],['review','На согласовании'],['approved','Согласован'],['effective','Действует']])stages.append(el('span',n,'life-stage'+(revision.state===k?' current':'')));
@@ -551,7 +594,7 @@ function render(){
  chart?.dispose();chart=null;document.documentElement.classList.toggle('dark',theme);
  const header=el('header',undefined,'corp-header');
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div'),el('div','LEAN CENTER','brand'),el('div','Обучение на рабочем месте · TWI','brand-sub')));
- const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.5','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
+ const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.6','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
  if(editorSession&&editorSession.host.hidden&&!libraryDraft)metaPanel.append(btn('Вернуться в редактор',()=>showEditor(editorSession),'primary'));header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.setAttribute('aria-label','Навигация');
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};
@@ -566,7 +609,7 @@ function render(){
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));main.inert=!!editorSession&&!editorSession.host.hidden;if(editorSession?.loaded)editorSession.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'theme',theme:theme?'dark':'light'},'*');
  if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(page==='twi')main.append(pane('TWI в составе СОП',el('p','План TWI сохраняется вместе с версией СОП и доступен в редакторе Stage43. Назначения обучения и практические оценки будут реализованы на LC4.','muted'),btn('Открыть библиотеку СОП',()=>navigate('sop'),'primary')));else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
- main.append(el('p','LC3.5 · автономная рабочая копия · общий сетевой обмен','foot'))
+ main.append(el('p','LC3.6 · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
 async function init(){configureMigrations(LC_BUILD.migration3,LC_BUILD.migration4,LC_BUILD.migration5,LC_BUILD.migration6);SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await net.latestSnapshot(folder,SQL);if(remote){await useSnapshot(remote.db);await persist();message(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки')}}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message('Сетевая база не обновлена: '+e.message,true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}
