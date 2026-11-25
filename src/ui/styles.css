@@ -3,12 +3,12 @@
 :root {
  --tn-red:#E30613; --tn-navy:#242E40; --tn-black:#1D1D1B; --tn-warm:#ECEAE5;
  --tn-gray:#BFC0C0; --tn-dark-gray:#85878C; --tn-white:#FFFFFF;
- --font:"Proxima Nova",Arial,sans-serif; --bg:#f4f5f6; --surface:#fff; --surface-alt:#f6f7f8;
+ --font:"Proxima Nova","Proxima Nova Rg",Arial,sans-serif; --bg:#f4f5f6; --surface:#fff; --surface-alt:#f6f7f8;
  --ink:#1d1d1b; --muted:#5b626e; --line:#dadddf; --accent:var(--tn-red); --accent-hover:#b90510;
  --nav-bg:var(--tn-navy); --nav-text:#e6e9ef; --nav-muted:#b4bdcb; --nav-active:#39465a;
  --focus:#006ab0; --danger:#b10c1a; --success:#256b42; --success-bg:#edf5ef; --error-bg:#fcebec;
  --warn:#8a5310; --radius:4px; --header:64px; --side:258px; --shadow:0 1px 2px #242e400b;
- font:14px/1.5 var(--font);color:var(--ink);background:var(--bg);font-synthesis:none;color-scheme:light;
+ font:14px/1.5 var(--font);color:var(--ink);background:var(--bg);font-synthesis:weight;color-scheme:light;
 }
 :root.dark {
  --bg:#171d27;--surface:#232b39;--surface-alt:#2a3444;--ink:#f1f3f5;--muted:#bdc6d3;--line:#424e60;

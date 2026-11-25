@@ -24,3 +24,5 @@ CI [45606327769](https://github.com/shonentez-afk/Lean-Center/actions/runs/45606
 
 ## LC1.2 — корпоративский дизайн
 Ветка feature/lc1-tn-design, baseline LC1.1 принят и объединён в main (a35aebff33db850777a1d74fa1283cad61878e63). Изучены официальное руководство ТЕХНОНИКОЛЬ и сайты. [Дизайн-система](docs/DESIGN_SYSTEM_RU.md). Изменения только UI/сборка: CSS tokens, шапка, навигация, дашборд, таблицы, адаптация тем. Не менять схему v2 и сетевой обмен. CI Windows/Linux, ZIP LeanCenter-LC1.2-TN.zip, скриншоты. Подтверждать результат по Actions. Реальный двусторонний обмен на двух ПК ещё не проверен.
+
+Присланный пользователем TTF проверен: Proxima Nova Regular 2.003 с русской кириллицей. Учитывать семейства Proxima Nova и Proxima Nova Rg, fallback Arial. Не коммитить/не распространять TTF без подтверждённой корпоративной лицензии; подробности в DESIGN_SYSTEM_RU.md.

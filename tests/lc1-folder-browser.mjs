@@ -34,6 +34,7 @@ try{
  assert.equal(await page.evaluate(()=>document.querySelectorAll('script[src]').length),5);
  assert.equal(await page.evaluate(()=>document.querySelectorAll('script:not([src])').length),0);
  assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--tn-red').trim()),'#E30613');
+ assert.match(await page.evaluate(()=>getComputedStyle(document.documentElement).fontFamily),/Proxima Nova Rg/);
  await page.getByRole('button',{name:'Тёмная тема',exact:true}).click();assert.equal(await page.locator('html').evaluate(n=>n.classList.contains('dark')),true);
  await page.getByRole('button',{name:'Светлая тема',exact:true}).click();
  await storage(page);
