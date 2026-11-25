@@ -8,10 +8,34 @@ export const twiFields=[
  ['tryOut','perform','Пробное выполнение'],['tryOut','explain','Объяснение работником'],['tryOut','check','Проверка выполнения'],['tryOut','correct','Исправление ошибок'],
  ['followUp','help','К кому обращаться'],['followUp','control','Последующий контроль'],['followUp','observe','Что наблюдать'],['followUp','close','Завершение обучения']
 ];
+export function sopTwiInput(s){
+ const meta=s.meta||{};
+ // Preserve the historical signature for SOPs without tool/material values.
+ return {operation:meta.operation,executor:meta.executor,workplace:meta.workplace,safety:meta.safety,...(meta.tools?{tools:meta.tools}:{}),...(meta.material?{material:meta.material}:{}),steps:(s.steps||[]).map((v,i)=>({stepNumber:i+1,action:v.action,keyPoints:Array.isArray(v.keyMoments)?v.keyMoments.filter(Boolean):[],reason:v.reason,successCriteria:v.successCriteria,decisionPoints:v.decisionPoints}))};
+}
 export function sopTwiSignature(s){
- const meta=s.meta||{},raw=JSON.stringify({operation:meta.operation,executor:meta.executor,workplace:meta.workplace,safety:meta.safety,steps:(s.steps||[]).map((v,i)=>({stepNumber:i+1,action:v.action,keyPoints:Array.isArray(v.keyMoments)?v.keyMoments.filter(Boolean):[],reason:v.reason,successCriteria:v.successCriteria,decisionPoints:v.decisionPoints}))});
+ const raw=JSON.stringify(sopTwiInput(s));
  let a=2166136261,b=0;for(let i=0;i<raw.length;i++){const n=raw.charCodeAt(i);a=Math.imul(a^n,16777619)>>>0;b=(b+n)>>>0;b=(b+((b<<10)>>>0))>>>0;b^=b>>>6}
  b=(b+((b<<3)>>>0))>>>0;b^=b>>>11;b=(b+((b<<15)>>>0))>>>0;return 'sop1:'+raw.length+':'+a.toString(16)+':'+(b>>>0).toString(16)
+}
+// Both Stage43 AI and local proposals pass through this same review rule.
+export function preserveTwiReview(current,proposal,chosen,result){
+ const get=(x,section,key)=>String(x?.[section]?.[key]??'');
+ let deferred=0;
+ for(const [section,key] of twiFields){
+  if(chosen.has(section+'.'+key))continue;
+  const value=get(current,section,key),initial=get(current?.generatedBaseline,section,key),next=get(proposal,section,key);
+  const manual=current?.generatedBaseline?value!==initial:!!value.trim();
+  // Do not turn a skipped automatic update into a manual override, and do
+  // not erase ownership of a previously edited manual field.
+  if(manual||value!==next)result.generatedBaseline[section][key]=initial;
+  if(!manual&&value!==next)deferred++;
+ }
+ if(deferred&&current?.sourceSignature!==result.sourceSignature){
+  if(current?.sourceSignature)result.sourceSignature=current.sourceSignature;
+  else delete result.sourceSignature
+ }
+ return {result,deferred}
 }
 export function linkedTwi(s){
  const t=s.twi||{},fields=twiFields.map(([section,key,label])=>({section,key,label,value:str(t[section]?.[key]??(key==='control'?t[section]?.frequency:''))}));

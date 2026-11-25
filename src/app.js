@@ -4,7 +4,7 @@ import {stage43Checklist,weightedResult,stage43Checks} from './modules/library/s
 import {linkedFrv,linkedTwi} from './modules/library/linked-materials.js';
 import {frvSummary,draftFromFrv} from './modules/library/frv-summary.js';
 import {validateChecklist,sopMethods,sopCriteria,evaluationResult} from './modules/library/sop-review.js';
-import {inspectSource,MAX_CONTENT,refsForDb,refsForEvents,unionRefs,DOMAIN_TYPES} from './modules/library/domain.js';
+import {inspectSource,MAX_CONTENT,refsForDb,refsForEvents,unionRefs,DOMAIN_TYPES,frvOriginSnapshot} from './modules/library/domain.js';
 import {ContentStore,makeTransfer,unpackTransfer,restoreContents,MAX_TRANSFER} from './modules/library/content.js';
 import {MAX_XLSX,loadWorkbook,sheetHeaders,sheetRows,importFields,fieldLabel,autoMap,planImport,commitImport,makeTemplate} from './modules/master-data/import-xlsx.js';
 import {registryCountChart} from './analytics/palette.js';
@@ -29,7 +29,7 @@ const navGroups=[
 ];
 const implemented=new Set(['home','sop','sop_constructor','frv','twi_plans','sop_evaluation','storage','import_xlsx',...Object.keys(definitions)]);
 const collapsedNav=new Set(['Производственное обучение','Наставники и ВТ','Аналитика','Справочники']);
-let librarySelected=null,evaluationSelected=null,evaluationTab='weighted',evaluationSearch='';
+let librarySelected=null,libraryRevisionSelected=null,evaluationSelected=null,evaluationTab='weighted',evaluationSearch='';
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n}
 function add(parent,...children){parent.append(...children);return parent}
 function btn(label,fn,cls='',disabled=false){const n=el('button',label,cls);n.type='button';n.disabled=disabled||busy;n.addEventListener('click',fn);return n}
@@ -38,7 +38,7 @@ function message(s,bad=false){status=s;error=bad;const n=document.getElementById
 function navigate(p){
  if(busy)return;
  if(editorSession&&!editorSession.host.hidden)hideEditor(editorSession);
- closePeopleDropdown();page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;if(p==='sop_evaluation'){evaluationSelected=null;evaluationTab='weighted';evaluationSearch=''}render()
+ closePeopleDropdown();page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;libraryRevisionSelected=null;if(p==='sop_evaluation'){evaluationSelected=null;evaluationTab='weighted';evaluationSearch=''}render()
 }
 function openImport(type){importState={type,book:null,sheet:0,header:1,mapping:{},allowUpdates:false,plan:null,file:''};navigate('import_xlsx')}
 function openHistory(id){navigate('person_assignment');historyPerson=id;archiveFilter='all';render()}
@@ -287,7 +287,7 @@ function evaluationRegistry(){
  const p=pane('Реестр оценок СОП'),options=relatedRevisions(),v=options.find(x=>x.id===evaluationSelected);
  if(v){
   const doc={...v,id:v.doc_id},source=JSON.parse(v.payload_json).source;
-  p.append(add(el('div',undefined,'row'),btn('К списку оценок',()=>{evaluationSelected=null;evaluationTab='weighted';render()}),btn('Карточка СОП',()=>goDocument(doc.id))),el('h2',v.code+' · '+v.title+' · версия '+v.version_no),el('p','Операция: '+refName('operation',v.operation_id)+' · '+(v.archived?'Архив':revisionLabels[v.state]||v.state),'muted'),evaluationDetail(doc,v,source,{registry:true}));return p
+  p.append(add(el('div',undefined,'row'),btn('К списку оценок',()=>{evaluationSelected=null;evaluationTab='weighted';render()}),btn('Карточка СОП',()=>goDocument(doc.id,v.id))),el('h2',v.code+' · '+v.title+' · версия '+v.version_no),el('p','Операция: '+refName('operation',v.operation_id)+' · '+(v.archived?'Архив':revisionLabels[v.state]||v.state),'muted'),evaluationDetail(doc,v,source,{registry:true}));return p
  }
  const search=fieldInput('evaluation_search',evaluationSearch,'search'),out=el('div');search.placeholder='Поиск по коду, названию или операции';
  p.append(el('p','Откройте нужную редакцию СОП. Чек-лист конструктора и корпоративская оценка ведутся отдельно.','muted'),search,out);
@@ -348,6 +348,20 @@ function editableRevision(doc,rev){
 function relatedRevisions(){
  return rows(ws.working,"SELECT r.*,d.id doc_id,d.code,d.title,d.archived,d.operation_id FROM document_revision r JOIN document d ON d.id=r.document_id WHERE d.kind='sop' ORDER BY d.code,r.version_no DESC")
 }
+function frvOriginPanel(revision){
+ const origin=frvOriginSnapshot(ws.working,revision.id),panel=el('div');
+ if(!origin)return panel;
+ const out=el('div'),open=btn('Показать исходные замеры ФРВ',async()=>{
+  open.disabled=true;try{
+   const raw=JSON.parse(await readContent(origin.source)),s=frvSummary(raw);
+   out.replaceChildren(el('p','Сохранённое исследование: '+(raw.study.studyId||origin.title)+' · '+(raw.study.operationId||'')+' · '+(origin.current?'Текущий исходник':'Исторический исходник на момент передачи в СОП'),'muted'),
+    tableOf(['Цикл','Группа','Измерено, сек','Полнота'],s.cycles.map(c=>[c.index,c.phase,c.seconds,c.complete?'Полный':'Неполный'])),
+    el('p','Строк без измерения / действия: '+s.missing,'muted'));
+  }catch(e){out.replaceChildren(el('p',e.message,'bad'));open.disabled=false}
+ });
+ panel.append(el('p','Источник СОП: '+origin.title+' · '+(origin.current?'Текущие замеры':'Исторические замеры; исследование изменялось после создания СОП'),'muted'),el('p','SHA-256 исходных замеров: '+origin.source.sha256,'source-hash'),add(el('div',undefined,'row'),open,btn('Скачать исходные замеры JSON',()=>run(async()=>{downloadRaw('FRV-исходник-'+origin.source.sha256.slice(0,12)+'.json',await readContent(origin.source));return 'Исходные замеры сформированы'},{save:false})),btn('Открыть текущее исследование ФРВ',()=>goResearch(origin.study_id))),out);
+ return panel
+}
 function relatedPanel(doc,rev,kind){
  const data=JSON.parse(rev.payload_json),c=libraryContext('sop',doc.id,rev.id),out=el('div'),open=btn(kind==='frv'?'Показать ФРВ по СОП':'Показать план инструктажа TWI',async()=>{
   open.disabled=true;
@@ -360,8 +374,7 @@ function relatedPanel(doc,rev,kind){
      ...(x.invalid?[el('p','Некорректных строк: '+x.invalid+'. Их категории не включены в сумму.','bad')]:[]),
      tableOf(['№','Действие','Начало, сек','Время, сек','ВДЦ','М1','М2','Не распределено','Перемещение, м','Комментарий'],x.rows.map(q=>[q.position,q.action,n(q.start),n(q.seconds),n(q.vdc),n(q.m1),n(q.m2),n(q.unclassified),n(q.distance),q.valid?q.comment:'Проверьте исходные значения: '+q.comment])),
      el('p','Наблюдали: '+(x.meta.observers||'не указано'),'muted'));
-    const origin=one(ws.working,'SELECT * FROM sop_frv_origin WHERE revision_id=?',[rev.id]);
-    if(origin)out.append(btn('Исходное исследование ФРВ',()=>goResearch(origin.study_id)),el('p','Исходная версия исследования: '+origin.source_sha256,'source-hash'));
+    out.append(frvOriginPanel(rev));
    }else{
     const x=linkedTwi(source);
     out.replaceChildren(el('p','Статус: '+x.status+' · '+x.filled+' из 15 полей. План связан с версией '+rev.version_no+' и не является назначением обучения.',x.outdated?'warn':'muted'));
@@ -370,7 +383,7 @@ function relatedPanel(doc,rev,kind){
    }
   }catch(e){out.replaceChildren(el('p',e.message,'bad'));open.disabled=false}
  });
- const buttons=add(el('div',undefined,'row'),open,btn('Карточка СОП',()=>goDocument(doc.id)));
+ const buttons=add(el('div',undefined,'row'),open,btn('Карточка СОП',()=>goDocument(doc.id,rev.id)));
  if(editableRevision(doc,rev))buttons.append(btn(rev.state==='draft'?(kind==='frv'?'Редактировать ФРВ по СОП':'Открыть план TWI'):'Создать новую редакцию СОП',()=>openRelated(c,kind),'primary',!!ws.conflicts.length));
  return add(el('div'),buttons,out)
 }
@@ -431,7 +444,7 @@ function editorStatus(s,text,bad=false){if(editorSession!==s)return;s.note.textC
 function editorRoute(c){return c.kind==='frv'||c.editorTab==='frv'?'frv':c.editorTab==='twi'?'twi_plans':'sop_constructor'}
 function showEditor(s){if(editorSession!==s)return;page=editorRoute(s.ctx);s.host.hidden=false;document.body.classList.add('editor-active');render();s.close.focus();if(s.loaded)s.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:s.session,type:'directory',people:editorPeople(),theme:theme?'dark':'light'},'*')}
 function hideEditor(s){if(editorSession!==s)return;s.host.hidden=true;document.body.classList.remove('editor-active');root.querySelector('main')?.removeAttribute('inert')}
-function goDocument(id){navigate('sop');librarySelected=id;render()}
+function goDocument(id,revisionId=null){navigate('sop');librarySelected=id;libraryRevisionSelected=revisionId;render()}
 function goResearch(id){navigate('frv');librarySelected=id;render()}
 function openRelated(c,tab){launchEditor({...c,editorTab:tab})}
 
@@ -500,7 +513,7 @@ function libraryPreview(main,kind){
  form.onsubmit=e=>{e.preventDefault();run(async()=>{assertContext(c);const payload={command:c.command,title:title.value.trim(),operation_id:op.value||null,source:d.source,projection:p};if(kind==='sop'){if(c.command==='create')payload.code=code.value.trim();else payload.revision_id=c.command==='save'?c.revisionId:null}else payload.observed_at=observed.value;
    // The complete original content is durable before its reference is written.
    await contentStore.put(d.source,d.text);const ev=libraryEvent(c,payload);const events=[ev];if(d.origin){invariant(c.command==='create','Проект из ФРВ должен быть новым документом');events.push({id:uuid(),entity_type:'document',entity_id:ev.entity_id,operation:'update',expected_revision:1,payload:{command:'origin',revision_id:ev.id,...d.origin},occurred_at:new Date().toISOString()})}await ws.applyContentEvents(events,readContent);await persist();
-   libraryDraft=null;librarySelected=ev.entity_id;if(d.editor&&editorSession)disposeEditor(editorSession,true);
+   libraryDraft=null;librarySelected=ev.entity_id;if(kind==='sop')libraryRevisionSelected=c.command==='save'?c.revisionId:ev.id;if(d.editor&&editorSession)disposeEditor(editorSession,true);
    return 'Черновик сохранён. Ожидает общей публикации базы.';
  },{save:false})};
  main.append(pane('Проверенный исходный файл',el('p',sourceSummary(d)),el('p','Исходный статус Stage43: '+(p.legacy_status||'не указан')+' · Номер: '+(p.number||'не указан')+' · '+Math.ceil(d.source.size/1024)+' КБ','muted'),el('p','Исходный статус не считается согласованием в Lean Center. Содержимое и фотографии сохраняются полностью; исходный JSON хранится отдельно по SHA-256.','muted'),add(form,grid,add(el('div',undefined,'row'),confirm,btn('Скачать исходный JSON',()=>downloadRaw('Stage43-'+kind+'.json',d.text)),btn('Отменить предпросмотр',()=>{if(window.confirm('Отменить неподтверждённый импорт? Исходный файл не изменится.')){libraryDraft=null;render()}})))));
@@ -528,15 +541,17 @@ function libraryScreen(main,kind){
    if(kind==='sop'&&!a&&libraryFilter==='missing_passport')visible=!!one(ws.working,"SELECT id FROM document_revision WHERE document_id=? AND state='draft' AND (print_format IS NULL OR workplace_id IS NULL)",[v.id]);
    return visible&&[v.title,v.code,refName('operation',v.operation_id)].some(x=>String(x||'').toLowerCase().includes(query.toLowerCase()))});
   if(!filtered.length){out.append(pane('Нет записей',el('p','Создайте документ в редакторе или импортируйте переносимый JSON Stage43.','muted')));return}
-  if(!filtered.some(x=>x.id===librarySelected))librarySelected=null;
-  if(!librarySelected){out.append(pane(kind==='sop'?'Каталог документов':'Журнал исследований',tableOf(['Код / дата','Название','Операция','Статус',''],filtered.map(v=>{const rev=kind==='sop'?one(ws.working,"SELECT * FROM document_revision WHERE document_id=? ORDER BY CASE WHEN state='effective' THEN 0 ELSE 1 END,version_no DESC LIMIT 1",[v.id]):null;return [v.code||v.observed_at,v.title,refName('operation',v.operation_id),v.archived?'Архив':revisionLabels[rev?.state||v.state]||'—',btn('Открыть',()=>{librarySelected=v.id;draw()},'primary')]}))));return}
-  out.append(add(el('div',undefined,'row'),btn('К списку',()=>{librarySelected=null;draw()})));
+  if(!filtered.some(x=>x.id===librarySelected)){librarySelected=null;libraryRevisionSelected=null}
+  if(!librarySelected){out.append(pane(kind==='sop'?'Каталог документов':'Журнал исследований',tableOf(['Код / дата','Название','Операция','Статус',''],filtered.map(v=>{const rev=kind==='sop'?one(ws.working,"SELECT * FROM document_revision WHERE document_id=? ORDER BY CASE WHEN state='effective' THEN 0 ELSE 1 END,version_no DESC LIMIT 1",[v.id]):null;return [v.code||v.observed_at,v.title,refName('operation',v.operation_id),v.archived?'Архив':revisionLabels[rev?.state||v.state]||'—',btn('Открыть',()=>{librarySelected=v.id;libraryRevisionSelected=null;draw()},'primary')]}))));return}
+  out.append(add(el('div',undefined,'row'),btn('К списку',()=>{librarySelected=null;libraryRevisionSelected=null;draw()})));
   for(const v of filtered.filter(x=>x.id===librarySelected)){
    const p=pane((kind==='sop'?v.code+' · ':'')+v.title,el('p','Операция: '+refName('operation',v.operation_id)+' · Ревизия записи: '+v.rev,'muted'));
    if(kind==='sop'){
     const versions=rows(ws.working,'SELECT * FROM document_revision WHERE document_id=? ORDER BY version_no DESC',[v.id]);
-    for(const revision of versions){
-     const data=JSON.parse(revision.payload_json),c=libraryContext(kind,v.id,revision.id),section=el('div',undefined,'library-version');
+    if(libraryRevisionSelected&&!versions.some(x=>x.id===libraryRevisionSelected))libraryRevisionSelected=null;
+    if(libraryRevisionSelected)p.append(btn('Все версии СОП',()=>{libraryRevisionSelected=null;draw()}),el('p','Открыта редакция по связи из другого раздела.','muted'));
+    for(const revision of versions.filter(x=>!libraryRevisionSelected||x.id===libraryRevisionSelected)){
+     const data=JSON.parse(revision.payload_json),c=libraryContext(kind,v.id,revision.id),section=el('div',undefined,'library-version');section.dataset.revisionId=revision.id;
      const header=add(el('div',undefined,'row'),el('strong','Версия '+revision.version_no),el('span',revisionLabels[revision.state]||revision.state,'pill'),el('span',revision.created_at.slice(0,10),'muted'));
      section.append(header,el('p',sourceSummary(data),'muted'),el('p','Пересмотр: '+(revision.review_due||'дата не задана')+' · '+(revision.print_format==='portrait'?'А3 книжный':revision.print_format==='landscape'?'А3 альбомный':'формат не выбран')+' · Рабочее место: '+(revision.workplace_name||'не определено'),revision.review_due&&revision.review_due<today()&&revision.state==='effective'?'bad':'muted'),sourceDetails(data));
      const tabs=el('div',undefined,'library-tabs'),body=el('div',undefined,'library-tab-body');
@@ -544,7 +559,7 @@ function libraryScreen(main,kind){
      const passport=()=>add(el('div'),el('p','Рабочее место: '+(revision.workplace_name||'—')+' · Оборудование: '+(revision.equipment_name||'—')+' · Дата изменения: '+(revision.changed_on||'—')),sourcePassport(data),...(!v.archived&&revision.state==='draft'?[passportForm(c,revision)]:[]));
      const assessments=()=>add(el('div'),btn('Перейти в реестр оценок СОП',()=>goEvaluation(revision.id)),evaluationDetail(v,revision,data.source));
      const materials=()=>materialsPanel(data);
-     const history=()=>{const origin=one(ws.working,'SELECT * FROM sop_frv_origin WHERE revision_id=?',[revision.id]);return add(el('div'),tableOf(['Версия','Статус','Создана','Пересмотр'],versions.map(x=>[x.version_no,revisionLabels[x.state]||x.state,x.created_at.slice(0,10),x.review_due])),...(origin?[el('p','Создано из исследования ФРВ: '+origin.study_id+' · SHA-256 '+origin.source_sha256,'source-hash')]:[]))};
+     const history=()=>add(el('div'),tableOf(['Версия','Статус','Создана','Пересмотр'],versions.map(x=>[x.version_no,revisionLabels[x.state]||x.state,x.created_at.slice(0,10),x.review_due])),frvOriginPanel(revision));
      const stages=el('div',undefined,'lifecycle');for(const [k,n] of [['draft','Черновик'],['review','На согласовании'],['approved','Согласован'],['effective','Действует']])stages.append(el('span',n,'life-stage'+(revision.state===k?' current':'')));
      section.append(stages);
      for(const [name,make] of [['Шаги и ключевые моменты',steps],['Паспорт документа',passport],['Версии',history],['ФРВ',()=>relatedPanel(v,revision,'frv')],['План TWI',()=>relatedPanel(v,revision,'twi')],['Оценка СОП',assessments],['Материалы',materials]]){const tab=btn(name,()=>{for(const t of tabs.children)t.classList.remove('selected');tab.classList.add('selected');body.replaceChildren(make())},'library-tab');tabs.append(tab)}tabs.firstChild.classList.add('selected');body.append(steps());section.append(tabs,body);
@@ -562,7 +577,7 @@ function libraryScreen(main,kind){
     if(!v.archived&&versions.length&&versions.every(x=>['superseded','withdrawn'].includes(x.state)))p.append(btn('Архивировать СОП',()=>{if(confirm('Архивировать документ без удаления истории?'))run(async()=>{await ws.applyContentEvents([libraryEvent(libraryContext(kind,v.id),null,'archive')],readContent);return 'Документ в архиве'})},'danger',!!ws.conflicts.length))
    }else{
     const data=JSON.parse(v.context_json),c=libraryContext(kind,v.id);p.append(el('p',revisionLabels[v.state]+' · Дата наблюдения: '+v.observed_at),el('p',sourceSummary(data),'muted'),sourceDetails(data),frvAnalysisPanel(v,data));
-    for(const link of rows(ws.working,'SELECT d.id,d.code,d.title,r.version_no,o.source_sha256 FROM sop_frv_origin o JOIN document_revision r ON r.id=o.revision_id JOIN document d ON d.id=r.document_id WHERE o.study_id=?',[v.id]))p.append(add(el('div',undefined,'row'),el('span',link.code+' · v'+link.version_no+' · '+(link.source_sha256===data.source.sha256?'Текущий исходник':'Ранее сохранённые замеры'),'muted'),btn('Открыть СОП',()=>goDocument(link.id))));
+    for(const link of rows(ws.working,'SELECT d.id,d.code,d.title,r.id revision_id,r.version_no,o.source_sha256 FROM sop_frv_origin o JOIN document_revision r ON r.id=o.revision_id JOIN document d ON d.id=r.document_id WHERE o.study_id=?',[v.id]))p.append(add(el('div',undefined,'row'),el('span',link.code+' · v'+link.version_no+' · '+(link.source_sha256===data.source.sha256?'Текущий исходник':'Ранее сохранённые замеры'),'muted'),btn('Открыть СОП',()=>goDocument(link.id,link.revision_id))));
     const buttons=add(el('div',undefined,'row'),rawButton(data.source,'FRV-'+v.id+'.json'));if(v.state==='draft'){buttons.append(btn('Открыть редактор',()=>launchEditor(c),'primary',!!ws.conflicts.length),btn('Импорт изменений JSON',()=>chooseLibraryFile(kind,c),'',!!ws.conflicts.length));const det=el('details');det.append(el('summary','Завершить исследование'),libraryAction(c,'finalize','Завершить исследование'));p.append(det)}
     if(v.state!=='archived')buttons.append(btn('Архивировать',()=>{if(confirm('Архивировать исследование без удаления измерений?'))run(async()=>{await ws.applyContentEvents([libraryEvent(c,null,'archive')],readContent);return 'Исследование в архиве'})},'danger',!!ws.conflicts.length));p.append(buttons)
    }out.append(p)
@@ -594,7 +609,7 @@ function render(){
  chart?.dispose();chart=null;document.documentElement.classList.toggle('dark',theme);
  const header=el('header',undefined,'corp-header');
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div'),el('div','LEAN CENTER','brand'),el('div','Обучение на рабочем месте · TWI','brand-sub')));
- const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.6','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
+ const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
  if(editorSession&&editorSession.host.hidden&&!libraryDraft)metaPanel.append(btn('Вернуться в редактор',()=>showEditor(editorSession),'primary'));header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.setAttribute('aria-label','Навигация');
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};
@@ -609,7 +624,7 @@ function render(){
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));main.inert=!!editorSession&&!editorSession.host.hidden;if(editorSession?.loaded)editorSession.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'theme',theme:theme?'dark':'light'},'*');
  if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(page==='twi')main.append(pane('TWI в составе СОП',el('p','План TWI сохраняется вместе с версией СОП и доступен в редакторе Stage43. Назначения обучения и практические оценки будут реализованы на LC4.','muted'),btn('Открыть библиотеку СОП',()=>navigate('sop'),'primary')));else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
- main.append(el('p','LC3.6 · автономная рабочая копия · общий сетевой обмен','foot'))
+ main.append(el('p','LC3.7 · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
 async function init(){configureMigrations(LC_BUILD.migration3,LC_BUILD.migration4,LC_BUILD.migration5,LC_BUILD.migration6);SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await net.latestSnapshot(folder,SQL);if(remote){await useSnapshot(remote.db);await persist();message(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки')}}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message('Сетевая база не обновлена: '+e.message,true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}

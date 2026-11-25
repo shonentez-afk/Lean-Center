@@ -136,6 +136,29 @@ try{
  const callsBeforeLocal=aiTasks.length;
  await editor.locator('#generateTwiBtn').click();await editor.waitForFunction(()=>!!document.getElementById('twi-purpose')?.value);
  assert.equal(aiTasks.length,callsBeforeLocal,'Local TWI must not use cloud');
+ const initialPlan=await editor.evaluate(()=>({signature:state.twi.sourceSignature,prep:state.twi.prepare.prep}));
+ await editor.locator('#twi-known').fill('Учебная ручная правка');
+ await editor.locator('[data-tab="editor"]').click();await editor.locator('#meta-tools').fill('Учебный инструмент');await editor.locator('#meta-material').fill('Учебный материал');await editor.locator('[data-step-field=action]').first().fill('Проверить ещё раз');
+ await editor.locator('[data-tab="twi"]').click();
+ assert.equal(await editor.evaluate(()=>state.twi.sourceSignature!==twiSourceSignature()),true);
+ const preview=editor.locator('#twiGenerationPreview');
+ await editor.locator('#generateTwiBtn').click();await preview.waitFor();
+ for(const choice of await preview.locator('[data-twi-choice]').all())await choice.uncheck();
+ await preview.locator('[data-twi-preview-apply]').click();await editor.waitForFunction(()=>!document.getElementById('generateTwiBtn').disabled);
+ assert.deepEqual(await editor.evaluate(()=>({signature:state.twi.sourceSignature,prep:state.twi.prepare.prep})),initialPlan);
+ await editor.locator('#generateTwiBtn').click();await preview.waitFor();
+ const prepChoice=preview.locator('label').filter({hasText:'Подготовка / Подготовка рабочего места'}).locator('input');
+ await prepChoice.uncheck();await preview.locator('[data-twi-preview-apply]').click();await editor.waitForFunction(()=>!document.getElementById('generateTwiBtn').disabled);
+ assert.equal(await editor.evaluate(()=>state.twi.sourceSignature!==twiSourceSignature()),true);
+ await editor.locator('#generateTwiBtn').click();await preview.waitFor();assert.equal(await prepChoice.isChecked(),true);
+ await preview.locator('[data-twi-preview-apply]').click();await editor.waitForFunction(()=>!document.getElementById('generateTwiBtn').disabled);
+ assert.equal(await editor.evaluate(()=>state.twi.sourceSignature===twiSourceSignature()),true);
+ assert.match(await editor.locator('#twi-prep').inputValue(),/Учебный материал/);assert.equal(await editor.locator('#twi-known').inputValue(),'Учебная ручная правка');
+ // Restore the existing fixture's action and refresh before saving.
+ await editor.locator('[data-tab="editor"]').click();await editor.locator('[data-step-field=action]').first().fill('Проверить повторно');await editor.locator('[data-tab="twi"]').click();
+ await editor.locator('#generateTwiBtn').click();await preview.waitFor();await preview.locator('[data-twi-preview-apply]').click();await editor.waitForFunction(()=>!document.getElementById('generateTwiBtn').disabled);
+ assert.equal(await editor.evaluate(()=>state.twi.sourceSignature===twiSourceSignature()),true);
+ assert.equal(aiTasks.length,callsBeforeLocal);
  await editor.getByRole('button',{name:'Выбрать: Инструктор / наставник',exact:true}).click();
  await editor.getByRole('searchbox',{name:'Поиск сотрудника'}).fill('Уч');
  assert.equal(await editor.locator('.lc-picker-popup .lc-person-option').count(),1);
@@ -160,6 +183,9 @@ try{
  await page.getByRole('button',{name:'Планы инструктажа TWI',exact:true}).first().click();await page.getByRole('heading',{name:'Реестр планов инструктажа TWI'}).waitFor();
  await page.getByRole('button',{name:'Открыть',exact:true}).click();await page.getByRole('button',{name:'Показать план инструктажа TWI',exact:true}).click();
  await page.getByText('Инструктор: Учебный оценщик · Обучаемый: Учебный обучаемый',{exact:true}).waitFor();
+ await page.getByText('Статус: Сформирован · 15 из 15 полей. План связан с версией 1 и не является назначением обучения.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Карточка СОП',exact:true}).click();
+ await page.getByRole('button',{name:'Все версии СОП',exact:true}).waitFor();assert.equal(await page.locator('[data-revision-id]').count(),1);
  // The weighted checklist is immediately available in the assessment registry.
  await page.getByRole('button',{name:'Оценка СОП',exact:true}).first().click();
  await page.getByRole('heading',{name:'Реестр оценок СОП'}).waitFor();

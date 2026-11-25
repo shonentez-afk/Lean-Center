@@ -73,6 +73,16 @@ export async function inspectSource(text,kind){
  return {source:{sha256:await sha256(bytes),size:bytes.length,kind},projection}
 }
 export function refsForEvents(events){const out=new Map();for(const e of events||[])if(Object.hasOwn(DOMAIN_TYPES,e.entity_type)&&e.payload?.source){const r=validateRef(e.payload.source);out.set(r.sha256,r)}return [...out.values()]}
+// The original FRV snapshot remains independently readable after a study edit.
+export function frvOriginSnapshot(db,revisionId){
+ const x=one(db,`SELECT o.study_id,o.source_sha256,o.created_at,f.title,f.state,f.context_json,a.byte_size,a.mime
+ FROM sop_frv_origin o JOIN frv_study f ON f.id=o.study_id JOIN attachment a ON a.sha256=o.source_sha256
+ WHERE o.revision_id=?`,[revisionId]);
+ if(!x)return null;
+ invariant(x.mime===MIME.frv,'Некорректный тип исходных замеров');
+ const source=validateRef({sha256:x.source_sha256,size:x.byte_size,kind:'frv'});
+ return {study_id:x.study_id,title:x.title,state:x.state,created_at:x.created_at,source,current:JSON.parse(x.context_json).source.sha256===source.sha256}
+}
 export function refsForDb(db){return rows(db,'SELECT sha256,byte_size,mime FROM attachment WHERE mime IN (?,?) ORDER BY sha256',[MIME.sop,MIME.frv]).map(x=>validateRef({sha256:x.sha256,size:x.byte_size,kind:x.mime===MIME.sop?'sop':'frv'}))}
 export function unionRefs(...groups){const m=new Map();for(const refs of groups)for(const ref of refs){validateRef(ref);const old=m.get(ref.sha256);invariant(!old||canonical(old)===canonical(ref),'Несогласованные метаданные исходного файла');m.set(ref.sha256,ref)}return [...m.values()]}
 export async function verifyDomainEvents(events,readContent){

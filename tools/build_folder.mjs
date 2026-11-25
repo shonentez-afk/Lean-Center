@@ -7,7 +7,7 @@ import {buildEditor} from './build_editor.mjs';
 
 const root=process.cwd();
 const read=p=>fs.readFileSync(path.join(root,p),'utf8').replace(/\r\n/g,'\n');
-const version='lc3.6';
+const version='lc3.7';
 const output=path.join(root,'dist','LeanCenter');
 const releasePath='versions/'+version;
 const files=new Map();
@@ -23,7 +23,8 @@ code('vendor/exceljs.min.js',read('baselines/sop-stage43/src/vendor/exceljs.min.
 put(releasePath+'/licenses/exceljs/LICENSE.txt',read('baselines/sop-stage43/src/vendor/ExcelJS_LICENSE.txt'));
 code('app/main.js',js);
 const picker=buildSync({entryPoints:['src/ui/people-picker.js'],bundle:true,platform:'browser',format:'iife',globalName:'LCPeoplePicker',target:'es2020',write:false,minify:false}).outputFiles[0].text;
-const bridge=picker+'\n'+read('src/modules/library/lean-bridge.js');new Script(bridge,{filename:'lean-bridge.js'});
+const linked=buildSync({entryPoints:['src/modules/library/linked-materials.js'],bundle:true,platform:'browser',format:'iife',globalName:'LCLinkedMaterials',target:'es2020',write:false,minify:false}).outputFiles[0].text;
+const bridge=picker+'\n'+linked+'\n'+read('src/modules/library/lean-bridge.js');new Script(bridge,{filename:'lean-bridge.js'});
 code('editor/Stage43-data.js','window.LC_EDITOR_HTML='+JSON.stringify(buildEditor(bridge,read('src/ui/editor.css')+'\n'+read('src/ui/people-picker.css')))+';\n');
 put(releasePath+'/assets/styles.css',read('src/ui/styles.css')+'\n'+read('src/ui/people-picker.css'));
 for(const name of ['sql.js','echarts','zrender','tslib']){

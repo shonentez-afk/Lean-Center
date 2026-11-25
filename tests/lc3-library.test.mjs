@@ -5,7 +5,7 @@ import initSqlJs from 'sql.js';
 import {webcrypto} from 'node:crypto';
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
 import {configureMigrations,createDb,openDb,bytesOf,Workspace,meta,rows,one,uuid,now,sha256,canonical,setMeta,prepareSnapshot,readSnapshot,restore,encode,backup,mergePackage} from '../src/core/db.js';
-import {inspectSource,refsForDb,refsForEvents,unionRefs,checkContent} from '../src/modules/library/domain.js';
+import {inspectSource,refsForDb,refsForEvents,unionRefs,checkContent,frvOriginSnapshot} from '../src/modules/library/domain.js';
 import {ContentStore,makeTransfer,unpackTransfer,restoreContents} from '../src/modules/library/content.js';
 import * as net from '../src/storage/network.js';
 const SQL=await initSqlJs(),schema=fs.readFileSync('db/schema_v1.sql','utf8'),m2=fs.readFileSync('db/migrations/002_lc1.sql','utf8'),m3=fs.readFileSync('db/migrations/003_lc2.sql','utf8'),m4=fs.readFileSync('db/migrations/004_lc3.sql','utf8');
@@ -85,11 +85,20 @@ test('FRV statistics preserve seconds, incomplete cycles, approved comparisons a
  await assert.rejects(w.applyContentEvents([event(w,'document',doc.entity_id,{...origin,source_sha256:'c'.repeat(64)})]),/изменилось/);
  await w.applyContentEvents([event(w,'document',doc.entity_id,origin)]);
  assert.equal(one(w.working,'SELECT study_id FROM sop_frv_origin').study_id,study.entity_id);
- assert.equal(one(w.working,'SELECT sum(duration_seconds) n FROM frv_measurement').n,6000);await w.acceptOwn(readFrom(s,draft));
+ assert.equal(one(w.working,'SELECT sum(duration_seconds) n FROM frv_measurement').n,6000);
+ assert.equal(frvOriginSnapshot(w.working,doc.id).current,true);
+ raw.study.processDescription='Уточнённые наблюдения';raw.cycles[0].observations[0].durationSec+=10;
+ const editedText=JSON.stringify(raw),edited={text:editedText,...await inspectSource(editedText,'frv')};
+ await w.applyContentEvents([event(w,'frv_study',study.entity_id,{command:'save',title:'Уточнённое исследование',operation_id:op,observed_at:'2026-11-20',...projection(edited)})],readFrom(edited));
+ const snapshot=frvOriginSnapshot(w.working,doc.id);assert.equal(snapshot.current,false);assert.deepEqual(snapshot.source,s.source);
+ assert.equal(JSON.parse(await readFrom(s,edited)(snapshot.source)).cycles[0].observations[0].durationSec,4000);
+ assert.equal(refsForDb(w.working).some(x=>x.sha256===s.source.sha256),true);
+ await w.acceptOwn(readFrom(s,draft,edited));
+ const restored=await restore(SQL,await backup(w),readFrom(s,draft,edited));assert.deepEqual(frvOriginSnapshot(restored.working,doc.id),snapshot);restored.close();
  raw.standard.outdated=true;await assert.rejects(draftFromFrv(JSON.stringify(raw)),/актуальный проект/);
 });
 
-import {linkedFrv,linkedTwi,sopTwiSignature} from '../src/modules/library/linked-materials.js';
+import {linkedFrv,linkedTwi,sopTwiInput,sopTwiSignature,preserveTwiReview,twiFields} from '../src/modules/library/linked-materials.js';
 test('SOP-linked FRV projects the same revision; no fictitious measured rows or double counted categories',()=>{
  const s={steps:[{action:'A',durationSeconds:12,keyMoments:[],frv:{vdc:true,m1:'3',m2:'2',move:'1.5'}},{action:'B',durationSeconds:8,keyMoments:[],frv:{}},{action:'C',durationSeconds:5,frv:{m1:'6'}}]};
  const a=linkedFrv(s);assert.equal(a.totals.seconds,25);assert.equal(a.totals.vdc,7);assert.equal(a.totals.m1,3);assert.equal(a.totals.m2,2);assert.equal(a.totals.unclassified,8);assert.equal(a.totals.distance,1.5);assert.equal(a.invalid,1);assert.equal(a.rows[2].m1,null);assert.equal(a.rows[1].start,12);
@@ -153,4 +162,27 @@ test('directory picker uses active role assignments, exact role aliases, distinc
  assert.equal(filterPeople(list,'',['mentor']).length,0);assert.equal(filterPeople(list,'ван').length,0);
  assert.equal(matchesPerson(list.find(x=>x.id===p),'ив пе'),true);assert.equal(roleKind('TRAINER','Наставник'),'mentor');
  assert.equal(new Set(list.map(x=>x.id)).size,3);w.close()
+});
+
+test('TWI shared input tracks tool and material; rejected automatic and manual changes retain provenance',()=>{
+ const s={meta:{operation:'Тест'},steps:[{action:'A',keyMoments:['K'],reason:'R'}]};
+ const old=sopTwiSignature(s);s.meta.tools='';s.meta.material='';assert.equal(sopTwiSignature(s),old);
+ s.meta.tools='Ключ';const tool=sopTwiSignature(s);assert.notEqual(tool,old);assert.equal(sopTwiInput(s).tools,'Ключ');
+ s.meta.material='Деталь';const fresh=sopTwiSignature(s);assert.notEqual(fresh,tool);
+ const baseline={prepare:{purpose:'Старая цель',prep:'Старый инструмент',known:'Старая рекомендация'},present:{round1:'Старый показ'}};
+ const current={...structuredClone(baseline),sourceSignature:old,generatedBaseline:structuredClone(baseline)};
+ current.prepare.known='Ручная рекомендация';
+ const proposal={prepare:{purpose:'Новая цель',prep:'Новый инструмент',known:'Новая рекомендация'},present:{round1:'Новый показ'}};
+ const chosen=new Set(['prepare.purpose','present.round1']);
+ function pinned(base,proposal,selected){
+  const next={...structuredClone(base),sourceSignature:fresh,generatedBaseline:{}};
+  for(const [section,key] of twiFields){next[section]??={};next.generatedBaseline[section]??={};const v=String(proposal[section]?.[key]??'');if(selected.has(section+'.'+key))next[section][key]=v;next.generatedBaseline[section][key]=v}return next
+ }
+ const partial=preserveTwiReview(current,proposal,chosen,pinned(current,proposal,chosen));
+ assert.equal(partial.deferred,1);assert.equal(partial.result.sourceSignature,old);assert.equal(partial.result.prepare.prep,'Старый инструмент');assert.equal(partial.result.generatedBaseline.prepare.prep,'Старый инструмент');
+ assert.equal(partial.result.prepare.known,'Ручная рекомендация');assert.equal(partial.result.generatedBaseline.prepare.known,'Старая рекомендация');
+ assert.equal(linkedTwi({...s,twi:partial.result}).outdated,true);
+ const accepted=new Set(['prepare.prep']),full=preserveTwiReview(partial.result,proposal,accepted,pinned(partial.result,proposal,accepted));
+ assert.equal(full.deferred,0);assert.equal(full.result.sourceSignature,fresh);assert.equal(full.result.prepare.prep,'Новый инструмент');assert.equal(full.result.prepare.known,'Ручная рекомендация');assert.equal(full.result.generatedBaseline.prepare.known,'Старая рекомендация');
+ assert.equal(linkedTwi({...s,twi:full.result}).outdated,false)
 });

@@ -133,16 +133,21 @@
    else{const u=URL.createObjectURL(new Blob([text],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='LeanCenter-'+kind+'-'+session+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);say('JSON сформирован. Проверьте загрузку файла.')}
   }catch(e){say('Не удалось передать: '+e.message)}finally{busy=false;send.disabled=false;download.disabled=false}
  }
+ // Use the same normalized input and signature in the editor and registry.
+ // Wrap the pinned Stage43 merge rather than patching the pinned baseline.
+ twiSopInput=()=>LCLinkedMaterials.sopTwiInput(state);
+ const originalTwiCommit=twiCommitProposal;
+ twiCommitProposal=(current,proposal,chosen)=>LCLinkedMaterials.preserveTwiReview(current,proposal,chosen,originalTwiCommit(current,proposal,chosen)).result;
  // Local, transparent TWI draft from SOP only. No network request; keep the
  // proven Stage43 per-field proposal comparison and manual-edit preservation.
  async function localTwi(){
   if(!loaded)return;
-  htmlFieldToState();const src=twiSopInput(),steps=src.steps.filter(s=>String(s.action||'').trim());
+  htmlFieldToState();htmlToTwi();const src=twiSopInput(),steps=src.steps.filter(s=>String(s.action||'').trim());
   if(!steps.length){say('Сначала заполните шаги СОП.');return}
   const action=steps.map(s=>s.stepNumber+'. '+s.action).join('\n');
   const keys=steps.map(s=>s.stepNumber+'. '+s.action+' — '+(s.keyPoints.join('; ')||'Ключевые моменты уточнить')).join('\n');
   const reasons=steps.map(s=>s.stepNumber+'. '+s.action+' — '+(s.reason||'Причину уточнить')).join('\n');
-  const current=state.twi||{};
+  const current=state.twi||{},signature=twiSourceSignature(),before=JSON.stringify(current);
   const proposal={
    prepare:{purpose:'Научить правильно выполнять операцию «'+(src.operation||'по СОП')+'».',known:'Уточнить опыт и исходные навыки обучаемого.',prep:[src.workplace?'Рабочее место: '+src.workplace:'Уточнить рабочее место.',src.safety?'Требования СОП: '+src.safety:'Уточнить требования безопасности.',state.meta?.tools?'Инструмент: '+state.meta.tools:'',state.meta?.material?'Материал: '+state.meta.material:''].filter(Boolean).join('\n'),interest:'Объяснить назначение операции и ожидаемый результат.'},
    present:{round1:'Показать операцию целиком в нормальном темпе:\n'+action,round2:'Показать и назвать основные шаги и ключевые моменты:\n'+keys,round3:'Повторить демонстрацию с объяснением причин:\n'+reasons},
@@ -150,8 +155,10 @@
    followUp:{help:'Назначить ответственного за поддержку.',control:'Указать график последующих проверок в плане обучения.',observe:'Наблюдать соблюдение требований СОП и устойчивость самостоятельного выполнения.',close:'Зафиксировать фактический результат проверки и решение ответственного.'}
   };
   let chosen=new Set(TWI_GENERATED_FIELDS.map(twiFieldId));
-  if(twiHasGeneratedContent(current)){const diff=twiProposalDiff(current,proposal);if(diff.length){const pending=twiShowPreview(diff);for(const el of document.querySelectorAll('#twiGenerationPreview b,#twiGenerationPreview p'))el.textContent=el.textContent.replaceAll('Предложение ИИ','Локальное предложение').replaceAll('предложения ИИ','предложения');const picked=await pending;if(!picked||!picked.size)return;chosen=picked}else chosen=new Set()}
-  state.twi=twiCommitProposal(current,proposal,chosen);twiToHtml();saveDraft();say('Черновик плана TWI сформирован по СОП. Проверьте и дополните его перед сохранением.')
+  if(twiHasGeneratedContent(current)){const diff=twiProposalDiff(current,proposal);if(diff.length){const pending=twiShowPreview(diff);for(const el of document.querySelectorAll('#twiGenerationPreview b,#twiGenerationPreview p'))el.textContent=el.textContent.replaceAll('Предложение ИИ','Локальное предложение').replaceAll('предложения ИИ','предложения');const picked=await pending;if(!picked||!picked.size){say('План TWI оставлен без изменений.');return}chosen=picked}else chosen=new Set()}
+  if(signature!==twiSourceSignature()||before!==JSON.stringify(state.twi)){say('СОП или план изменился во время сравнения. Повторите формирование.');return}
+  state.twi=twiCommitProposal(current,proposal,chosen);twiToHtml();saveDraft();
+  say(state.twi.sourceSignature===twiSourceSignature()?'Черновик плана TWI сформирован по СОП. Проверьте и дополните его перед сохранением.':'Часть изменений не принята. План требует актуализации.')
  }
  const gen=document.getElementById('generateTwiBtn');
  if(gen){
