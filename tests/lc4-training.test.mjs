@@ -6,10 +6,10 @@ import {one,rows,meta,bytesOf,openDb,Workspace,restore,backup,uuid,setMeta,prepa
 import {jiStages,progressFor,authorizationValid,admissionStatus,practicalResult,latestAssessment,matrixData,coverageData,enrollmentTasks,practicalMethods} from '../src/modules/training/domain.js';
 import {refsForDb,refsForEvents} from '../src/modules/library/domain.js';
 
-test('LC4.3 migration v9 to v10 retains identities and old data',()=>{
- const db=new SQL.Database();db.run(schema);for(const m of migrations.slice(0,-1))db.run(m);setMeta(db,'database_id',uuid());
+test('LC5 migration v9 through v10 to v11 retains identities and old data',()=>{
+ const db=new SQL.Database();db.run(schema);for(const m of migrations.slice(0,-2))db.run(m);setMeta(db,'database_id',uuid());
  const id=uuid();db.run('INSERT INTO person(id,employee_code,display_name) VALUES(?,?,?)',[id,'Q','Учебный']);
- const migrated=openDb(SQL,bytesOf(db));assert.equal(meta(db,'schema_version'),'9');assert.equal(meta(migrated,'schema_version'),'10');assert.equal(one(migrated,'SELECT id FROM person').id,id);assert.deepEqual(rows(migrated,'PRAGMA foreign_key_check'),[]);migrated.close();db.close()
+ const migrated=openDb(SQL,bytesOf(db));assert.equal(meta(db,'schema_version'),'9');assert.equal(meta(migrated,'schema_version'),'11');assert.equal(one(migrated,'SELECT id FROM person').id,id);assert.deepEqual(rows(migrated,'PRAGMA foreign_key_check'),[]);migrated.close();db.close()
 });
 test('role/certificate/order authorization and exact SOP source, no unreviewed or duplicate assignment',async()=>{
  const f=await fixture();try{
@@ -50,7 +50,7 @@ test('training stages, 5 followups, separate practical qualification and admissi
  assert.equal(one(other.base,'SELECT count(*) n FROM training_session').n,14);
  const restored=await restore(SQL,await backup(f.w),f.readContent);assert.equal(admissionStatus(restored.working,f.trainee,f.operation,date).current,true);assert.equal(progressFor(restored.working,one(restored.working,'SELECT * FROM training_assignment WHERE id=?',[id])).followup,5);
  restored.close();other.close();await f.w.acceptOwn(f.readContent);
- const next=await prepareSnapshot(f.w),opened=await readSnapshot(SQL,next.manifest,next.bytes);assert.equal(meta(opened,'schema_version'),'10');assert.deepEqual(rows(opened,'PRAGMA foreign_key_check'),[]);opened.close();
+ const next=await prepareSnapshot(f.w),opened=await readSnapshot(SQL,next.manifest,next.bytes);assert.equal(meta(opened,'schema_version'),'11');assert.deepEqual(rows(opened,'PRAGMA foreign_key_check'),[]);opened.close();
  const r=await f.revise();assert.equal(admissionStatus(f.w.working,f.trainee,f.operation,date).current,false);assert.match(admissionStatus(f.w.working,f.trainee,f.operation,date).status,/прежней/);assert.equal(matrixData(f.w.working,date).cells.get(f.trainee+':'+f.skill).fact.level,2);assert.equal(coverageData(f.w.working,date)[0].actual,0);
  await assert.rejects(f.stage(id,'prepare'),/актуальное/);await f.addAssignment({revision_id:r.revision,source:r.source.source});assert.equal(one(f.w.working,'SELECT count(*) n FROM training_assignment').n,2)
  }finally{f.w.close()}
