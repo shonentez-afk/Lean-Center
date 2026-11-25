@@ -6,10 +6,10 @@ import {one,rows,meta,bytesOf,openDb,Workspace,restore,backup,uuid,setMeta,prepa
 import {jiStages,progressFor,authorizationValid,admissionStatus,practicalResult,latestAssessment,matrixData,coverageData,enrollmentTasks,practicalMethods} from '../src/modules/training/domain.js';
 import {refsForDb,refsForEvents} from '../src/modules/library/domain.js';
 
-test('LC4.2 migration v8 to v9 retains identities and old data',()=>{
+test('LC4.3 migration v9 to v10 retains identities and old data',()=>{
  const db=new SQL.Database();db.run(schema);for(const m of migrations.slice(0,-1))db.run(m);setMeta(db,'database_id',uuid());
  const id=uuid();db.run('INSERT INTO person(id,employee_code,display_name) VALUES(?,?,?)',[id,'Q','Учебный']);
- const migrated=openDb(SQL,bytesOf(db));assert.equal(meta(db,'schema_version'),'8');assert.equal(meta(migrated,'schema_version'),'9');assert.equal(one(migrated,'SELECT id FROM person').id,id);assert.deepEqual(rows(migrated,'PRAGMA foreign_key_check'),[]);migrated.close();db.close()
+ const migrated=openDb(SQL,bytesOf(db));assert.equal(meta(db,'schema_version'),'9');assert.equal(meta(migrated,'schema_version'),'10');assert.equal(one(migrated,'SELECT id FROM person').id,id);assert.deepEqual(rows(migrated,'PRAGMA foreign_key_check'),[]);migrated.close();db.close()
 });
 test('role/certificate/order authorization and exact SOP source, no unreviewed or duplicate assignment',async()=>{
  const f=await fixture();try{
@@ -50,7 +50,7 @@ test('training stages, 5 followups, separate practical qualification and admissi
  assert.equal(one(other.base,'SELECT count(*) n FROM training_session').n,14);
  const restored=await restore(SQL,await backup(f.w),f.readContent);assert.equal(admissionStatus(restored.working,f.trainee,f.operation,date).current,true);assert.equal(progressFor(restored.working,one(restored.working,'SELECT * FROM training_assignment WHERE id=?',[id])).followup,5);
  restored.close();other.close();await f.w.acceptOwn(f.readContent);
- const next=await prepareSnapshot(f.w),opened=await readSnapshot(SQL,next.manifest,next.bytes);assert.equal(meta(opened,'schema_version'),'9');assert.deepEqual(rows(opened,'PRAGMA foreign_key_check'),[]);opened.close();
+ const next=await prepareSnapshot(f.w),opened=await readSnapshot(SQL,next.manifest,next.bytes);assert.equal(meta(opened,'schema_version'),'10');assert.deepEqual(rows(opened,'PRAGMA foreign_key_check'),[]);opened.close();
  const r=await f.revise();assert.equal(admissionStatus(f.w.working,f.trainee,f.operation,date).current,false);assert.match(admissionStatus(f.w.working,f.trainee,f.operation,date).status,/прежней/);assert.equal(matrixData(f.w.working,date).cells.get(f.trainee+':'+f.skill).fact.level,2);assert.equal(coverageData(f.w.working,date)[0].actual,0);
  await assert.rejects(f.stage(id,'prepare'),/актуальное/);await f.addAssignment({revision_id:r.revision,source:r.source.source});assert.equal(one(f.w.working,'SELECT count(*) n FROM training_assignment').n,2)
  }finally{f.w.close()}
@@ -181,4 +181,36 @@ test('LC4.2 built-in forms contain source criteria and no example responses; var
 test('LC4.2 built-in order is an unsigned DOCX without external template',async()=>{
  const parts=await readZip(builtinOrderDocx({organization:'QA',city:'QA',order_on:date,order_number:'QA-1',approved_name:'Учебный',instructor_amount:null,trainer_amount:null,supplement_from:null},[{role:'instructor',person_name:'Учебный наставник',position_name:'Должность'}]));
  const xml=new TextDecoder().decode(parts.find(x=>x.name==='word/document.xml').bytes);assert.match(xml,/Учебный наставник, Должность/);assert.match(xml,/ПРОЕКТ · БЕЗ ПОДПИСИ/)
+});
+
+import {matrixRoster,columnChoices,matrixBaseline,matrixProjection,matrixFromRecord,matrixKey} from '../src/modules/training/matrix-view.js';
+import {SCALE_NAME,CORPORATE_LEVELS} from '../src/modules/training/corporate-forms.js';
+import {employeeRelations,employeeSourceLinks} from '../src/modules/master-data/employee-records.js';
+test('LC4.3 matrix roster, evidence baseline, targets, versions, employee relationships and restore',async()=>{
+ const f=await fixture();try{
+ const db=f.w.working,scale=f.w.edit('rating_scale',null,{name:SCALE_NAME,version_no:'1',levels:CORPORATE_LEVELS});
+ const id=await f.addAssignment({scale_id:scale});await f.approve(id);
+ for(const stage of jiStages('classic').filter(x=>!['support','followup'].includes(x.phase)))await f.stage(id,stage.code);
+ const p=(await f.assess(id)).entity_id;await f.qualify(id,p);
+ const roster=matrixRoster(db,date,f.unit,f.shift).filter(x=>[f.trainee,f.mentor].includes(x.person_id));
+ assert.equal(roster.length,2);assert.equal(roster.find(x=>x.person_id===f.mentor).instructor,true);
+ const columns=columnChoices(db,f.unit,f.workplace).filter(x=>x.skill_id===f.skill).map(({skill_id,document_id,title})=>({skill_id,document_id,title}));
+ assert.equal(columns.length,1);assert.equal(columns[0].document_id,f.doc.entity_id);
+ const baseline=matrixBaseline(db,roster,columns,scale,date),base={code:'QA-MATRIX',title:'Матрица QA',author_id:f.actor,unit_id:f.unit,shift_id:f.shift,scale_id:scale,base_on:date,target_on:'2027-01-31',roster,columns,baseline,previous_id:null,previous_rev:0};
+ assert.equal(baseline.find(x=>x.person_id===f.trainee).value,2);assert.equal(baseline.find(x=>x.person_id===f.mentor).value,null);
+ await assert.rejects(f.save('competency_matrix',{...base,baseline:baseline.map(x=>({...x,value:4}))}),/срез/);
+ const e=await f.save('competency_matrix',base),rec=one(db,'SELECT * FROM competency_matrix WHERE id=?',[e.entity_id]);
+ const plan=(await f.save('development_plan',{person_id:f.trainee,title:'QA развитие',start_on:date,due_on:'2027-01-31'})).entity_id;
+ await f.save('development_goal',{plan_id:plan,skill_id:f.skill,scale_id:scale,target_level:3,title:'QA цель',due_on:'2027-01-31'});
+ const projection=matrixProjection(db,matrixFromRecord(rec),date),cell=projection.cells.get(matrixKey(f.trainee,f.skill));
+ assert.equal(cell.actual,2);assert.equal(cell.base,2);assert.equal(cell.target,3);assert.equal(cell.need,1);assert.equal(projection.total.actualCount,1);assert.equal(projection.total.base,2);
+ const mentor=employeeRelations(db,f.mentor),trainee=employeeRelations(db,f.trainee),author=employeeRelations(db,f.actor),other=employeeRelations(db,f.other);
+ assert.equal(trainee.matrices[0].dest.options.matrixId,e.entity_id);assert.equal(trainee.matrices[0].dest.options.personId,f.trainee);assert.equal(mentor.matrices.length,1);assert.equal(author.matrices[0].role,'Разработал');assert.equal(other.matrices.length,0);
+ assert(trainee.training.some(r=>r.id===id&&r.role.includes('Обучаемый')));assert(mentor.training.some(r=>r.id===id&&r.role.includes('Инструктор')));assert(trainee.assessments.some(r=>r.title.includes('Практическая')));assert(mentor.mentoring.some(r=>r.id===f.certificate));assert(author.training.some(r=>r.id===id));assert.equal(trainee.development[0].id,plan);
+ await assert.rejects(f.save('competency_matrix',base),/другим пользователем/);
+ const v2=await f.save('competency_matrix',{...base,previous_id:e.entity_id,previous_rev:1});
+ assert.equal(one(db,'SELECT state FROM competency_matrix WHERE id=?',[e.entity_id]).state,'retired');assert.equal(one(db,'SELECT version_no FROM competency_matrix WHERE id=?',[v2.entity_id]).version_no,2);
+ const restored=await restore(SQL,await backup(f.w),f.readContent);assert.equal(employeeRelations(restored.working,f.trainee).matrices.length,2);assert.deepEqual(rows(restored.working,'PRAGMA foreign_key_check'),[]);restored.close();
+ const links=await employeeSourceLinks(db,f.trainee,f.readContent);assert(links.scanned>=1);assert.equal(links.items.length,0);assert.equal(links.errors.length,0)
+ }finally{f.w.close()}
 });

@@ -170,7 +170,7 @@ export function applyTrainingEvent(db,e,old){
  }
  if(t==='competency_matrix'){
   if(old){changeOnly(e,old);exact(p,['command','reason']);invariant(old.state==='active'&&p.command==='retire'&&required(p.reason),'Укажите основание закрытия матрицы');update(db,t,id,{state:'retired'});return}
-  createOnly(e,old);exact(p,['code','title','author_id','unit_id','shift_id','scale_id','base_on','target_on','roster','columns','baseline']);
+  createOnly(e,old);exact(p,['code','title','author_id','unit_id','shift_id','scale_id','base_on','target_on','roster','columns','baseline','previous_id','previous_rev']);
   invariant(required(p.code,80)&&required(p.title,200)&&period(p.base_on,p.target_on)&&p.target_on&&p.base_on<=eventDay(e),'Укажите код, название, дату среза и целевую дату');
   person(db,p.author_id);if(p.unit_id)active(db,'org_unit',p.unit_id);if(p.shift_id)active(db,'work_shift',p.shift_id);
   const scale=active(db,'rating_scale',p.scale_id),levels=rows(db,'SELECT value,label FROM rating_level WHERE scale_id=? ORDER BY value',[p.scale_id]);
@@ -199,6 +199,8 @@ export function applyTrainingEvent(db,e,old){
    exact(b,['person_id','skill_id','value','assessment_id']);
    invariant(b.person_id===r.person_id&&b.skill_id===c.skill_id&&b.value===actual&&b.assessment_id===(actual===null?null:fact.session_id),'Исходный срез изменился. Обновите предпросмотр');
   }
+  const current=one(db,"SELECT id,rev FROM competency_matrix WHERE code=? AND state='active'",[p.code]);
+  invariant(p.previous_id===(current?.id||null)&&p.previous_rev===(current?.rev||0),'Матрица уже изменена другим пользователем. Обновите данные перед сохранением');
   const prev=one(db,'SELECT MAX(version_no) n FROM competency_matrix WHERE code=?',[p.code])?.n||0;
   db.run("UPDATE competency_matrix SET state='retired',rev=rev+1 WHERE code=? AND state='active'",[p.code]);
   store(db,t,{id,code:p.code,title:p.title,author_id:p.author_id,unit_id:p.unit_id,shift_id:p.shift_id,scale_id:p.scale_id,base_on:p.base_on,target_on:p.target_on,roster_json:canonical(p.roster),columns_json:canonical(p.columns),baseline_json:canonical(p.baseline),created_at:e.occurred_at,state:'active',version_no:prev+1,rev:1});return
