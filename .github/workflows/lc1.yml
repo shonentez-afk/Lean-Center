@@ -1,7 +1,7 @@
-name: LC4.4.1 matrix and full regression
+name: LC5 development full regression
 on:
   push:
-    branches: [feature/lc4.4-matrix]
+    branches: [feature/lc5-audit]
     paths: ['src/**','db/**','tests/**','tools/build_lc1.mjs','tools/build_folder.mjs','tools/build_editor.mjs','tools/package_folder.py','docs/DEPLOY_NETWORK_RU.md','package.json','.github/workflows/lc1.yml']
   workflow_dispatch:
 permissions:
@@ -36,33 +36,12 @@ jobs:
       - run: npm run smoke
       - uses: actions/upload-artifact@v4
         with:
-          name: LeanCenter-LC4.4.1-${{ runner.os }}
-          path: releases/LeanCenter-LC4.4.1.zip
+          name: LeanCenter-LC5.0-dev-${{ runner.os }}
+          path: releases/LeanCenter-LC5.0-dev.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LC4.4.1-screenshots-${{ runner.os }}
+          name: LC5.0-dev-screenshots-${{ runner.os }}
           path: artifacts
           if-no-files-found: warn
-  publish:
-    needs: verify
-    if: github.ref == 'refs/heads/feature/lc4.4-matrix'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: LeanCenter-LC4.4.1-Linux
-          path: releases
-      - name: Publish verified folder candidate
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add releases/LeanCenter-LC4.4.1.zip
-          if ! git diff --cached --quiet; then
-            git commit -m "Build: verified LC4.4.1 production training candidate"
-            git push origin HEAD:feature/lc4.4-matrix
-          fi
