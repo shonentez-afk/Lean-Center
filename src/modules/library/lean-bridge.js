@@ -20,7 +20,7 @@
    if(typeof stage37DraftDecisionPending!=='undefined'&&stage37DraftDecisionPending){
     if(!confirm('В этом рабочем окне есть сохранённый черновик. Восстановить его вместо исходной версии из центра?'))throw Error('Найден защищённый черновик. Сначала восстановите его или скачайте исходный текст через баннер.');
     await applyDraft(JSON.parse(stage37InitialDraft.raw));stage37DraftDecisionPending=false;$('draftBanner')?.classList.add('hidden');saveDraft();
-    if(kind==='frv')document.querySelector('[data-tab="frvstudy"]')?.click();
+    if(kind==='frv'){document.querySelector('[data-tab="frvstudy"]')?.click();const passport=document.getElementById('frvs-studyId')?.closest('details');if(passport)passport.open=true}
     loaded=true;send.disabled=false;download.disabled=false;say('Рабочая копия готова · черновик восстановлен.');tell('loaded');return
    }
    if(text){
@@ -36,7 +36,7 @@
     if(defaults?.operation){state.meta.operation=defaults.operation;setVal('meta-operation',defaults.operation)}
     if(defaults?.unit){state.meta.department=defaults.unit;setVal('meta-department',defaults.unit)}
    }else if(defaults?.operation){const d=ensureFrvStudy();d.operationId=defaults.operation;renderFrvStudy()}
-   if(kind==='frv'){const tab=document.querySelector('[data-tab="frvstudy"]');tab?.click()}else document.querySelector('[data-tab="editor"]')?.click();
+   if(kind==='frv'){const tab=document.querySelector('[data-tab="frvstudy"]');tab?.click();const passport=document.getElementById('frvs-studyId')?.closest('details');if(passport)passport.open=true}else document.querySelector('[data-tab="editor"]')?.click();
    loaded=true;send.disabled=false;download.disabled=false;say('Рабочая копия готова. Передача не публикует документ.');tell('loaded')
   }catch(e){console.error('Lean Center editor load',e);say('Ошибка загрузки: '+e.message+' · закройте окно и сохраните исходный файл');tell('error',{message:e.message})}finally{busy=false}
  }
