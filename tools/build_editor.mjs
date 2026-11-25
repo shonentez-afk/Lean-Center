@@ -21,6 +21,10 @@ export function buildEditor(){
  // Do not send corporate content outside the offline editor. Keep the
  // deterministic check, import, photo tools and exports intact.
  replace("initDocumentManager();pingAI()","initDocumentManager();");
+ // Preserve five text entries in the derived editor without changing the baseline.
+ replace("s.keyMoments.map(String).slice(0,3)","s.keyMoments.map(String).slice(0,5)");
+ if(html.split('s.keyMoments.length<3').length!==3)throw Error('KM editor anchors changed');
+ html=html.replaceAll('s.keyMoments.length<3','s.keyMoments.length<5');
  replace('</body>','<script src="lean-bridge.js"></script>\n</body>');
  return html
 }
