@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node tools/build_lc1.mjs",
+    "build": "node tools/build_folder.mjs && python tools/package_folder.py",
     "test": "node --test tests/lc1-core.test.mjs",
-    "smoke": "node tests/lc1-browser.mjs"
+    "smoke": "node tests/lc1-folder-browser.mjs",
+    "build:standalone": "node tools/build_lc1.mjs"
   },
   "dependencies": {
     "sql.js": "1.13.0",
