@@ -35,7 +35,7 @@ try{
  await page.goto(pathToFileURL(entry).href);
  await home(page);
  assert.equal(await page.evaluate(()=>window.LC_BUILD.version),'lc3.2');
- assert.equal(await page.evaluate(()=>document.querySelectorAll('script[src]').length),6);
+ assert.equal(await page.evaluate(()=>document.querySelectorAll('script[src]').length),7);
  assert.equal(await page.evaluate(()=>document.querySelectorAll('script:not([src])').length),0);
  assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--tn-red').trim()),'#E30613');
  assert.match(await page.evaluate(()=>getComputedStyle(document.documentElement).fontFamily),/Proxima Nova Rg/);
@@ -84,7 +84,7 @@ try{
  await second.context.close();
  assert.deepEqual(errors,[]);
  assert.equal(requests.some(u=>/^https?:/i.test(u)),false,'External HTTP dependency');
- for(const p of ['app/config.js','vendor/sql-wasm-data.js','vendor/sql-wasm.js','vendor/echarts.min.js','vendor/exceljs.min.js','app/main.js','assets/styles.css'])
+ for(const p of ['app/config.js','vendor/sql-wasm-data.js','vendor/sql-wasm.js','vendor/echarts.min.js','vendor/exceljs.min.js','app/main.js','editor/Stage43-data.js','assets/styles.css'])
   assert(requests.some(u=>u.endsWith('/'+p)),'Missing local request '+p);
  assert.equal(requests.some(u=>u.endsWith('.wasm')),false,'WASM must not be fetched under file://');
  console.log('LC3.2 folder offline file:// smoke PASS: Cyrillic paths, external scripts, CRUD, reload, stable entry update, backup/restore, no HTTP');
