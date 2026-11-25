@@ -5,7 +5,7 @@ import {rows,one,list,uuid,invariant,sha256} from '../../core/db.js';
 import {directoryPeople} from '../master-data/people-directory.js';
 import {openPeopleDropdown} from '../../ui/people-picker.js';
 import {linkedTwi} from '../library/linked-materials.js';
-import {TRAINING_TYPES,programKinds,parts,variants,conclusions,jiStages,progressFor,currentStandard,isCurrentStandard,activeAuthorizations,authorizationValid,certificateValid,practicalMethods,practicalCriteria,practicalResult,validatePracticalMethod,latestAssessment,latestVerification,admissionStatus,enrollmentTasks,matrixData,coverageData} from './domain.js';
+import {TRAINING_TYPES,programKinds,parts,variants,conclusions,jiStages,progressFor,currentStandard,isCurrentStandard,activeAuthorizations,authorizationValid,certificateValid,orderPosition,practicalMethods,practicalCriteria,practicalResult,validatePracticalMethod,latestAssessment,latestVerification,admissionStatus,enrollmentTasks,matrixData,coverageData} from './domain.js';
 export const TRAINING_PAGES=['twi','programs','internship','instruction','retraining','journal','skills','practical','development','mentoring','certification','appointments','my_plan'];
 let route={};
 export function resetTrainingRoute(){route={}}
@@ -321,7 +321,7 @@ export function trainingScreen(main,page,c){
    const matching=()=>candidates().filter(x=>!role.value||(role.value==='internal_trainer'?x.role==='internal_trainer':x.role!=='internal_trainer'));
    const who=person('group_member_person','Сертифицированный сотрудник','',{at:()=>start.value,filter:p=>matching().some(x=>x.person_id===p.id),onChange:refresh});
    const selected=()=>matching().find(x=>x.id===cert.value&&x.person_id===who.value);
-   function show(){const x=selected(),p=x&&directoryPeople(db,start.value).find(y=>y.id===x.person_id);description.textContent=x?n('person',x.person_id)+' · '+(p?.position||'Должность не назначена')+' · '+roleLabel(x):'Выберите действующий сертификат'}
+   function show(){const x=selected(),p=x&&directoryPeople(db,start.value).find(y=>y.id===x.person_id);description.textContent=x?n('person',x.person_id)+' · '+(orderPosition(db,x.person_id,start.value)||'Должность не назначена')+' · '+roleLabel(x):'Выберите действующий сертификат'}
    function refresh(){if(who.value&&!matching().some(x=>x.person_id===who.value))who.set('');const before=cert.value,available=matching().filter(x=>x.person_id===who.value);replaceOptions(cert,select(cert.name,available.map(x=>[x.id,roleLabel(x)+' · '+x.number]),available.some(x=>x.id===before)?before:available.length===1?available[0].id:''));show()}
    role.onchange=refresh;cert.onchange=show;const item={cert,ack,block,selected,refresh};members.push(item);block.append(grid(f('Группа приказа',role),who.element,f('Сертификат',cert),f('Ознакомлен',ack)),description,btn('Удалить сотрудника',()=>{members.splice(members.indexOf(item),1);block.remove()}));listEl.append(block);refresh()
   }
@@ -331,7 +331,7 @@ export function trainingScreen(main,page,c){
    invariant(header.order_number&&header.organization&&header.city&&actor.value&&members.length&&header.order_on&&header.valid_from,'Заполните шапку приказа и выберите сотрудников');
    if(registered)invariant(confirmed.input.checked,'Подтвердите регистрацию подписанного приказа и ознакомлений');
    const snapshots=[],seen=new Set();
-   for(const m of members){const cert=m.selected(),p=cert&&directoryPeople(db,start.value).find(x=>x.id===cert.person_id);invariant(cert&&p?.position,'Нужны сертификат и должность сотрудника');const k=p.id+':'+(cert.role==='internal_trainer'?'vt':'instructor');invariant(!seen.has(k),'Повтор сотрудника в группе');seen.add(k);header.members.push({id:uuid(),credential_id:cert.id,acknowledged_on:m.ack.value});snapshots.push({role:cert.role,person_name:p.display_name,position_name:p.position})}
+   for(const m of members){const cert=m.selected(),p=cert&&directoryPeople(db,start.value).find(x=>x.id===cert.person_id);const position=p?orderPosition(db,p.id,start.value):'';invariant(cert&&p&&position,'Нужны сертификат и должность сотрудника');const k=p.id+':'+(cert.role==='internal_trainer'?'vt':'instructor');invariant(!seen.has(k),'Повтор сотрудника в группе');seen.add(k);header.members.push({id:uuid(),credential_id:cert.id,acknowledged_on:m.ack.value});snapshots.push({role:cert.role,person_name:p.display_name,position_name:position})}
    invariant([header.instructor_amount,header.trainer_amount].every(x=>x===null||Number.isInteger(x)&&x>=0),'Введите неотрицательные целые суммы');invariant((header.instructor_amount===null&&header.trainer_amount===null)?!header.supplement_from:!!header.supplement_from,'Укажите дату доплаты или оставьте все поля доплат пустыми');
    return {header,snapshots,order:{...header,approved_name:n('person',actor.value)}}
   }

@@ -70,6 +70,10 @@ export function currentStandard(db,revisionId){
 export function isCurrentStandard(db,revisionId){const r=currentStandard(db,revisionId);return !!(r&&r.state==='effective'&&!r.archived)}
 function effective(db,revisionId){const r=currentStandard(db,revisionId);invariant(r&&r.state==='effective'&&!r.archived&&r.operation_id&&r.source?.kind==='sop','Выберите действующую редакцию СОП, привязанную к операции');active(db,'operation',r.operation_id);return r}
 function names(db,ids){return Object.fromEntries(Object.entries(ids).map(([k,id])=>[k,id?person(db,id).display_name:'']))}
+// An official order must use the assigned position, not a profession fallback.
+export function orderPosition(db,id,day){
+ return one(db,"SELECT pos.name FROM person_assignment a JOIN position pos ON pos.id=a.position_id WHERE a.person_id=? AND a.valid_from<=? AND coalesce(a.valid_to,'9999-12-31')>=? ORDER BY a.valid_from DESC,a.id LIMIT 1",[id,day,day])?.name||''
+}
 export function certificateValid(db,id,day){const x=one(db,'SELECT * FROM mentor_credential WHERE id=?',[id]);return x&&x.kind==='certificate'&&within(day,x.issued_on,x.valid_until)&&beforeRevocation(x.revoked_at,day)?x:null}
 function appointmentValid(db,id,day){
  const x=one(db,'SELECT * FROM mentor_appointment WHERE id=?',[id]);if(!x||!within(day,x.valid_from,x.valid_to)||x.acknowledged_on>day||!beforeRevocation(x.revoked_at,day))return null;
@@ -161,12 +165,12 @@ export function applyTrainingEvent(db,e,old){
   invariant([p.instructor_amount,p.trainer_amount].every(v=>v===null||integer(v,0,10000000)),'Доплата: целая сумма рублей или не установлена');
   invariant((p.instructor_amount===null&&p.trainer_amount===null)?p.supplement_from===null:date(p.supplement_from)&&p.supplement_from>=p.order_on,'Укажите дату начала доплаты');
   invariant(!one(db,'SELECT id FROM mentor_order WHERE organization=? AND order_number=? AND order_on=?',[p.organization,p.order_number,p.order_on]),'Такой групповой приказ уже зарегистрирован');
-  const directory=new Map(directoryPeople(db,p.valid_from).map(x=>[x.id,x])),seen=new Set(),ids=new Set();
+  const seen=new Set(),ids=new Set();
   const members=p.members.map(m=>{
    exact(m,['id','credential_id','acknowledged_on']);invariant(isId(m.id)&&!ids.has(m.id),'Повтор идентификатора назначения');ids.add(m.id);
    noFuture(m.acknowledged_on,e);invariant(m.acknowledged_on>=p.order_on,'Ознакомление не может предшествовать приказу');
    const c=certificateValid(db,m.credential_id,p.valid_from);invariant(c&&roles.includes(c.role),'Нужен действующий сертификат, а не свидетельство');
-   const who=person(db,c.person_id),info=directory.get(who.id),position=info?.position||'';
+   const who=person(db,c.person_id),position=orderPosition(db,who.id,p.valid_from);
    invariant(position.trim(),'Укажите действующую должность сотрудника в справочнике: '+who.display_name);
    const key=who.id+':'+(c.role==='internal_trainer'?'internal_trainer':'instructor');invariant(!seen.has(key),'Сотрудник повторяется в одной группе приказа');seen.add(key);
    return {id:m.id,person_id:who.id,credential_id:c.id,role:c.role,order_number:p.order_number,order_on:p.order_on,approved_by:p.approved_by,valid_from:p.valid_from,valid_to:p.valid_to,acknowledged_on:m.acknowledged_on,evidence:p.evidence,order_id:id,person_name:who.display_name,position_name:position,rev:1}
