@@ -1,13 +1,13 @@
-import {BUILTIN_PRACTICAL,INITIAL_PROGRAM_TASKS,previewCriteria} from './builtin-forms.js';
+import {BUILTIN_PRACTICAL,BUILTIN_SOP,BUILTIN_SELF,SELF_LEVELS,RC1_CRITERIA,FORM_CATALOG,INITIAL_PROGRAM_TASKS,previewCriteria} from './builtin-forms.js';
 import {SCALE_NAME,CORPORATE_LEVELS,practicalCriteriaFromSheet,calendarData,calendarFacts,matrixPoints,personalTargets,productionHeaders,productionRows,productionWorkbook,entryWorkbook,practicalWorkbook,criteriaFromTabularSheet} from './corporate-forms.js';
 import {fillOrderTemplate,draftDocx,orderPayment,builtinOrderDocx} from './local-docx.js';
 // LC4 uses the same workspace, event log, directory and corporate UI as LC3.
-import {rows,one,list,uuid,invariant,sha256} from '../../core/db.js';
+import {rows,one,list,uuid,invariant,sha256,canonical} from '../../core/db.js';
 import {directoryPeople} from '../master-data/people-directory.js';
 import {openPeopleDropdown} from '../../ui/people-picker.js';
 import {linkedTwi} from '../library/linked-materials.js';
-import {TRAINING_TYPES,programKinds,parts,variants,conclusions,jiStages,progressFor,currentStandard,isCurrentStandard,activeAuthorizations,authorizationValid,certificateValid,orderPosition,practicalMethods,practicalCriteria,practicalResult,validatePracticalMethod,latestAssessment,latestVerification,admissionStatus,enrollmentTasks,matrixData,coverageData} from './domain.js';
-export const TRAINING_PAGES=['twi','programs','internship','instruction','retraining','journal','skills','practical','development','mentoring','certification','appointments','my_plan'];
+import {TRAINING_TYPES,programKinds,parts,variants,conclusions,jiStages,progressFor,currentStandard,isCurrentStandard,activeAuthorizations,authorizationValid,certificateValid,orderPosition,practicalMethods,practicalCriteria,practicalResult,validatePracticalMethod,validateMentorMethod,trainingMethods,AUDIT_CODE,SELF_CODE,latestAssessment,latestVerification,admissionStatus,enrollmentTasks,matrixData,coverageData} from './domain.js';
+export const TRAINING_PAGES=['twi','programs','internship','instruction','retraining','journal','skills','practical','development','mentoring','certification','appointments','my_plan','forms','audit','self_eval'];
 let route={};
 export function resetTrainingRoute(){route={}}
 export function setTrainingRoute(page,options={}){route={page,...options}}
@@ -256,7 +256,7 @@ export function trainingScreen(main,page,c){
   if(!ads.length)decisions.append(msg('Нет решений.'));panel.append(decisions);return panel
  }
  function assignmentCard(a){
-  const root=pane('Обучение · '+assignmentName(a),row(back(),btn('К плану обучения',()=>go('twi')),btn('К журналу',()=>go('journal')))),tabs=el('div',undefined,'library-tabs');
+  const root=pane('Обучение · '+assignmentName(a),row(back(),btn('К плану обучения',()=>go('twi')),btn('К журналу',()=>go('journal')),btn('Аудит 1-го уровня',()=>go('audit',{mode:'new',assignmentId:a.id})))),tabs=el('div',undefined,'library-tabs');
   const selected=route.tab||(page==='instruction'?'instruction':page==='practical'?'practice':'overview'),content=el('div');
   for(const [id,label,fn] of [['overview','Назначение',()=>overview(a)],['instruction','Инструктаж',()=>instruction(a)],['practice','Практика и допуск',()=>practice(a)]]){
    const button=btn(label,()=>{route.tab=id;for(const x of tabs.children)x.classList.remove('selected');button.classList.add('selected');content.replaceChildren(fn())},'library-tab'+(selected===id?' selected':''));tabs.append(button);if(selected===id)content.append(fn())
@@ -446,6 +446,66 @@ export function trainingScreen(main,page,c){
   const actor=person('my_plan_person','Сотрудник',route.personId||'',{onChange:id=>{route.personId=id;render()}}),id=actor.value,items=id?asgns().filter(a=>[a.trainee_id,a.mentor_id,a.supervisor_id,a.assigned_by].includes(id)):[],programs=id?enrollmentList().filter(x=>[x.trainee_id,x.mentor_id,x.manager_id].includes(id)):[];
   return stack(pane('Мой план',msg('Выберите сотрудника. Это фильтр рабочих записей, не вход в систему и не ограничение прав доступа.'),actor.element,id?assignmentRows(items):msg('Выберите сотрудника для просмотра назначений.')),pane('Программы',table(['Программа','Обучаемый','Срок','Статус',''],programs.map(x=>[one(db,'SELECT title FROM training_program WHERE id=?',[x.program_id])?.title,n('person',x.trainee_id),x.due_on,statuses[x.state],btn('Открыть',()=>go(enrollmentPage(x.id),{enrollmentId:x.id}),'primary')]))))
  }
+ function methodView(code,method){
+  const existing=trainingMethods(db,code),out=pane('Версии методики',msg('Встроенная форма используется до первого сохранения. Импорт новой версии не изменяет старые оценки. Допустимо 1–100 критериев. Шкала определяется видом методики.'));
+  const sample=existing.find(m=>m.state==='active');const data=sample?JSON.parse(sample.methodology_json):method;
+  out.append(tableOf(['№','Раздел','Критерий'],data.criteria.map(q=>[q.code,q.section,q.question])));
+  const importMethod=async p=>{validateMentorMethod(p,method.format);if(!confirm(p.title+' · '+p.criteria.length+' критериев. Активировать новую версию?\n\n'+p.criteria.map(q=>q.code+'. '+q.question).join('\n')))return 'Импорт отменён';await write('checklist_version',p);return 'Методика зарегистрирована'};
+  out.append(row(action('Загрузить новую методику JSON',()=>pick('.json',importMethod,128000)),action('Загрузить методику XLSX',()=>{
+   const input=el('input');input.type='file';input.accept='.xlsx';input.onchange=()=>{const file=input.files?.[0];if(file)run(async()=>{invariant(file.size<=12*1024*1024,'Файл слишком большой');const bytes=new Uint8Array(await file.arrayBuffer()),book=new ExcelJS.Workbook();await book.xlsx.load(bytes);
+    const generic=book.getWorksheet('Критерии'),original=code===SELF_CODE?book.getWorksheet('Самооценка'):null;
+    let criteria;if(generic)criteria=criteriaFromTabularSheet(generic);else if(original){criteria=Array.from({length:20},(_,i)=>({code:Number(original.getCell(i+5,1).text),section:'Самооценка',question:original.getCell(i+5,2).text.trim()}))}else throw Error('Нужен лист «Критерии»: №, Раздел, Критерий');
+    return importMethod({format:method.format,title:file.name.slice(0,200),source_sha256:await sha256(bytes),criteria})
+   })};input.click()
+  }),btn('Скачать JSON действующей методики',()=>run(async()=>{const payload={...data};if(!sample&&code===AUDIT_CODE)payload.source_sha256=await sha256(canonical(payload.criteria));downloadBytes('Методика-'+code+'.json',new TextEncoder().encode(JSON.stringify(payload,null,2)));return 'Методика сформирована'},{save:false}))));
+  for(const m of existing){const p=JSON.parse(m.methodology_json);const d=el('details');d.append(el('summary','v'+m.version_no+' · '+p.title+' · '+p.criteria.length+' критериев · '+(m.state==='active'?'Действует':'История')),tableOf(['№','Раздел','Критерий'],p.criteria.map(q=>[q.code,q.section,q.question])));out.append(d)}return out
+ }
+ function answerControls(criteria,levels,prefix){
+  const values=criteria.map(q=>({q,input:select(prefix+'_'+q.position,Object.entries(levels).map(([k,v])=>[k,k+' — '+v]),'','Не оценено'),note:fieldInput(prefix+'_note_'+q.position)}));
+  const progress=msg('Оценено 0 / '+criteria.length);for(const x of values)x.input.onchange=()=>{progress.textContent='Оценено '+values.filter(v=>v.input.value!=='').length+' / '+criteria.length};
+  return {values,table:stack(tableOf(['№','Раздел','Критерий','Оценка','Комментарий'],values.map(x=>[x.q.position,x.q.section_code,x.q.question,x.input,x.note])),progress),responses:()=>values.map(x=>({criterion_id:x.q.id,value:x.input.value===''?null:Number(x.input.value),note:x.note.value}))}
+ }
+ function methodDraft(code,builtin){
+  const m=trainingMethods(db,code).find(x=>x.state==='active'),created=m?null:event('checklist_version',builtin),id=m?.id||created.entity_id;
+  return {id,created,criteria:m?practicalCriteria(db,id):previewCriteria(builtin,id),label:m?'v'+m.version_no:'Встроенная форма'}
+ }
+ function saveWithMethod(label,draft,type,payload,done){
+  return action(label,()=>run(async()=>{const e=event(type,payload());await ws.applyContentEvents([...(draft.created?[draft.created]:[]),e],readContent);done?.(e.entity_id);return 'Запись сохранена. Ожидает публикации базы.'}))
+ }
+ function selfPage(){
+  const items=rows(db,'SELECT * FROM mentor_self_evaluation ORDER BY evaluated_on DESC,recorded_at DESC');
+  const detail=items.find(x=>x.id===route.id);
+  if(detail){const criteria=practicalCriteria(db,detail.method_id),answers=JSON.parse(detail.responses_json),lines=criteria.map((q,i)=>[q.position,q.question,answers[i]?.value??'—',answers[i]?.note||'']);return pane('Самооценка · '+detail.person_name,back(),msg(detail.evaluated_on+' · '+detail.place),tableOf(['№','Критерий','Уровень','Комментарий'],lines),msg(detail.feedback),exportButton('Самооценка-'+detail.id.slice(0,8),['№','Критерий','Уровень','Комментарий'],lines))}
+  if(route.mode==='new'){
+   const draft=methodDraft(SELF_CODE,BUILTIN_SELF),when=date('self_date'),who=person('self_person','Инструктор / наставник','',{allowed:['instructor','mentor'],at:()=>when.value}),place=fieldInput('self_place'),feedback=note('self_feedback'),answers=answerControls(draft.criteria,SELF_LEVELS,'self_value');
+   return pane('Самооценка наставника',back(),msg(draft.label+' · '+draft.criteria.length+' критериев. Шкала 1–5; не смешивается с матрицей 1–4.'),grid(who.element,f('Дата',when),f('Место',place)),answers.table,f('Анализ и обратная связь',feedback),saveWithMethod('Сохранить самооценку',draft,'mentor_self_evaluation',()=>({person_id:who.value,method_id:draft.id,evaluated_on:when.value,place:place.value,responses:answers.responses(),feedback:feedback.value}),id=>{route={page,id}}))
+  }
+  return stack(pane('Самооценка инструкторов и ВТ',action('Новая самооценка',()=>goLocal({mode:'new'})),table(['Сотрудник','Дата','Место','Итого',''],items.map(x=>{const v=JSON.parse(x.responses_json);return [x.person_name,x.evaluated_on,x.place,v.reduce((n,q)=>n+q.value,0)+' / '+(v.length*5),btn('Открыть',()=>goLocal({id:x.id}),'primary')]}))),methodView(SELF_CODE,BUILTIN_SELF))
+ }
+ // RC1 criteria come from the pinned baseline. Their fingerprint is calculated
+ // from exact criterion content rather than the old 17-point DOCX.
+ function auditPayload(){return {format:'lean-audit-checklist-v1',title:'Аудит 1-го уровня · RC1',source_sha256:'0'.repeat(64),criteria:RC1_CRITERIA.map(({rc1_id,...q})=>q)}}
+ function auditPage(){
+  const method=auditPayload(),items=rows(db,"SELECT * FROM audit_session WHERE assignment_id IS NOT NULL ORDER BY observed_at DESC,recorded_at DESC"),detail=items.find(x=>x.id===route.auditId);
+  if(detail){
+   const criteria=practicalCriteria(db,detail.version_id),answers=rows(db,'SELECT * FROM audit_response WHERE audit_id=?',[detail.id]),byId=new Map(answers.map(x=>[x.criterion_id,x])),lines=criteria.map(q=>[q.position,q.section_code,q.question,byId.get(q.id)?.response==='yes'?1:0,byId.get(q.id)?.note||'']);
+   const source=JSON.parse(one(db,'SELECT methodology_json FROM checklist_version WHERE id=?',[detail.version_id]).methodology_json),recommendations=source.criteria.filter((q,i)=>lines[i][3]===0&&q.recommendation).map(q=>q.recommendation);
+   const names=JSON.parse(detail.recorded_names_json);
+   return pane('Аудит 1-го уровня · '+(names.mentor||n('person',detail.mentor_id)),back(),msg(detail.observed_at+' · '+revLabel(detail.standard_revision_id)+' · '+(detail.state==='void'?'Аннулирован':'Зафиксирован')),msg('Внутренний тренер: '+names.auditor+' · Обучаемый: '+names.trainee),msg('Результат: '+lines.reduce((n,x)=>n+x[3],0)+' / '+lines.length),tableOf(['№','Раздел','Критерий','Оценка','Комментарий'],lines),msg(detail.summary||''),...recommendations.map(x=>msg(x)),btn('Открыть назначение',()=>go('twi',{id:detail.assignment_id})),exportButton('Аудит-L1-'+detail.id.slice(0,8),['№','Раздел','Критерий','Оценка','Комментарий'],lines),...(detail.state==='final'?[closeRecord('Аннулировать аудит','audit_session',detail,'void')]:[msg(detail.void_reason||'')]))
+  }
+  if(route.mode==='new'){
+   const available=asgns().filter(a=>a.state!=='cancelled'&&a.approval_json&&progressFor(db,a).facts.length),as=select('audit_assignment',available.map(a=>[a.id,assignmentName(a)]),route.assignmentId||''),session=select('audit_fact',[]),when=date('audit_date');
+   const auditor=person('audit_actor','Внутренний тренер','',{at:()=>when.value,allowed:['instructor'],filter:p=>{const a=available.find(x=>x.id===as.value);return p.id!==a?.mentor_id&&p.id!==a?.trainee_id&&p.roles.some(r=>[r.name,r.code].some(v=>['internal_trainer','internal trainer','внутренний тренер','вт'].includes(String(v).toLocaleLowerCase('ru-RU').trim().replaceAll('-','_'))))}});
+   const feedback=note('audit_feedback'),draft=methodDraft(AUDIT_CODE,method),answers=answerControls(draft.criteria,{0:'Нет',1:'Да'},'audit_value');
+   const info=msg('Выберите назначение'),refresh=()=>{const a=available.find(x=>x.id===as.value);replaceOptions(session,select('audit_fact',a?progressFor(db,a).facts.map(v=>[v.id,v.held_at+' · '+JSON.parse(v.steps_json).label]):[]));info.textContent=a?'Инструктор: '+n('person',a.mentor_id)+' · Обучаемый: '+n('person',a.trainee_id)+' · '+revLabel(a.sop_revision_id):'Выберите назначение'};as.onchange=()=>{auditor.set('');refresh()};refresh();
+   return pane('Аудит первого уровня',back(),msg('Оценка инструктора. Практическая оценка стажёра остаётся отдельным результатом.'),f('Назначение обучения',as),info,grid(f('Наблюдавшийся факт',session),auditor.element,f('Дата наблюдения',when)),answers.table,f('Обратная связь инструктору',feedback),action('Сохранить аудит',()=>run(async()=>{const a=available.find(x=>x.id===as.value);invariant(a,'Выберите назначение');if(draft.created)draft.created.payload={...method,source_sha256:await sha256(canonical(method.criteria))};const e=event('audit_session',{assignment_id:a.id,assignment_rev:a.rev,method_id:draft.id,auditor_id:auditor.value,session_id:session.value,observed_on:when.value,responses:answers.responses(),feedback:feedback.value});await ws.applyContentEvents([...(draft.created?[draft.created]:[]),e],readContent);route={page,auditId:e.entity_id};return 'Запись сохранена. Ожидает публикации базы.'})))
+  }
+  return stack(pane('Аудиты 1-го уровня',msg('Встроенная RC1: 7+4+4+5 критериев. Запись привязана к назначению и факту инструктажа. Расширенная аналитика и мобильный обмен RC1 — отдельная задача LC5.'),action('Новый аудит',()=>goLocal({mode:'new'})),table(['Дата','Инструктор','Обучаемый','СОП','Состояние',''],items.map(x=>[x.observed_at,n('person',x.mentor_id),n('person',x.trainee_id),revLabel(x.standard_revision_id),x.state==='void'?'Аннулирован':'Зафиксирован',btn('Открыть',()=>goLocal({auditId:x.id}),'primary')]))),methodView(AUDIT_CODE,method))
+ }
+ function formsPage(){
+  const routes=FORM_CATALOG.map(([i,name,p,notes])=>[i,name,notes,btn('Открыть',()=>go(p),'primary')]);
+  return stack(pane('Бланки и методики',msg('13 приложений стандарта связаны с рабочими разделами. Оценки и данные из примеров не перенесены. Новые редакции чек-листов загружайте в соответствующих разделах.'),tableOf(['№ приложения','Форма','Применение',''],routes)),pane('Встроенные чек-листы',...[['Оценка СОП',BUILTIN_SOP],['Практика стажёра',BUILTIN_PRACTICAL],['Самооценка',BUILTIN_SELF],['Аудит 1-го уровня',auditPayload()]].map(([label,p])=>{const d=el('details');d.append(el('summary',label+' · '+p.criteria.length+' критериев'),tableOf(['№','Раздел','Критерий'],p.criteria.map(q=>[q.code,q.section||'—',q.question])),btn('Скачать исходную методику JSON',()=>run(async()=>{const payload={...p};if(p.format==='lean-audit-checklist-v1')payload.source_sha256=await sha256(canonical(payload.criteria));downloadBytes('Методика-'+p.format+'.json',new TextEncoder().encode(JSON.stringify(payload,null,2)));return 'Методика сформирована'},{save:false})));return d})))
+ }
  let content;
  if(page==='twi'||page==='instruction'||page==='practical'){
   const a=route.id?asgns().find(x=>x.id===route.id):null;
@@ -463,5 +523,8 @@ export function trainingScreen(main,page,c){
  else if(page==='retraining')content=retrainingPage();
  else if(page==='development')content=developmentPage();
  else if(page==='my_plan')content=myPlan();
+ else if(page==='forms')content=formsPage();
+ else if(page==='self_eval')content=selfPage();
+ else if(page==='audit')content=auditPage();
  if(content){main.append(content);main.dataset.lc4Page=page}
 }

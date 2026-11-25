@@ -18,7 +18,7 @@ const root=document.getElementById('app');
 let SQL,ws,cache,folder,generation=0,busy=false,master=false,page='home',theme=false,status='Готово',error=false,chart=null,edit=null,query='',incoming=[],importState=null,historyPerson=null,archiveFilter='active',libraryDraft=null,editorSession=null,libraryFilter='all';
 const contentStore=new ContentStore(()=>cache,()=>folder),readContent=ref=>contentStore.get(ref);
 const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
-const planned={sop:'Каталог СОП',sop_constructor:'Конструктор СОП',frv:'ФРВ',twi_plans:'Планы инструктажа TWI',sop_evaluation:'Оценка СОП',my_plan:'Мой план',twi:'План производственного обучения',programs:'Ввод в профессию',internship:'Программы стажировки',instruction:'Инструктажи TWI',retraining:'Переобучение',journal:'Журнал заданий',skills:'Матрица компетенций',practical:'Практические оценки',development:'Планы развития',mentoring:'Наставники и ВТ',self_eval:'Самооценка',certification:'Сертификация',appointments:'Назначения',audit:'Аудиты 1-го уровня',calendar:'Календарь',actions:'Мероприятия',analytics:'Аналитика центра',metrics:'Дерево метрик',roi:'ROI-модель',ai:'ИИ-помощник'};
+const planned={forms:'Бланки и методики',sop:'Каталог СОП',sop_constructor:'Конструктор СОП',frv:'ФРВ',twi_plans:'Планы инструктажа TWI',sop_evaluation:'Оценка СОП',my_plan:'Мой план',twi:'План производственного обучения',programs:'Ввод в профессию',internship:'Программы стажировки',instruction:'Инструктажи TWI',retraining:'Переобучение',journal:'Журнал заданий',skills:'Матрица компетенций',practical:'Практические оценки',development:'Планы развития',mentoring:'Наставники и ВТ',self_eval:'Самооценка',certification:'Сертификация',appointments:'Назначения',audit:'Аудиты 1-го уровня',calendar:'Календарь',actions:'Мероприятия',analytics:'Аналитика центра',metrics:'Дерево метрик',roi:'ROI-модель',ai:'ИИ-помощник'};
 const labels={home:'Дашборд',...Object.fromEntries(Object.entries(definitions).map(([k,v])=>[k,v.label])),...planned,org_unit:'Структура предприятия',import_xlsx:'Импорт данных',storage:'Настройки и обмен'};
 const navGroups=[
  ['Ежедневная работа',['home','my_plan','calendar','actions']],
@@ -27,7 +27,7 @@ const navGroups=[
  ['Люди и компетенции',['person','workplace','skills','practical','development']],
  ['Наставники и ВТ',['mentoring','self_eval','certification','appointments','audit']],
  ['Аналитика',['analytics','metrics','roi']],
- ['Управление центром',['org_unit','import_xlsx','storage']],
+ ['Управление центром',['org_unit','forms','import_xlsx','storage']],
  ['Справочники',['profession','position','work_shift','equipment','operation','person_assignment','business_role','role_assignment','skill_category','skill','rating_scale']]
 ];
 const implemented=new Set(['home','sop','sop_constructor','frv','twi_plans','sop_evaluation','storage','import_xlsx',...TRAINING_PAGES,...Object.keys(definitions)]);
@@ -233,7 +233,7 @@ async function evaluationXlsx(id){
 function evaluationHistory(revision,source){
  const data=rows(ws.working,'SELECT e.*,m.version_no AS method_version FROM sop_evaluation e JOIN checklist_version m ON m.id=e.method_id WHERE e.revision_id=? ORDER BY e.evaluated_on DESC,e.recorded_at DESC',[revision.id]);
  const out=el('div');if(!data.length)out.append(el('p','Оценок этой версии ещё нет.','muted'));
- else out.append(tableOf(['Дата','Оценщик','Методика','Результат','Исходник','Отчёт'],data.map(e=>{const r=evaluationResult(rows(ws.working,'SELECT value FROM sop_evaluation_response WHERE evaluation_id=?',[e.id]),sopCriteria(ws.working,e.method_id).length);return [e.evaluated_on,e.actor_name,'v'+e.method_version,r.yes+'/'+r.total · '+(r.fraction*100).toFixed(0)+'%',e.source_sha256===source.sha256?'Текущий':'Предыдущий черновик',btn('Скачать XLSX',()=>run(async()=>{await evaluationXlsx(e.id);return 'Отчёт сформирован'},{save:false}))]})));return out
+ else out.append(tableOf(['Дата','Оценщик','Методика','Результат','Исходник','Отчёт'],data.map(e=>{const r=evaluationResult(rows(ws.working,'SELECT value FROM sop_evaluation_response WHERE evaluation_id=?',[e.id]),sopCriteria(ws.working,e.method_id).length);return [e.evaluated_on,e.actor_name,'v'+e.method_version,r.yes+'/'+r.total+' · '+(r.fraction*100).toFixed(0)+'%',e.source_sha256===source.sha256?'Текущий':'Предыдущий черновик',btn('Скачать XLSX',()=>run(async()=>{await evaluationXlsx(e.id);return 'Отчёт сформирован'},{save:false}))]})));return out
 }
 function goEvaluation(id){navigate('sop_evaluation');evaluationSelected=id;render()}
 const stage43SourceLabels={seed:'Стартовое значение',auto:'Автоматически',manual:'Вручную',legacy:'Из исходника'};
