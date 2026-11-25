@@ -23,8 +23,28 @@ export function scoreQuestions(qs){
  for(const q of qs){if(q.response==='legacy'&&typeof q.legacy_score==='number'&&q.legacy_score>=0&&q.legacy_score<=1){counts.legacy++;legacySum+=q.legacy_score}else if(['yes','no','not_observed','not_applicable'].includes(q.response)){counts[q.response]++;if(q.response==='no'&&q.critical===1)counts.critical++}else counts.missing++}
  const observed=counts.yes+counts.no;return {...counts,observed,expected:qs.length,recorded:qs.length-counts.missing,pct:observed?100*counts.yes/observed:null,legacySum};
 }
+export function actionSource(db,kind,id){
+ if(kind==='practical'){const p=one(db,"SELECT * FROM assessment_session WHERE id=? AND assessment_kind='practical' AND state='confirmed' AND conclusion='not_meet'",[id]);if(!p)return null;return {kind,id,label:'Практическая оценка · '+p.assessed_at,subject_id:p.person_id,assignment_id:p.assignment_id,revision_id:p.standard_revision_id,assessment_id:id}}
+ if(kind==='assignment'){const a=one(db,"SELECT * FROM training_assignment WHERE id=? AND state<>'cancelled' AND source_sha256 IS NOT NULL",[id]);return a?{kind,id,label:'Назначение обучения · '+a.assigned_on,subject_id:a.trainee_id,assignment_id:id,revision_id:a.sop_revision_id}:null}
+ if(kind==='sop_evaluation'){const x=one(db,'SELECT e.*,d.code,d.title FROM sop_evaluation e JOIN document_revision r ON r.id=e.revision_id JOIN document d ON d.id=r.document_id WHERE e.id=?',[id]);return x?{kind,id,label:'Оценка СОП · '+x.code+' · '+x.evaluated_on,revision_id:x.revision_id,evaluation_id:id}:null}
+ if(kind==='document_revision'){const x=one(db,'SELECT r.id,r.version_no,d.code,d.title FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=?',[id]);return x?{kind,id,label:'СОП · '+x.code+' · '+x.title+' · v'+x.version_no,revision_id:id}:null}
+ if(kind==='frv_study'){const x=one(db,'SELECT id,title,state FROM frv_study WHERE id=?',[id]);return x?{kind,id,label:'ФРВ · '+x.title,study_id:id}:null}
+ if(kind==='development_goal'){const x=one(db,'SELECT g.*,p.person_id FROM development_goal g JOIN development_plan p ON p.id=g.plan_id WHERE g.id=?',[id]);return x?{kind,id,label:'Цель развития · '+x.title,subject_id:x.person_id,goal_id:id}:null}
+ return null
+}
+export function actionSourceOf(db,a){
+ if(a.audit_id)return {kind:'audit',id:a.audit_id,label:a.question||'Аудит L1'};
+ for(const [k,id] of [['practical',a.source_assessment_id],['sop_evaluation',a.source_evaluation_id],['assignment',a.source_assignment_id],['development_goal',a.goal_id],['frv_study',a.study_id],['document_revision',a.document_revision_id]])if(id){const x=actionSource(db,k,id);if(x)return x}
+ return null
+}
+export function practicalEvidenceForAction(db,a){
+ if(!a.source_assessment_id||!a.implemented_at)return [];
+ const s=one(db,"SELECT * FROM assessment_session WHERE id=? AND state='confirmed' AND assessment_kind='practical'",[a.source_assessment_id]);if(!s)return [];
+ return rows(db,"SELECT id,assessed_at,conclusion,assignment_id FROM assessment_session WHERE state='confirmed' AND assessment_kind='practical' AND person_id=? AND operation_id=? AND standard_revision_id=? AND method_id=? AND substr(assessed_at,1,10)>? ORDER BY assessed_at,id",[s.person_id,s.operation_id,s.standard_revision_id,s.method_id,a.implemented_at.slice(0,10)])
+}
+function practicalEffect(db,a,id){const e=practicalEvidenceForAction(db,a);return e.some(x=>x.id===id&&['basic','exceeds'].includes(x.conclusion))&&!e.some(x=>x.conclusion==='not_meet')}
 export function actionRows(db){
- return rows(db,`SELECT a.*,f.audit_response_id,f.state finding_state,r.criterion_id,r.response,c.question,c.section_code,s.id audit_id,s.state audit_state,s.mentor_id,s.auditor_id,s.trainee_id,s.operation_id,s.standard_revision_id,s.version_id,s.observed_at FROM action_item a LEFT JOIN finding f ON f.id=a.finding_id LEFT JOIN audit_response r ON r.id=f.audit_response_id LEFT JOIN checklist_criterion c ON c.id=r.criterion_id LEFT JOIN audit_session s ON s.id=r.audit_id ORDER BY a.due_on,a.id`);
+ return rows(db,`SELECT a.*,f.audit_response_id,f.study_id,f.document_revision_id,f.state finding_state,r.criterion_id,r.response,c.question,c.section_code,s.id audit_id,s.state audit_state,s.mentor_id,s.auditor_id,s.trainee_id,s.operation_id,s.standard_revision_id,s.version_id,s.observed_at FROM action_item a LEFT JOIN finding f ON f.id=a.finding_id LEFT JOIN audit_response r ON r.id=f.audit_response_id LEFT JOIN checklist_criterion c ON c.id=r.criterion_id LEFT JOIN audit_session s ON s.id=r.audit_id ORDER BY a.due_on,a.id`);
 }
 export function evidenceForAction(db,a){
  if(!a.audit_id||!a.implemented_at||!a.operation_id||!a.standard_revision_id||a.audit_state!=='final')return [];
@@ -37,16 +57,18 @@ export function effectiveEvidence(db,a,auditId){
 }
 export function actionStatus(db,a){
  if(a.state==='verified'&&a.audit_id){const v=one(db,"SELECT audit_id FROM action_verification WHERE action_id=? AND outcome='effective' ORDER BY checked_at DESC,id DESC LIMIT 1",[a.id]);if(!v||!effectiveEvidence(db,a,v.audit_id))return 'ineffective'}
+ if(a.state==='verified'&&a.kind==='trainee_training'){const v=one(db,"SELECT assessment_session_id FROM action_verification WHERE action_id=? AND outcome='effective' ORDER BY checked_at DESC,id DESC LIMIT 1",[a.id]);if(!v||!practicalEffect(db,a,v.assessment_session_id))return 'ineffective'}
  return a.state;
 }
 export function applyLC5Event(db,e,old){
  const p=e.payload,id=e.entity_id,t=e.entity_type;
  if(t==='action_item'){
   if(!old){
-   invariant(e.operation==='create','Требуется создание мероприятия');exact(p,['response_id','title','owner_id','subject_id','due_on','kind','priority']);
+   invariant(e.operation==='create','Требуется создание мероприятия');exact(p,['response_id','title','owner_id','subject_id','due_on','kind','priority',...(Object.hasOwn(p,'source')?['source']:[])]);
    person(db,p.owner_id);if(p.subject_id!==null)person(db,p.subject_id);
    invariant(required(p.title,500)&&validDate(p.due_on)&&p.due_on>=day(e)&&Object.hasOwn(ACTION_KINDS,p.kind)&&['normal','major','critical'].includes(p.priority),'Укажите задачу, срок и приоритет');
-   let finding=null;
+   let finding=null,generic=null;
+   if(p.source){exact(p.source,['kind','id']);invariant(p.response_id===null,'Выберите один источник');generic=actionSource(db,p.source.kind,p.source.id);invariant(generic,'Источник мероприятия недоступен');if(p.kind==='trainee_training')invariant(generic.kind==='practical'&&p.subject_id===generic.subject_id,'Переобучение обучаемого требует отрицательного заключения практической оценки');else invariant(['corrective','development'].includes(p.kind),'Недопустимый тип для этого источника');if(generic.revision_id||generic.study_id){finding=id;insert(db,'finding',{id:finding,document_revision_id:generic.revision_id||null,study_id:generic.study_id||null,title:generic.label,severity:p.priority,created_at:e.occurred_at,state:'open'})}}
    if(p.response_id!==null){
     const r=one(db,"SELECT r.*,a.state,c.question FROM audit_response r JOIN audit_session a ON a.id=r.audit_id JOIN checklist_criterion c ON c.id=r.criterion_id WHERE r.id=?",[p.response_id]);
     invariant(r?.state==='final'&&r.response==='no','Источник — подтверждённое отклонение действующего аудита');
@@ -57,18 +79,21 @@ export function applyLC5Event(db,e,old){
     if(!finding){finding=id;insert(db,'finding',{id:finding,audit_response_id:r.id,title:r.question,severity:p.priority,created_at:e.occurred_at,state:'open'})}
     invariant(!one(db,"SELECT id FROM action_item WHERE finding_id=? AND kind=? AND state NOT IN('cancelled','verified')",[finding,p.kind]),'Для замечания уже есть незавершённое мероприятие этого типа');
     db.run("UPDATE finding SET state='open' WHERE id=?",[finding]);
-   }else invariant(p.kind==='corrective','Для обучения или развития требуется подтверждённое основание');
-   insert(db,t,{id,finding_id:finding||null,goal_id:null,owner_id:p.owner_id,title:p.title.trim(),due_on:p.due_on,state:'open',rev:1,kind:p.kind,subject_id:p.subject_id,priority:p.priority,created_at:e.occurred_at});return
+   }else if(!generic)invariant(p.kind==='corrective','Для обучения или развития требуется подтверждённое основание');
+   insert(db,t,{id,finding_id:finding||null,goal_id:generic?.goal_id||null,source_assessment_id:generic?.assessment_id||null,source_assignment_id:generic?.assignment_id||null,source_evaluation_id:generic?.evaluation_id||null,owner_id:p.owner_id,title:p.title.trim(),due_on:p.due_on,state:'open',rev:1,kind:p.kind,subject_id:p.subject_id,priority:p.priority,created_at:e.occurred_at});return
   }
   invariant(e.operation==='update','Недопустимая операция');const a=actionRows(db).find(x=>x.id===id);
+  if(p.command==='link_followup'){exact(p,['command','type','id']);invariant(['open','in_progress','ineffective'].includes(actionStatus(db,a))&&a.subject_id,'Связь добавляется до выполнения и только для определённого сотрудника');let x=null,column=null;if(p.type==='assignment'&&a.kind==='trainee_training'){x=one(db,"SELECT * FROM training_assignment WHERE id=? AND trainee_id=? AND state<>'cancelled'",[p.id,a.subject_id]);const src=a.source_assessment_id?one(db,'SELECT operation_id FROM assessment_session WHERE id=?',[a.source_assessment_id]):null;invariant(x&&x.id!==a.source_assignment_id&&x.operation_id===src?.operation_id,'Выберите новое обучение того же сотрудника по операции');column='followup_assignment_id'}else if(p.type==='enrollment'&&a.kind==='instructor_training'){x=one(db,"SELECT * FROM training_enrollment WHERE id=? AND trainee_id=? AND state<>'cancelled'",[p.id,a.subject_id]);column='followup_enrollment_id'}else if(p.type==='plan'&&a.kind==='development'){x=one(db,"SELECT * FROM development_plan WHERE id=? AND person_id=? AND state<>'cancelled'",[p.id,a.subject_id]);column='followup_plan_id'}invariant(x&&column,'Связанная программа / план недоступны');update(db,t,id,{[column]:p.id});return}
   if(p.command==='start'){exact(p,['command']);invariant(['open','ineffective'].includes(actionStatus(db,a)),'Мероприятие уже в работе или закрыто');update(db,t,id,{state:'in_progress',result_note:null,implemented_at:null});if(a.finding_id)db.run("UPDATE finding SET state='open' WHERE id=?",[a.finding_id]);return}
-  if(p.command==='implement'){exact(p,['command','result']);invariant(['open','in_progress','ineffective'].includes(actionStatus(db,a))&&required(p.result),'Укажите фактический результат выполнения');update(db,t,id,{state:'implemented',result_note:p.result,implemented_at:e.occurred_at});return}
+  if(p.command==='implement'){exact(p,['command','result']);invariant(['open','in_progress','ineffective'].includes(actionStatus(db,a))&&required(p.result),'Укажите фактический результат выполнения');for(const [table,id] of [['training_assignment',a.followup_assignment_id],['training_enrollment',a.followup_enrollment_id],['development_plan',a.followup_plan_id]])if(id)invariant(one(db,'SELECT state FROM '+table+' WHERE id=?',[id])?.state==='completed','Связанное обучение / план ещё не завершены');update(db,t,id,{state:'implemented',result_note:p.result,implemented_at:e.occurred_at});return}
   if(p.command==='cancel'){exact(p,['command','reason']);invariant(['open','in_progress','ineffective','implemented'].includes(actionStatus(db,a))&&required(p.reason),'Укажите основание отмены');update(db,t,id,{state:'cancelled',result_note:p.reason});return}
-  exact(p,['command','verifier_id','audit_id','outcome','evidence']);invariant(p.command==='verify'&&old.state==='implemented'&&['effective','ineffective','insufficient'].includes(p.outcome)&&required(p.evidence),'Требуется выполненное мероприятие и результат проверки');
+  exact(p,['command','verifier_id','audit_id','outcome','evidence',...(Object.hasOwn(p,'assessment_id')?['assessment_id']:[])]);invariant(p.command==='verify'&&old.state==='implemented'&&['effective','ineffective','insufficient'].includes(p.outcome)&&required(p.evidence),'Требуется выполненное мероприятие и результат проверки');
   person(db,p.verifier_id);invariant(p.verifier_id!==old.owner_id,'Проверяющий должен отличаться от исполнителя');
   if(p.audit_id!==null)invariant(evidenceForAction(db,a).some(x=>x.id===p.audit_id&&x.observed_at.slice(0,10)<=day(e)),'Нужен последующий аудит того же инструктора, операции, СОП и версии методики');
   if(p.outcome==='effective'&&a.audit_id)invariant(effectiveEvidence(db,a,p.audit_id),'Эффект не подтверждён: нет положительного повторного аудита или нарушение повторилось');
-  insert(db,'action_verification',{id:e.id,action_id:id,verifier_id:p.verifier_id,checked_at:e.occurred_at,outcome:p.outcome,audit_id:p.audit_id,evidence_note:p.evidence});
+  if(p.assessment_id)invariant(a.kind==='trainee_training'&&practicalEvidenceForAction(db,a).some(x=>x.id===p.assessment_id&&x.assessed_at.slice(0,10)<=day(e)),'Требуется последующая практическая оценка того же сотрудника и операции');
+  if(p.outcome==='effective'&&a.kind==='trainee_training')invariant(practicalEffect(db,a,p.assessment_id),'Эффект переобучения не подтверждён последующей практической оценкой');
+  insert(db,'action_verification',{id:e.id,action_id:id,verifier_id:p.verifier_id,checked_at:e.occurred_at,outcome:p.outcome,audit_id:p.audit_id,assessment_session_id:p.assessment_id||null,evidence_note:p.evidence});
   update(db,t,id,{state:p.outcome==='effective'?'verified':p.outcome==='ineffective'?'ineffective':'implemented'});
   if(a.finding_id){const unresolved=one(db,"SELECT id FROM action_item WHERE finding_id=? AND state<>'verified' AND state<>'cancelled'",[a.finding_id]);if(!unresolved&&p.outcome==='effective')db.run("UPDATE finding SET state='resolved' WHERE id=?",[a.finding_id])}return
  }

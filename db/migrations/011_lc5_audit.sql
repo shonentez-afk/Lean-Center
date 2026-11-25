@@ -5,6 +5,12 @@ ALTER TABLE action_item ADD COLUMN kind TEXT NOT NULL DEFAULT 'corrective' CHECK
 ALTER TABLE action_item ADD COLUMN subject_id TEXT REFERENCES person(id);
 ALTER TABLE action_item ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN('normal','major','critical'));
 ALTER TABLE action_item ADD COLUMN created_at TEXT;
+ALTER TABLE action_item ADD COLUMN source_assessment_id TEXT REFERENCES assessment_session(id);
+ALTER TABLE action_item ADD COLUMN source_assignment_id TEXT REFERENCES training_assignment(id);
+ALTER TABLE action_item ADD COLUMN source_evaluation_id TEXT REFERENCES sop_evaluation(id);
+ALTER TABLE action_item ADD COLUMN followup_assignment_id TEXT REFERENCES training_assignment(id);
+ALTER TABLE action_item ADD COLUMN followup_enrollment_id TEXT REFERENCES training_enrollment(id);
+ALTER TABLE action_item ADD COLUMN followup_plan_id TEXT REFERENCES development_plan(id);
 ALTER TABLE schedule_event ADD COLUMN rev INTEGER NOT NULL DEFAULT 1 CHECK(rev>0);
 ALTER TABLE schedule_event ADD COLUMN source_type TEXT;
 ALTER TABLE schedule_event ADD COLUMN created_at TEXT;
