@@ -160,7 +160,7 @@ function registry(main,type){
  search.oninput=()=>{query=search.value;draw()};filter.onchange=()=>{archiveFilter=filter.value;draw()};draw();
  if(type==='org_unit')orgTree(panel,items)
 }
-function downloadBytes(name,bytes){const url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function downloadBytes(name,bytes){const url=URL.createObjectURL(new Blob([bytes],{type:name.endsWith('.docx')?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function updateMapping(s){s.plan=null;s.mapping=s.book?autoMap(s.type,sheetHeaders(s.book.worksheets[s.sheet],s.header)):{}}
 function importScreen(main){
  const s=importState||(importState={type:'person',book:null,sheet:0,header:1,mapping:{},allowUpdates:false,plan:null,file:''});

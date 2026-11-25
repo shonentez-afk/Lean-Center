@@ -95,3 +95,41 @@ test('four JI variants, safety gate and attendance is not authorization',async()
  await assert.rejects(f.save('mentor_appointment',{person_id:f.other,credential_id:c,role:'mentor',order_number:'QA-2',order_on:'2020-01-01',approved_by:f.actor,valid_from:'2020-01-01',valid_to:null,acknowledged_on:'2020-01-01',evidence:'Учебный приказ'}),/сертификат/);
  }finally{f.w.close()}
 });
+
+import {calendarData,matrixPoints,practicalCriteriaFromSheet,CORPORATE_LEVELS,productionRows} from '../src/modules/training/corporate-forms.js';
+import {zipStored,readZip,draftDocx,orderPayment} from '../src/modules/training/local-docx.js';
+test('LC4.1 source rows, calendar, points and print rows are separate and complete',async()=>{
+ const values={A7:'Учебный раздел A',A10:'Учебный раздел B'};[8,9,11,12,13,14,15,16,17,18,19].forEach((r,i)=>values['A'+r]='Учебный критерий '+(i+1));
+ const q=practicalCriteriaFromSheet({name:'Чек лист',getCell:id=>({text:values[id]||''})});assert.equal(q.length,11);assert.equal(q[2].section,'Учебный раздел B');assert.equal(q[10].question,'Учебный критерий 11');
+ assert.equal(calendarData('2026-01-20',[{day_offset:0,hours:2},{day_offset:2,hours:1.5},{day_offset:2,hours:3}]).days[1].hours,4.5);
+ const p=[{id:'p1'},{id:'p2'}],s=[{id:'s'}],m={cells:new Map([['p1:s',{valid:true,revisionCurrent:true,fact:{scale_id:'a',level:2},goal:{scale_id:'a',required_level:3}}],['p2:s',{valid:false,revisionCurrent:true,fact:{scale_id:'b',level:4},goal:{scale_id:'a',required_level:2}}]])};
+ const x=matrixPoints(m,p,s,'a',[{person_id:'p1',skill_id:'s',scale_id:'a',target_level:4}]);assert.equal(x.bySkill.get('s').actual,2);assert.equal(x.bySkill.get('s').need,2);assert.equal(x.bySkill.get('s').unknown,1);assert.equal(x.cells.get('p2:s').actual,null);
+ const label={unit:()=>'',person:id=>id,revision:id=>id},items=[{id:'a',trainee_id:'p',mentor_id:'m',sop_revision_id:'s'},{id:'b'}],facts=[{assignment_id:'a',held_at:'2026-01-20T10:00',duration_minutes:60},{assignment_id:'a',held_at:'2026-01-20T11:00',duration_minutes:30}];
+ const r=productionRows(items,facts,label);assert.equal(r.length,3);assert.equal(r[0].values[6],60/1440);assert.equal(r[2].fact,null);assert.equal(r[0].values[7],'');
+ const doc=draftDocx(['Учебный текст & символ <']);const z=await readZip(doc);assert.equal(z.length,3);assert.match(new TextDecoder().decode(z.find(x=>x.name==='word/document.xml').bytes),/&amp; символ &lt;/);
+ assert.match(orderPayment({instructor_amount:4000,trainer_amount:null,supplement_from:'2026-01-20'}),/4000/);
+});
+test('LC4.1 group order creates all appointments atomically and preserves legacy certificate identity',async()=>{
+ const f=await fixture();try{
+ const pos=f.w.edit('position',null,{code:'QA-POS',name:'Учебная должность'});const a=one(f.w.working,'SELECT * FROM person_assignment WHERE person_id=?',[f.mentor]);
+ f.w.edit('person_assignment',a.id,{person_id:a.person_id,unit_id:a.unit_id,profession_id:a.profession_id,position_id:pos,shift_id:a.shift_id,shift_code:a.shift_code,valid_from:a.valid_from,valid_to:a.valid_to});
+ const header={order_number:'QA-GROUP',order_on:date,organization:'Учебная организация',city:'Учебный город',approved_by:f.actor,valid_from:date,valid_to:null,supplement_from:date,instructor_amount:1000,trainer_amount:null,evidence:'Синтетический подписанный приказ'};
+ const member={id:uuid(),credential_id:f.certificate,acknowledged_on:date};
+ await assert.rejects(f.save('mentor_order',{...header,members:[member,{...member,id:uuid()}]}),/повторяется/);
+ assert.equal(one(f.w.working,'SELECT count(*) n FROM mentor_order').n,0);
+ const e=await f.save('mentor_order',{...header,members:[member]});
+ assert.equal(one(f.w.working,'SELECT order_id FROM mentor_appointment WHERE id=?',[member.id]).order_id,e.entity_id);
+ assert.equal(one(f.w.working,'SELECT position_name FROM mentor_appointment WHERE id=?',[member.id]).position_name,'Учебная должность');
+ await assert.rejects(f.save('mentor_order',{...header,members:[{...member,id:uuid()}]}),/уже зарегистрирован/);
+ const restored=await restore(SQL,await backup(f.w),f.readContent);assert.equal(one(restored.working,'SELECT instructor_amount FROM mentor_order').instructor_amount,1000);restored.close();
+ }finally{f.w.close()}
+});
+test('LC4.1 separate internship and entry periods preserve original template and reject out-of-range dates',async()=>{
+ const f=await fixture();try{
+ const tasks=['general','individual','practice','knowledge'].map(part=>({part,title:'QA '+part,hours:1,day_offset:0,sop_revision_id:null,skill_id:null,scale_id:null,target_level:null}));
+ const p=(await f.save('training_program',{code:'QA-PERIOD',kind:'internship',title:'Учебная программа',profession_id:f.profession,position_id:null,created_by:f.actor,tasks})).entity_id;
+ const base={program_id:p,trainee_id:f.trainee,mentor_id:f.mentor,manager_id:f.actor,start_on:date,due_on:'2026-02-20',reason:'Учебная программа',internship_start:date,internship_end:'2026-01-25',entry_start:date,entry_end:'2026-02-20'};
+ await assert.rejects(f.save('training_enrollment',{...base,entry_end:'2026-03-01'}),/общий срок/);
+ const e=await f.save('training_enrollment',base),row=one(f.w.working,'SELECT * FROM training_enrollment WHERE id=?',[e.entity_id]);assert.equal(row.internship_end,'2026-01-25');assert.equal(row.entry_end,'2026-02-20')
+ }finally{f.w.close()}
+});
