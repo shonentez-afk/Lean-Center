@@ -13,7 +13,7 @@ const oldAssignment={person_id:pa.person_id,unit_id:pa.unit_id,profession_id:pa.
 f.w.edit('person_assignment',pa.id,{...oldAssignment,valid_to:'2026-01-19'});f.w.edit('person_assignment',null,{...oldAssignment,position_id:pos,valid_from:date,valid_to:null});
 const sample=Array(56).fill('');sample[1]='ОБРАЗЕЦ';sample[8]='ПРИКАЗ';sample[38]='Директор';for(const i of [20,21,22,27,28,29])sample[i]='ФИО, должность';const orderFile=path.join(tmp,'qa-order.docx');await fs.writeFile(orderFile,draftDocx(sample));
 const file=path.join(tmp,'training.leanbackup');await fs.writeFile(file,JSON.stringify(await f.backupBundle()));
-const ids={trainee:f.trainee,mentor:f.mentor,actor:f.actor,revision:f.doc.id,skill:f.skill,scale:f.scale,shift:f.shift};f.w.close();
+const ids={trainee:f.trainee,mentor:f.mentor,actor:f.actor,revision:f.doc.id,skill:f.skill,scale:f.scale,shift:f.shift,certificate:f.certificate};f.w.close();
 const browser=await chromium.launch({headless:true,...(process.env.RUNNER_OS==='Windows'?{channel:'msedge'}:{})});
 try{
  const ctx=await browser.newContext({offline:true,acceptDownloads:true,viewport:{width:1366,height:850}}),page=await ctx.newPage(),errors=[],http=[];
@@ -80,9 +80,33 @@ try{
  await nav('Наставники и ВТ');await page.getByRole('cell',{name:'Инструктор Тестовый',exact:true}).waitFor();
  await nav('Назначения');await page.getByRole('button',{name:'Групповой приказ',exact:true}).click();
  await page.locator('input[name=order_organization]').fill('Учебная организация');await page.locator('input[name=order_city]').fill('Учебный город');await page.locator('input[name=order_number]').fill('QA-GROUP');await page.locator('input[name=order_on]').fill(date);await page.locator('input[name=order_start]').fill(date);await choose('Директор / утверждающий','LC4-003');
- await page.locator('select[name=group_member_role]').selectOption('instructor');await choose('Сертифицированный сотрудник','Инстр');await page.locator('input[name=group_member_ack]').fill(date);
+ const groupRole=page.locator('select[name=group_member_role]'),groupCertificate=page.locator('select[name=group_member_cert]');
+ await groupRole.selectOption('instructor');await choose('Сертифицированный сотрудник','Инстр');
+ assert.equal(await groupCertificate.inputValue(),ids.certificate,'Single matching certificate must remain selected after option replacement');
+ await groupRole.selectOption('');assert.equal(await groupCertificate.inputValue(),ids.certificate,'Changing compatible filter must preserve selected certificate');
+ await groupRole.selectOption('internal_trainer');assert.equal(await groupCertificate.inputValue(),'','Incompatible role must clear certificate');
+ await groupRole.selectOption('instructor');await choose('Сертифицированный сотрудник','Инстр');assert.equal(await groupCertificate.inputValue(),ids.certificate);
+ await page.locator('input[name=group_member_ack]').fill(date);
  await page.locator('input[name=order_pay_instructor]').fill('1000');await page.locator('input[name=order_pay_from]').fill(date);
- const chooser=page.waitForEvent('filechooser'),download=page.waitForEvent('download');await page.getByRole('button',{name:'Сформировать проект по оригиналу DOCX',exact:true}).click();await (await chooser).setFiles(orderFile);const output=path.join(tmp,'qa-draft.docx');await (await download).saveAs(output);const parts=await readZip(new Uint8Array(await fs.readFile(output))),xml=new TextDecoder().decode(parts.find(x=>x.name==='word/document.xml').bytes);assert.match(xml,/Инструктор Тестовый, Учебная должность/);assert.match(xml,/QA-GROUP/);assert.match(xml,/ПРОЕКТ · БЕЗ ПОДПИСИ/);assert.equal(await page.locator('input[name=order_number]').inputValue(),'QA-GROUP');
+ const draftButton=page.getByRole('button',{name:'Сформировать проект по оригиналу DOCX',exact:true});
+ const invalidTemplate=path.join(tmp,'qa-invalid-order.docx');await fs.writeFile(invalidTemplate,draftDocx(['Несовместимый учебный шаблон']));
+ let chooser=page.waitForEvent('filechooser');await draftButton.click();await (await chooser).setFiles(invalidTemplate);
+ await page.locator('#status.error').filter({hasText:'Структура не совпадает'}).waitFor();
+ assert.equal(await page.locator('input[name=order_number]').inputValue(),'QA-GROUP');assert.equal(await groupCertificate.inputValue(),ids.certificate);
+ const output=path.join(tmp,'qa-draft.docx');
+ // Capture errors reported by the application, rather than failing only with
+ // a generic Playwright download timeout.
+ chooser=page.waitForEvent('filechooser');
+ const download=page.waitForEvent('download').then(value=>({value}),error=>({error}));
+ await draftButton.click();await (await chooser).setFiles(orderFile);
+ try{
+  await page.waitForFunction(()=>{const s=document.getElementById('status');return s&&(s.classList.contains('error')||s.textContent==='Проект приказа сформирован без подписи')});
+  const status=await page.locator('#status').textContent();assert.equal(status,'Проект приказа сформирован без подписи','DOCX export status: '+status);
+  const result=await download;if(result.error)throw result.error;await result.value.saveAs(output)
+ }catch(e){console.error('LC4.1 order export status',await page.locator('#status').textContent(),errors);await page.screenshot({path:'artifacts/lc4/group-order-error.png',fullPage:true});throw e}
+ const parts=await readZip(new Uint8Array(await fs.readFile(output))),xml=new TextDecoder().decode(parts.find(x=>x.name==='word/document.xml').bytes);
+ assert.match(xml,/Инструктор Тестовый, Учебная должность/);assert.match(xml,/QA-GROUP/);assert.match(xml,/ПРОЕКТ · БЕЗ ПОДПИСИ/);
+ assert.equal(await page.locator('input[name=order_number]').inputValue(),'QA-GROUP');assert.equal(await groupCertificate.inputValue(),ids.certificate);
  await page.locator('textarea[name=group_order_evidence]').fill('Учебный подписанный приказ');await page.locator('input[name=group_order_confirm]').check();await saved('Зарегистрировать групповой приказ');await page.getByRole('heading',{name:'Групповой приказ QA-GROUP',exact:true}).waitFor();await page.getByRole('cell',{name:'Учебная должность',exact:true}).waitFor();await page.screenshot({path:'artifacts/lc4/group-order.png',fullPage:true});
  await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await nav('Практические оценки');await page.getByRole('cell',{name:'Допуск зарегистрирован',exact:true}).waitFor();
  assert.deepEqual(errors,[]);assert.deepEqual(http,[]);await ctx.close();

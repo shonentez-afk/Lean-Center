@@ -59,7 +59,8 @@ export function trainingScreen(main,page,c){
  const revPicker=(name,id='')=>select(name,revs().map(x=>[x.id,x.code+' · '+x.title+' · v'+x.version_no]),id);
  const scalePicker=(name,id='')=>ref('rating_scale',name,id);
  function levelPicker(name,scaleId,initial=''){return select(name,rows(db,'SELECT value,label FROM rating_level WHERE scale_id=? ORDER BY value',[scaleId]).map(x=>[x.value,x.value+' — '+x.label]),initial)}
- function replaceOptions(dest,source){dest.replaceChildren(...Array.from(source.children));dest.value=source.value}
+ // Moving options empties the source select, so capture its selection first.
+ function replaceOptions(dest,source){const value=source.value;dest.replaceChildren(...Array.from(source.children));dest.value=value}
  function scaleFields(prefix,scaleId='',target=null){
   const scale=scalePicker(prefix+'_scale',scaleId),level=levelPicker(prefix+'_level',scale.value,target??'');
   scale.onchange=()=>replaceOptions(level,levelPicker(level.name,scale.value));
@@ -85,7 +86,18 @@ export function trainingScreen(main,page,c){
  const saveWorkbook=async(name,w)=>{downloadBytes(name+'.xlsx',await w.xlsx.writeBuffer());return 'Отчёт сформирован'};
  // Printing a draft must not rerender the screen or discard the form.
  const localDocx=(label,handler)=>{
-  const trigger=btn(label,()=>{const input=el('input');input.type='file';input.accept='.docx';input.onchange=async()=>{const file=input.files?.[0];if(!file)return;trigger.disabled=true;try{invariant(file.size<=32*1024*1024,'Файл слишком большой');c.notify(await handler(new Uint8Array(await file.arrayBuffer())))}catch(e){c.notify(e.message,true)}finally{trigger.disabled=false}};input.click()});
+  const trigger=btn(label,()=>{
+   const input=el('input');input.type='file';input.accept='.docx';input.hidden=true;
+   input.addEventListener('cancel',()=>input.remove(),{once:true});
+   input.onchange=async()=>{
+    const file=input.files?.[0];input.remove();if(!file)return;
+    trigger.disabled=true;c.notify('Проверка и заполнение шаблона DOCX…');
+    try{invariant(file.size<=32*1024*1024,'Файл слишком большой');c.notify(await handler(new Uint8Array(await file.arrayBuffer())))}
+    catch(e){c.notify(e.message||String(e),true)}
+    finally{trigger.disabled=false}
+   };
+   document.body.append(input);input.click()
+  });
   return trigger
  };
  const exportButton=(name,headers,items)=>btn('Скачать XLSX',()=>run(async()=>{await exportTable(name,headers,items);return 'Отчёт сформирован'},{save:false}));
