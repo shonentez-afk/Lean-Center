@@ -15,7 +15,7 @@ const day=e=>new Date(Date.parse(e.occurred_at)+14*3600000).toISOString().slice(
 export function auditDetails(db,id){
  const a=one(db,'SELECT a.*,v.version_no,v.methodology_json,c.code method_code FROM audit_session a JOIN checklist_version v ON v.id=a.version_id JOIN checklist c ON c.id=v.checklist_id WHERE a.id=?',[id]);if(!a)return null;
  let method={};try{method=JSON.parse(a.methodology_json)}catch{}
- const questions=rows(db,'SELECT c.*,r.id response_id,r.response,r.legacy_score,r.note FROM checklist_criterion c LEFT JOIN audit_response r ON r.criterion_id=c.id AND r.audit_id=? WHERE c.version_id=? ORDER BY c.position',[id,a.version_id]).map(q=>({...q,recommendation:method.criteria?.find(x=>String(x.code)===q.code)?.recommendation||''}));
+ const questions=rows(db,'SELECT c.*,r.id response_id,r.response,r.legacy_score,r.note FROM checklist_criterion c LEFT JOIN audit_response r ON r.criterion_id=c.id AND r.audit_id=? WHERE c.version_id=? ORDER BY c.position',[id,a.version_id]).map(q=>({...q,recommendation:(Array.isArray(method.criteria)?method.criteria.find(x=>String(x.code)===q.code)?.recommendation:'')||''}));
  return {...a,questions,stats:scoreQuestions(questions)};
 }
 export function scoreQuestions(qs){

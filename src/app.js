@@ -1,3 +1,4 @@
+import {centerAuditIndicators,pctText} from './modules/training/audit-analytics.js';
 import {employeeRelations,employeeSourceLinks} from './modules/master-data/employee-records.js';
 import {sopCriteriaFromDocx} from './modules/training/local-docx.js';
 import {BUILTIN_SOP,previewCriteria} from './modules/training/builtin-forms.js';
@@ -19,7 +20,7 @@ const root=document.getElementById('app');
 let SQL,ws,cache,folder,generation=0,busy=false,master=false,page='home',theme=false,status='Готово',error=false,chart=null,edit=null,query='',incoming=[],importState=null,historyPerson=null,archiveFilter='active',libraryDraft=null,editorSession=null,libraryFilter='all';
 const contentStore=new ContentStore(()=>cache,()=>folder),readContent=ref=>contentStore.get(ref);
 const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
-const planned={forms:'Бланки и методики',sop:'Каталог СОП',sop_constructor:'Конструктор СОП',frv:'ФРВ',twi_plans:'Планы инструктажа TWI',sop_evaluation:'Оценка СОП',my_plan:'Мой план',twi:'План производственного обучения',programs:'Ввод в профессию',internship:'Программы стажировки',instruction:'Инструктажи TWI',retraining:'Переобучение',journal:'Журнал заданий',skills:'Матрица компетенций',practical:'Практические оценки',development:'Планы развития',mentoring:'Наставники и ВТ',self_eval:'Самооценка',certification:'Сертификация',appointments:'Назначения',audit:'Аудиты 1-го уровня',calendar:'Календарь',actions:'Мероприятия',analytics:'Аналитика центра',metrics:'Дерево метрик',roi:'ROI-модель',ai:'ИИ-помощник'};
+const planned={forms:'Бланки и методики',sop:'Каталог СОП',sop_constructor:'Конструктор СОП',frv:'ФРВ',twi_plans:'Планы инструктажа TWI',sop_evaluation:'Оценка СОП',my_plan:'Мой план',twi:'План производственного обучения',programs:'Ввод в профессию',internship:'Программы стажировки',instruction:'Инструктажи TWI',retraining:'Переобучение',journal:'Журнал заданий',skills:'Матрица компетенций',practical:'Практические оценки',development:'Планы развития',mentoring:'Наставники и ВТ',self_eval:'Самооценка',certification:'Сертификация',appointments:'Назначения',audit:'Аудиты 1-го уровня',calendar:'Календарь',actions:'Задачи и мероприятия',analytics:'Аналитика центра',metrics:'Дерево метрик',roi:'ROI-модель',ai:'ИИ-помощник'};
 const labels={home:'Дашборд',...Object.fromEntries(Object.entries(definitions).map(([k,v])=>[k,v.label])),...planned,org_unit:'Структура предприятия',import_xlsx:'Импорт данных',storage:'Настройки и обмен'};
 const navGroups=[
  ['Ежедневная работа',['home','my_plan','calendar','actions']],
@@ -96,7 +97,10 @@ function home(main){
  const overdueTraining=one(ws.working,"SELECT count(*) n FROM training_assignment WHERE source_sha256 IS NOT NULL AND state IN('planned','in_progress') AND due_on<?",[todayIso]).n;
  const revisedTraining=one(ws.working,"SELECT count(*) n FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1)").n;
  needs.append(add(el('div',undefined,'attention-row'),el('strong',String(overdueTraining),overdueTraining?'warn':'muted'),el('span','Просроченные назначения обучения'),btn('Открыть',()=>goTraining('twi',{filter:'overdue'}))),add(el('div',undefined,'attention-row'),el('strong',String(revisedTraining),revisedTraining?'warn':'muted'),el('span','Обучение по прежним редакциям СОП'),btn('Открыть',()=>goTraining('retraining'))));
- main.append(needs);
+ const ai=centerAuditIndicators(ws.working,todayIso);
+ const auditAttention=[['Просрочено мероприятий',ai.overdue,'actions',{filter:'overdue'}],['Ожидают проверки эффективности',ai.verification,'actions',{filter:'implemented'}],['Потребности в переобучении по аудиту',ai.retraining,'retraining',{}],['Запланировано аудитов',ai.scheduled,'calendar',{}]];
+ for(const [label,count,dest,options] of auditAttention)needs.append(add(el('div',undefined,'attention-row'),el('strong',String(count),count?'warn':'muted'),el('span',label),btn('Открыть',()=>goTraining(dest,options))));
+ main.append(needs,pane('Аудит L1 · текущий месяц',add(el('div',undefined,'kpi-grid'),...[[String(ai.auditCount),'Проведено аудитов','audit',{from:todayIso.slice(0,7)+'-01',to:todayIso}],[ai.month?pctText(ai.month.stats.pct):'—','Доля положительных наблюдений','analytics',{}],[ai.repeated===null?'—':String(ai.repeated),'Повторяющиеся отклонения','analytics',{}]].map(([value,label,dest,options])=>{const b=btn('',()=>goTraining(dest,options),'tile');b.append(el('span',label,'muted'),el('b',value));return b})),el('p',ai.methodCount>1?'В месяце несколько версий методики: общего среднего нет.':'Результаты учитывают только наблюдавшиеся критерии.','muted')));
  main.append(sectionHeading('Справочники предприятия','Активные записи'));
  const g=el('div',undefined,'kpi-grid');
  const counts=Object.fromEntries(Object.keys(definitions).map(k=>[k,list(ws.working,k).filter(x=>activeRecord(definitions[k],x)).length]));
@@ -105,7 +109,7 @@ function home(main){
  const c=el('div',undefined,'chart');c.style.height=Math.max(290,Object.keys(definitions).length*29)+'px';main.append(pane('Структура справочников',c));
  if(window.echarts){chart=echarts.init(c,theme?'dark':null);chart.setOption(registryCountChart(Object.values(definitions).map(x=>x.label),Object.keys(definitions).map(k=>counts[k]),theme))}
  const links=el('div',undefined,'workspace-grid');for(const [k,n] of Object.entries(planned).filter(([k])=>implemented.has(k))){const b=btn('',()=>navigate(k),'workspace-link');b.append(icon(k),el('span',n));links.append(b)}
- main.append(pane('Рабочие модули',el('p','СОП, ФРВ, TWI, компетенции, наставничество и аудит — равноправные модули центра. Доступны база, справочники, библиотека СОП, ФРВ, обучение, компетенции и наставники. Аудит L1 и расширенная аналитика подключаются отдельно.','muted'),links))
+ main.append(pane('Рабочие модули',el('p','СОП, ФРВ, TWI, компетенции, наставничество и аудит — равноправные модули центра. Доступны база, справочники, библиотека СОП, ФРВ, обучение, компетенции и наставники. Аудит L1 связан с общими мероприятиями, календарём, аналитикой и карточками сотрудников.','muted'),links))
 }
 function form(type,v){
  const d=definitions[type],f=el('form'),grid=el('div',undefined,'formgrid'),controls={};

@@ -1,4 +1,5 @@
 // Employee dossier: read-only projections of existing authoritative records.
+import {auditDetails,actionRows,actionStatus} from '../training/audit-domain.js';
 import {rows,one} from '../../core/db.js';
 import {checkContent} from '../library/domain.js';
 const parse=s=>{try{return JSON.parse(s||'{}')}catch{return {}}};
@@ -44,7 +45,11 @@ export function employeeRelations(db,id){
  for(const r of query('SELECT * FROM mentor_order WHERE approved_by=?1 OR EXISTS(SELECT 1 FROM mentor_appointment a WHERE a.order_id=mentor_order.id AND a.person_id=?1) ORDER BY order_on DESC'))groups.mentoring.push(item(r,'Групповой приказ № '+r.order_number,r.approved_by===id?'Утвердил':'Назначен приказом',r.order_on,'registered',link('appointments',{groupId:r.id}),r.organization));
  for(const r of query('SELECT * FROM mentor_authorization WHERE person_id=?1 OR approved_by=?1 ORDER BY valid_from DESC'))groups.mentoring.push(item(r,'Право обучать · '+ref('operation',r.operation_id),roles(r,id,['person_id','approved_by']),r.valid_from,r.revoked_at?'revoked':'registered',link('mentoring',{personId:r.person_id}),'До: '+(r.valid_to||'—')));
  for(const r of query('SELECT * FROM mentor_self_evaluation WHERE person_id=?1 ORDER BY evaluated_on DESC'))groups.mentoring.push(item(r,'Самооценка наставника','Самооценка',r.evaluated_on,'registered',link('self_eval',{id:r.id}),r.feedback));
- for(const r of query('SELECT * FROM audit_session WHERE mentor_id=?1 OR auditor_id=?1 OR trainee_id=?1 ORDER BY observed_at DESC'))groups.mentoring.push(item(r,'Аудит 1-го уровня · '+revLabel(r.standard_revision_id),roles(r,id,['mentor_id','auditor_id','trainee_id']),r.observed_at,r.state,r.assignment_id?link('audit',{auditId:r.id}):null,r.summary||''));
+ for(const r of query('SELECT * FROM audit_session WHERE mentor_id=?1 OR auditor_id=?1 OR trainee_id=?1 ORDER BY observed_at DESC')){
+  const a=auditDetails(db,r.id),s=a?.stats;
+  groups.mentoring.push(item(r,'Аудит 1-го уровня · '+revLabel(r.standard_revision_id),roles(r,id,['mentor_id','auditor_id','trainee_id']),r.observed_at,r.state,link('audit',{auditId:r.id}),s?'Да '+s.yes+' / '+s.observed+'; отклонений '+s.no+' · '+(r.summary||''):r.summary||''));
+  if(r.state==='final'&&(r.mentor_id===id||r.auditor_id===id))for(const q of a?.questions||[])if(q.response==='no')groups.mentoring.push(item({id:q.response_id},'Замечание · '+q.question,roles(r,id,['mentor_id','auditor_id']),r.observed_at,'registered',link('audit',{auditId:r.id}),q.recommendation||q.note||''))
+ }
  for(const r of query('SELECT r.*,d.code,d.title FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.author_id=?1 OR EXISTS(SELECT 1 FROM document_approval a WHERE a.revision_id=r.id AND a.actor_id=?1) ORDER BY d.code,r.version_no DESC')){
   const role=[r.author_id===id?'Автор':'',one(db,'SELECT id FROM document_approval WHERE revision_id=? AND actor_id=?',[r.id,id])?'Согласование':''].filter(Boolean).join(' · ');
   groups.documents.push(item(r,r.code+' · '+r.title+' · v'+r.version_no,role,r.created_at,r.state,docLink(r.document_id,r.id)))
@@ -53,9 +58,9 @@ export function employeeRelations(db,id){
  for(const r of query('SELECT * FROM sop_stage43_checklist WHERE actor_id=?1 ORDER BY updated_at DESC'))groups.documents.push(item(r,'Чек-лист конструктора · '+revLabel(r.revision_id),'Оценщик',r.updated_at,'registered',link('sop_evaluation',{revisionId:r.revision_id,tab:'weighted'})));
  for(const r of query('SELECT * FROM frv_study WHERE author_id=?1 ORDER BY observed_at DESC'))groups.documents.push(item(r,'ФРВ · '+r.title,'Автор',r.observed_at,r.state,link('frv',{studyId:r.id})));
  for(const r of query('SELECT * FROM development_plan WHERE person_id=?1 ORDER BY start_on DESC'))groups.development.push(item(r,r.title,'План развития',r.start_on,r.state,link('development',{id:r.id}),'Срок: '+r.due_on));
- for(const r of query('SELECT a.* FROM action_item a WHERE a.owner_id=?1 ORDER BY a.due_on'))groups.development.push(item(r,r.title,'Мероприятие · исполнитель',r.due_on,r.state,null,r.result_note||''));
- for(const r of query('SELECT * FROM action_verification WHERE verifier_id=?1 ORDER BY checked_at DESC'))groups.development.push(item(r,'Проверка мероприятия','Проверяющий',r.checked_at,r.outcome,null,r.evidence_note));
- for(const r of query('SELECT * FROM schedule_event WHERE owner_id=?1 ORDER BY due_on'))groups.development.push(item(r,'Календарь · '+r.kind,'Ответственный',r.due_on,r.state));
+ for(const a of actionRows(db).filter(x=>[x.owner_id,x.subject_id,x.mentor_id,x.auditor_id,x.trainee_id].includes(id)))groups.development.push(item(a,a.title,[a.owner_id===id?'Исполнитель':'',a.subject_id===id?'К кому относится':'',a.mentor_id===id?'Инструктор источника':'',a.auditor_id===id?'ВТ источника':'',a.trainee_id===id?'Обучаемый источника':''].filter(Boolean).join(' · '),a.due_on,actionStatus(db,a),link('actions',{id:a.id}),a.result_note||a.question||''));
+ for(const r of query('SELECT * FROM action_verification WHERE verifier_id=?1 ORDER BY checked_at DESC'))groups.development.push(item(r,'Проверка мероприятия','Проверяющий',r.checked_at,r.outcome,link('actions',{id:r.action_id}),r.evidence_note));
+ for(const r of query('SELECT * FROM schedule_event WHERE owner_id=?1 ORDER BY due_on'))groups.development.push(item(r,'Календарь · '+r.kind,'Ответственный',r.due_on,r.state,r.kind==='audit'?link('calendar',{id:r.id}):null));
  for(const r of query('SELECT * FROM person_assignment WHERE person_id=?1 ORDER BY valid_from DESC'))groups.history.push(item(r,ref('org_unit',r.unit_id)+' · '+(r.position_id?ref('position',r.position_id):ref('profession',r.profession_id)),'Должность / подразделение',r.valid_from,r.valid_to?'closed':'registered',link('person_assignment',{personId:id}),'До: '+(r.valid_to||'—')+' · Смена: '+(r.shift_id?ref('work_shift',r.shift_id):r.shift_code||'—')));
  for(const r of query('SELECT * FROM role_assignment WHERE person_id=?1 ORDER BY valid_from DESC'))groups.history.push(item(r,ref('business_role',r.role_id),'Роль',r.valid_from,r.valid_to?'closed':'registered',link('role_assignment',{personId:id}),'До: '+(r.valid_to||'—')));
  return groups
