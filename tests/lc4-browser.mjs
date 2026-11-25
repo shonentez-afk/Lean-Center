@@ -24,6 +24,7 @@ try{
  const nav=async name=>{const target=page.locator('.sidebar .nav').filter({has:page.getByText(name,{exact:true})});if(!(await target.isVisible())){const group=target.locator('xpath=ancestor::details[1]');await group.locator('summary').click()}await target.click()};
  async function choose(label,query){await page.getByRole('button',{name:'Выбрать: '+label,exact:true}).click();await page.getByRole('searchbox',{name:'Поиск сотрудника'}).fill(query);await page.locator('.lc-picker-popup .lc-person-option').click()}
  const saved=async label=>{await page.getByRole('button',{name:label,exact:true}).click();await page.getByText('Запись сохранена. Ожидает публикации базы.',{exact:true}).waitFor();assert.equal(await page.locator('#status').getAttribute('class'),'status')};
+ try{
  await page.goto(pathToFileURL(path.resolve('dist/LeanCenter/index.html')).href);await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();
  await nav('Настройки и обмен');const restore=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Восстановить копию',exact:true}).click();await (await restore).setFiles(file);await page.getByText('Копия восстановлена; проверьте ID базы',{exact:true}).waitFor();
  await nav('Инструктажи TWI');await page.getByRole('button',{name:'Назначить обучение',exact:true}).click();
@@ -143,4 +144,5 @@ try{
  await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await nav('Практические оценки');await page.getByRole('cell',{name:'Допуск зарегистрирован',exact:true}).waitFor();
  assert.deepEqual(errors,[]);assert.deepEqual(http,[]);await ctx.close();
  console.log('LC4 browser PASS: assignment, approval, eight intro facts, knowledge checks, practical, qualification, admission, matrix, journal, reload');
+ }catch(e){console.error('LC4 browser failure',String(e),'status:',await page.locator('#status').textContent().catch(()=>''),'page errors:',errors);await page.screenshot({path:'artifacts/lc4/failure.png',fullPage:true}).catch(()=>{});throw e}
 }finally{await browser.close();await fs.rm(tmp,{recursive:true,force:true})}

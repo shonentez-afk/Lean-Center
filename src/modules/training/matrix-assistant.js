@@ -17,7 +17,7 @@ export function autoMatrix(db,roster,catalog,day,scaleId,{allSops=false}={}){
  const professions=new Set(people.map(p=>p.profession_id)),req=profileRequirements(db,day,scaleId).filter(x=>professions.has(x.profession_id));
  const requiredSkills=new Set(req.map(x=>x.skill_id)),selected=[],seen=new Set(),ambiguous=[],missing=[];
  for(const id of requiredSkills){const choices=catalog.filter(x=>x.skill_id===id);if(choices.length===1){selected.push(choices[0]);seen.add(id)}else if(choices.length>1)ambiguous.push({skill_id:id,choices:choices.map(c=>c.key)});else missing.push(id)}
- if(allSops)for(const x of catalog.filter(x=>x.document_id)){if(x.skill_id&&seen.has(x.skill_id)||!x.skill_id&&selected.some(y=>y.operation_id===x.operation_id))continue;if(x.skill_id&&catalog.filter(y=>y.skill_id===x.skill_id).length>1){if(!ambiguous.some(y=>y.skill_id===x.skill_id))ambiguous.push({skill_id:x.skill_id,choices:catalog.filter(y=>y.skill_id===x.skill_id).map(y=>y.key)});continue}selected.push(x);if(x.skill_id)seen.add(x.skill_id)}
+ if(allSops)for(const x of catalog.filter(x=>x.document_id)){if(x.skill_id&&seen.has(x.skill_id)||!x.skill_id&&selected.some(y=>y.operation_id===x.operation_id))continue;if(!x.skill_id){const matches=catalog.filter(y=>!y.skill_id&&y.operation_id===x.operation_id);if(matches.length>1){if(!ambiguous.some(y=>y.operation_id===x.operation_id))ambiguous.push({operation_id:x.operation_id,skill_id:null,choices:matches.map(y=>y.key)});continue}}if(x.skill_id&&catalog.filter(y=>y.skill_id===x.skill_id).length>1){if(!ambiguous.some(y=>y.skill_id===x.skill_id))ambiguous.push({skill_id:x.skill_id,choices:catalog.filter(y=>y.skill_id===x.skill_id).map(y=>y.key)});continue}selected.push(x);if(x.skill_id)seen.add(x.skill_id)}
  return {keys:selected.map(x=>x.key),missing,ambiguous,unprofiled:[...professions].filter(p=>!req.some(x=>x.profession_id===p)),requirements:req.length}
 }
 export function profileEdits(db,{professionId,scaleId,effective,entries}){
@@ -51,10 +51,11 @@ export function uniqueMatrixMatch(value,choices,aliases){
  const hits=choices.filter(x=>aliases(x).some(v=>normalizeMatrixText(v)===key));
  return hits.length===1?hits[0]:null
 }
+export function matrixHeaderLabel(sheet,row,col){const cell=sheet.getCell(row,col),value=cell.text.trim();return value||((row>1&&cell.isMerged)?sheet.getCell(row-1,col).text.trim():'')}
 export function readMatrixRange(sheet,{headerRow,firstRow,lastRow,personCol,firstSkill,lastSkill}){
  invariant([headerRow,firstRow,lastRow,personCol,firstSkill,lastSkill].every(Number.isInteger)&&headerRow>0&&firstRow>headerRow&&lastRow>=firstRow&&lastRow-firstRow<300&&lastRow<=sheet.rowCount&&personCol>0&&firstSkill>personCol&&lastSkill>=firstSkill&&lastSkill-firstSkill<150&&lastSkill<=sheet.columnCount,'Проверьте диапазон: до 300 сотрудников, 150 столбцов, без итоговых строк');
  const cols=[],people=[];
- for(let col=firstSkill;col<=lastSkill;col++){const label=sheet.getCell(headerRow,col).text.trim();if(label)cols.push({col,label})}
+ for(let col=firstSkill;col<=lastSkill;col++){const label=matrixHeaderLabel(sheet,headerRow,col);if(label)cols.push({col,label})}
  for(let row=firstRow;row<=lastRow;row++){const label=sheet.getCell(row,personCol).text.trim();if(!label)continue;const values=cols.map(c=>{const cell=sheet.getCell(row,c.col),raw=cell.text.trim();return {col:c.col,raw,value:/^[1-4]$/.test(raw)?Number(raw):null,invalid:raw!==''&&!/^[1-4]$/.test(raw)}});people.push({row,label,values})}
  invariant(people.length&&cols.length&&people.length*cols.length<=12000,'Нет данных или превышен лимит 12000 ячеек');return {people,cols}
 }
@@ -65,8 +66,9 @@ export function suggestMatrixRange(sheet){
  const firstSkill=personCol+(/должност|професси/.test(normalizeMatrixText(sheet.getCell(headerRow,personCol+1).text))?2:1);
  let lastSkill=firstSkill-1;
  for(let c=firstSkill;c<=Math.min(sheet.columnCount,firstSkill+149);c++){
-  const label=normalizeMatrixText(sheet.getCell(headerRow,c).text);
-  if(!label||/компетенци[ияй].*сотрудник|потребност|суммарн|^итого|^состояние/.test(label))break;lastSkill=c
+  const label=normalizeMatrixText(matrixHeaderLabel(sheet,headerRow,c)),previous=headerRow>1?normalizeMatrixText(sheet.getCell(headerRow-1,c).text):'';
+  const isTotal=v=>/компетенци[ияй].*сотрудник|потребност|суммарн|^итого|^состояние|^на\s+\d{1,2}[./-]\d{1,2}/.test(v);
+  if(!label||isTotal(label)||isTotal(previous))break;lastSkill=c
  }
  if(lastSkill<firstSkill)lastSkill=Math.max(firstSkill,Math.min(sheet.columnCount,firstSkill+149));
  let firstRow=headerRow+1;
@@ -77,11 +79,15 @@ export function suggestMatrixRange(sheet){
  }
  return {headerRow,personCol,firstRow,lastRow:Math.max(firstRow,lastRow),firstSkill,lastSkill}
 }
+export function preferredMatrixSheet(book){
+ const candidates=book.worksheets.filter(s=>s.rowCount>=4&&s.columnCount>=4).filter(s=>{try{const r=suggestMatrixRange(s);return r.firstRow<=s.rowCount&&r.firstSkill<=r.lastSkill&&!!matrixHeaderLabel(s,r.headerRow,r.firstSkill)&&!/^компетенци|^потребност/i.test(matrixHeaderLabel(s,r.headerRow,r.firstSkill))}catch{return false}});
+ return candidates.find(s=>normalizeMatrixText(s.name)==='матрица компетенций')||candidates[0]||book.worksheets[0]
+}
 export function reconcileMatrix(source,personMap,columnMap,projection){
  const people=source.people.filter(p=>personMap.get(p.row)),cols=source.cols.filter(c=>columnMap.get(c.col));
  invariant(people.length&&cols.length,'Сопоставьте сотрудников и навыки');
  invariant(new Set(people.map(p=>personMap.get(p.row))).size===people.length&&new Set(cols.map(c=>columnMap.get(c.col))).size===cols.length,'Повтор сопоставления сотрудника или столбца');
- return people.flatMap(p=>cols.map(c=>{const src=p.values.find(v=>v.col===c.col),personId=personMap.get(p.row),skillId=columnMap.get(c.col),actual=projection?.cells.get(matrixKey(personId,skillId))?.actual??null;return {personId,skillId,person:p.label,skill:c.label,raw:src.raw,imported:src.value,actual,status:src.invalid?'Неверное значение':src.value===null?'Пусто':actual===src.value?'Совпадает':actual===null?'Нет подтверждения':'Расхождение'}}))
+ return people.flatMap(p=>cols.map(c=>{const src=p.values.find(v=>v.col===c.col),personId=personMap.get(p.row),skillId=columnMap.get(c.col),actual=projection?.cells.get(matrixKey(personId,skillId))?.actual??null;return {personId,skillId,person:p.label,skill:c.label,raw:src.raw,imported:src.value,actual,status:src.raw==='0'?'Исходный 0 (вне шкалы 1–4)':src.invalid?'Неверное значение':src.value===null?'Пусто':actual===src.value?'Совпадает':actual===null?'Нет подтверждения':'Расхождение'}}))
 }
 
 export function matrixGroupLabels(db,columns){

@@ -215,7 +215,7 @@ test('LC4.3 matrix roster, evidence baseline, targets, versions, employee relati
  }finally{f.w.close()}
 });
 
-import {matrixCatalog,autoMatrix,profileRequirements,profileEdits,matrixActivity,matrixComparison,columnIdentity,uniqueMatrixMatch,readMatrixRange,suggestMatrixRange,reconcileMatrix} from '../src/modules/training/matrix-assistant.js';
+import {matrixCatalog,autoMatrix,profileRequirements,profileEdits,matrixActivity,matrixComparison,columnIdentity,uniqueMatrixMatch,readMatrixRange,suggestMatrixRange,reconcileMatrix,preferredMatrixSheet} from '../src/modules/training/matrix-assistant.js';
 test('LC4.4 automatic matrix uses dated compatible profession requirements, not unrelated SOPs',async()=>{
  const f=await fixture();try{
  const db=f.w.working,scale=f.w.edit('rating_scale',null,{name:SCALE_NAME,version_no:'1',levels:CORPORATE_LEVELS});
@@ -229,6 +229,8 @@ test('LC4.4 automatic matrix uses dated compatible profession requirements, not 
  const result=autoMatrix(db,roster,catalog,date,scale);assert.deepEqual(result.keys,[col.key]);assert.equal(result.requirements,1);assert.equal(result.unprofiled.length,0);
  const ambiguous=autoMatrix(db,roster,[...catalog,{...col,key:'ambiguous'}],date,scale);assert.equal(ambiguous.keys.length,0);assert.equal(ambiguous.ambiguous.length,1);
  assert.equal(autoMatrix(db,roster,[],date,scale).missing.length,1);
+ const newDocs=[{key:'new:a',skill_id:null,document_id:'a',operation_id:'new-operation'},{key:'new:b',skill_id:null,document_id:'b',operation_id:'new-operation'}];
+ const newAmbiguous=autoMatrix(db,roster,[...catalog,...newDocs],date,scale,{allSops:true});assert.deepEqual(newAmbiguous.keys,[col.key]);assert.equal(newAmbiguous.ambiguous.length,1);
  assert.equal(profileEdits(db,{professionId:f.profession,scaleId:scale,effective:date,entries:[{skill_id:f.skill,level:2,criticality:'normal'}]}).length,0);
  assert.throws(()=>profileEdits(db,{professionId:f.profession,scaleId:scale,effective:date,entries:[{skill_id:f.skill,level:3,criticality:'critical'}]}),/следующую дату/);
  const next=profileEdits(db,{professionId:f.profession,scaleId:scale,effective:'2026-01-21',entries:[{skill_id:f.skill,level:3,criticality:'critical'}]});
@@ -252,7 +254,17 @@ test('LC4.4 spreadsheet import detects corporate header/footers, requires unique
  assert.equal(uniqueMatrixMatch(' Иванов   И.И. ',[{name:'Иванов И.И.',id:'a'}],x=>[x.name]).id,'a');
  assert.equal(uniqueMatrixMatch('Иванов И.И.',[{name:'Иванов И.И.'},{name:'Иванов И.И.'}],x=>[x.name]),null);
  const people=new Map([[7,'a'],[8,'b']]),columns=new Map([[4,'s'],[5,'t']]),projection={cells:new Map([['a:s',{actual:2}],['b:s',{actual:4}]])};
- const before=JSON.stringify([...projection.cells]);const result=reconcileMatrix(source,people,columns,projection);assert.deepEqual(result.map(x=>x.status),['Расхождение','Неверное значение','Совпадает','Пусто']);assert.equal(JSON.stringify([...projection.cells]),before);
+ const before=JSON.stringify([...projection.cells]);const result=reconcileMatrix(source,people,columns,projection);assert.deepEqual(result.map(x=>x.status),['Расхождение','Исходный 0 (вне шкалы 1–4)','Совпадает','Пусто']);assert.equal(JSON.stringify([...projection.cells]),before);
  assert.throws(()=>reconcileMatrix(source,new Map([[7,'a'],[8,'a']]),columns,projection),/Повтор/);
  assert.throws(()=>readMatrixRange(sheet,{...range,lastRow:309}),/диапазон/);
+});
+
+test('LC4.4.1 recognizes the actual appendix 6 two-line header and skips instruction sheets and dated totals',()=>{
+ const cells={A6:'Название СОП',D6:'Учебный СОП 1',E6:'Учебный СОП 2',F6:'Компетенции сотрудника',I6:'Потребности сотрудника',A7:'№',B7:'ФИО',C7:'Должность',F7:'на 29/03',G7:'на 29/04',H7:'на 30/05',A8:'1',B8:'Учебный сотрудник 1',D8:'4',E8:'4',A9:'2',B9:'Учебный сотрудник 2',D9:'0',E9:'2',B10:'Состояние компетенций подразделения'};
+ const example={id:3,name:'Пример',rowCount:23,columnCount:16,getCell:(r,c)=>{const key=String.fromCharCode(64+c)+r;return {text:cells[key]||'',isMerged:['D7','E7'].includes(key)}}};
+ const instructions={id:1,name:'Порядок работы с МК',rowCount:16,columnCount:1,getCell:()=>({text:'Инструкция'})};
+ const blank={...example,id:2,name:'Матрица компетенций',getCell:(r,c)=>r===6&&[4,5].includes(c)?{text:'',isMerged:true}:example.getCell(r,c)};
+ assert.equal(preferredMatrixSheet({worksheets:[instructions,blank,example]}).id,3);
+ const range=suggestMatrixRange(example);assert.deepEqual(range,{headerRow:7,personCol:2,firstRow:8,lastRow:9,firstSkill:4,lastSkill:5});
+ const source=readMatrixRange(example,range);assert.deepEqual(source.cols.map(c=>c.label),['Учебный СОП 1','Учебный СОП 2']);assert.equal(source.people[1].values[0].raw,'0');assert.equal(source.people[1].values[0].value,null);
 });
