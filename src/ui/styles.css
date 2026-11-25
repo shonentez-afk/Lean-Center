@@ -157,3 +157,11 @@ body.editor-active{overflow:hidden}.editor-host{position:fixed;inset:0;z-index:2
 .corporate-matrix .matrix-need{background:#f3d9ed;color:#392337;font-weight:600;min-width:100px}
 .corporate-matrix tfoot{font-weight:600}.corporate-matrix tfoot td,.corporate-matrix tfoot th{background:var(--surface)}
 .matrix-legend{display:inline-flex;align-items:center;gap:5px;font-size:12px}.matrix-legend>span:first-child{width:24px;height:24px;display:grid;place-items:center;border:1px solid var(--line);font-weight:700}
+
+/* LC4.3 employee dossier */
+.employee-name-link{background:transparent;border:0;text-decoration:underline;text-align:left;color:inherit;padding:2px}
+.employee-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:15px}
+.employee-meta>div{display:flex;flex-direction:column;gap:5px;border-bottom:1px solid var(--line);padding:8px 0}
+.employee-overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
+.employee-section-button{padding:14px;text-align:left;white-space:normal}
+.employee-return{margin:6px 0 12px}.employee-tabs{position:relative}

@@ -1,3 +1,4 @@
+import {employeeRelations,employeeSourceLinks} from './modules/master-data/employee-records.js';
 import {sopCriteriaFromDocx} from './modules/training/local-docx.js';
 import {BUILTIN_SOP,previewCriteria} from './modules/training/builtin-forms.js';
 import {TRAINING_PAGES,trainingScreen,resetTrainingRoute,setTrainingRoute} from './modules/training/screens.js';
@@ -32,20 +33,20 @@ const navGroups=[
 ];
 const implemented=new Set(['home','sop','sop_constructor','frv','twi_plans','sop_evaluation','storage','import_xlsx',...TRAINING_PAGES,...Object.keys(definitions)]);
 const collapsedNav=new Set(['Производственное обучение','Наставники и ВТ','Аналитика','Справочники']);
-let librarySelected=null,libraryRevisionSelected=null,evaluationSelected=null,evaluationTab='weighted',evaluationSearch='';
+let librarySelected=null,libraryRevisionSelected=null,evaluationSelected=null,evaluationTab='weighted',evaluationSearch='',employeeSelected=null,employeeTab='overview',employeeReturn=null,employeeSources=null;
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n}
 function add(parent,...children){parent.append(...children);return parent}
 function btn(label,fn,cls='',disabled=false){const n=el('button',label,cls);n.type='button';n.disabled=disabled||busy;n.addEventListener('click',fn);return n}
 function pane(title,...children){return add(el('section',undefined,'panel'),el('h2',title),...children)}
 function message(s,bad=false){status=s;error=bad;const n=document.getElementById('status');if(n){n.textContent=s;n.className='status'+(bad?' error':'')}}
-function navigate(p){
+function navigate(p,{retainEmployee=false}={}){
  if(busy)return;
  if(editorSession&&!editorSession.host.hidden)hideEditor(editorSession);
- closePeopleDropdown();resetTrainingRoute();page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;libraryRevisionSelected=null;if(p==='sop_evaluation'){evaluationSelected=null;evaluationTab='weighted';evaluationSearch=''}render()
+ closePeopleDropdown();resetTrainingRoute();if(!retainEmployee){employeeSelected=null;employeeReturn=null;employeeTab='overview';employeeSources=null}page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;libraryRevisionSelected=null;if(p==='sop_evaluation'){evaluationSelected=null;evaluationTab='weighted';evaluationSearch=''}render()
 }
-function goTraining(p,options={}){navigate(p);setTrainingRoute(p,options);render()}
+function goTraining(p,options={}){navigate(p,{retainEmployee:!!employeeReturn});setTrainingRoute(p,options);render()}
 function openImport(type){importState={type,book:null,sheet:0,header:1,mapping:{},allowUpdates:false,plan:null,file:''};navigate('import_xlsx')}
-function openHistory(id){navigate('person_assignment');historyPerson=id;archiveFilter='all';render()}
+function openHistory(id){navigate('person_assignment',{retainEmployee:!!employeeReturn});historyPerson=id;archiveFilter='all';render()}
 async function persist(){if(cache)generation=await local.saveWorkspace(cache,generation,ws.state())}
 function replace(newWs){ws?.close();ws=newWs}
 async function run(fn,{save=true}={}){if(busy)return;const prev=ws.state();busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message(e.message,true)}finally{busy=false;render()}}
@@ -136,7 +137,60 @@ function orgTree(panel,items){
  walk('',0);for(const v of items.filter(x=>!seen.has(x.id)))box.append(el('p',v.code+' — '+v.name+' (неразрешённый родитель)','warn'));
  if(items.length)panel.append(pane('Иерархия предприятия',box));
 }
+const employeeTabs=[['overview','Обзор'],['matrices','Матрицы компетенций'],['training','Обучение'],['assessments','Оценки и допуски'],['mentoring','Наставничество'],['documents','СОП и ФРВ'],['development','Планы и мероприятия'],['history','Назначения и роли']];
+const employeeStates={active:'Действует',retired:'Предыдущая версия',planned:'Запланировано',in_progress:'В процессе',completed:'Завершено',cancelled:'Отменено',confirmed:'Подтверждено',void:'Аннулировано',registered:'Зарегистрировано',revoked:'Отозвано',closed:'Закрыто',granted:'Допуск выдан',denied:'Не допущен',final:'Зафиксировано',draft:'Черновик',pass:'Пройдено',fail:'Не пройдено',incomplete:'Не завершено',effective:'Действует',superseded:'Заменено',withdrawn:'Выведено из действия',open:'Открыто',review:'На согласовании',approved:'Согласовано',archived:'Архив'};
+function openEmployee(id,{restore=false}={}){
+ if(!id||!one(ws.working,'SELECT id FROM person WHERE id=?',[id]))return;
+ const keep=restore&&employeeReturn===id,tab=keep?employeeTab:'overview';navigate('person',{retainEmployee:keep});employeeSelected=id;employeeReturn=id;employeeTab=tab;employeeSources=null;render()
+}
+function employeeDestination(id,d){
+ if(!d)return;employeeReturn=id;const p=d.page,o=d.options||{};
+ if(p==='sop'){goDocument(o.documentId,o.revisionId);return}
+ if(p==='frv'){goResearch(o.studyId);return}
+ if(p==='sop_evaluation'){navigate(p,{retainEmployee:true});evaluationSelected=o.revisionId;evaluationTab=o.tab||'corporate';render();return}
+ if(p==='person_assignment'||p==='role_assignment'){navigate(p,{retainEmployee:true});historyPerson=id;archiveFilter='all';render();return}
+ goTraining(p,o)
+}
+function employeeCard(main,id){
+ const db=ws.working,p=one(db,'SELECT * FROM person WHERE id=?',[id]);if(!p){employeeSelected=null;return registry(main,'person')}
+ const cur=one(db,"SELECT * FROM person_assignment WHERE person_id=? AND valid_from<=? AND coalesce(valid_to,'9999-12-31')>=? ORDER BY valid_from DESC,id LIMIT 1",[id,today(),today()]);
+ const roles=rows(db,"SELECT b.name FROM role_assignment a JOIN business_role b ON b.id=a.role_id WHERE a.person_id=? AND b.archived=0 AND a.valid_from<=? AND coalesce(a.valid_to,'9999-12-31')>=? ORDER BY b.name",[id,today(),today()]);
+ const groups=employeeRelations(db,id);
+ const top=pane(p.display_name,add(el('div',undefined,'row'),btn('← Список сотрудников',()=>navigate('person')),btn('История назначений',()=>employeeDestination(id,{page:'person_assignment'})),btn('Роли',()=>employeeDestination(id,{page:'role_assignment'}))),add(el('div',undefined,'employee-meta'),...[
+  ['Табельный номер',p.employee_code],['Подразделение',refName('org_unit',cur?.unit_id)],['Должность',refName(cur?.position_id?'position':'profession',cur?.position_id||cur?.profession_id)],['Смена',cur?.shift_id?refName('work_shift',cur.shift_id):cur?.shift_code||'—'],['Роли',roles.map(r=>r.name).join(', ')||'—'],['Статус',p.archived?'Архив':'Активен']
+ ].map(([key,value])=>add(el('div'),el('span',key,'muted'),el('strong',value)))));
+ main.append(top);
+ const nav=el('div',undefined,'library-tabs employee-tabs'),body=el('div');
+ function show(key){
+  employeeTab=key;for(const b of nav.children)b.classList.toggle('selected',b.dataset.tab===key);
+  body.replaceChildren();
+  if(key==='overview'){
+   body.append(pane('Связанные данные',el('p','Все сведения берутся из общей базы по идентификатору сотрудника. Для исходных СОП и ФРВ предусмотрен отдельный поиск сохранённых ссылок.','muted'),add(el('div',undefined,'employee-overview'),...employeeTabs.slice(1).map(([k,label])=>btn(label+' · '+groups[k].length,()=>show(k),'employee-section-button')))));
+   const open=groups.training.filter(x=>['active','planned','in_progress'].includes(x.state));if(open.length)body.append(pane('Действующее обучение',recordsTable(open.slice(0,10))));
+   const active=groups.matrices.filter(x=>x.state==='active');if(active.length)body.append(pane('Действующие матрицы',recordsTable(active)));return
+  }
+  const title=employeeTabs.find(x=>x[0]===key)?.[1]||key,items=groups[key],section=pane(title);
+  const search=fieldInput('employee_related_search','','search');search.placeholder='Поиск по названию, роли, дате';const out=el('div');
+  const draw=()=>{const q=search.value.trim().toLocaleLowerCase('ru-RU'),list=items.filter(r=>[r.title,r.role,r.date,employeeStates[r.state]||r.state,r.extra].join(' ').toLocaleLowerCase('ru-RU').includes(q));out.replaceChildren(list.length?recordsTable(list):el('p','Нет связанных записей по выбранным условиям.','muted'))};search.oninput=draw;section.append(search,out);draw();
+  if(key==='matrices'&&!p.archived)section.append(btn('Создать матрицу с сотрудником',()=>employeeDestination(id,{page:'skills',options:{mode:'builder',personId:id}}),'primary'));
+  if(key==='training'&&!p.archived)section.append(btn('Назначить обучение',()=>employeeDestination(id,{page:'twi',options:{mode:'new',traineeId:id}}),'primary'));
+  if(key==='development'&&!p.archived)section.append(btn('Создать план развития',()=>employeeDestination(id,{page:'development',options:{mode:'new',personId:id}}),'primary'));
+  if(key==='documents'){
+   const sourceOut=el('div'),searchSources=btn('Найти связи в оригиналах СОП и ФРВ',async()=>{searchSources.disabled=true;sourceOut.replaceChildren(el('p','Проверяются ссылки в исходных файлах…','muted'));try{
+    const result=await employeeSourceLinks(db,id,readContent,(done,total)=>{sourceOut.replaceChildren(el('p','Проверено '+done+' из '+total,'muted'))});
+    if(employeeSelected!==id)return;employeeSources={id,result};drawSources(result)
+   }catch(e){sourceOut.replaceChildren(el('p',e.message,'bad'))}finally{searchSources.disabled=false}});
+   function drawSources(result){sourceOut.replaceChildren(el('p','Проверено исходников: '+result.scanned+'. Найдено связанных: '+result.items.length+'.','muted'));if(result.items.length)sourceOut.append(recordsTable(result.items));if(result.errors.length){const details=el('details');details.append(el('summary','Не удалось проверить: '+result.errors.length),...result.errors.map(e=>el('p',e,'warn')));sourceOut.append(details)}}
+   section.append(pane('Сотрудник в полях исходных документов',el('p','Поиск по сохранённым идентификаторам: рабочая группа, согласующие, утверждающие, инструктор, обучаемый, исполнитель и наблюдатель ФРВ. Старые поля только с ФИО не связываются автоматически.','muted'),searchSources,sourceOut));if(employeeSources?.id===id)drawSources(employeeSources.result)
+  }
+  body.append(section)
+ }
+ function recordsTable(items){return tableOf(['Запись','Роль сотрудника','Дата','Состояние','Сведения',''],items.map(r=>[r.title,r.role,r.date,employeeStates[r.state]||r.state||'—',r.extra,r.dest?btn('Открыть',()=>employeeDestination(id,r.dest),'primary'):'—']))}
+ for(const [key,title] of employeeTabs){const b=btn(title+(key==='overview'?'':' ('+groups[key].length+')'),()=>show(key),'library-tab');b.dataset.tab=key;nav.append(b)}
+ main.append(nav,body);show(employeeTab)
+}
 function registry(main,type){
+ if(type==='person'&&employeeSelected){employeeCard(main,employeeSelected);return}
  const d=definitions[type],items=list(ws.working,type),search=el('input');search.type='search';search.placeholder='Поиск по справочнику';search.value=query;
  const filter=el('select');for(const [value,label] of [['active',d.history?'Действующие':'Активные'],['all','Все записи'],['inactive',d.history?'История / будущие':'Архив']]){const o=el('option',label);o.value=value;filter.append(o)}filter.value=archiveFilter;
  const panel=pane(d.label,add(el('div',undefined,'row'),search,filter,btn('Добавить',()=>{edit=historyPerson?{person_id:historyPerson}:{};render()},'primary',!!ws.conflicts.length),btn('Импорт Excel',()=>openImport(type))));
@@ -149,13 +203,13 @@ function registry(main,type){
   const data=items.filter(v=>(!historyPerson||v.person_id===historyPerson)&&(archiveFilter==='all'||(archiveFilter==='active'?activeRecord(d,v):!activeRecord(d,v)))&&Object.entries(d.fields).some(([k,f])=>String(showVal(k,f,v)).toLowerCase().includes(query.toLowerCase())));
   if(!data.length){wrap.append(el('p','Нет записей','empty'));return}
   const fields=Object.entries(d.fields).filter(([,f])=>!f.legacy);
-  const t=el('table'),head=el('tr');for(const [,f] of fields)head.append(el('th',f.label));head.append(el('th','Версия / статус'),el('th','Действия'));t.append(add(el('thead'),head));
-  const body=el('tbody');for(const v of data){const tr=el('tr',undefined,!activeRecord(d,v)?'archive':'');for(const [k,f] of fields)tr.append(el('td',String(showVal(k,f,v)),f.multiline?'multiline-cell':''));
+  const t=el('table'),head=el('tr');for(const [,f] of fields)head.append(el('th',f.label));if(type==='person')head.append(el('th','Подразделение'),el('th','Должность'));head.append(el('th','Версия / статус'),el('th','Действия'));t.append(add(el('thead'),head));
+  const body=el('tbody'),directory=type==='person'?new Map(directoryPeople(ws.working,today()).map(p=>[p.id,p])):null;for(const v of data){const tr=el('tr',undefined,!activeRecord(d,v)?'archive':'');for(const [k,f] of fields)tr.append(type==='person'&&k==='display_name'?add(el('td'),btn(v.display_name,()=>openEmployee(v.id),'employee-name-link')):el('td',String(showVal(k,f,v)),f.multiline?'multiline-cell':''));if(type==='person'){const p=directory.get(v.id);tr.append(el('td',p?.unit||'—'),el('td',p?.position||'—'))}
    const state=v.archived?'Архив':d.history?(v.valid_from>today()?'Будущее':v.valid_to&&v.valid_to<today()?'Завершено':'Действует'):'Активно';
-   tr.append(el('td',state+' · v'+v.rev));const a=el('td');
+   tr.append(el('td',state+' · v'+v.rev));const a=el('td');if(type==='person')a.append(btn('Карточка',()=>openEmployee(v.id),'primary'));
    if(!v.archived){if(!d.immutable&&(!d.history||!v.valid_to))a.append(btn(d.history?'Закрыть / изменить':'Изменить',()=>{edit=v;render()},'',!!ws.conflicts.length));if(d.immutable)a.append(btn('Новая версия',()=>{edit={name:v.name,version_no:String(Math.max(...items.filter(x=>x.name===v.name).map(x=>x.version_no))+1),levels:v.levels};render()},'',!!ws.conflicts.length));
     if(!d.history)a.append(btn('Архив',()=>{if(confirm('Архивировать запись? История сохранится.'))run(async()=>{ws.edit(type,v.id,null,'archive');return 'Запись архивирована'})},'danger',!!ws.conflicts.length));
-    if(type==='person'){a.append(btn('Назначения',()=>openHistory(v.id)));a.append(btn('Роли',()=>{navigate('role_assignment');historyPerson=v.id;archiveFilter='all';render()}))}
+    // All employee-related sections are opened from the dossier.
    }tr.append(a);body.append(tr)
   }t.append(body);wrap.append(t)
  }
@@ -456,8 +510,8 @@ function editorStatus(s,text,bad=false){if(editorSession!==s)return;s.note.textC
 function editorRoute(c){return c.kind==='frv'||c.editorTab==='frv'?'frv':c.editorTab==='twi'?'twi_plans':'sop_constructor'}
 function showEditor(s){if(editorSession!==s)return;page=editorRoute(s.ctx);s.host.hidden=false;document.body.classList.add('editor-active');render();s.close.focus();if(s.loaded)s.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:s.session,type:'directory',people:editorPeople(),theme:theme?'dark':'light'},'*')}
 function hideEditor(s){if(editorSession!==s)return;s.host.hidden=true;document.body.classList.remove('editor-active');root.querySelector('main')?.removeAttribute('inert')}
-function goDocument(id,revisionId=null){navigate('sop');librarySelected=id;libraryRevisionSelected=revisionId;render()}
-function goResearch(id){navigate('frv');librarySelected=id;render()}
+function goDocument(id,revisionId=null){navigate('sop',{retainEmployee:!!employeeReturn});libraryFilter='all';librarySelected=id;libraryRevisionSelected=revisionId;render()}
+function goResearch(id){navigate('frv',{retainEmployee:!!employeeReturn});libraryFilter='all';librarySelected=id;render()}
 function openRelated(c,tab){launchEditor({...c,editorTab:tab})}
 
 function disposeEditor(s,confirmed=false){
@@ -634,9 +688,10 @@ function render(){
  if(!cache)main.append(el('p','IndexedDB недоступен. Изменения только в памяти — скачивайте резервную копию до закрытия.','bad'));
  if(ws.conflicts.length)main.append(el('p','Есть конфликты локальных изменений. Откройте «База и обмен».','bad'));
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
+ if(employeeReturn&&page!=='person')main.append(add(el('div',undefined,'row employee-return'),btn('← К карточке сотрудника',()=>openEmployee(employeeReturn,{restore:true})),el('span',refName('person',employeeReturn),'muted')));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));main.inert=!!editorSession&&!editorSession.host.hidden;if(editorSession?.loaded)editorSession.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'theme',theme:theme?'dark':'light'},'*');
- if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,readContent,pick,downloadBytes,notify:message});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
- main.append(el('p','LC3.7 · автономная рабочая копия · общий сетевой обмен','foot'))
+ if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,readContent,pick,downloadBytes,notify:message,openEmployee});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
+ main.append(el('p',(LC_BUILD.version||'Lean Center')+' · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
 async function init(){configureMigrations(LC_BUILD.migration3,LC_BUILD.migration4,LC_BUILD.migration5,LC_BUILD.migration6,LC_BUILD.migration7,LC_BUILD.migration8,LC_BUILD.migration9,LC_BUILD.migration10);SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await net.latestSnapshot(folder,SQL);if(remote){await useSnapshot(remote.db);await persist();message(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки')}}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message('Сетевая база не обновлена: '+e.message,true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}
