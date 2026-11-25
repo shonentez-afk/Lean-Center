@@ -4,7 +4,7 @@ import {validDate} from '../library/sop-review.js';
 export const ACTION_KINDS={corrective:'Корректирующее мероприятие',instructor_training:'Переобучение инструктора TWI',trainee_training:'Повторное производственное обучение',development:'Индивидуальное развитие'};
 export const ACTION_STATES={open:'Открыто',in_progress:'В работе',implemented:'Ожидает проверки',verified:'Эффект подтверждён',ineffective:'Эффект не подтверждён',cancelled:'Отменено'};
 export const RESPONSE_LABELS={yes:'Да',no:'Нет',not_observed:'Не наблюдалось',not_applicable:'Не применимо',legacy:'Историческая доля'};
-export const LC5_TYPES={action_item:'Задача / мероприятие',schedule_event:'Календарное событие'};
+export const LC5_TYPES={action_item:'Задача / мероприятие',schedule_event:'Календарное событие',rc1_archive:'Архив RC1'};
 export const isLC5Event=e=>['import_rc1','import_rc1_method','mobile_lc5','observe_lc5'].includes(e.payload?.command)||Object.hasOwn(LC5_TYPES,e.entity_type)||(e.entity_type==='audit_session'&&e.payload?.responses?.some(r=>typeof r.value==='string'));
 const required=(v,n=2000)=>typeof v==='string'&&v.trim().length>0&&v.length<=n;
 const exact=(p,k)=>invariant(p&&Object.keys(p).length===k.length&&k.every(x=>Object.hasOwn(p,x)),'Некорректные поля LC5');

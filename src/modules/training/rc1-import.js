@@ -9,7 +9,7 @@ const exact=(p,ks)=>invariant(object(p)&&Object.keys(p).length===ks.length&&ks.e
 const insert=(db,t,p)=>db.run('INSERT INTO '+t+'('+Object.keys(p).join(',')+') VALUES('+Object.keys(p).map(()=>'?').join(',')+')',Object.values(p));
 export const rc1Mapping=(db,type,id)=>one(db,'SELECT * FROM legacy_mapping WHERE source_system=? AND source_entity=? AND source_id=?',[system,type,id]);
 const link=(db,type,id,target,tid,hash)=>insert(db,'legacy_mapping',{source_system:system,source_entity:type,source_id:id,target_entity:target,target_id:tid,source_hash:hash});
-export const isRC1Import=e=>['import_rc1_method','import_rc1'].includes(e.payload?.command)&&['checklist_version','audit_session'].includes(e.entity_type);
+export const isRC1Import=e=>(e.entity_type==='rc1_archive'&&e.payload?.command==='archive_rc1')||['import_rc1_method','import_rc1'].includes(e.payload?.command)&&['checklist_version','audit_session'].includes(e.entity_type);
 const methodShape=m=>{
  exact(m,['id','keys','criteria']);
  invariant(req(m.id,160)&&Array.isArray(m.keys)&&Array.isArray(m.criteria)&&m.keys.length===m.criteria.length&&m.keys.length>0&&m.keys.length<=100&&new Set(m.keys).size===m.keys.length&&m.keys.every(k=>req(k,160)),'Некорректная версия чек-листа RC1');
@@ -31,6 +31,7 @@ function recordShape(x){
  invariant(req(x.id,180)&&req(x.version,160)&&validDate(x.date)&&['active','annulled'].includes(x.status)&&Number.isSafeInteger(x.revision)&&x.revision>0&&req(x.names.mentor,500)&&req(x.names.auditor,500)&&str(x.names.trainee,500)&&Object.values(x.ids).every(v=>str(v,180))&&str(x.job,1000)&&str(x.feedback,10000)&&Array.isArray(x.responses)&&x.responses.length<=100,'Некорректный аудит RC1');
  const seen=new Set();for(const a of x.responses){exact(a,['key','value','note']);invariant(req(a.key,160)&&!seen.has(a.key)&&(a.value===null||typeof a.value==='number'&&Number.isFinite(a.value)&&a.value>=0&&a.value<=1)&&str(a.note,2000),'Некорректная историческая оценка');seen.add(a.key)}return x
 }
+function archiveShape(x){exact(x,['actions','cycles','changes','mobileLog']);invariant(Object.values(x).every(a=>Array.isArray(a)&&a.length<=5000&&a.every(object))&&new TextEncoder().encode(canonical(x)).length<=2*1024*1024,'Архив дополнительных записей превышает лимит 2 МБ или содержит неверные строки');return x}
 export async function rc1Plan(db,raw){
  invariant(object(raw)&&Array.isArray(raw.audits)&&raw.audits.length<=1000,'Ожидается база RC1 v2/v3 или мобильный пакет до 1000 аудитов');
  const mobile=raw.type==='twi-audit-transfer'&&raw.schemaVersion===1;
@@ -43,12 +44,14 @@ export async function rc1Plan(db,raw){
  const versionPlans=new Map();for(const m of methods.values()){const hash=await sha256(canonical(m)),existing=rc1Mapping(db,'method',m.id);versionPlans.set(m.id,{method:m,hash,existing,conflict:!!existing&&existing.source_hash!==hash})}
  const seen=new Set(),items=[];
  for(const a of raw.audits){try{const record=normalizeAudit(a,rd.checklistVersion||'ji-l1-v1');invariant(!seen.has(record.id),'Повтор ID внутри файла');seen.add(record.id);const hash=await sha256(canonical(record)),existing=rc1Mapping(db,'audit',record.id),method=versionPlans.get(record.version);invariant(method&&!method.conflict,'Не найдена точная версия методики '+record.version+' или её содержание изменилось');invariant(record.responses.every(r=>method.method.keys.includes(r.key)),'В ответах есть критерии другой версии');items.push({record,hash,method,existing,status:existing?(existing.source_hash===hash?'duplicate':'conflict'):'ready'})}catch(e){items.push({record:null,status:'invalid',error:e.message})}}
- return {mobile,items,extra:{actions:Array.isArray(raw.correctiveActions)?raw.correctiveActions.length:0,cycles:Array.isArray(raw.auditCycles)?raw.auditCycles.length:0,changes:Array.isArray(raw.auditChangeLog)?raw.auditChangeLog.length:0}}
+ const archive={actions:raw.correctiveActions||[],cycles:raw.auditCycles||[],changes:raw.auditChangeLog||[],mobileLog:raw.mobileImportLog||[]};let archiveData=null,archiveError='';try{archiveShape(archive);if(Object.values(archive).some(a=>a.length)){const hash=await sha256(canonical(archive));archiveData={records:archive,hash,existing:one(db,'SELECT id FROM rc1_archive WHERE source_hash=?',[hash])}}}catch(e){archiveError=e.message}
+ return {mobile,items,archiveData,archiveError,extra:{actions:Array.isArray(archive.actions)?archive.actions.length:0,cycles:Array.isArray(archive.cycles)?archive.cycles.length:0,changes:Array.isArray(archive.changes)?archive.changes.length:0}}
 }
 export function personMatch(people,name){const key=s=>String(s||'').trim().replace(/\s+/g,' ').toLocaleLowerCase('ru-RU'),matches=people.filter(p=>key(p.display_name)===key(name));return name&&matches.length===1?matches[0].id:''}
-export async function verifyRC1Event(e){if(!isRC1Import(e))return;const p=e.payload;invariant(await sha256(canonical(p.command==='import_rc1_method'?methodShape(p.method):recordShape(p.record)))===p.source_sha256,'Контрольная сумма исходной записи RC1 не совпадает')}
+export async function verifyRC1Event(e){if(!isRC1Import(e))return;const p=e.payload;invariant(await sha256(canonical(p.command==='archive_rc1'?archiveShape(p.records):p.command==='import_rc1_method'?methodShape(p.method):recordShape(p.record)))===p.source_sha256,'Контрольная сумма исходной записи RC1 не совпадает')}
 export function applyRC1Event(db,e,old){
  const p=e.payload,id=e.entity_id;invariant(e.operation==='create'&&!old&&/^[0-9a-f]{64}$/.test(p.source_sha256),'Импорт RC1 создаёт только новую историческую запись');
+ if(p.command==='archive_rc1'){exact(p,['command','records','source_sha256']);invariant(e.entity_type==='rc1_archive'&&!one(db,'SELECT id FROM rc1_archive WHERE source_hash=?',[p.source_sha256]),'Архив уже сохранён');insert(db,'rc1_archive',{id,source_hash:p.source_sha256,records_json:canonical(archiveShape(p.records)),recorded_at:e.occurred_at,rev:1});return}
  if(p.command==='import_rc1_method'){
   exact(p,['command','format','method','source_sha256']);invariant(e.entity_type==='checklist_version'&&p.format==='lean-audit-checklist-v1','Неверный тип методики');const m=methodShape(p.method);invariant(!rc1Mapping(db,'method',m.id),'Версия RC1 уже импортирована');
   let c=one(db,"SELECT * FROM checklist WHERE code='TWI_L1_RC1'");if(!c){c={id};insert(db,'checklist',{id,code:'TWI_L1_RC1',name:'Аудит 1-го уровня'})}
