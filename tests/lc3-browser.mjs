@@ -121,6 +121,7 @@ try{
  assert.equal(aiTasks.length,callsBeforeLocal,'Local TWI must not use cloud');
  await choosePerson(editor,'Инструктор / наставник');assert.equal(await editor.locator('#twi-trainer').inputValue(),'Учебный оценщик');
  await page.screenshot({path:'artifacts/lc3/twi-editor.png',fullPage:true});
+ await editor.locator('[data-tab="checklist"]').click();await editor.locator('[data-score="1"]').selectOption('0.7');await editor.locator('[data-comment="1"]').fill('Учебный комментарий из конструктора');
  await editor.locator('#lc-editor-send').click();await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();await page.getByRole('button',{name:'Сохранить изменения черновика'}).click();await page.getByText('Черновик сохранён. Ожидает общей публикации базы.',{exact:true}).waitFor();
  await page.locator('#lc-editor-host').waitFor({state:'detached'});
  await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();await page.getByRole('heading',{name:'QA-SOP · Проверить учебный стенд'}).waitFor();
@@ -135,15 +136,30 @@ try{
  await page.getByRole('button',{name:'Планы инструктажа TWI',exact:true}).first().click();await page.getByRole('heading',{name:'Реестр планов инструктажа TWI'}).waitFor();
  await page.getByRole('button',{name:'Открыть',exact:true}).click();await page.getByRole('button',{name:'Показать план инструктажа TWI',exact:true}).click();
  await page.getByText('Инструктор: Учебный оценщик · Обучаемый: не указан',{exact:true}).waitFor();
- // New corporate SOP assessment is distinct from Stage43's legacy print sheet.
-
+ // The weighted checklist is immediately available in the assessment registry.
  await page.getByRole('button',{name:'Оценка СОП',exact:true}).first().click();
+ await page.locator('select[name=stage43_score_1]').waitFor();
+ assert.equal(await page.locator('select[name=stage43_score_1]').inputValue(),'0.7');
+ assert.equal(await page.locator('input[name=stage43_note_1]').inputValue(),'Учебный комментарий из конструктора');
+ await page.locator('select[name=stage43_score_1]').selectOption('1');
+ await page.locator('input[name=stage43_note_1]').fill('Уточнено в центре');
+ await page.getByRole('button',{name:'Сохранить чек-лист СОП',exact:true}).click();
+ await page.getByText('Чек-лист СОП сохранён. Ожидает публикации.',{exact:true}).waitFor();
+ await page.locator('select[name=stage43_score_1]').waitFor();assert.equal(await page.locator('select[name=stage43_score_1]').inputValue(),'1');
+ await page.reload();await page.getByRole('button',{name:'Оценка СОП',exact:true}).first().click();
+ await page.locator('input[name=stage43_note_1]').waitFor();assert.equal(await page.locator('input[name=stage43_note_1]').inputValue(),'Уточнено в центре');
+ await page.screenshot({path:'artifacts/lc3/stage43-checklist-registry.png',fullPage:true});
+ const wd=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать чек-лист XLSX',exact:true}).click();const wf=path.join(tmp,'weighted.xlsx');await (await wd).saveAs(wf);
+ const weighted=await page.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const s=w.getWorksheet('Чек-лист Stage43');return {score:s.getCell('C5').value,note:s.getCell('F5').value,formula:s.getCell('C19').value.formula}},Array.from(await fs.readFile(wf)));
+ assert.deepEqual(weighted,{score:1,note:'Уточнено в центре',formula:'E18/D18'});
+ // New corporate SOP assessment is distinct from Stage43 weighted checklist.
  const method={format:'lean-sop-checklist-v1',title:'Учебная методика',source_sha256:'a'.repeat(64),criteria:Array.from({length:20},(_,i)=>({code:i+1,question:'Учебное требование '+(i+1)}))};
  const mf=path.join(tmp,'method.json');await fs.writeFile(mf,JSON.stringify(method));
  const mc=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Загрузить методику JSON'}).click();await (await mc).setFiles(mf);
  await page.getByText('Методика добавлена, ожидает публикации.',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();
  await page.locator('.library-tabs').getByRole('button',{name:'Оценка СОП',exact:true}).click();
+ await page.locator('input[name=stage43_note_1]').waitFor();assert.equal(await page.locator('input[name=stage43_note_1]').inputValue(),'Уточнено в центре');
  await page.locator('select[name=eval_actor]').selectOption({index:1});
  await page.locator('input[name=eval_place]').fill('Учебное место');
  const saveEval=page.getByRole('button',{name:'Зафиксировать оценку'});assert.equal(await saveEval.isDisabled(),true);

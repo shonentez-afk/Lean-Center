@@ -27,3 +27,6 @@ tests/test_schema.py проверяет SQL, внешние ключи, смеш
 
 ## LC3.1, схема v5
 [004_lc3.sql](../db/migrations/004_lc3.sql) включает detached Stage43 source/версионирование; [005_lc3_requirements.sql](../db/migrations/005_lc3_requirements.sql) добавляет workplace, operation.workplace_id, паспорт document_revision, sop_evaluation/response, sop_frv_origin и ревизию checklist_version. Методика SOP_APP4 отделена от L1, одна действующая версия, старые архивируются без изменения критериев/оценок. Исторические оценки привязаны к методике, версии СОП и SHA256 исходника. Просрочка от фактической даты изменения +12 календарных месяцев; при редактировании черновика паспорт сбрасывается. Подробности и границы: [LC3_RU.md](LC3_RU.md).
+
+## LC3.5 — схема v6
+[006_stage43_checklist.sql](../db/migrations/006_stage43_checklist.sql) добавляет sop_stage43_checklist: один изменяемый результат для пары revision_id/source_sha256, неизменяемые требования и веса проверяются по оригиналу Stage43, ревизии и изменения через change_event, прежние исходники остаются в attachment. Сохранение оценки не изменяет document_revision, статус и паспорт. Первоначальный чек-лист читается из оригинала без второй записи; правки хранятся отдельно. Веса, шкала и происхождение seed/auto/manual/legacy сохраняются, стартовые значения обозначаются предварительными. SOP_APP4 и L1 независимы.

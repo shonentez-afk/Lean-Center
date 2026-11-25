@@ -1,7 +1,8 @@
+import {applyStage43Checklist,verifyStage43Checklist} from './stage43-checklist.js';
 import {applySopMethod,applySopEvaluation,reviewDue,validDate} from './sop-review.js';
 // LC3: aggregate events + detached original Stage43 content.
 import {invariant,isId,one,rows,canonical,sha256,foldKey} from '../../core/db.js';
-export const DOMAIN_TYPES=Object.freeze({document:'Библиотека СОП',frv_study:'Исследования ФРВ',checklist_version:'Методика оценки СОП',sop_evaluation:'Оценка СОП'});
+export const DOMAIN_TYPES=Object.freeze({document:'Библиотека СОП',frv_study:'Исследования ФРВ',checklist_version:'Методика оценки СОП',sop_evaluation:'Оценка СОП',sop_stage43_checklist:'Чек-лист Stage43'});
 export const MAX_CONTENT=30*1024*1024;
 const MIME={sop:'application/vnd.lean.stage43.sop+json',frv:'application/vnd.lean.stage43.frv+json'};
 const encoder=new TextEncoder();
@@ -78,7 +79,8 @@ export async function verifyDomainEvents(events,readContent){
  const checked=new Map();
  for(const e of events||[]){if(!Object.hasOwn(DOMAIN_TYPES,e.entity_type)||!e.payload?.source)continue;
   const ref=validateRef(e.payload.source);invariant(typeof readContent==='function','Пакет содержит документы; требуется полный комплект исходных файлов');
-  let result=checked.get(ref.sha256);if(!result){const text=await checkContent(ref,await readContent(ref));result=await inspectSource(text,ref.kind);checked.set(ref.sha256,result)}
+  let result=checked.get(ref.sha256);if(!result){const text=await checkContent(ref,await readContent(ref));result=await inspectSource(text,ref.kind);result.raw=JSON.parse(text);checked.set(ref.sha256,result)}
+  if(e.entity_type==='sop_stage43_checklist'){invariant(ref.kind==='sop'&&canonical(result.source)===canonical(ref),'Неверный исходник чек-листа');verifyStage43Checklist(e.payload,result.raw.constructor);continue}
   invariant(canonical(result.source)===canonical(ref)&&canonical(result.projection)===canonical(e.payload.projection),'Проекция не совпадает с исходным файлом');
  }
 }
@@ -98,6 +100,7 @@ export function applyDomainEvent(db,e,old){
  const p=e.payload,id=e.entity_id;
  if(e.entity_type==='checklist_version')return applySopMethod(db,e,old);
  if(e.entity_type==='sop_evaluation')return applySopEvaluation(db,e,old);
+ if(e.entity_type==='sop_stage43_checklist')return applyStage43Checklist(db,e,old);
  if(e.entity_type==='document'){
   if(e.operation==='create'){
    exact(p,['command','code','title','operation_id','source','projection']);invariant(!old&&p.command==='create'&&nonempty(p.code,200)&&nonempty(p.title),'Неверный новый СОП');operation(db,p.operation_id);invariant(!rows(db,'SELECT code FROM document').some(x=>foldKey(x.code)===foldKey(p.code)),'Номер документа уже существует');
