@@ -31,10 +31,11 @@ test('LC5 same-day planning accepts local today across UTC rollover; old deadlin
  const f=await fixture();try{const db=f.w.working,a=await f.addAssignment();
  const create=async(type,payload,occurred_at)=>{const e={id:uuid(),entity_type:type,entity_id:uuid(),operation:'create',expected_revision:0,payload,occurred_at};await f.w.applyContentEvents([e],f.readContent);return e.entity_id};
  const action={response_id:null,title:'QA срок сегодня',owner_id:f.actor,subject_id:null,kind:'corrective',priority:'normal'};
- for(const [timestamp,due] of [['2026-01-20T19:23:22Z','2026-01-20'],['2026-01-21T02:00:00Z','2026-01-20'],['2026-01-20T19:23:22Z','2026-01-21']]){
+ for(const [timestamp,due] of [['2026-01-20T19:23:22Z','2026-01-20'],['2026-01-22T02:00:00Z','2026-01-21'],['2026-01-21T19:23:22Z','2026-01-22']]){
   const id=await create('action_item',{...action,due_on:due},timestamp);assert.equal(one(db,'SELECT due_on FROM action_item WHERE id=?',[id]).due_on,due);
   const s=await create('schedule_event',{assignment_id:a,owner_id:f.actor,due_on:due},timestamp);assert.equal(one(db,'SELECT due_on FROM schedule_event WHERE id=?',[s]).due_on,due);
  }
+ await assert.rejects(create('schedule_event',{assignment_id:a,owner_id:f.actor,due_on:'2026-01-20'},'2026-01-20T19:23:22Z'),/уже запланирован/);
  await assert.rejects(create('action_item',{...action,due_on:'2026-01-18'},'2026-01-20T19:23:22Z'),/предшествовать/);
  await assert.rejects(create('schedule_event',{assignment_id:a,owner_id:f.actor,due_on:'2026-01-18'},'2026-01-20T19:23:22Z'),/предшествовать/);
  assert.deepEqual(rows(db,'PRAGMA foreign_key_check'),[]);
