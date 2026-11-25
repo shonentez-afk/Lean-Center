@@ -476,37 +476,88 @@ export function trainingScreen(main,page,c){
   return stack(settings,selectionPane,tools,importing,pane('Предпросмотр и сохранение',counts,row(btn('Предпросмотр',()=>showPreview()),action('Сохранить матрицу',()=>run(saveMatrix))),preview))
  }
  function matrixDetail(record){
-  const cfg=matrixFromRecord(record),projection=matrixProjection(db,cfg,day),filter=check('matrix_only_employee','Только выбранный сотрудник'),focus=route.personId||'',search=searchInput('matrix_saved_search'),out=el('div');filter.input.checked=!!focus;
-  const col=route.skillId&&cfg.columns.find(x=>x.skill_id===route.skillId),who=cfg.roster.find(x=>x.person_id===focus);
+  const cfg=matrixFromRecord(record),projection=matrixProjection(db,cfg,day),filter=check('matrix_only_employee','Только выбранный сотрудник'),focus=route.personId||'',search=searchInput('matrix_saved_search'),out=el('div');const saved=route.matrixFilters||{},activity=matrixActivity(db,cfg),labels=matrixGroupLabels(db,cfg.columns),drawer=el('aside',undefined,'matrix-cell-drawer');
+  filter.input.checked=saved.only??!!focus;drawer.hidden=true;search.value=saved.search||'';
+  const gaps=check('matrix_saved_gaps','Только требующие обучения'),transpose=check('matrix_saved_transpose','Навыки строками');gaps.input.checked=!!saved.gaps;transpose.input.checked=!!saved.transpose;
+  const grouping=select('matrix_saved_group',[['none','Без группировки'],['workplace','Рабочее место'],['equipment','Оборудование'],['category','Категория']],saved.grouping||'none',null);
+  const group=select('matrix_saved_group_value',[],'','Все группы');
+  const metric=select('matrix_saved_metric',[['actual','Текущие уровни'],['target','Целевые уровни'],['base','Исходный срез'],['delta','Изменение к срезу']],saved.metric||'actual',null);
+  const versions=rows(db,'SELECT * FROM competency_matrix WHERE code=? AND scale_id=? AND id<>? ORDER BY version_no DESC',[cfg.code,cfg.scale_id,cfg.id]);
+  const compare=select('matrix_compare_snapshot',versions.map(x=>[x.id,x.base_on+' · v'+x.version_no]),saved.compare||'','Исходный срез этой версии');
+  const needs=x=>x.targetLevel!==null&&(x.actual===null||x.need>0);
+  function comparison(){const v=versions.find(x=>x.id===compare.value);return v?matrixComparison(cfg,matrixFromRecord(v)):new Map(cfg.baseline.map(x=>[matrixKey(x.person_id,x.skill_id),x.value]))}
+  function refreshGroups(prior=''){
+   const values=grouping.value==='none'?[]:[...new Set(cfg.columns.map(c=>labels.get(c.skill_id)?.[grouping.value]||'Без группы'))].sort((a,b)=>a.localeCompare(b,'ru'));
+   replaceOptions(group,select('matrix_saved_group_value',values.map(v=>[v,v]),values.includes(prior)?prior:'','Все группы'));group.disabled=grouping.value==='none'
+  }
   const total=(a,k)=>a[k+'Count']?String(a[k]):'—';
   const personLink=r=>btn(r.name,()=>c.openEmployee(r.person_id),'matrix-person-link');
-  const backMatrix=()=>goLocal({matrixId:record.id,personId:focus});
-  if(col&&who){
+  const backMatrix=()=>{delete route.cellPersonId;delete route.cellSkillId;delete route.skillId;drawer.hidden=true;drawer.replaceChildren()};
+  function openCell(who,col){
+   route.cellPersonId=who.person_id;route.cellSkillId=col.skill_id;
    const x=projection.cells.get(matrixKey(who.person_id,col.skill_id)),goal=select('matrix_cell_target',Object.entries(LEVEL_TEXT).map(([v,t])=>[v,v+' — '+t]),String(x.targetLevel||'')),due=date('matrix_cell_due',cfg.target_on>=day?cfg.target_on:plusDays(day,30));
-   const root=pane(who.name+' · '+col.title,row(btn('К матрице',backMatrix),personLink(who)),msg('Исходный: '+(x.base??'—')+' · Текущий: '+(x.actual??'—')+' · Цель: '+(x.targetLevel??'—')+' · '+x.reason+' · '+x.admission));
+   const root=pane(who.name+' · '+col.title,row(btn('Закрыть',backMatrix),personLink(who)),msg('Исходный: '+(x.base??'—')+' · Текущий: '+(x.actual??'—')+' · Цель: '+(x.targetLevel??'—')+' · '+x.reason+' · '+x.admission));
+   const active=activity.get(matrixKey(who.person_id,col.skill_id))||[];
+   const history=rows(db,"SELECT i.*,a.assessed_at,a.evaluator_id,a.standard_revision_id,a.assignment_id FROM assessment_item i JOIN assessment_session a ON a.id=i.session_id WHERE a.person_id=? AND i.skill_id=? AND a.state='confirmed' ORDER BY a.assessed_at DESC,a.recorded_at DESC",[who.person_id,col.skill_id]);
+   const plans=rows(db,"SELECT p.id,p.title,g.due_on,g.target_json FROM development_plan p JOIN development_goal g ON g.plan_id=p.id WHERE p.person_id=? AND p.state='active' AND g.skill_id=? AND g.state='open' ORDER BY g.due_on",[who.person_id,col.skill_id]);
+   root.append(msg('Требование профессии: '+(x.required??'—')+' · Индивидуальная цель: '+(x.explicit??'—')));
    if(col.document_id)root.append(btn('Открыть СОП',()=>goDocument(col.document_id)));
+   const trainingLines=active.map(v=>[v.due_on,n('person',v.mentor_id),(statuses[v.state]||v.state)+(v.revision_state!=='effective'?' · прежняя редакция':''),btn('Открыть обучение',()=>go('twi',{id:v.id}))]);
+   root.append(pane('Назначенное обучение',trainingLines.length?tableOf(['Срок','Инструктор','Состояние',''],trainingLines):msg('Открытых назначений нет.')));
+   const historyLines=history.map(v=>[v.assessed_at,n('rating_scale',v.scale_id),v.observation_state==='rated'?v.level:observationLabels[v.observation_state],n('person',v.evaluator_id),revLabel(v.standard_revision_id),v.assignment_id?btn('Открыть',()=>go('twi',{id:v.assignment_id,tab:'practice'})):'—']);
+   root.append(pane('История подтверждений',historyLines.length?tableOf(['Дата','Шкала','Уровень','Оценщик','СОП',''],historyLines):msg('Подтверждённых оценок нет.')));
+   const planLines=plans.map(v=>[v.title,JSON.parse(v.target_json).target_level,v.due_on,btn('Открыть план',()=>go('development',{id:v.id}))]);
+   root.append(pane('Открытые цели',planLines.length?tableOf(['План','Уровень','Срок',''],planLines):msg('Нет открытых индивидуальных целей.')));
    const rev=col.document_id&&one(db,"SELECT id FROM document_revision WHERE document_id=? AND state='effective'",[col.document_id]);
-   if(record.state==='active'&&!one(db,'SELECT archived FROM person WHERE id=?',[who.person_id])?.archived)root.append(row(btn('Назначить обучение',()=>go('twi',{mode:'new',traineeId:who.person_id,skillId:col.skill_id,scaleId:cfg.scale_id,targetLevel:x.targetLevel??2,revisionId:rev?.id,reason:'Развитие компетенции по матрице '+cfg.code}),'primary',!rev),btn('История компетенции',()=>goLocal({mode:'overview',personId:who.person_id,skillId:col.skill_id})),btn('Планы развития',()=>go('development',{mode:'new',personId:who.person_id}))),grid(f('Целевой уровень',goal),f('Срок',due)),action('Поставить цель развития',()=>run(async()=>{const level=Number(goal.value);invariant(level>=1&&level<=4&&due.value>=day,'Укажите уровень и срок');invariant((x.actual??0)<level,'Уровень уже достигнут');invariant(!personalTargets(db,day,due.value).some(g=>g.person_id===who.person_id&&g.skill_id===col.skill_id&&g.scale_id===cfg.scale_id&&g.target_level>=level),'Есть открытая цель не ниже выбранной');const p=event('development_plan',{person_id:who.person_id,title:'Развитие по матрице '+cfg.title,start_on:day,due_on:due.value}),g=event('development_goal',{plan_id:p.entity_id,skill_id:col.skill_id,scale_id:cfg.scale_id,target_level:level,title:'Освоить: '+col.title,due_on:due.value});await ws.applyContentEvents([p,g],readContent);return 'Цель добавлена в план развития.'})));
-   return root
+   if(record.state==='active'&&!one(db,'SELECT archived FROM person WHERE id=?',[who.person_id])?.archived)root.append(row(btn('Назначить обучение',()=>go('twi',{mode:'new',traineeId:who.person_id,skillId:col.skill_id,scaleId:cfg.scale_id,targetLevel:x.targetLevel??2,revisionId:rev?.id,reason:'Развитие компетенции по матрице '+cfg.code}),'primary',!rev||active.some(v=>v.revision_state==='effective')),btn('История компетенции',()=>goLocal({mode:'overview',personId:who.person_id,skillId:col.skill_id})),btn('Планы развития',()=>go('development',{mode:'new',personId:who.person_id}))),grid(f('Целевой уровень',goal),f('Срок',due)),action('Поставить цель развития',()=>run(async()=>{const level=Number(goal.value);invariant(level>=1&&level<=4&&due.value>=day,'Укажите уровень и срок');invariant((x.actual??0)<level,'Уровень уже достигнут');invariant(!personalTargets(db,day,due.value).some(g=>g.person_id===who.person_id&&g.skill_id===col.skill_id&&g.scale_id===cfg.scale_id&&g.target_level>=level),'Есть открытая цель не ниже выбранной');const p=event('development_plan',{person_id:who.person_id,title:'Развитие по матрице '+cfg.title,start_on:day,due_on:due.value}),g=event('development_goal',{plan_id:p.entity_id,skill_id:col.skill_id,scale_id:cfg.scale_id,target_level:level,title:'Освоить: '+col.title,due_on:due.value});await ws.applyContentEvents([p,g],readContent);return 'Цель добавлена в план развития.'})));
+   drawer.hidden=false;drawer.replaceChildren(root)
+  }
+  function cellButton(r,v,ri,ci,prior){
+   const k=matrixKey(r.person_id,v.skill_id),x=projection.cells.get(k),old=prior.get(k),pending=activity.get(k)||[],mode=metric.value;
+   const value=mode==='base'?x.base:mode==='target'?x.targetLevel:mode==='delta'?(x.actual===null||old==null?null:x.actual-old):x.actual;
+   const b=btn(value===null?'—':mode==='delta'&&value>0?'+'+value:String(value),()=>openCell(r,v),'matrix-value'+(mode!=='delta'&&value!==null?' matrix-level-'+value:'')+(needs(x)?' matrix-deficit':'')+(pending.length?' matrix-training-pending':''));
+   b.dataset.matrixR=ri;b.dataset.matrixC=ci;b.title=[v.title,'Факт: '+(x.actual??'не подтверждён'),'Цель: '+(x.targetLevel??'—'),x.reason,x.admission,pending.length?'Назначений обучения: '+pending.length:'',mode==='delta'?'Сравнение со срезом: '+(old??'—'):''].filter(Boolean).join(' · ');
+   b.setAttribute('aria-label',r.name+' · '+v.title+' · '+b.title);
+   b.onkeydown=e=>{const d={ArrowLeft:[0,-1],ArrowRight:[0,1],ArrowUp:[-1,0],ArrowDown:[1,0]}[e.key];if(d){const next=out.querySelector('[data-matrix-r="'+(ri+d[0])+'"][data-matrix-c="'+(ci+d[1])+'"]');if(next){e.preventDefault();next.focus()}}else if(e.key==='Escape')backMatrix()};
+   return add(el('td',undefined,'matrix-value-cell'),b)
   }
   function draw(){
-   const selected=cfg.roster.filter(r=>(!filter.input.checked||!focus||r.person_id===focus)&&(r.name+' '+r.position).toLocaleLowerCase('ru-RU').includes(search.value.trim().toLocaleLowerCase('ru-RU')));
+   route.matrixFilters={only:filter.input.checked,gaps:gaps.input.checked,transpose:transpose.input.checked,search:search.value,grouping:grouping.value,group:group.value,metric:metric.value,compare:compare.value};
+   const columns=cfg.columns.filter(v=>!group.value||grouping.value==='none'||labels.get(v.skill_id)?.[grouping.value]===group.value),prior=comparison();
+   const selected=cfg.roster.filter(r=>(!filter.input.checked||!focus||r.person_id===focus)&&normalizeMatrixText(r.name+' '+r.position).includes(normalizeMatrixText(search.value))&&(!gaps.input.checked||columns.some(v=>needs(projection.cells.get(matrixKey(r.person_id,v.skill_id))))));
+   if(!selected.length||!columns.length){out.replaceChildren(msg('Нет строк или столбцов по выбранным фильтрам.'));return}
    const t=el('table',undefined,'corporate-matrix'),head=el('thead'),tr=el('tr');
+   if(transpose.input.checked){
+    t.classList.add('matrix-transposed');tr.append(el('th','СОП / навык','matrix-fixed matrix-transposed-skill'));
+    selected.forEach(r=>tr.append(add(el('th',undefined,'matrix-transposed-person'),personLink(r))));tr.append(el('th','Потребность процесса'));head.append(tr);
+    const body=el('tbody');let prev=null;
+    columns.forEach((v,i)=>{
+     const g=labels.get(v.skill_id)?.[grouping.value];
+     if(grouping.value!=='none'&&g!==prev){const line=el('tr',undefined,'matrix-group-row'),label=el('th',g||'Без группы');label.colSpan=selected.length+2;line.append(label);body.append(line);prev=g}
+     const line=el('tr');line.append(el('th',v.title,'matrix-fixed matrix-transposed-skill'));selected.forEach((r,j)=>line.append(cellButton(r,v,i,j,prior)));
+     const a=projection.bySkill.get(v.skill_id);line.append(el('td',total(a,'need')+(a.unknown?' + ?'+a.unknown:''),'matrix-need'));body.append(line)
+    });
+    t.append(head,body);out.replaceChildren(msg('Навыки строками. Итоги относятся ко всей сохранённой матрице.'),add(el('div',undefined,'tablewrap corporate-matrix-wrap'),t));return
+   }
    for(const [i,label] of ['№','ФИО','Должность'].entries()){const th=el('th',label,'matrix-fixed matrix-fixed-'+i);th.rowSpan=2;tr.append(th)}
-   for(const v of cfg.columns){const th=add(el('th',undefined,'matrix-skill-head'),el('span',v.title));th.rowSpan=2;th.title=v.title;tr.append(th)}
+   for(const v of columns){const th=add(el('th',undefined,'matrix-skill-head'),el('span',v.title));th.rowSpan=2;th.title=v.title+(grouping.value==='none'?'':' · '+labels.get(v.skill_id)?.[grouping.value]);tr.append(th)}
    const grouped=el('th','Компетенции сотрудника');grouped.colSpan=3;const need=el('th','Потребность','matrix-need');need.rowSpan=2;tr.append(grouped,need);
    const dates=el('tr');for(const d of [cfg.base_on,day,cfg.target_on])dates.append(el('th',d));head.append(tr,dates);t.append(head);
    const body=el('tbody');for(const [i,r] of selected.entries()){
     const line=el('tr'),a=projection.byPerson.get(r.person_id);line.append(el('td',String(i+1),'matrix-fixed matrix-fixed-0'),add(el('td',undefined,'matrix-fixed matrix-fixed-1'+(r.instructor?' matrix-instructor':'')),personLink(r)),el('td',r.position||'—','matrix-fixed matrix-fixed-2'));
-    for(const v of cfg.columns){const x=projection.cells.get(matrixKey(r.person_id,v.skill_id)),b=btn(x.actual===null?'—':String(x.actual),()=>goLocal({matrixId:record.id,personId:r.person_id,skillId:v.skill_id}),'matrix-value'+(x.actual!==null?' matrix-level-'+x.actual:'')+((x.targetLevel!==null&&(x.actual===null||x.need>0))?' matrix-deficit':''));b.title=[v.title,'Факт: '+(x.actual??'не подтверждён'),'Цель: '+(x.targetLevel??'—'),x.reason,x.admission].filter(Boolean).join(' · ');b.setAttribute('aria-label',r.name+' · '+v.title+' · '+b.title);line.append(add(el('td',undefined,'matrix-value-cell'),b))}
+    columns.forEach((v,j)=>line.append(cellButton(r,v,i,j,prior)));
     for(const k of ['base','actual','target'])line.append(el('td',total(a,k),'matrix-total'));line.append(el('td',total(a,'need')+(a.unknown?' + ?'+a.unknown:''),'matrix-need'));body.append(line)
    }t.append(body);
-   const footer=el('tfoot');for(const [label,k] of [['Состояние на '+cfg.base_on,'base'],['Текущее состояние '+day,'actual'],['Целевое состояние '+cfg.target_on,'target'],['Потребности процесса','need']]){const tr=el('tr',undefined,k==='need'?'matrix-need':'');const labelCell=el('th',label);labelCell.colSpan=3;tr.append(labelCell);for(const v of cfg.columns){const a=projection.bySkill.get(v.skill_id);tr.append(el('td',total(a,k)+(k==='need'&&a.unknown?' + ?'+a.unknown:'')))}const sum=el('td',total(projection.total,k));sum.colSpan=4;tr.append(sum);footer.append(tr)}t.append(footer);
+   const footer=el('tfoot');for(const [label,k] of [['Состояние на '+cfg.base_on,'base'],['Текущее состояние '+day,'actual'],['Целевое состояние '+cfg.target_on,'target'],['Потребности процесса','need']]){const tr=el('tr',undefined,k==='need'?'matrix-need':'');const labelCell=el('th',label);labelCell.colSpan=3;tr.append(labelCell);for(const v of columns){const a=projection.bySkill.get(v.skill_id);tr.append(el('td',total(a,k)+(k==='need'&&a.unknown?' + ?'+a.unknown:'')))}const sum=el('td',total(projection.total,k));sum.colSpan=4;tr.append(sum);footer.append(tr)}t.append(footer);
    out.replaceChildren(msg('Показано '+selected.length+' из '+cfg.roster.length+' сотрудников. Нижние итоги относятся ко всей матрице.'),add(el('div',undefined,'tablewrap corporate-matrix-wrap'),t))
   }
-  search.oninput=draw;filter.input.onchange=draw;draw();
-  const legend=row(...Object.entries(LEVEL_TEXT).map(([v,label])=>add(el('span',undefined,'matrix-legend'),el('span',v,'matrix-level-'+v),el('span',label))),el('span','Красная рамка — потребность; ? — цель без подтверждённого факта','muted'));
-  return stack(pane(cfg.title,row(btn('К списку матриц',()=>goLocal()),action('Новая версия',()=>goLocal({mode:'builder',copyId:record.id})),btn('Скачать матрицу XLSX',()=>run(async()=>saveWorkbook('Матрица-'+cfg.code,matrixWorkbook(ExcelJS,{...cfg,author_name:n('person',cfg.author_id)},projection,day)),{save:false}))),msg(cfg.code+' · v'+cfg.version_no+' · '+statuses[cfg.state]+' · '+n('org_unit',cfg.unit_id)+' · '+n('work_shift',cfg.shift_id)+' · разработал: '+n('person',cfg.author_id)),legend,row(search,...(focus?[filter.element]:[])),out,msg('Оценки — подтверждённые факты в корпоративской шкале. Для исходного среза используются сохранённые значения. Текущая квалификация не равна допуску. Прежняя версия матрицы сохраняет состав и исходный срез, но текущие показатели рассчитываются на сегодня.')),pane('Требования и покрытие',requirementsPanel(),coveragePanel(matrixData(db,day))))
+  refreshGroups(saved.group);grouping.onchange=()=>{refreshGroups();draw()};for(const ctl of [group,metric,compare])ctl.onchange=draw;
+  search.oninput=draw;filter.input.onchange=gaps.input.onchange=transpose.input.onchange=draw;draw();
+  const who=cfg.roster.find(r=>r.person_id===(route.cellPersonId||route.personId)),col=cfg.columns.find(v=>v.skill_id===(route.cellSkillId||route.skillId));if(who&&col)openCell(who,col);
+  const legend=row(...Object.entries(LEVEL_TEXT).map(([v,label])=>add(el('span',undefined,'matrix-legend'),el('span',v,'matrix-level-'+v),el('span',label))),el('span','Красная рамка — потребность; ? — цель без факта; синяя точка — назначенное обучение','muted'));
+  const coverage=coverageData(db,day,matrixData(db,day)).filter(x=>cfg.columns.some(c=>c.skill_id===x.skill_id)&&(!cfg.unit_id||x.unit_id===cfg.unit_id||one(db,'WITH RECURSIVE u(id) AS (SELECT ? UNION SELECT o.id FROM org_unit o JOIN u ON o.parent_id=u.id) SELECT id FROM u WHERE id=?',[cfg.unit_id,x.unit_id]))&&(!cfg.shift_id||!x.shift_code||one(db,'SELECT code FROM work_shift WHERE id=?',[cfg.shift_id])?.code===x.shift_code));
+  const coverageSection=pane('Покрытие по сменам',coverage.length?tableOf(['Подразделение','Смена','Навык','Нужно','Есть','Дефицит'],coverage.map(x=>[n('org_unit',x.unit_id),x.shift_code||'Все',n('skill',x.skill_id),x.min_people,x.actual,x.deficit])):msg('Для выбранных навыков нет нормы покрытия. Отсутствие нормы не считается дефицитом.'));
+  return stack(pane(cfg.title,row(btn('К списку матриц',()=>goLocal()),action('Новая версия',()=>goLocal({mode:'builder',copyId:record.id})),btn('Скачать матрицу XLSX',()=>run(async()=>saveWorkbook('Матрица-'+cfg.code,matrixWorkbook(ExcelJS,{...cfg,author_name:n('person',cfg.author_id)},projection,day)),{save:false}))),msg(cfg.code+' · v'+cfg.version_no+' · '+statuses[cfg.state]+' · '+n('org_unit',cfg.unit_id)+' · '+n('work_shift',cfg.shift_id)+' · разработал: '+n('person',cfg.author_id)),legend,grid(f('Поиск',search),f('Группировка',grouping),f('Группа',group),f('Показатель',metric),f('Срез для сравнения',compare)),row(...(focus?[filter.element]:[]),gaps.element,transpose.element),add(el('div',undefined,'matrix-workspace'),out,drawer),msg('Оценки — подтверждённые факты в корпоративской шкале. Для исходного среза используются сохранённые значения. Текущая квалификация не равна допуску. Прежняя версия матрицы сохраняет состав и исходный срез, но текущие показатели рассчитываются на сегодня. Сравнение использует сохранённый исходный срез выбранной версии. Экспорт — полная корпоративская матрица.')),coverageSection,pane('Требования и покрытие',requirementsPanel(),coveragePanel(matrixData(db,day))))
  }
  function matrixProfiles(){
   const profession=ref('profession','matrix_profile_profession'),effective=date('matrix_profile_date');
@@ -542,7 +593,7 @@ export function trainingScreen(main,page,c){
      const v=values.get(x.key),target=select('profile_level_'+x.key,Object.entries(LEVEL_TEXT).map(([k,t])=>[k,k+' — '+t]),v.level,'Не требуется');
      const critical=simple('profile_critical_'+x.key,{normal:'Обычная',important:'Важная',critical:'Критическая'},v.criticality);
      target.onchange=()=>{v.level=target.value;dirty.add(x.key);updateStatus()};
-     critical.onchange=()=>{v.criticality=critical.value;dirty.add(x.key);updateStatus()};
+     critical.onchange=()=>{if(v.old&&v.old.scale_id!==loaded.scaleId&&!v.level){critical.value=v.criticality;c.notify('Сначала выберите новый уровень в корпоративской шкале',true);return}v.criticality=critical.value;dirty.add(x.key);updateStatus()};
      return [x.title,target,critical,v.old?(v.old.required_level+' · '+n('rating_scale',v.old.scale_id)+' · с '+v.old.valid_from):'Нет']
     });
     d.append(tableOf(['СОП / навык','Требуемый уровень','Критичность','Действующее требование'],lines));out.append(d)

@@ -165,3 +165,18 @@ body.editor-active{overflow:hidden}.editor-host{position:fixed;inset:0;z-index:2
 .employee-overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
 .employee-section-button{padding:14px;text-align:left;white-space:normal}
 .employee-return{margin:6px 0 12px}.employee-tabs{position:relative}
+
+/* LC4.4 matrix workspace */
+.matrix-builder-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:12px;align-items:start}
+.matrix-builder-columns .panel{min-width:0}.matrix-builder-columns .matrix-choice-list{max-height:340px}
+.matrix-choice-list details{margin:4px 0}.matrix-choice-list summary{font-weight:600}
+.matrix-preview-value{display:inline-block;min-width:32px;padding:5px;border:1px solid var(--line);text-align:center;font-weight:600}
+.matrix-preview-gap{border-color:#cf2525}.matrix-drag-handle{cursor:grab}
+.matrix-workspace{display:flex;gap:12px;align-items:flex-start;min-width:0}.matrix-workspace>div{flex:1;min-width:0}
+.matrix-cell-drawer{width:min(440px,42vw);flex:0 0 min(440px,42vw);position:sticky;top:12px;max-height:78vh;overflow:auto;border-left:1px solid var(--line);padding-left:8px}
+.matrix-cell-drawer[hidden]{display:none}.matrix-cell-drawer .panel{min-width:0}.matrix-cell-drawer .tablewrap{overflow:auto}
+.matrix-value.matrix-training-pending{position:relative}.matrix-value.matrix-training-pending:after{content:'';position:absolute;right:3px;top:3px;width:7px;height:7px;border-radius:50%;background:#2369c4;border:1px solid #fff}
+.corporate-matrix.matrix-transposed thead tr:first-child th{height:auto;min-height:44px;top:0}
+.matrix-transposed-skill{left:0;min-width:220px;max-width:320px;width:260px;text-align:left!important}
+.matrix-transposed-person{min-width:90px;max-width:130px}.matrix-group-row th{text-align:left;background:var(--surface)}
+@media(max-width:900px){.matrix-builder-columns{grid-template-columns:1fr}.matrix-workspace{display:block}.matrix-cell-drawer{position:static;width:auto;max-height:none;padding-left:0;border-left:0}}
