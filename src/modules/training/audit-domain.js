@@ -11,7 +11,15 @@ const exact=(p,k)=>invariant(p&&Object.keys(p).length===k.length&&k.every(x=>Obj
 const insert=(db,t,p)=>db.run('INSERT INTO '+t+'('+Object.keys(p).join(',')+') VALUES('+Object.keys(p).map(()=>'?').join(',')+')',Object.values(p));
 const update=(db,t,id,p)=>db.run('UPDATE '+t+' SET '+Object.keys(p).map(k=>k+'=?').join(',')+',rev=rev+1 WHERE id=?',[...Object.values(p),id]);
 const person=(db,id)=>invariant(isId(id)&&one(db,'SELECT id FROM person WHERE id=? AND archived=0',[id]),'Выберите действующего сотрудника');
-const day=e=>new Date(Date.parse(e.occurred_at)+14*3600000).toISOString().slice(0,10);
+// Event timestamps are UTC. The latest civil day is appropriate for an upper
+// bound on observations, never as the earliest due date. Replay is timezone-independent.
+const civilDay=(e,offset)=>new Date(Date.parse(e.occurred_at)+offset*3600000).toISOString().slice(0,10);
+const day=e=>civilDay(e,14);
+const earliestDay=e=>civilDay(e,-12);
+function validateDueDate(e,value){
+ invariant(validDate(value),'Укажите корректный срок');
+ invariant(value>=earliestDay(e),'Срок не может предшествовать дате создания');
+}
 export function auditDetails(db,id){
  const a=one(db,'SELECT a.*,v.version_no,v.methodology_json,c.code method_code FROM audit_session a JOIN checklist_version v ON v.id=a.version_id JOIN checklist c ON c.id=v.checklist_id WHERE a.id=?',[id]);if(!a)return null;
  let method={};try{method=JSON.parse(a.methodology_json)}catch{}
@@ -66,7 +74,7 @@ export function applyLC5Event(db,e,old){
   if(!old){
    invariant(e.operation==='create','Требуется создание мероприятия');exact(p,['response_id','title','owner_id','subject_id','due_on','kind','priority',...(Object.hasOwn(p,'source_link')?['source_link']:[])]);
    person(db,p.owner_id);if(p.subject_id!==null)person(db,p.subject_id);
-   invariant(required(p.title,500)&&validDate(p.due_on)&&p.due_on>=day(e)&&Object.hasOwn(ACTION_KINDS,p.kind)&&['normal','major','critical'].includes(p.priority),'Укажите задачу, срок и приоритет');
+   invariant(required(p.title,500),'Укажите название мероприятия');validateDueDate(e,p.due_on);invariant(Object.hasOwn(ACTION_KINDS,p.kind)&&['normal','major','critical'].includes(p.priority),'Выберите тип и приоритет мероприятия');
    let finding=null,generic=null;
    if(p.source_link){exact(p.source_link,['kind','id']);invariant(p.response_id===null,'Выберите один источник');generic=actionSource(db,p.source_link.kind,p.source_link.id);invariant(generic,'Источник мероприятия недоступен');if(p.kind==='trainee_training')invariant(generic.kind==='practical'&&p.subject_id===generic.subject_id,'Переобучение обучаемого требует отрицательного заключения практической оценки');else invariant(['corrective','development'].includes(p.kind),'Недопустимый тип для этого источника');if(generic.revision_id||generic.study_id){finding=id;insert(db,'finding',{id:finding,document_revision_id:generic.revision_id||null,study_id:generic.study_id||null,title:generic.label,severity:p.priority,created_at:e.occurred_at,state:'open'})}}
    if(p.response_id!==null){
@@ -98,7 +106,7 @@ export function applyLC5Event(db,e,old){
   if(a.finding_id){const unresolved=one(db,"SELECT id FROM action_item WHERE finding_id=? AND state<>'verified' AND state<>'cancelled'",[a.finding_id]);if(!unresolved&&p.outcome==='effective')db.run("UPDATE finding SET state='resolved' WHERE id=?",[a.finding_id])}return
  }
  if(t==='schedule_event'){
-  if(!old){exact(p,['assignment_id','owner_id','due_on']);person(db,p.owner_id);invariant(e.operation==='create'&&validDate(p.due_on)&&p.due_on>=day(e)&&one(db,"SELECT id FROM training_assignment WHERE id=? AND state<>'cancelled' AND source_sha256 IS NOT NULL",[p.assignment_id]),'Укажите назначение, ответственного и дату аудита');insert(db,t,{id,kind:'audit',owner_id:p.owner_id,source_id:p.assignment_id,due_on:p.due_on,state:'planned',source_type:'training_assignment',created_at:e.occurred_at,rev:1});return}
+  if(!old){exact(p,['assignment_id','owner_id','due_on']);person(db,p.owner_id);validateDueDate(e,p.due_on);invariant(e.operation==='create'&&one(db,"SELECT id FROM training_assignment WHERE id=? AND state<>'cancelled' AND source_sha256 IS NOT NULL",[p.assignment_id]),'Укажите назначение, ответственного и дату аудита');insert(db,t,{id,kind:'audit',owner_id:p.owner_id,source_id:p.assignment_id,due_on:p.due_on,state:'planned',source_type:'training_assignment',created_at:e.occurred_at,rev:1});return}
   invariant(e.operation==='update'&&old.state==='planned'&&old.kind==='audit'&&old.source_type==='training_assignment','Событие не доступно для изменения');
   if(p.command==='cancel'){exact(p,['command']);update(db,t,id,{state:'cancelled'});return}
   exact(p,['command','audit_id']);const a=one(db,"SELECT * FROM audit_session WHERE id=? AND state='final' AND assignment_id=?",[p.audit_id,old.source_id]);invariant(p.command==='complete'&&a&&a.auditor_id===old.owner_id&&a.observed_at.slice(0,10)<=day(e)&&(!old.created_at||a.recorded_at>=old.created_at&&a.observed_at.slice(0,10)>=old.created_at.slice(0,10))&&!one(db,'SELECT id FROM schedule_event WHERE completed_audit_id=?',[a.id]),'Выберите фактически проведённый аудит этого назначения и ответственного');update(db,t,id,{state:'done',completed_audit_id:a.id});return

@@ -25,3 +25,18 @@ test('verification cannot use a stale fact and later repeated failure reopens th
  const at=async(type,p,d,id=null)=>{const old=id?one(db,'SELECT * FROM '+type+' WHERE id=?',[id]):null,e={id:uuid(),entity_type:type,entity_id:id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload:p,occurred_at:d+'T10:00:00Z'};await f.w.applyContentEvents([e],f.readContent);return e.entity_id};
  const stage=async d=>at('training_session',{assignment_id:a,assignment_rev:f.getAssignment(a).rev,stage_code:'prepare',held_at:d+'T08:00',duration_minutes:10,result:'completed',notes:'QA',witness_id:null,mentor_ack:true,trainee_ack:true},d);
  const stale=await at('audit_session',payload(first,'2026-01-21',false),'2026-01-21');assert(!effectiveEvidence(db,actionRows(db)[0],stale));const fact=await stage('2026-01-22'),ok=await at('audit_session',payload(fact,'2026-01-22',false),'2026-01-22');await at('action_item',{command:'verify',verifier_id:f.actor,audit_id:ok,outcome:'effective',evidence:'QA'},'2026-01-22',act);assert.equal(actionStatus(db,actionRows(db)[0]),'verified');const fact2=await stage('2026-01-23');await at('audit_session',payload(fact2,'2026-01-23',true),'2026-01-23');assert.equal(actionStatus(db,actionRows(db)[0]),'ineffective')}finally{f.w.close()}});
+
+// A deadline is a civil calendar date, not the upper UTC+14 observation bound.
+test('LC5 same-day planning accepts local today across UTC rollover; old deadlines rejected',async()=>{
+ const f=await fixture();try{const db=f.w.working,a=await f.addAssignment();
+ const create=async(type,payload,occurred_at)=>{const e={id:uuid(),entity_type:type,entity_id:uuid(),operation:'create',expected_revision:0,payload,occurred_at};await f.w.applyContentEvents([e],f.readContent);return e.entity_id};
+ const action={response_id:null,title:'QA срок сегодня',owner_id:f.actor,subject_id:null,kind:'corrective',priority:'normal'};
+ for(const [timestamp,due] of [['2026-01-20T19:23:22Z','2026-01-20'],['2026-01-21T02:00:00Z','2026-01-20'],['2026-01-20T19:23:22Z','2026-01-21']]){
+  const id=await create('action_item',{...action,due_on:due},timestamp);assert.equal(one(db,'SELECT due_on FROM action_item WHERE id=?',[id]).due_on,due);
+  const s=await create('schedule_event',{assignment_id:a,owner_id:f.actor,due_on:due},timestamp);assert.equal(one(db,'SELECT due_on FROM schedule_event WHERE id=?',[s]).due_on,due);
+ }
+ await assert.rejects(create('action_item',{...action,due_on:'2026-01-18'},'2026-01-20T19:23:22Z'),/предшествовать/);
+ await assert.rejects(create('schedule_event',{assignment_id:a,owner_id:f.actor,due_on:'2026-01-18'},'2026-01-20T19:23:22Z'),/предшествовать/);
+ assert.deepEqual(rows(db,'PRAGMA foreign_key_check'),[]);
+ }finally{f.w.close()}
+});
