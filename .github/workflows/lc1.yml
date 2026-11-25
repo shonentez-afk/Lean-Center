@@ -36,12 +36,12 @@ jobs:
       - run: npm run smoke
       - uses: actions/upload-artifact@v4
         with:
-          name: LeanCenter-LC1.2-TN-${{ runner.os }}
-          path: releases/LeanCenter-LC1.2-TN.zip
+          name: LeanCenter-LC1.3-TN-${{ runner.os }}
+          path: releases/LeanCenter-LC1.3-TN.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: LC1.2-screenshots-${{ runner.os }}
+          name: LC1.3-screenshots-${{ runner.os }}
           path: artifacts/lc1-tn
           if-no-files-found: error
   publish:
@@ -54,14 +54,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: LeanCenter-LC1.2-TN-Linux
+          name: LeanCenter-LC1.3-TN-Linux
           path: releases
       - name: Publish verified folder candidate
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add releases/LeanCenter-LC1.2-TN.zip
+          git add releases/LeanCenter-LC1.3-TN.zip
           if ! git diff --cached --quiet; then
-            git commit -m "Build: verified LC1.2 TN design candidate"
+            git commit -m "Build: verified LC1.3 TN design candidate"
             git push origin HEAD:feature/lc1-tn-design
           fi

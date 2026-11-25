@@ -1,3 +1,4 @@
+import {registryCountChart} from './analytics/palette.js';
 import {createDb,openDb,Workspace,definitions,list,rows,one,meta,uuid,canonical,prepareSnapshot,readSnapshot,backup,restore,encode,decode,invariant,MAX_PACKAGE} from './core/db.js';
 import * as local from './storage/local.js';
 import * as net from './storage/network.js';
@@ -56,7 +57,7 @@ function home(main){
  for(const [k,d] of Object.entries(definitions)){const n=btn('',()=>navigate(k),'tile');n.setAttribute('aria-label',d.label+': '+counts[k]);add(n,add(el('div',undefined,'tile-head'),el('span',d.label,'muted'),icon(k,'tile-icon')),el('b',String(counts[k])),el('span','Открыть справочник →','tile-link'));g.append(n)}
  main.append(g);
  const c=el('div',undefined,'chart');main.append(pane('Структура справочников',c));
- if(window.echarts){const palette=theme?['#bdc6d3','#424e60']:['#5b626e','#dadddf'];chart=echarts.init(c,theme?'dark':null);chart.setOption({backgroundColor:'transparent',animation:false,textStyle:{fontFamily:'Proxima Nova, Proxima Nova Rg, Arial, sans-serif'},tooltip:{trigger:'axis'},grid:{left:24,right:36,bottom:8,top:8,containLabel:true},xAxis:{type:'value',minInterval:1,axisLabel:{color:palette[0]},splitLine:{lineStyle:{color:palette[1]}}},yAxis:{type:'category',inverse:true,data:Object.values(definitions).map(x=>x.label),axisLabel:{color:palette[0],fontSize:11,width:144,overflow:'truncate'},axisLine:{show:false},axisTick:{show:false}},series:[{type:'bar',barMaxWidth:20,data:Object.keys(definitions).map(k=>counts[k]),label:{show:true,position:'right',color:palette[0]},itemStyle:{color:'#E30613',borderRadius:[0,2,2,0]}}]})}
+ if(window.echarts){chart=echarts.init(c,theme?'dark':null);chart.setOption(registryCountChart(Object.values(definitions).map(x=>x.label),Object.keys(definitions).map(k=>counts[k]),theme))}
  const links=el('div',undefined,'workspace-grid');for(const [k,n] of Object.entries(planned)){const b=btn('',()=>navigate(k),'workspace-link');b.append(icon(k),el('span',n));links.append(b)}
  main.append(pane('Рабочие модули',el('p','СОП, ФРВ, TWI, компетенции, наставничество и аудит — равноправные модули центра. На текущем этапе доступны база и справочники; функциональные модули будут подключаться последовательно.','muted'),links))
 }
@@ -75,7 +76,7 @@ function render(){
  chart?.dispose();chart=null;document.documentElement.classList.toggle('dark',theme);
  const header=el('header',undefined,'corp-header');
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div'),el('div','LEAN CENTER','brand'),el('div','Центр производственной системы','brand-sub')));
- const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc1.2','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
+ const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc1.3','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
  header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.setAttribute('aria-label','Навигация');
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};
@@ -89,7 +90,7 @@ function render(){
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));
  if(page==='home')home(main);else if(page==='storage')storage(main);else if(Object.hasOwn(definitions,page))registry(main,page);else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
- main.append(el('p','LC1.2 · автономная рабочая копия · общий сетевой обмен','foot'))
+ main.append(el('p','LC1.3 · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
 async function init(){SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await net.latestSnapshot(folder,SQL);if(remote){await useSnapshot(remote.db);await persist();message(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки')}}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message('Сетевая база не обновлена: '+e.message,true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}
