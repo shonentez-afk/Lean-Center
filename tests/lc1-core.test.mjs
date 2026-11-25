@@ -17,3 +17,22 @@ test('SQLite export retains foreign keys',()=>{const w=newWs();bytesOf(w.base);a
 
 test('manual conflict resolution creates a new versioned event',async()=>{let m=newWs();const id=m.edit('person',null,person('P'));await m.acceptOwn();m=await published(m);const a=clone(m),b=clone(m);a.edit('person',id,person('P','Local'));const old=a.pending[0].id;b.edit('person',id,person('P','Remote'));await m.accept(await b.package());const s=await prepareSnapshot(m);a.replaceBase(await readSnapshot(SQL,s.manifest,s.bytes));a.resolveConflict('reapply');assert.equal(a.conflicts.length,0);assert.notEqual(a.pending[0].id,old);assert.equal(a.pending[0].expected_revision,2);assert.equal(list(a.working,'person')[0].display_name,'Local')});
 test('publisher recovers after a verified publication already includes accepted edits',async()=>{let m=await published(newWs());m.edit('person',null,person('A'));await m.acceptOwn();assert.equal(m.dirty,true);const s=await prepareSnapshot(m);m.replaceBase(await readSnapshot(SQL,s.manifest,s.bytes));assert.equal(m.dirty,false);assert.equal(list(m.base,'person').length,1)});
+
+import * as net from '../src/storage/network.js';
+const missing=()=>Object.assign(new Error('missing'),{name:'NotFoundError'});
+class FileHandle {
+ constructor(){this.kind='file';this.data=new Uint8Array()}
+ async getFile(){return new Blob([this.data])}
+ async createWritable(){let data;return {write:async d=>{data=typeof d==='string'?new TextEncoder().encode(d):new Uint8Array(d)},close:async()=>{this.data=data},abort:async()=>{}}}
+}
+class FolderHandle {
+ constructor(name='test'){this.kind='directory';this.name=name;this.files=new Map()}
+ async queryPermission(){return 'granted'}
+ async requestPermission(){return 'granted'}
+ async getFileHandle(name,{create=false}={}){if(!this.files.has(name)){if(!create)throw missing();this.files.set(name,new FileHandle())}const f=this.files.get(name);assert.equal(f.kind,'file');return f}
+ async getDirectoryHandle(name,{create=false}={}){if(!this.files.has(name)){if(!create)throw missing();this.files.set(name,new FolderHandle(name))}const f=this.files.get(name);assert.equal(f.kind,'directory');return f}
+ async removeEntry(name){if(!this.files.delete(name))throw missing()}
+ async *entries(){yield* this.files.entries()}
+}
+test('network adapter publication, two client exchange and backup using simulated directory API',async()=>{const folder=new FolderHandle();assert.equal(await net.testFolder(folder),true);let master=newWs();let s=await prepareSnapshot(master);await net.publishSnapshot(folder,SQL,s);master.replaceBase((await net.latestSnapshot(folder,SQL)).db);const client=new Workspace(SQL,(await net.latestSnapshot(folder,SQL)).db);client.edit('person',null,person('NETWORK'));const p=await client.package();await net.sendPackage(folder,p);const incoming=await net.listPackages(folder);assert.equal(incoming.length,1);assert.equal((await master.accept(incoming[0].p)).count,1);s=await prepareSnapshot(master);await net.publishSnapshot(folder,SQL,s);master.replaceBase((await net.latestSnapshot(folder,SQL)).db);client.replaceBase((await net.latestSnapshot(folder,SQL)).db);assert.equal(client.pending.length,0);assert.equal(list(client.working,'person')[0].employee_code,'NETWORK');await net.saveBackup(folder,await backup(client));assert.equal((await folder.getDirectoryHandle('Backups')).files.size,1);await assert.rejects(net.publishSnapshot(folder,SQL,s),/обновилась/);await assert.rejects(net.sendPackage(folder,p),/уже существует/)});
+test('network adapter refuses damaged snapshot and parallel publication',async()=>{const folder=new FolderHandle();const m=newWs();const s=await prepareSnapshot(m);await net.publishSnapshot(folder,SQL,s);const d=await folder.getDirectoryHandle('Database');const f=await d.getFileHandle('snapshot-'+s.manifest.id+'.sqlite');f.data[100]^=1;await assert.rejects(net.latestSnapshot(folder,SQL),/Повреждён/);f.data[100]^=1;const fork=await prepareSnapshot(m);await net.writeNew(d,'snapshot-'+fork.manifest.id+'.sqlite',fork.bytes);await net.writeNew(d,'publication-'+fork.manifest.id+'.json',canonical(fork.manifest));await assert.rejects(net.latestSnapshot(folder,SQL),/параллельные/)});
