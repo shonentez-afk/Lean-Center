@@ -184,7 +184,7 @@ test('LC4.2 built-in order is an unsigned DOCX without external template',async(
 });
 
 import {matrixRoster,columnChoices,matrixBaseline,matrixProjection,matrixFromRecord,matrixKey} from '../src/modules/training/matrix-view.js';
-import {SCALE_NAME,CORPORATE_LEVELS} from '../src/modules/training/corporate-forms.js';
+import {SCALE_NAME} from '../src/modules/training/corporate-forms.js';
 import {employeeRelations,employeeSourceLinks} from '../src/modules/master-data/employee-records.js';
 test('LC4.3 matrix roster, evidence baseline, targets, versions, employee relationships and restore',async()=>{
  const f=await fixture();try{
