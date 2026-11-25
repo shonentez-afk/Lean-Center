@@ -107,3 +107,5 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
  .panel{padding:13px}.chart{height:270px}.version{display:none}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+
+.registry-shortcuts{margin:0 0 16px}.org-tree{max-height:380px;overflow:auto}.org-node{display:flex;align-items:center;gap:9px;padding-top:5px;padding-bottom:5px;border-bottom:1px solid var(--line);min-height:34px;flex-wrap:wrap}.multiline-cell,.preview-detail{white-space:pre-wrap;overflow-wrap:anywhere;max-width:560px}.preview-detail{font-size:12px;padding:2px 0}.tablewrap td:has(.preview-detail){white-space:normal;min-width:240px}.field textarea{resize:vertical;min-height:90px}
