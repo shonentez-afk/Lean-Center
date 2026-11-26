@@ -10,7 +10,7 @@ const factState={draft:'Черновик',confirmed:'Подтверждён',voi
 const methodLabel={time:'Высвобождение времени',direct:'Прямой денежный расчёт'};
 export function economicScreen(c,h,route){
  const {ws,el,add,btn,pane,tableOf,run,go,readContent}=c,db=ws.working;
- const {day,n,stack,row,grid,msg,action,goLocal,back,select,simple,ref,date,planningDate,planningValue,num,note,f,person,save,event,table,exportButton}=h;
+ const {day,n,stack,row,grid,msg,action,writeAction,goLocal,back,select,simple,ref,date,planningDate,planningValue,num,note,f,person,save,event,table,exportButton}=h;
  const studies=frvRegistry(db),actions=actionRows(db),records=effectRows(db);
  const readNum=i=>{invariant(i.value.trim()!=='','Заполните все числовые поля; ноль вводится явно');const x=Number(i.value);invariant(Number.isFinite(x),'Некорректное число');return x};
  const sourceLabel=r=>r.study_id?'ФРВ · '+(studies.find(x=>x.id===r.study_id)?.title||r.study_id):'Мероприятие · '+(actions.find(x=>x.id===r.action_id)?.title||r.action_id);
@@ -68,13 +68,14 @@ export function economicScreen(c,h,route){
   }
   if(r.state==='active'){
    const holder=el('div'),reviewer=person('lc6_reviewer','Проверяющий расчёта','',{filter:x=>x.id!==r.owner_id}),evidence=note('lc6_measure_evidence','','Основание проверки объёма, ставки, затрат и замеров'),available=effectEvidence(db,r,actions);
+   holder.dataset.lcWriteScope='1';
    let serial=0;
    function showModel(source,measurement){
     const initial={...(actual?.inputs||plan)},fixed=basis?basis.p.comparison.deltaMinutes*60:measurement?measurement.before-measurement.after:null;if(fixed!==null)initial.deltaSeconds=fixed;
     const model=modelEditor(r.method,initial,'lc6_actual',fixed,r.currency,!!basis);
-    holder.replaceChildren(...(basis?[msg('Время TWI: разница вводных инструктажей или времени задач программы. Ставка и объём указываются на одно сопоставимое обучение; одни и те же часы не учитываются дважды.')]:measurement?[msg('ФРВ: '+fmt(measurement.before)+' → '+fmt(measurement.after)+' сек; полных циклов '+measurement.baselineCount+' / '+measurement.improvedCount+'. Разница рассчитана из исходного файла.')]:[msg('Ручное основание: укажите документированные измерения или расчёты в доказательствах. Не является автоматически измеренным ФРВ.')]),reviewer.element,f('Доказательства проверенного расчёта',evidence),model.element,action('Зафиксировать проверенный расчёт',()=>run(async()=>{const e=event('economic_effect',{command:'measure',inputs:model.values(),measurement,reviewer_id:reviewer.value,evidence:evidence.value,actions:available,source,...(basis?{twi_basis_id:basis.id}:{})},r);await ws.applyContentEvents([e],readContent);route.measurePrepared=null;return 'Проверенный расчёт сохранён. Ожидает публикации базы.'},{retainForm:true})));
+    holder.replaceChildren(...(basis?[msg('Время TWI: разница вводных инструктажей или времени задач программы. Ставка и объём указываются на одно сопоставимое обучение; одни и те же часы не учитываются дважды.')]:measurement?[msg('ФРВ: '+fmt(measurement.before)+' → '+fmt(measurement.after)+' сек; полных циклов '+measurement.baselineCount+' / '+measurement.improvedCount+'. Разница рассчитана из исходного файла.')]:[msg('Ручное основание: укажите документированные измерения или расчёты в доказательствах. Не является автоматически измеренным ФРВ.')]),reviewer.element,f('Доказательства проверенного расчёта',evidence),model.element,writeAction('Зафиксировать проверенный расчёт',()=>run(async()=>{const e=event('economic_effect',{command:'measure',inputs:model.values(),measurement,reviewer_id:reviewer.value,evidence:evidence.value,actions:available,source,...(basis?{twi_basis_id:basis.id}:{})},r);await ws.applyContentEvents([e],readContent);route.measurePrepared=null;return 'Проверенный расчёт сохранён. Ожидает публикации базы.'},{retainForm:true})));
    }
-   async function prepare(){const request=++serial;holder.replaceChildren(msg('Проверка исходных доказательств…'));try{
+   async function prepare(){if(holder.lcIsDirty?.()&&!confirm('В расчёте есть несохранённые изменения. Открыть модель заново?'))return;holder.lcResetForm?.();const request=++serial;holder.replaceChildren(msg('Проверка исходных доказательств…'));try{
     invariant(available.length,'Сначала подтвердите эффективность связанного мероприятия');if(basis)invariant(twiBasisCurrent(db,r,basis.id),'Сравнение TWI утратило актуальность. Повторите проверку групп.');
     let source=null,measurement=null;
     if(r.study_id){const e=await verifiedFrvEffect(db,r.study_id,readContent),x=e.summary;source=e.study.source;measurement={before:x.before,after:x.after,baselineCount:x.baselineCount,improvedCount:x.improvedCount}}

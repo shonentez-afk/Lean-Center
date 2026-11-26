@@ -101,7 +101,7 @@ function replace(newWs){ws?.close();ws=newWs}
 function formControls(){return [...document.querySelectorAll('main input[name]:not([type=file]),main select[name],main textarea[name],main button.lc-directory-trigger[name]')]}
 function captureRejectedForm(){
  const fields=formControls(),details=[...document.querySelectorAll('main details')];
- return {page,edit:edit===null?null:structuredClone(edit),route:getTrainingRoute(),scroll:window.scrollY,fields:fields.map(e=>({name:e.name,tag:e.tagName,type:e.type,person:typeof e.lcRestorePerson==='function',value:e.dataset.personId??e.value,checked:e.checked})),details:details.map(e=>({label:e.querySelector('summary')?.textContent||'',open:e.open}))}
+ return {page,edit:edit===null?null:structuredClone(edit),route:getTrainingRoute(),scroll:window.scrollY,fields:fields.map(e=>({name:e.name,tag:e.tagName,type:e.type,person:typeof e.lcRestorePerson==='function',value:e.dataset.personId??e.value,checked:e.checked,selected:e.tagName==='SELECT'&&e.multiple?[...e.selectedOptions].map(o=>o.value):null})),details:details.map(e=>({label:e.querySelector('summary')?.textContent||'',open:e.open}))}
 }
 function restoreRejectedForm(s){
  if(!s||s.page!==page)return;
@@ -109,6 +109,7 @@ function restoreRejectedForm(s){
  for(const v of s.fields){const key=v.name+'|'+v.tag+'|'+v.type,idx=seen.get(key)||0;seen.set(key,idx+1);const e=fields.filter(x=>x.name===v.name&&x.tagName===v.tag&&x.type===v.type)[idx];if(!e)continue;
   if(v.person){people.push([e,v.value]);continue}
   if(e.type==='checkbox'||e.type==='radio'){if(e.checked!==v.checked){e.checked=v.checked;changed.push(e)}}
+  else if(v.selected&&e.multiple){const old=[...e.selectedOptions].map(o=>o.value);if(JSON.stringify(old)!==JSON.stringify(v.selected)){for(const o of e.options)o.selected=v.selected.includes(o.value);changed.push(e)}}
   else if(e.value!==v.value&&(!e.options||[...e.options].some(o=>o.value===v.value))){e.value=v.value;changed.push(e)}
  }
  for(const [e,v] of people)if(e.isConnected)e.lcRestorePerson?.(v);

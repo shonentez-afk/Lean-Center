@@ -14,7 +14,7 @@ const form=id=>STANDARD_FORMS.find(x=>x.id===id);
 const show=(d)=>d?.kind==='internship'?'internship':'programs';
 export function standardWorkflowScreen(page,c,h,route){
  const {ws,el,btn,pane,tableOf,go,run,fieldInput,downloadBytes,readContent}=c,db=ws.working;
- const {day,n,stack,row,grid,msg,action,goLocal,back,select,simple,ref,date,num,note,f,person,save,event,table,exportButton,saveWorkbook,nullable}=h;
+ const {day,n,stack,row,grid,msg,action,writeAction,goLocal,back,select,simple,ref,date,num,note,f,person,save,event,table,exportButton,saveWorkbook,nullable}=h;
  const exportForm=(label,id,fields,lines,name)=>btn(label,()=>run(async()=>saveWorkbook(name,standardWorkbook(ExcelJS,form(id),{fields,rows:lines})),{save:false}));
  const after=id=>goLocal({id});
  const name=id=>n('person',id);
@@ -38,7 +38,7 @@ export function standardWorkflowScreen(page,c,h,route){
    function sync(reset=false){if(!ad.start.value)return;try{const b=adaptationBounds(ad.start.value,category.value);ad.due.min=b.min;ad.due.max=b.max;if(reset||!ad.due.value||ad.due.value<b.min||ad.due.value>b.max)ad.due.value=b.min;bounds.textContent='Допустимый срок завершения адаптации: '+b.min+' — '+b.max;for(const k of ['safety','internship']){controls[k].start.min=ad.start.value;controls[k].start.max=ad.due.value;controls[k].due.min=ad.start.value;controls[k].due.max=ad.due.value}}catch(e){bounds.textContent=e.message}}
    ad.start.onchange=category.onchange=()=>sync(true);ad.due.onchange=()=>sync(false);sync();addShift();addShift();
    const panels=Object.entries(controls).map(([k,v])=>pane(PROGRAM_DOCS[k].title,f('Активная версия шаблона',v.program),grid(v.mentor.element,f('Начало',v.start),f('Окончание',v.due)),...(k==='adaptation'?[bounds]:[])));
-   const create=action('Оформить три документа одновременно',()=>run(async()=>{
+   const create=writeAction('Оформить три документа одновременно',()=>run(async()=>{
     const shared={trainee_id:trainee.value,manager_id:manager.value,reason:why.value},events=Object.entries(controls).map(([k,v])=>event('training_enrollment',{...shared,program_id:v.program.value,mentor_id:v.mentor.value,start_on:v.start.value,due_on:v.due.value}));
     const e=event('twi_preparation',{trainee_id:trainee.value,manager_id:manager.value,category:category.value,adaptation_id:events[0].entity_id,safety_id:events[1].entity_id,internship_id:events[2].entity_id,shifts:shifts.map(x=>({date:x.d.value,shift_id:x.s.value})),note:why.value});
     await ws.applyContentEvents([...events,e],readContent);goLocal({id:e.entity_id});return 'Запись сохранена. Ожидает публикации базы.'

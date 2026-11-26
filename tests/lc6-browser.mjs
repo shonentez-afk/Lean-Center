@@ -1,4 +1,5 @@
 import {chromium} from 'playwright';
+import {guardProbe,nestedGuard,refusedLeave} from './form-guard-acceptance.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,7 +17,7 @@ const browser=await chromium.launch({headless:true});
 try{
  const ctx=await browser.newContext({offline:true,acceptDownloads:true,timezoneId:'Asia/Novokuznetsk',viewport:{width:1366,height:850}}),page=await ctx.newPage(),errors=[];
  await page.clock.setFixedTime(new Date('2026-10-31T17:30:00Z')); // 1 Nov 00:30 in Yurga, still 31 Oct UTC
- page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+ page.on('pageerror',e=>errors.push(e.message));const guard=guardProbe(page);
  const nav=async name=>{const target=page.locator('.sidebar .nav').filter({has:page.getByText(name,{exact:true})});if(!(await target.isVisible()))await target.locator('xpath=ancestor::details[1]/summary').click();await target.click()};
  const choose=async(label,query)=>{await page.getByRole('button',{name:'Выбрать: '+label,exact:true}).click();await page.getByRole('searchbox',{name:'Поиск сотрудника'}).fill(query);await page.locator('.lc-picker-popup .lc-person-option').click()};
  const saved=async label=>{await page.getByRole('button',{name:label,exact:true}).click();try{await page.getByText('Запись сохранена. Ожидает публикации базы.',{exact:true}).waitFor()}catch(e){console.error('QA save failed',label,await page.locator('#status').textContent());throw e}assert.equal(await page.locator('#status').getAttribute('class'),'status')};
@@ -27,6 +28,18 @@ try{
  await page.locator('select[name=lc6_source_type]').selectOption('action');await page.locator('select[name=lc6_action]').selectOption(task);await page.locator('select[name=lc6_method]').selectOption('direct');
  await input('lc6_plan_basis','QA план');await input('lc6_plan_annualGross',1000);await input('lc6_plan_investment',200);await input('lc6_plan_annualCost',100);await saved('Сохранить план эффекта');
  await page.getByRole('heading',{name:'1. Плановый эффект',exact:true}).waitFor();await page.getByRole('cell',{name:'350%',exact:true}).waitFor();
+ // LC6.7.6: edit an existing plan, not only create a new ROI card.
+ const openPlan=async()=>{const s=page.locator('main summary').filter({hasText:'Изменить план до проверки'});if(!await s.locator('xpath=..').evaluate(d=>d.open))await s.click()};
+ const openROI=async()=>{await nav('ROI-модель');await page.getByRole('row').filter({hasText:title}).getByRole('button',{name:'Открыть',exact:true}).click();await openPlan()};
+ const editValues=async()=>[await page.locator('[name=lc6_edit_basis]').inputValue(),await page.locator('[name=lc6_edit_plan_annualGross]').inputValue()];
+ await openPlan();assert.equal(await page.locator('[name=lc6_edit_basis]').evaluate(e=>e.closest('[data-lc-work-form]')?.tagName),'DETAILS');
+ const originalPlan=await editValues();assert.deepEqual(originalPlan,['QA план','1000']);const changedPlan=['QA изменённое основание','1234'];
+ await input('lc6_edit_basis',changedPlan[0]);await input('lc6_edit_plan_annualGross',1234);await nestedGuard(page,guard,nav,editValues,changedPlan);await fs.mkdir('artifacts/lc6',{recursive:true});await page.screenshot({path:'artifacts/lc6/roi-plan-guard-retained.png',fullPage:true});
+ await nav('Дашборд');await openROI();assert.deepEqual(await editValues(),originalPlan);
+ await input('lc6_edit_basis','');await input('lc6_edit_plan_annualGross',1234);await page.getByRole('button',{name:'Сохранить изменения плана',exact:true}).click();await page.getByText(/Укажите основание планового расчёта/).waitFor();assert.deepEqual(await editValues(),['','1234']);await refusedLeave(guard,()=>nav('Дашборд'));assert.deepEqual(await editValues(),['','1234']);guard.allow=true;
+ await input('lc6_edit_basis',changedPlan[0]);await saved('Сохранить изменения плана');let promptCount=guard.events.length;await nav('Дашборд');assert.equal(guard.events.length,promptCount);await openROI();assert.deepEqual(await editValues(),changedPlan);
+ await input('lc6_edit_basis',originalPlan[0]);await input('lc6_edit_plan_annualGross',1000);await saved('Сохранить изменения плана');
+
  await page.getByText('Назначить цель на период',{exact:true}).click();const targetDay=await page.locator('[name=lc61_target_to]').inputValue();assert.equal(targetDay,'2026-11-01');await input('lc61_target_from','2026-10-31');await input('lc61_target_to','2026-10-31');await input('lc61_target_net',400);await input('lc61_target_basis','QA цель месяца');await page.getByRole('button',{name:'Сохранить цель на период',exact:true}).click();await page.getByText(/Укажите период цели, который ещё не завершён/).waitFor();await input('lc61_target_from',targetDay);await input('lc61_target_to',targetDay);await saved('Сохранить цель на период');
  await page.getByRole('button',{name:'Открыть цель',exact:true}).click();await page.getByText(/Период открыт · QA цель месяца/).waitFor();await page.getByText('Отменить открытую цель',{exact:true}).click();await input('lc61_cancel_reason','QA отмена в последний день');await saved('Отменить цель');
  await page.getByText('Назначить цель на период',{exact:true}).click();await input('lc61_target_from',targetDay);await input('lc61_target_to',targetDay);await input('lc61_target_net',400);await input('lc61_target_basis','QA цель месяца');await saved('Сохранить цель на период');

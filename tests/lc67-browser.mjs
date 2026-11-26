@@ -1,4 +1,5 @@
 import {chromium} from 'playwright';
+import {guardProbe,nestedGuard,refusedLeave} from './form-guard-acceptance.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,7 +17,7 @@ const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'LC67 final TWI ')),original=pa
 if(scenario!=='commission'){const f=await fixture({installMethod:false});try{ids={revision:f.doc.id,skill:f.skill,scale:f.scale,shift:f.shift};await fs.writeFile(original,JSON.stringify(await f.backupBundle()))}finally{f.w.close()}}
 if(['all','commission'].includes(scenario)){prepared=await preparedBundle();await fs.writeFile(preparedFile,JSON.stringify(prepared.backup))}
 await fs.mkdir('artifacts/lc67',{recursive:true});
-const browser=await chromium.launch({headless:true});const errors=[];let page,ctx;
+const browser=await chromium.launch({headless:true});const errors=[];let page,ctx,guard;
 const input=(name,value)=>page.locator('[name="'+name+'"]').fill(String(value));
 const select=(name,value)=>page.locator('select[name="'+name+'"]').selectOption(String(value));
 const button=(label)=>page.locator('main').getByRole('button',{name:label,exact:true});
@@ -24,7 +25,7 @@ async function nav(name){const target=page.locator('.sidebar .nav').filter({has:
 async function choose(label,query){await button('Выбрать: '+label).click();await page.getByRole('searchbox',{name:'Поиск сотрудника'}).fill(query);await page.locator('.lc-picker-popup .lc-person-option').click()}
 async function chooseNamed(field,query){await page.locator('button[name="'+field+'"]').click();await page.getByRole('searchbox',{name:'Поиск сотрудника'}).fill(query);const popup=page.locator('.lc-picker-popup'),option=popup.locator('.lc-person-option');await option.waitFor({timeout:5000}).catch(async e=>{throw Error('Не найден сотрудник '+query+' для поля '+field+': '+await popup.innerText(),{cause:e})});assert.equal(await option.count(),1,'Неоднозначный сотрудник '+query+' в поле '+field);await option.click()}
 async function saved(label){await button(label).click();try{await page.getByText('Запись сохранена. Ожидает публикации базы.',{exact:true}).waitFor({timeout:15000})}catch(e){console.error('LC67 save failed',label,await page.locator('#status').textContent());throw e}}
-async function restore(file){if(ctx)await ctx.close();ctx=await browser.newContext({offline:true,acceptDownloads:true,viewport:{width:1366,height:900}});page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());await page.goto(pathToFileURL(path.resolve('dist/LeanCenter/index.html')).href);await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await nav('Настройки и обмен');const fc=page.waitForEvent('filechooser');await button('Восстановить копию').click();await (await fc).setFiles(file);await page.getByText('Копия восстановлена; проверьте ID базы',{exact:true}).waitFor()}
+async function restore(file){if(ctx)await ctx.close();ctx=await browser.newContext({offline:true,acceptDownloads:true,viewport:{width:1366,height:900}});page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));guard=guardProbe(page);await page.goto(pathToFileURL(path.resolve('dist/LeanCenter/index.html')).href);await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await nav('Настройки и обмен');const fc=page.waitForEvent('filechooser');await button('Восстановить копию').click();await (await fc).setFiles(file);await page.getByText('Копия восстановлена; проверьте ID базы',{exact:true}).waitFor()}
 const tab=label=>page.locator('.library-tabs').getByRole('button',{name:label,exact:true});
 const summary=label=>page.locator('main summary').and(page.getByText(label,{exact:true}));
 async function openDetails(label){const s=summary(label);await s.waitFor();if(!await s.locator('xpath=..').evaluate(d=>d.open))await s.click()}
@@ -58,7 +59,24 @@ try{
  // The core fixture has canonical training and practical/qualification evidence, but no preparation outcomes.
  // Register every result through the preparation card, then close all three documents.
  if(['all','commission'].includes(scenario)){await restore(preparedFile);await nav('Подготовка сотрудников');await button('Открыть').click();await page.getByRole('heading',{name:'Программа подготовки · Ученик Тестовый',exact:true}).waitFor();
- await openDetails('Зарегистрировать / уточнить смену');await input('prep_fact_shift_date',date);await select('prep_fact_shift_id',prepared.shift);await select('prep_fact_shift_result','incomplete');await input('prep_fact_shift_minutes',10);await input('prep_fact_shift_note','QA неполная смена');await saved('Сохранить факт смены');
+ // LC6.7.6: exact acceptance reproduction. Scope is the shift editor, not
+ // the preparation card. Merely opening/closing its details is not an edit.
+ const shiftSummary='Зарегистрировать / уточнить смену',shiftField=name=>page.locator('[name="prep_fact_shift_'+name+'"]');
+ const shiftValues=async()=>[await shiftField('minutes').inputValue(),await shiftField('note').inputValue()];
+ const openPreparation=async()=>{await nav('Подготовка сотрудников');await button('Открыть').click();await page.getByRole('heading',{name:'Программа подготовки · Ученик Тестовый',exact:true}).waitFor();await openDetails(shiftSummary)};
+ await openDetails(shiftSummary);assert.equal(await shiftField('minutes').evaluate(e=>e.closest('[data-lc-work-form]')?.tagName),'DETAILS');const initialShift=await shiftValues(),cleanCount=guard.events.length;
+ await summary(shiftSummary).click();await summary(shiftSummary).click();await nav('Дашборд');assert.equal(guard.events.length,cleanCount);await openPreparation();
+ const shiftDraft=['377','QA несохранённый факт смены'];await input('prep_fact_shift_minutes',377);await input('prep_fact_shift_note',shiftDraft[1]);await nestedGuard(page,guard,nav,shiftValues,shiftDraft);
+ await page.screenshot({path:'artifacts/lc67/shift-guard-retained.png',fullPage:true});
+ // Other writes must not erase this draft. Refuse the confirmation.
+ const safetyEditor=page.locator('main details').filter({has:page.locator('[name=prep_safety_date]')});if(!await safetyEditor.evaluate(e=>e.open))await safetyEditor.locator('summary').click();
+ await refusedLeave(guard,()=>button('Зарегистрировать протокол ОТ').click());assert.deepEqual(await shiftValues(),shiftDraft);
+ guard.allow=true;await nav('Дашборд');await openPreparation();assert.deepEqual(await shiftValues(),initialShift);
+ await input('prep_fact_shift_date',date);await select('prep_fact_shift_id',prepared.shift);await select('prep_fact_shift_result','incomplete');await input('prep_fact_shift_minutes',0);await input('prep_fact_shift_note',shiftDraft[1]);await button('Сохранить факт смены').click();await page.locator('#status.error').waitFor();assert.deepEqual(await shiftValues(),['0',shiftDraft[1]]);
+ await refusedLeave(guard,()=>nav('Дашборд'));assert.deepEqual(await shiftValues(),['0',shiftDraft[1]]);guard.allow=true;
+ await input('prep_fact_shift_minutes',377);await saved('Сохранить факт смены');await page.getByRole('cell',{name:'377',exact:true}).waitFor();
+ let promptCount=guard.events.length;await nav('Дашборд');assert.equal(guard.events.length,promptCount);await openPreparation();
+
  for(const d of [date,'2026-01-21']){await openDetails('Зарегистрировать / уточнить смену');await input('prep_fact_shift_date',d);await select('prep_fact_shift_id',prepared.shift);await select('prep_fact_shift_result','completed');await input('prep_fact_shift_minutes',480);await input('prep_fact_shift_note','QA смена');await saved('Сохранить факт смены')}
  await page.getByText(/Завершено смен: 2 \/ минимум 2/).waitFor();
  for(const [kind,label] of [['safety','Зарегистрировать протокол ОТ'],['internship','Зарегистрировать итог стажировки']]){

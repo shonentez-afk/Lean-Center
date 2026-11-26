@@ -1,4 +1,4 @@
-name: LC6.7.5 shared work form protection
+name: LC6.7.6 nested form protection and SOP footer
 on:
   push:
     branches: [feature/lc6-economic-effect, feature/lc6.3-twi-standard-v03]
@@ -36,12 +36,12 @@ jobs:
       - run: npm run smoke
       - uses: actions/upload-artifact@v4
         with:
-          name: LeanCenter-LC6.7.5-standard-dev-${{ runner.os }}
-          path: releases/LeanCenter-LC6.7.5-standard-dev.zip
+          name: LeanCenter-LC6.7.6-standard-dev-${{ runner.os }}
+          path: releases/LeanCenter-LC6.7.6-standard-dev.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LC6.7.5-standard-dev-screenshots-${{ runner.os }}
+          name: LC6.7.6-standard-dev-screenshots-${{ runner.os }}
           path: artifacts
           if-no-files-found: warn
