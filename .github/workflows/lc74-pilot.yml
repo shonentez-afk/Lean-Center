@@ -1,0 +1,29 @@
+name: LC7.4.0 cloud pilot regression
+on:
+  push:
+    branches: [feature/lc7.4-amvera]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  server-pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: node --test tests/lc74-server.test.mjs
+      - run: node tools/build_folder.mjs
+      - run: python tools/package_folder.py
+      - run: npx playwright install --with-deps chromium
+      - run: npm run smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LC7.4.0-test-evidence
+          path: artifacts
+          if-no-files-found: warn
