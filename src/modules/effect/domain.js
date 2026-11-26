@@ -1,3 +1,4 @@
+import {twiComparison} from '../training/twi-effectiveness.js';
 import {calculateEffect} from './math.js';
 export {calculateEffect} from './math.js';
 // LC6: calculations, event guards, current evidence and period facts.
@@ -26,8 +27,12 @@ export function verifyEconomicSource(e,result){
 export function effectEvidence(db,record,allActions=actionRows(db)){
  return allActions.filter(a=>record.study_id?a.study_id===record.study_id:a.id===record.action_id).filter(a=>actionStatus(db,a)==='verified').map(a=>({id:a.id,verification_id:one(db,"SELECT id FROM action_verification WHERE action_id=? AND outcome='effective' ORDER BY checked_at DESC,id DESC LIMIT 1",[a.id])?.id})).filter(a=>a.verification_id).sort((a,b)=>a.id.localeCompare(b.id));
 }
+export function twiBasis(db,id){const e=one(db,"SELECT id,payload_json,occurred_at FROM change_event WHERE entity_type='economic_effect' AND entity_id=? AND json_extract(payload_json,'$.command')='twi_basis' ORDER BY expected_revision DESC,id DESC LIMIT 1",[id]);return e?{...e,p:JSON.parse(e.payload_json)}:null}
+export function twiBasisCurrent(db,r,id){const b=twiBasis(db,r.id);if(!b||b.id!==id)return false;try{return canonical(twiComparison(db,b.p.scope,b.p.scope.after_to))===canonical(b.p.comparison)}catch{return false}}
+export function twiEffectsFor(db,kind,id){return effectRows(db).filter(r=>{const b=twiBasis(db,r.id);if(!b)return false;const p=b.p;return kind==='program'?p.scope.kind==='program'&&p.scope.source_id===id:kind==='assignment'?p.scope.kind==='assignment'&&(p.scope.source_id===id||[...p.comparison.before,...p.comparison.after].some(x=>x.id===id)):kind==='person'?[...p.comparison.before,...p.comparison.after].some(x=>x.person===id):false})}
 function snapshotCurrent(db,r,a,allActions){
  if(r.state!=='active'||!a)return false;
+ const basis=twiBasis(db,r.id);if(basis&&(!a.twi_basis_id||!twiBasisCurrent(db,r,a.twi_basis_id)))return false;
  if(r.study_id){const f=one(db,'SELECT state,context_json FROM frv_study WHERE id=?',[r.study_id]);if(f?.state!=='final'||JSON.parse(f.context_json).source.sha256!==a.source?.sha256)return false}
  const evidence=effectEvidence(db,r,allActions);return a.actions.length>0&&a.actions.every(x=>evidence.some(y=>y.id===x.id&&y.verification_id===x.verification_id));
 }
@@ -124,11 +129,18 @@ export function applyEconomicEvent(db,e,old){
    insert(db,t,{id,study_id:p.study_id,action_id:p.action_id,owner_id:p.owner_id,unit_id:p.unit_id,currency:p.currency,method:p.method,title:p.title.trim(),plan_json:canonical(p.plan),plan_basis:p.plan_basis.trim(),review_due:p.review_due,state:'active',created_at:e.occurred_at,rev:1});return
   }
   invariant(e.operation==='update'&&old.state==='active','Карточка недоступна для изменения');
+  if(p.command==='twi_basis'){
+   exact(p,['command','scope','comparison','actor_id','note']);person(db,p.actor_id);invariant(old.action_id&&!old.study_id&&old.method==='time'&&text(p.note),'Основание TWI связывается с карточкой мероприятия с методом времени');
+   const scope=p.scope;exact(scope,['kind','source_id','unit_id','before_from','before_to','after_from','after_to']);const c=twiComparison(db,scope,day(e));invariant(c.comparable&&c.unit_id===old.unit_id&&canonical(c)===canonical(p.comparison),'Требуются сопоставимые завершённые группы TWI того же подразделения');
+   invariant(!one(db,"SELECT id FROM economic_fact WHERE effect_id=? AND state='draft'",[id]),'Сначала разрешите черновики денежных фактов');
+   const ids=new Set(c.after.map(x=>x.id));for(const other of effectRows(db).filter(x=>x.id!==id&&x.state==='active')){const b=twiBasis(db,other.id);invariant(!b||b.p.scope.kind!==scope.kind||!b.p.comparison.after.some(x=>ids.has(x.id)),'Эти результаты TWI уже учтены в другой активной карточке');}
+   update(db,t,id,{reviewed_at:null});return
+  }
   if(['period_target','period_target_cancel','period_review'].includes(p.command)){applyPeriodCommand(db,e,old);return}
   if(p.command==='plan'){exact(p,['command','plan','plan_basis']);invariant(!old.actual_json,'Исходный план зафиксирован после проверки расчёта');calculateEffect(old.method,p.plan);invariant(text(p.plan_basis),'Укажите основание планового расчёта');update(db,t,id,{plan_json:canonical(p.plan),plan_basis:p.plan_basis.trim()});return}
   if(p.command==='reschedule'){exact(p,['command','review_due','reason']);due(e,p.review_due);invariant(text(p.reason),'Укажите основание нового срока');update(db,t,id,{review_due:p.review_due,reviewed_at:null});return}
   if(p.command==='cancel'){exact(p,['command','reason']);invariant(text(p.reason)&&!one(db,"SELECT id FROM economic_fact WHERE effect_id=? AND state<>'void'",[id]),'Укажите основание; сначала разрешите все денежные факты');update(db,t,id,{state:'cancelled'});return}
-  exact(p,['command','inputs','measurement','reviewer_id','evidence','actions','source']);invariant(p.command==='measure'&&text(p.evidence),'Укажите основание проверки расчёта');
+  const basis=twiBasis(db,id);exact(p,['command','inputs','measurement','reviewer_id','evidence','actions','source',...(basis?['twi_basis_id']:[])]);if(basis){invariant(p.twi_basis_id===basis.id&&twiBasisCurrent(db,old,basis.id),'Сравнение TWI утратило актуальность');invariant(p.inputs.deltaSeconds===basis.p.comparison.deltaMinutes*60,'Разница времени должна следовать из зафиксированного сравнения TWI')};invariant(p.command==='measure'&&text(p.evidence),'Укажите основание проверки расчёта');
   person(db,p.reviewer_id);invariant(p.reviewer_id!==old.owner_id,'Проверяющий отличается от ответственного');
   const available=effectEvidence(db,old);invariant(Array.isArray(p.actions)&&p.actions.length>0&&p.actions.length<=1000&&new Set(p.actions.map(x=>x.id)).size===p.actions.length&&p.actions.every(x=>available.some(y=>canonical(x)===canonical(y))),'Нужны связанные мероприятия с действующей проверкой эффективности');
   invariant(!one(db,"SELECT id FROM economic_fact WHERE effect_id=? AND state='draft'",[id]),'Сначала подтвердите или аннулируйте черновики денежных фактов');
@@ -140,7 +152,7 @@ export function applyEconomicEvent(db,e,old){
    invariant(p.inputs.deltaSeconds===p.measurement.before-p.measurement.after,'Разница должна следовать из замеров ФРВ');
   }else{invariant(p.source===null&&p.measurement===null,'Для самостоятельного мероприятия используйте документированное ручное основание')}
   calculateEffect(old.method,p.inputs);
-  update(db,t,id,{actual_json:canonical({inputs:p.inputs,measurement:p.measurement,reviewer_id:p.reviewer_id,evidence:p.evidence.trim(),actions:p.actions,source:p.source,at:e.occurred_at}),actual_event_id:e.id,reviewed_at:e.occurred_at});return
+  update(db,t,id,{actual_json:canonical({inputs:p.inputs,measurement:p.measurement,reviewer_id:p.reviewer_id,evidence:p.evidence.trim(),actions:p.actions,source:p.source,...(basis?{twi_basis_id:basis.id}:{}),at:e.occurred_at}),actual_event_id:e.id,reviewed_at:e.occurred_at});return
  }
  invariant(t==='economic_fact','Неизвестное событие LC6');
  const fields=['actual_event_id','period_from','period_to','gross_minor','recurring_minor','investment_minor','registered_by','evidence'];
