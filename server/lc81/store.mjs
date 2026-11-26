@@ -116,7 +116,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     const result=tx(candidate,()=>fn(candidate));checkPrivate(candidate);
     try{
      const packed=pack(candidate);await write(file,packed);
-     const back=await unpack(SQL,file);try{must(digest(bytesOf(back))===digest(bytesOf(candidate)),503,'Запись не подтверждена')}finally{back.close()}
+     const back=await unpack(SQL,file);try{must((await fs.readFile(file)).equals(packed),503,'Запись не подтверждена')}finally{back.close()}
     }catch(e){poisoned=true;throw new PilotError(503,'Запись не подтверждена; требуется проверка хранилища')}
     current.close();current=candidate;return result;
    }finally{if(candidate!==current)candidate.close()}
