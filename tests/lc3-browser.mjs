@@ -138,6 +138,12 @@ try{
  await page.getByRole('button',{name:'Вернуться в редактор',exact:true}).click();
  assert.equal(await emptyEditor.locator('#meta-operation').inputValue(),'Черновик проверки нового редактора');
  await fs.mkdir('artifacts/lc3',{recursive:true});await page.screenshot({path:'artifacts/lc3/new-sop-editor.png',fullPage:true});
+ // Full portable recovery includes original image and annotations, without catalog publication.
+ await emptyEditor.waitForFunction(()=>document.getElementById('lc-sop-recovery-status')?.textContent.includes('Черновик СОП сохранён'));
+ await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'Конструктор СОП',exact:true}).first().click();await page.getByRole('button',{name:'Создать СОП',exact:true}).click();const recovered=await editorFrame();
+ assert.equal(await recovered.locator('#meta-operation').inputValue(),'Черновик проверки нового редактора');assert.equal(await recovered.evaluate(()=>state.steps[0].hasPhoto&&!!state.steps[0].imageData),true);
+ assert.deepEqual(await recovered.evaluate(()=>state.steps[0].photoAnnotations.filter(x=>['label','callout'].includes(x.type)).map(x=>x.text)),['Проверить зелёный индикатор','Проверить кнопку']);
+ await recovered.locator('#lc-sop-discard-recovery').click();await recovered.waitForFunction(()=>document.getElementById('lc-sop-recovery-status')?.textContent.includes('Локальная копия удалена'));
  await page.getByRole('button',{name:'Закрыть редактор',exact:true}).click();
  await page.locator('#lc-editor-host').waitFor({state:'detached'});
  // Missing asset must be an explicit error, not a success banner or blank window.

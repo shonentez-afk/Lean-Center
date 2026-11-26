@@ -43,6 +43,7 @@
  document.addEventListener('click',e=>{if(kind!=='sop')return;const btn=e.target.closest('button');if(btn&&guarded.has(btn.id)&&!validateTime()){e.preventDefault();e.stopImmediatePropagation()}},true);
  // Recovery is a separate local working copy, never a catalog write.
  const draftKey=kind==='frv'&&typeof context.draftKey==='string'?context.draftKey:null;
+ const sopKey=kind==='sop'&&typeof context.draftKey==='string'?context.draftKey:null;
  let lastDraftRaw=null,lastDraftPayload='',draftBlocked=false,draftAvailable=!!draftKey,restoredDraft=false;
  const recoveryStatus=document.createElement('span');recoveryStatus.id='lc-frv-recovery-status';recoveryStatus.setAttribute('role','status');
  const clearRecovery=kind==='frv'?make('lc-frv-discard-recovery','Удалить локальный черновик'):null;
@@ -72,8 +73,67 @@
   catch{setRecovery('Не удалось удалить локальный черновик. Скачайте JSON.',true)}
  };
  window.addEventListener('pagehide',checkpoint);
+
+ // SOP recovery is intentionally separate from the FRV localStorage path.
+ // A full portable Stage43 JSON includes original/rendered photos and TWI.
+ // The parent stores it atomically in IndexedDB under database/document/revision.
+ let sopToken=null,sopRecordText=null,sopBlocked=false,sopTimer=null,sopRunning=null,sopRevision=0,sopStoredRevision=0,sopExporting=false;
+ const sopStatus=document.createElement('span');sopStatus.id='lc-sop-recovery-status';sopStatus.setAttribute('role','status');
+ const sopDiscard=kind==='sop'?make('lc-sop-discard-recovery','Удалить локальный черновик'):null;
+ if(sopDiscard){bar.append(sopStatus);sopDiscard.hidden=true}
+ const sopSay=(message,show=!!sopToken)=>{if(kind!=='sop')return;sopStatus.textContent=message;sopDiscard.hidden=!show};
+ const sopIO=(op,token=null,text=null)=>host.LCSopRecovery(window,session,op,token,text);
+ async function loadSopRecovery(){
+  if(!sopKey)return null;
+  try{const d=await sopIO('read');if(!d){sopSay('Локальный черновик СОП появится после изменения данных.');return null}
+   sopToken=d.token;sopRecordText=d.text;
+   const raw=JSON.parse(d.text);if(d.version!==1||typeof d.token!=='string'||!raw.constructor||!raw.document)throw Error('Неверный формат черновика');
+   if(confirm('Найден локальный черновик СОП от '+d.savedAt+'. Восстановить его? Отмена сохраняет прежнюю копию без перезаписи.')){sopSay('Локальный черновик СОП восстановлен · в каталог не передан.',true);return d.text}
+   sopBlocked=true;sopSay('Прежний черновик сохранён. Для новой автозаписи сначала удалите его явно.',true);return null
+  }catch(e){sopBlocked=true;sopSay('Восстановление СОП недоступно: '+e.message+'. Скачивайте JSON.',!!sopToken);return null}
+ }
+ function scheduleSopRecovery(){
+  if(kind!=='sop'||!loaded||!sopKey||sopBlocked||sopExporting)return;
+  sopRevision++;clearTimeout(sopTimer);sopSay('Локальный черновик СОП: запись ожидается…');sopTimer=setTimeout(()=>void sopCheckpoint(),350)
+ }
+ async function sopCheckpoint(exactText=null){
+  if(!sopKey||!loaded||sopBlocked)return false;
+  clearTimeout(sopTimer);sopTimer=null;
+  if(sopRunning){await sopRunning;if(sopBlocked)return false}
+  const revision=sopRevision;
+  const job=(async()=>{
+   try{
+    sopExporting=true;const text=exactText??await exportText();sopExporting=false;
+    const d=await sopIO('write',sopToken,text);sopToken=d.token;sopRecordText=text;sopStoredRevision=revision;
+    sopSay('Черновик СОП сохранён в браузере · в каталог не передан.',true);return true
+   }catch(e){
+    sopExporting=false;if(e.code==='RECOVERY_CONFLICT')sopBlocked=true;
+    sopSay(e.code==='RECOVERY_CONFLICT'?e.message:'Локальный черновик СОП не сохранён: '+e.message+'. Скачайте JSON.',!!sopToken);return false
+   }
+  })();sopRunning=job;const ok=await job;if(sopRunning===job)sopRunning=null;
+  if(!sopBlocked&&sopRevision!==revision&&sopTimer===null)sopTimer=setTimeout(()=>void sopCheckpoint(),350);
+  return ok
+ }
+ if(kind==='sop'){
+  // Native state changes (including imported photos, steps and TWI) and direct
+  // field edits converge here. Do not export while the original editor is loading.
+  const nativeSaveDraft=saveDraft;
+  saveDraft=function(...args){try{return nativeSaveDraft.apply(this,args)}finally{scheduleSopRecovery()}};
+  document.addEventListener('input',e=>{if(e.target.matches('input:not([type=file]),textarea,select')&&!bar.contains(e.target))scheduleSopRecovery()});
+  document.addEventListener('change',e=>{if(e.target.matches('input,textarea,select')&&!bar.contains(e.target))scheduleSopRecovery()});
+  // Recheck after the editor's explicit download/transfer as well as user edits.
+  if(sopDiscard)sopDiscard.onclick=async()=>{
+   if(!sopToken||!confirm('Удалить только локальный черновик СОП? Каталог и открытый бланк не изменятся.'))return;
+   clearTimeout(sopTimer);sopTimer=null;
+   if(sopRunning)await sopRunning;
+   try{await sopIO('clear',sopToken);sopToken=null;sopRecordText=null;sopBlocked=false;sopStoredRevision=sopRevision;sopSay('Локальная копия удалена. Новые изменения будут сохраняться.')}
+   catch(e){sopSay(e.message,true)}
+  };
+  window.addEventListener('beforeunload',e=>{if(sopRevision!==sopStoredRevision||sopRunning){e.preventDefault();e.returnValue=''}})
+ }
+
  // The catalog write calls this only after successful persistence of the exact sent content.
- window.lc54ClearCommittedRecovery=(text)=>{if(!draftKey)return;try{const current=localStorage.getItem(draftKey);if(current!==lastDraftRaw||!current)return;const d=JSON.parse(current);if(d.writer===session&&d.payload===JSON.stringify(JSON.parse(text))){localStorage.removeItem(draftKey);draftBlocked=true;lastDraftRaw=null}}catch{}};
+ window.lc54ClearCommittedRecovery=async(text)=>{if(sopKey){clearTimeout(sopTimer);sopTimer=null;if(sopRunning)await sopRunning;if(sopToken&&sopRecordText===text&&!sopBlocked)try{await sopIO('clear',sopToken);sopToken=null;sopBlocked=true;sopRecordText=null}catch{}return}if(!draftKey)return;try{const current=localStorage.getItem(draftKey);if(current!==lastDraftRaw||!current)return;const d=JSON.parse(current);if(d.writer===session&&d.payload===JSON.stringify(JSON.parse(text))){localStorage.removeItem(draftKey);draftBlocked=true;lastDraftRaw=null}}catch{}};
  function readLocalDraft(){
   if(!draftKey)return null;const raw=readRecovery();lastDraftRaw=raw;
   if(!raw){setRecovery(draftAvailable?'Локальный черновик появится после изменения данных.':'Память браузера недоступна. Сохраняйте JSON.');return null}
@@ -125,14 +185,14 @@
  function setField(f,v){f.value=v;f.dispatchEvent(new Event('input',{bubbles:true}));f.dispatchEvent(new Event('change',{bubbles:true}))}
  function choosePerson(field,spec,p){
   if(!field.isConnected)return;links=currentLinks();
-  if(!p){if(spec.multiple)return;links=links.filter(x=>x.slot!==spec.slot);setField(field,'');const post=postField(spec);if(post)setField(post,'');checkpoint();say('Выбор сотрудника очищен.');return}
+  if(!p){if(spec.multiple)return;links=links.filter(x=>x.slot!==spec.slot);setField(field,'');const post=postField(spec);if(post)setField(post,'');checkpoint();scheduleSopRecovery();say('Выбор сотрудника очищен.');return}
   if(spec.multiple){
    if(field.value.split(/\r?\n/).includes(p.display_name)){if(!links.some(x=>x.slot===spec.slot&&x.person_id===p.id)){say('Такое ФИО уже есть в списке. Уточните сотрудника вручную.');return}}
    else setField(field,[field.value.trim(),p.display_name].filter(Boolean).join('\n'));
   }else{links=links.filter(x=>x.slot!==spec.slot);setField(field,p.display_name)}
   const post=postField(spec);if(post)setField(post,p.position||'');
   if(!links.some(x=>x.slot===spec.slot&&x.person_id===p.id))links.push({slot:spec.slot,person_id:p.id,employee_code:p.employee_code,display_name:p.display_name,position:p.position||'',unit:p.unit||''});
-  checkpoint();say('Выбран сотрудник: '+p.display_name);
+  checkpoint();scheduleSopRecovery();say('Выбран сотрудник: '+p.display_name);
  }
  function attachPickers(){
   for(const field of document.querySelectorAll('#meta-approver-name,#frv-observers,#twi-trainer,#twi-trainee,#frvs-operator,#frvs-observer,[data-resp],[data-agn]')){
@@ -172,7 +232,7 @@
   if(loaded||busy)return;
   busy=true;
   try{
-   people=Array.isArray(defaults?.people)?defaults.people:[];applyTheme(defaults?.theme);const recovered=readLocalDraft();if(recovered)text=recovered;
+   people=Array.isArray(defaults?.people)?defaults.people:[];applyTheme(defaults?.theme);const recovered=kind==='sop'?await loadSopRecovery():readLocalDraft();if(recovered)text=recovered;
    if(text){const raw=JSON.parse(text);const stored=kind==='sop'?raw.constructor?.leanCenterPeople:raw.study?.leanCenterPeople;links=Array.isArray(stored)?stored:[]}
    if(typeof stage37DraftDecisionPending!=='undefined'&&stage37DraftDecisionPending){
     if(!confirm('В этом рабочем окне есть сохранённый черновик. Восстановить его вместо исходной версии из центра?'))throw Error('Найден защищённый черновик. Сначала восстановите его или скачайте исходный текст через баннер.');
@@ -203,7 +263,7 @@
  }
  async function act(toCenter){
   if(!loaded||busy||outerModal)return;busy=true;send.disabled=true;download.disabled=true;
-  try{const text=await exportText();if(toCenter){tell('source',{kind,text});say('Передано. Подтвердите сохранение в библиотеке Lean Center.')}
+  try{const text=await exportText();if(toCenter){if(sopKey)await sopCheckpoint(text);tell('source',{kind,text});say('Передано. Подтвердите сохранение в библиотеке Lean Center.')}
    else{const u=URL.createObjectURL(new Blob([text],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='LeanCenter-'+kind+'-'+session+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);say('JSON сформирован. Проверьте загрузку файла.')}
   }catch(e){say('Не удалось передать: '+e.message)}finally{busy=false;send.disabled=false;download.disabled=false}
  }

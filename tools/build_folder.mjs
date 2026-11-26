@@ -7,7 +7,7 @@ import {buildEditor} from './build_editor.mjs';
 
 const root=process.cwd();
 const read=p=>fs.readFileSync(path.join(root,p),'utf8').replace(/\r\n/g,'\n');
-const version='lc6.7.3-standard-dev';
+const version='lc6.7.4-standard-dev';
 const output=path.join(root,'dist','LeanCenter');
 const releasePath='versions/'+version;
 const files=new Map();

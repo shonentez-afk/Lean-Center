@@ -34,7 +34,7 @@ try{
  const {page,context}=await newPage();
  await page.goto(pathToFileURL(entry).href);
  await home(page);
- assert.equal(await page.evaluate(()=>window.LC_BUILD.version),'lc6.7.3-standard-dev');
+ assert.equal(await page.evaluate(()=>window.LC_BUILD.version),'lc6.7.4-standard-dev');
  assert.equal(await page.evaluate(()=>document.querySelectorAll('script[src]').length),7);
  assert.equal(await page.evaluate(()=>document.querySelectorAll('script:not([src])').length),0);
  assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--tn-red').trim()),'#E30613');
@@ -71,10 +71,10 @@ try{
  await other.locator('input[name=display_name]').fill('QA Employee');await other.getByRole('button',{name:'Сохранить',exact:true}).click();await person(other);await other.close();await page.reload();await home(page);await person(page);await page.getByRole('cell',{name:'QA-001-A',exact:true}).waitFor();
  // Simulate installing a new version next to the old one, switching only the
  // stable index.html, and keeping the local working state.
- const next=path.join(dest,'versions','lc6.7.3-standard-dev-test-update');
- await fs.cp(path.join(dest,'versions','lc6.7.3-standard-dev'),next,{recursive:true});
+ const next=path.join(dest,'versions','lc6.7.4-standard-dev-test-update');
+ await fs.cp(path.join(dest,'versions','lc6.7.4-standard-dev'),next,{recursive:true});
  const html=await fs.readFile(entry,'utf8');
- await fs.writeFile(entry,html.replaceAll('versions/lc6.7.3-standard-dev/','versions/lc6.7.3-standard-dev-test-update/'));
+ await fs.writeFile(entry,html.replaceAll('versions/lc6.7.4-standard-dev/','versions/lc6.7.4-standard-dev-test-update/'));
  await page.reload();await home(page);await person(page);
  await storage(page);
  const download=page.waitForEvent('download');
@@ -97,5 +97,5 @@ try{
  for(const p of ['app/config.js','vendor/sql-wasm-data.js','vendor/sql-wasm.js','vendor/echarts.min.js','vendor/exceljs.min.js','app/main.js','editor/Stage43-data.js','assets/styles.css'])
   assert(requests.some(u=>u.endsWith('/'+p)),'Missing local request '+p);
  assert.equal(requests.some(u=>u.endsWith('.wasm')),false,'WASM must not be fetched under file://');
- console.log('LC6.7.3-standard-dev folder offline file:// smoke PASS: Cyrillic paths, external scripts, CRUD, reload, stable entry update, backup/restore, no HTTP');
+ console.log('LC6.7.4-standard-dev folder offline file:// smoke PASS: Cyrillic paths, external scripts, CRUD, reload, stable entry update, backup/restore, no HTTP');
 }finally{await browser.close();await fs.rm(temp,{recursive:true,force:true})}

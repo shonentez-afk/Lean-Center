@@ -15,7 +15,7 @@ import {employeeRelations,employeeSourceLinks} from './modules/master-data/emplo
 import {sopCriteriaFromDocx} from './modules/training/local-docx.js';
 import {BUILTIN_SOP,previewCriteria} from './modules/training/builtin-forms.js';
 import {TRAINING_PAGES,trainingScreen,resetTrainingRoute,setTrainingRoute,getTrainingRoute} from './modules/training/screens.js';
-import {directoryPeople} from './modules/master-data/people-directory.js';
+import {directoryPeople,personKey} from './modules/master-data/people-directory.js';
 import {openPeopleDropdown,closePeopleDropdown} from './ui/people-picker.js';
 import {weightedHistory,corporateEvaluations} from './modules/library/sop-assessment-review.js';
 import {stage43Checklist,weightedResult,stage43Checks} from './modules/library/stage43-checklist.js';
@@ -30,7 +30,10 @@ import {configureMigrations,recordPayload,createDb,openDb,Workspace,definitions,
 import * as local from './storage/local.js';
 import * as net from './storage/network.js';
 const root=document.getElementById('app');
-let registryConflict=null;
+let registryConflict=null,registryPage=0,volatileChanges=0;
+const REGISTRY_PAGE_SIZE=100;
+const registryDirty=()=>document.querySelector('main form[data-registry-form]')?.lcIsDirty?.()===true;
+const allowDiscardRegistry=()=>!registryDirty()||window.confirm('В форме есть несохранённые изменения. Уйти без сохранения?');
 let SQL,ws,cache,folder,generation=0,busy=false,master=false,page='home',theme=false,status='Готово',error=false,chart=null,edit=null,query='',incoming=[],importState=null,historyPerson=null,archiveFilter='active',libraryDraft=null,editorSession=null,libraryFilter='all';
 const contentStore=new ContentStore(()=>cache,()=>folder),readContent=ref=>contentStore.get(ref);
 const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
@@ -62,16 +65,16 @@ function initNav(){if(navCurrent!==null)return;navCurrent=++navSerial;try{histor
 const filterName=n=>!!n&&(/_filter_|^lc5_analytics_|^lc51_analytics_|^lc52_(analytics|metrics|frv|sop|retrain|calendar_unit|action_unit)|^compare_|^lc5_calendar_(month|person|type)$/.test(n));
 function navSnapshot(){
  const controls=[...document.querySelectorAll('main input[name],main select[name],main button.lc-directory-trigger[name]')].filter(e=>filterName(e.name)).map(e=>({name:e.name,value:e.dataset.personId??e.value,person:typeof e.lcRestorePerson==='function'}));
- return {parent:navParent,page,route:getTrainingRoute(),employeeSelected,employeeTab,employeeReturn,query,archiveFilter,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson,scroll:window.scrollY,controls};
+ return {parent:navParent,page,route:getTrainingRoute(),employeeSelected,employeeTab,employeeReturn,query,archiveFilter,registryPage,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson,scroll:window.scrollY,controls};
 }
 function rememberNavigation(){
  if(restoringNav||!ws)return;initNav();navSnapshots.set(navCurrent,navSnapshot());const previous=navCurrent;navCurrent=++navSerial;navParent=previous;try{if(navSupported)history.pushState({lcNav:navCurrent,parent:previous},'')}catch{navSupported=false}mobileMenu=false;
 }
 function restoreNavigation(id,parent){
- const snap=navSnapshots.get(id);if(!snap||busy||editorSession&&!editorSession.host.hidden)return false;
+ const snap=navSnapshots.get(id);if(!snap||busy||editorSession&&!editorSession.host.hidden||!allowDiscardRegistry())return false;
  navSnapshots.set(navCurrent,navSnapshot());navCurrent=id;navParent=parent;restoringNav=true;
  try{
-  closePeopleDropdown();({page,employeeSelected,employeeTab,employeeReturn,query,archiveFilter,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson}=snap);employeeSources=null;edit=null;mobileMenu=false;setTrainingRoute(page,snap.route);render();
+  closePeopleDropdown();({page,employeeSelected,employeeTab,employeeReturn,query,archiveFilter,registryPage,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson}=snap);registryPage??=0;employeeSources=null;registryConflict=null;edit=null;mobileMenu=false;setTrainingRoute(page,snap.route);render();
   const find=name=>[...document.querySelectorAll('main [name]')].find(e=>e.name===name);
   for(const v of snap.controls.filter(x=>x.person))find(v.name)?.lcRestorePerson?.(v.value);
   const changed=[];for(const v of snap.controls.filter(x=>!x.person)){const e=find(v.name);if(e&&e.value!==v.value&&(!e.options||[...e.options].some(o=>o.value===v.value))){e.value=v.value;changed.push(e)}}
@@ -80,18 +83,19 @@ function restoreNavigation(id,parent){
  }finally{restoringNav=false}
 }
 function navigationBack(){if(busy||navParent===null)return;if(navSupported){history.back();return}restoreNavigation(navParent,navSnapshots.get(navParent)?.parent??null)}
-window.addEventListener('popstate',e=>{if(e.state?.lcNav&&navSnapshots.has(e.state.lcNav)){if(!restoreNavigation(e.state.lcNav,e.state.parent??null)&&navSupported)history.forward()}});
+window.addEventListener('popstate',e=>{const id=e.state?.lcNav;if(id===navCurrent)return;if(id&&navSnapshots.has(id)){const direction=id<navCurrent?1:-1;if(!restoreNavigation(id,e.state.parent??null)&&navSupported)history.go(direction)}});
 function navigate(p,{retainEmployee=false}={}){
- registryConflict=null;
- if(busy)return;
+ if(busy||!allowDiscardRegistry())return false;
+ registryConflict=null;registryPage=0;
  if(editorSession&&!editorSession.host.hidden)hideEditor(editorSession);
  rememberNavigation();
- closePeopleDropdown();resetTrainingRoute();if(!retainEmployee){employeeSelected=null;employeeReturn=null;employeeTab='overview';employeeSources=null}page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;libraryRevisionSelected=null;if(p==='sop_evaluation'){evaluationSelected=null;evaluationTab='weighted';evaluationSearch=''}render()
+ closePeopleDropdown();resetTrainingRoute();if(!retainEmployee){employeeSelected=null;employeeReturn=null;employeeTab='overview';employeeSources=null}page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;libraryRevisionSelected=null;if(p==='sop_evaluation'){evaluationSelected=null;evaluationTab='weighted';evaluationSearch=''}render();return true
 }
-function goTraining(p,options={}){navigate(p,{retainEmployee:!!employeeReturn});setTrainingRoute(p,options);render()}
-function openImport(type){importState={type,book:null,sheet:0,header:1,mapping:{},allowUpdates:false,plan:null,file:''};navigate('import_xlsx')}
-function openHistory(id){navigate('person_assignment',{retainEmployee:!!employeeReturn});historyPerson=id;archiveFilter='all';render()}
-async function persist(){if(cache)generation=await local.saveWorkspace(cache,generation,ws.state())}
+function goTraining(p,options={}){if(!navigate(p,{retainEmployee:!!employeeReturn}))return;setTrainingRoute(p,options);render()}
+function openImport(type){if(!navigate('import_xlsx'))return;importState={type,book:null,sheet:0,header:1,mapping:{},allowUpdates:false,plan:null,file:''};render()}
+function openHistory(id){if(!navigate('person_assignment',{retainEmployee:!!employeeReturn}))return;historyPerson=id;archiveFilter='all';render()}
+async function persist(){if(cache){try{generation=await local.saveWorkspace(cache,generation,ws.state());return true}catch(e){if(e.code==='WORKSPACE_GENERATION_CONFLICT')throw e;throw Object.assign(new Error('Локальная запись не выполнена',{cause:e}),{code:'WORKSPACE_WRITE_FAILED'})}}volatileChanges++;return false}
+async function saveMemoryBackup(){if(busy)return;busy=true;try{download('lean-'+uuid()+'.leanbackup',await backupTransfer());message('Резервная копия сформирована. Проверьте скачанный файл перед выходом. Рабочая копия всё ещё только в памяти.')}catch(e){message('Не удалось сформировать копию: '+e.message,true)}finally{busy=false}}
 function replace(newWs){ws?.close();ws=newWs}
 function formControls(){return [...document.querySelectorAll('main input[name]:not([type=file]),main select[name],main textarea[name],main button.lc-directory-trigger[name]')]}
 function captureRejectedForm(){
@@ -111,7 +115,7 @@ function restoreRejectedForm(s){
  const details=[...document.querySelectorAll('main details')];s.details.forEach((v,i)=>{const e=details[i];if(e&&(e.querySelector('summary')?.textContent||'')===v.label)e.open=v.open});
  requestAnimationFrame(()=>window.scrollTo(0,s.scroll||0));
 }
-async function run(fn,{save=true,retainForm=false}={}){if(busy)return;const prev=ws.state(),form=retainForm?captureRejectedForm():null;let failure=null;busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));failure=e.message;if(form&&page===form.page){edit=form.edit;setTrainingRoute(page,form.route);if(form.edit!==null&&e.code==='WORKSPACE_GENERATION_CONFLICT'){registryConflict={type:page,id:form.edit.id||null};failure='Другая вкладка изменила рабочую копию. Черновик сохранён в форме; загрузите актуальные данные и сверьте изменения.'}}message(e.message,true)}finally{busy=false;render();if(failure&&form){restoreRejectedForm(form);message(failure,true)}}}
+async function run(fn,{save=true,retainForm=false}={}){if(busy)return;const prev=ws.state(),form=retainForm?captureRejectedForm():null,previousVolatile=volatileChanges;let failure=null;busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(!cache&&volatileChanges!==previousVolatile?'Изменения только в памяти. На диск не записаны — скачайте резервную копию.':m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));failure=e.code==='WORKSPACE_WRITE_FAILED'?'Локальная запись не выполнена. Изменения не записаны; проверьте доступ и свободное место браузера, затем повторите сохранение.':e.message;if(form&&page===form.page){edit=form.edit;setTrainingRoute(page,form.route);if(form.edit!==null&&e.code==='WORKSPACE_GENERATION_CONFLICT'){registryConflict={type:page,id:form.edit.id||null};failure='Другая вкладка изменила рабочую копию. Черновик сохранён в форме; загрузите актуальные данные и сверьте изменения.'}}message(failure,true)}finally{busy=false;render();if(failure&&form){restoreRejectedForm(form);message(failure,true)}}}
 function download(name,body){const url=URL.createObjectURL(new Blob([canonical(body)],{type:'application/json'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function pick(accept,fn,max=150*1024*1024){const i=el('input');i.type='file';i.accept=accept;i.onchange=()=>{const f=i.files?.[0];if(f)run(async()=>{invariant(f.size<=max,'Файл слишком большой');return await fn(JSON.parse(await f.text()))})};i.click()}
 const empty=()=>!ws.pending.length&&!ws.dirty&&!meta(ws.base,'publication_id')&&Object.keys(definitions).every(t=>list(ws.base,t).length===0)&&!one(ws.base,'SELECT id FROM document LIMIT 1')&&!one(ws.base,'SELECT id FROM frv_study LIMIT 1');
@@ -204,6 +208,7 @@ function form(type,v){
  }
  const submit=el('button','Сохранить','primary');submit.type='submit';submit.disabled=busy;
  const values=()=>Object.fromEntries(Object.entries(controls).map(([k,n])=>[k,n.value||null]));
+ const initialValues=canonical(values());f.dataset.registryForm='1';f.lcIsDirty=()=>canonical(values())!==initialValues;
  f.onsubmit=e=>{e.preventDefault();const payload=values();run(async()=>{ws.edit(type,v?.id||null,payload);edit=null;return 'Запись сохранена локально. Изменение ожидает публикации.'},{retainForm:true})};
  if(registryConflict?.type===type&&registryConflict.id===(v?.id||null)){
   const draft=()=>({entity_type:type,entity_id:v?.id||null,base_revision:v?.rev||0,payload:values()});
@@ -232,7 +237,7 @@ function form(type,v){
  }
  if(d.history&&v?.id)f.append(el('p','История неизменяема: можно только закрыть открытое назначение датой окончания. Для перевода создайте новое назначение после закрытия.','muted'));
  if(type==='rating_scale')f.append(el('p','После сохранения шкала неизменяема. Для новой методики создайте следующую версию. Уровни задаются пользователем; корпоративские пороги не предустановлены.','muted'));
- return add(f,grid,add(el('div',undefined,'row'),submit,btn('Отмена',()=>{registryConflict=null;edit=null;render()})))
+ return add(f,grid,add(el('div',undefined,'row'),submit,btn('Отмена',()=>{if(!allowDiscardRegistry())return;registryConflict=null;edit=null;render()})))
 }
 function orgTree(panel,items){
  const box=el('div',undefined,'org-tree'),children=new Map();
@@ -246,14 +251,14 @@ const employeeTabs=[['overview','Обзор'],['matrices','Матрицы ком
 const employeeStates={active:'Действует',retired:'Предыдущая версия',planned:'Запланировано',in_progress:'В процессе',completed:'Завершено',cancelled:'Отменено',confirmed:'Подтверждено',void:'Аннулировано',registered:'Зарегистрировано',revoked:'Отозвано',closed:'Закрыто',granted:'Допуск выдан',denied:'Не допущен',final:'Зафиксировано',draft:'Черновик',pass:'Пройдено',fail:'Не пройдено',incomplete:'Не завершено',effective:'Действует',superseded:'Заменено',withdrawn:'Выведено из действия',open:'Открыто',implemented:'Ожидает проверки',verified:'Эффект подтверждён',ineffective:'Эффект не подтверждён',done:'Выполнено',needs_replan:'Требует перепланирования',replanned:'Перепланировано',review:'На согласовании',approved:'Согласовано',archived:'Архив'};
 function openEmployee(id,{restore=false}={}){
  if(!id||!one(ws.working,'SELECT id FROM person WHERE id=?',[id]))return;
- const keep=restore&&employeeReturn===id,tab=keep?employeeTab:'overview';navigate('person',{retainEmployee:keep});employeeSelected=id;employeeReturn=id;employeeTab=tab;employeeSources=null;render()
+ const keep=restore&&employeeReturn===id,tab=keep?employeeTab:'overview';if(!navigate('person',{retainEmployee:keep}))return;employeeSelected=id;employeeReturn=id;employeeTab=tab;employeeSources=null;render()
 }
 function employeeDestination(id,d){
  if(!d)return;employeeReturn=id;const p=d.page,o=d.options||{};
  if(p==='sop'){goDocument(o.documentId,o.revisionId);return}
  if(p==='frv'){goResearch(o.studyId);return}
- if(p==='sop_evaluation'){navigate(p,{retainEmployee:true});evaluationSelected=o.revisionId;evaluationTab=o.tab||'corporate';render();return}
- if(p==='person_assignment'||p==='role_assignment'){navigate(p,{retainEmployee:true});historyPerson=id;archiveFilter='all';render();return}
+ if(p==='sop_evaluation'){if(!navigate(p,{retainEmployee:true}))return;evaluationSelected=o.revisionId;evaluationTab=o.tab||'corporate';render();return}
+ if(p==='person_assignment'||p==='role_assignment'){if(!navigate(p,{retainEmployee:true}))return;historyPerson=id;archiveFilter='all';render();return}
  goTraining(p,o)
 }
 function employeeCard(main,id){
@@ -302,27 +307,30 @@ function registry(main,type){
  if(type==='person'&&employeeSelected){employeeCard(main,employeeSelected);return}
  const d=definitions[type],items=list(ws.working,type),search=el('input');search.type='search';search.placeholder='Поиск по справочнику';search.value=query;
  const filter=el('select');for(const [value,label] of [['active',d.history?'Действующие':'Активные'],['all','Все записи'],['inactive',d.history?'История / будущие':'Архив']]){const o=el('option',label);o.value=value;filter.append(o)}filter.value=archiveFilter;
- const panel=pane(d.label,add(el('div',undefined,'row'),search,filter,btn('Добавить',()=>{edit=historyPerson?{person_id:historyPerson}:{};render()},'primary',!!ws.conflicts.length),btn('Импорт Excel',()=>openImport(type))));
+ const panel=pane(d.label,add(el('div',undefined,'row'),search,filter,btn('Добавить',()=>{if(!allowDiscardRegistry())return;registryConflict=null;edit=historyPerson?{person_id:historyPerson}:{};render()},'primary',!!ws.conflicts.length),btn('Импорт Excel',()=>openImport(type))));
  main.append(panel);
- if(historyPerson)panel.append(add(el('div',undefined,'row'),el('span','История сотрудника: '+refName('person',historyPerson),'pill'),btn('Все сотрудники',()=>{historyPerson=null;render()})));
+ if(historyPerson)panel.append(add(el('div',undefined,'row'),el('span','История сотрудника: '+refName('person',historyPerson),'pill'),btn('Все сотрудники',()=>{if(!allowDiscardRegistry())return;registryConflict=null;edit=null;historyPerson=null;registryPage=0;render()})));
  if(edit!==null)panel.append(pane(edit.id?'Редактирование':'Новая запись',form(type,edit)));
- const wrap=el('div',undefined,'tablewrap');panel.append(wrap);
+ const wrap=el('div',undefined,'tablewrap'),paging=el('div',undefined,'row');panel.append(paging,wrap);
+ const directory=type==='person'?new Map(directoryPeople(ws.working,today()).map(p=>[p.id,p])):null;
+ const searchIndex=type==='person'?new Map(items.map(v=>[v.id,[v.employee_code,v.display_name,directory.get(v.id)?.unit,directory.get(v.id)?.position].map(personKey)])):null;
  function draw(){
-  wrap.replaceChildren();
-  const data=items.filter(v=>(!historyPerson||v.person_id===historyPerson)&&(archiveFilter==='all'||(archiveFilter==='active'?activeRecord(d,v):!activeRecord(d,v)))&&Object.entries(d.fields).some(([k,f])=>String(showVal(k,f,v)).toLowerCase().includes(query.toLowerCase())));
-  if(!data.length){wrap.append(el('p','Нет записей','empty'));return}
+  wrap.replaceChildren();paging.replaceChildren();const key=personKey(query);
+  const data=items.filter(v=>(!historyPerson||v.person_id===historyPerson)&&(archiveFilter==='all'||(archiveFilter==='active'?activeRecord(d,v):!activeRecord(d,v)))&&(!key||(searchIndex?searchIndex.get(v.id).some(x=>x.includes(key)):Object.entries(d.fields).some(([k,f])=>personKey(showVal(k,f,v)).includes(key)))));
+  if(!data.length){registryPage=0;wrap.append(el('p','Нет записей','empty'));return}
+  let visible=data;if(type==='person'){const count=Math.ceil(data.length/REGISTRY_PAGE_SIZE);registryPage=Math.max(0,Math.min(registryPage,count-1));const start=registryPage*REGISTRY_PAGE_SIZE;visible=data.slice(start,start+REGISTRY_PAGE_SIZE);paging.append(el('span','Показано '+(start+1)+'–'+(start+visible.length)+' из '+data.length+' · страница '+(registryPage+1)+' / '+count,'muted'),btn('Предыдущая страница',()=>{registryPage--;draw()},'',registryPage===0),btn('Следующая страница',()=>{registryPage++;draw()},'',registryPage>=count-1))}
   const fields=Object.entries(d.fields).filter(([,f])=>!f.legacy);
   const t=el('table'),head=el('tr');for(const [,f] of fields)head.append(el('th',f.label));if(type==='person')head.append(el('th','Подразделение'),el('th','Должность'));head.append(el('th','Версия / статус'),el('th','Действия'));t.append(add(el('thead'),head));
-  const body=el('tbody'),directory=type==='person'?new Map(directoryPeople(ws.working,today()).map(p=>[p.id,p])):null;for(const v of data){const tr=el('tr',undefined,!activeRecord(d,v)?'archive':'');for(const [k,f] of fields)tr.append(type==='person'&&k==='display_name'?add(el('td'),btn(v.display_name,()=>openEmployee(v.id),'employee-name-link')):el('td',String(showVal(k,f,v)),f.multiline?'multiline-cell':''));if(type==='person'){const p=directory.get(v.id);tr.append(el('td',p?.unit||'—'),el('td',p?.position||'—'))}
+  const body=el('tbody');for(const v of visible){const tr=el('tr',undefined,!activeRecord(d,v)?'archive':'');for(const [k,f] of fields)tr.append(type==='person'&&k==='display_name'?add(el('td'),btn(v.display_name,()=>openEmployee(v.id),'employee-name-link')):el('td',String(showVal(k,f,v)),f.multiline?'multiline-cell':''));if(type==='person'){const p=directory.get(v.id);tr.append(el('td',p?.unit||'—'),el('td',p?.position||'—'))}
    const state=v.archived?'Архив':d.history?(v.valid_from>today()?'Будущее':v.valid_to&&v.valid_to<today()?'Завершено':'Действует'):'Активно';
    tr.append(el('td',state+' · v'+v.rev));const a=el('td');if(type==='person')a.append(btn('Карточка',()=>openEmployee(v.id),'primary'));if(type==='org_unit'||type==='operation')a.append(btn('Эффективность TWI',()=>goTraining('analytics',{assessmentType:'twi_effect',...(type==='org_unit'?{unitId:v.id}:{operationId:v.id})})));
-   if(!v.archived){if(!d.immutable&&(!d.history||!v.valid_to))a.append(btn(d.history?'Закрыть / изменить':'Изменить',()=>{edit=v;render()},'',!!ws.conflicts.length));if(d.immutable)a.append(btn('Новая версия',()=>{edit={name:v.name,version_no:String(Math.max(...items.filter(x=>x.name===v.name).map(x=>x.version_no))+1),levels:v.levels};render()},'',!!ws.conflicts.length));
-    if(!d.history)a.append(btn('Архив',()=>{if(confirm('Архивировать запись? История сохранится.'))run(async()=>{ws.edit(type,v.id,null,'archive');return 'Запись архивирована'})},'danger',!!ws.conflicts.length));
+   if(!v.archived){if(!d.immutable&&(!d.history||!v.valid_to))a.append(btn(d.history?'Закрыть / изменить':'Изменить',()=>{if(!allowDiscardRegistry())return;registryConflict=null;edit=v;render()},'',!!ws.conflicts.length));if(d.immutable)a.append(btn('Новая версия',()=>{if(!allowDiscardRegistry())return;registryConflict=null;edit={name:v.name,version_no:String(Math.max(...items.filter(x=>x.name===v.name).map(x=>x.version_no))+1),levels:v.levels};render()},'',!!ws.conflicts.length));
+    if(!d.history)a.append(btn('Архив',()=>{if(allowDiscardRegistry()&&confirm('Архивировать запись? История сохранится.')){registryConflict=null;edit=null;run(async()=>{ws.edit(type,v.id,null,'archive');return 'Запись архивирована'})}},'danger',!!ws.conflicts.length));
     // All employee-related sections are opened from the dossier.
    }tr.append(a);body.append(tr)
   }t.append(body);wrap.append(t)
  }
- search.oninput=()=>{query=search.value;draw()};filter.onchange=()=>{archiveFilter=filter.value;draw()};draw();
+ search.oninput=()=>{query=search.value;registryPage=0;draw()};filter.onchange=()=>{archiveFilter=filter.value;registryPage=0;draw()};draw();
  if(type==='org_unit')orgTree(panel,items)
 }
 function downloadBytes(name,bytes){const url=URL.createObjectURL(new Blob([bytes],{type:name.endsWith('.docx')?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':name.endsWith('.html')?'text/html':name.endsWith('.json')?'application/json':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
@@ -406,7 +414,7 @@ function evaluationHistory(revision,source){
  const out=el('div');if(!data.length)out.append(el('p','Оценок этой версии ещё нет.','muted'));
  else out.append(tableOf(['Дата','Оценщик','Методика','Результат','Исходник','Отчёт',''],data.map(e=>{const r=evaluationResult(rows(ws.working,'SELECT value FROM sop_evaluation_response WHERE evaluation_id=?',[e.id]),sopCriteria(ws.working,e.method_id).length);return [e.evaluated_on,e.actor_name,'v'+e.method_version,r.yes+'/'+r.total+' · '+(r.fraction*100).toFixed(0)+'%',e.source_sha256===source.sha256?'Текущий':'Предыдущий черновик',btn('Скачать XLSX',()=>run(async()=>{await evaluationXlsx(e.id);return 'Отчёт сформирован'},{save:false})),btn('Открыть оценку',()=>goTraining('sop_review',{kind:'sop_evaluation',id:e.id}))]})));return out
 }
-function goEvaluation(id){navigate('sop_evaluation');evaluationSelected=id;render()}
+function goEvaluation(id){if(!navigate('sop_evaluation'))return;evaluationSelected=id;render()}
 const stage43SourceLabels={seed:'Стартовое значение',auto:'Автоматически',manual:'Вручную',legacy:'Из исходника'};
 const weightedLabel=data=>{const x=weightedResult(data);return 'Взвешенный результат: '+(x.fraction===null?'—':(x.fraction*100).toFixed(1)+'%')+' ('+x.points.toFixed(2)+' / '+x.weight.toFixed(2)+')'+(x.seed?' · Стартовых оценок: '+x.seed+'; результат предварительный':'')};
 async function stage43Xlsx(doc,revision,source,data,actorName){
@@ -628,8 +636,8 @@ function editorStatus(s,text,bad=false){if(editorSession!==s)return;s.note.textC
 function editorRoute(c){return c.kind==='frv'||c.editorTab==='frv'?'frv':c.editorTab==='twi'?'twi_plans':'sop_constructor'}
 function showEditor(s){if(editorSession!==s)return;page=editorRoute(s.ctx);s.host.hidden=false;document.body.classList.add('editor-active');render();s.close.focus();if(s.loaded)s.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:s.session,type:'directory',people:editorPeople(),theme:theme?'dark':'light'},'*')}
 function hideEditor(s){if(editorSession!==s)return;s.host.hidden=true;document.body.classList.remove('editor-active');root.querySelector('main')?.removeAttribute('inert')}
-function goDocument(id,revisionId=null){navigate('sop',{retainEmployee:!!employeeReturn});libraryFilter='all';librarySelected=id;libraryRevisionSelected=revisionId;render()}
-function goResearch(id){navigate('frv',{retainEmployee:!!employeeReturn});libraryFilter='all';librarySelected=id;render()}
+function goDocument(id,revisionId=null){if(!navigate('sop',{retainEmployee:!!employeeReturn}))return;libraryFilter='all';librarySelected=id;libraryRevisionSelected=revisionId;render()}
+function goResearch(id){if(!navigate('frv',{retainEmployee:!!employeeReturn}))return;libraryFilter='all';librarySelected=id;render()}
 function openRelated(c,tab){launchEditor({...c,editorTab:tab})}
 
 function disposeEditor(s,confirmed=false){
@@ -638,6 +646,7 @@ function disposeEditor(s,confirmed=false){
  clearTimeout(s.timeout);hideEditor(s);s.host.remove();editorSession=null;return true
 }
 function launchEditor(ctx){
+ if(!allowDiscardRegistry())return;edit=null;registryConflict=null;
  if(libraryDraft){message('Сначала завершите или отмените текущий предпросмотр.',true);return}
  if(editorSession){
   const old=editorSession.ctx;
@@ -651,7 +660,7 @@ function launchEditor(ctx){
   const session=uuid(),host=el('section',undefined,'editor-host'),bar=el('div',undefined,'editor-host-bar'),frame=el('iframe'),note=el('span','Загрузка конструктора…','editor-host-note');
   host.id='lc-editor-host';host.setAttribute('aria-label','Рабочая область редактора');host.setAttribute('role','region');
   frame.id='lc-editor-frame';frame.title=ctx.kind==='frv'?'Редактор ФРВ':ctx.editorTab==='twi'?'План инструктажа TWI':ctx.editorTab==='frv'?'ФРВ по СОП':'Конструктор СОП';
-  const draftKey=ctx.kind==='frv'?'lean-frv-recovery-v1:'+ctx.database+':'+(ctx.id||'new')+':'+ctx.expected:null;
+  const draftKey=ctx.kind==='frv'?'lean-frv-recovery-v1:'+ctx.database+':'+(ctx.id||'new')+':'+ctx.expected:['lean-sop-recovery-v1',ctx.database,ctx.id||'new',ctx.revisionId||'new',ctx.expected,ctx.origin?.study_id||'',ctx.origin?.source_sha256||''].join(':');
   const s={session,host,frame,note,ctx,draftKey,loading:false,loaded:false,timeout:null,close:null};
   const back=btn('К библиотеке',()=>{hideEditor(s);navigate(s.ctx.kind==='frv'?'frv':'sop')});
   const close=btn('Закрыть редактор',()=>{if(disposeEditor(s)){message('Редактор закрыт. База не изменена.');navigate(s.ctx.kind==='frv'?'frv':'sop')}});
@@ -663,6 +672,14 @@ function launchEditor(ctx){
   message('Загрузка конструктора. Ожидание подтверждения готовности.');
  }catch(e){if(editorSession)disposeEditor(editorSession,true);message(e.message,true)}
 }
+// Only the active same-origin editor session may read/write its isolated recovery key.
+window.LCSopRecovery=async (caller,session,op,expected=null,text=null)=>{
+ const s=editorSession;invariant(s&&s.frame.contentWindow===caller&&s.session===session&&s.ctx.kind==='sop','Редактор уже закрыт');if(op!=='clear')assertContext(s.ctx);else invariant(s.ctx.database===meta(ws.base,'database_id'),'Открыта другая база');invariant(cache,'IndexedDB недоступен; скачайте JSON');
+ if(op==='read')return (await local.load(cache,s.draftKey))||null;
+ if(op==='write'){invariant(typeof text==='string'&&new TextEncoder().encode(text).length<=MAX_CONTENT,'Черновик превышает 30 МБ; скачайте JSON');const record={version:1,token:uuid(),savedAt:new Date().toISOString(),text};return local.compareRecovery(cache,s.draftKey,expected,record)}
+ if(op==='clear')return local.compareRecovery(cache,s.draftKey,expected,null);
+ throw Error('Неизвестная операция черновика')
+};
 window.addEventListener('message',async e=>{
  const s=editorSession,m=e.data;
  if(!s||e.source!==s.frame.contentWindow||m?.protocol!=='lean-editor-v1'||m.session!==s.session)return;
@@ -683,7 +700,7 @@ window.addEventListener('message',async e=>{
   if(error){reply(status);showEditor(s)}else{reply('Документ подготовлен к сохранению в Lean Center.');hideEditor(s);render()}
  }else if(m.type==='error'){clearTimeout(s.timeout);editorStatus(s,'Ошибка: '+String(m.message||'ошибка'),true);message('Редактор: '+String(m.message||'ошибка'),true)}
 });
-window.addEventListener('beforeunload',e=>{if(editorSession||libraryDraft){e.preventDefault();e.returnValue=''}});
+window.addEventListener('beforeunload',e=>{if(editorSession||libraryDraft||registryDirty()||!cache&&volatileChanges>0||busy){e.preventDefault();e.returnValue=''}});
 function sourceSummary(d){
  const p=d.projection;return d.source.kind==='sop'?'Шагов: '+p.steps.length+' · Фото: '+p.photos+' · TWI: '+(p.twi?'есть':'нет'):'Циклов: '+p.cycles+' · Полных: '+p.complete+' · Измерений: '+p.measurements.length+' · Без измерения/действия: '+p.unmeasured
 }
@@ -699,9 +716,9 @@ function libraryPreview(main,kind){
  form.onsubmit=e=>{e.preventDefault();run(async()=>{assertContext(c);const payload={command:c.command,title:title.value.trim(),operation_id:op.value||null,source:d.source,projection:p};if(kind==='sop'){if(c.command==='create')payload.code=code.value.trim();else payload.revision_id=c.command==='save'?c.revisionId:null}else payload.observed_at=observed.value;
    // The complete original content is durable before its reference is written.
    await contentStore.put(d.source,d.text);const ev=libraryEvent(c,payload);const events=[ev];if(d.origin){invariant(c.command==='create','Проект из ФРВ должен быть новым документом');events.push({id:uuid(),entity_type:'document',entity_id:ev.entity_id,operation:'update',expected_revision:1,payload:{command:'origin',revision_id:ev.id,...d.origin},occurred_at:new Date().toISOString()})}await ws.applyContentEvents(events,readContent);await persist();
-   libraryDraft=null;librarySelected=ev.entity_id;if(kind==='sop')libraryRevisionSelected=c.command==='save'?c.revisionId:ev.id;if(d.editor&&editorSession){try{editorSession.frame.contentWindow.lc54ClearCommittedRecovery?.(d.text)}catch{}disposeEditor(editorSession,true);}
+   libraryDraft=null;librarySelected=ev.entity_id;if(kind==='sop')libraryRevisionSelected=c.command==='save'?c.revisionId:ev.id;if(d.editor&&editorSession){if(cache)try{await editorSession.frame.contentWindow.lc54ClearCommittedRecovery?.(d.text)}catch{}disposeEditor(editorSession,true);}
    return 'Черновик сохранён. Ожидает общей публикации базы.';
- },{save:false})};
+ },{save:false,retainForm:true})};
  main.append(pane('Проверенный исходный файл',el('p',sourceSummary(d)),el('p','Исходный статус Stage43: '+(p.legacy_status||'не указан')+' · Номер: '+(p.number||'не указан')+' · '+Math.ceil(d.source.size/1024)+' КБ','muted'),el('p','Исходный статус не считается согласованием в Lean Center. Содержимое и фотографии сохраняются полностью; исходный JSON хранится отдельно по SHA-256.','muted'),add(form,grid,add(el('div',undefined,'row'),confirm,btn('Скачать исходный JSON',()=>downloadRaw('Stage43-'+kind+'.json',d.text)),btn('Отменить предпросмотр',()=>{if(window.confirm('Отменить неподтверждённый импорт? Исходный файл не изменится.')){libraryDraft=null;render()}})))));
 }
 function libraryAction(c,command,label){
@@ -796,7 +813,7 @@ function render(){
  initNav();chart?.dispose();chart=null;document.documentElement.classList.toggle('dark',theme);
  const header=el('header',undefined,'corp-header');
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div'),el('div','LEAN CENTER','brand'),el('div','Обучение на рабочем месте · TWI','brand-sub')));
- const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;try{localStorage.setItem('lean-center-theme',theme?'dark':'light')}catch{}render()}),btn('Хранение',()=>navigate('storage')));
+ const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{if(!allowDiscardRegistry())return;edit=null;registryConflict=null;theme=!theme;try{localStorage.setItem('lean-center-theme',theme?'dark':'light')}catch{}render()}),btn('Хранение',()=>navigate('storage')));
  if(editorSession&&editorSession.host.hidden&&!libraryDraft)metaPanel.append(btn('Вернуться в редактор',()=>showEditor(editorSession),'primary'));header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.id='lc53-sidebar';side.setAttribute('aria-label','Навигация');side.classList.toggle('lc53-menu-open',mobileMenu);const menu=btn(mobileMenu?'Закрыть меню':'Меню',()=>{mobileMenu=!mobileMenu;side.classList.toggle('lc53-menu-open',mobileMenu);menu.textContent=mobileMenu?'Закрыть меню':'Меню';menu.setAttribute('aria-expanded',String(mobileMenu))},'lc53-mobile-menu');menu.setAttribute('aria-controls',side.id);menu.setAttribute('aria-expanded',String(mobileMenu));header.append(menu);
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};
@@ -806,7 +823,7 @@ function render(){
  const section=navGroups.find(([,keys])=>keys.includes(page))?.[0]||'Рабочее пространство';
  const top=add(el('div',undefined,'top'),add(el('div'),el('div',section,'eyebrow'),el('h1',labels[page]),el('div','Локальная база · '+ws.pending.length+' ожидающих изменений','muted')),el('span',folder?'Сетевая папка выбрана':'Локальная рабочая копия','pill'));
  main.append(top);if(navParent!==null)main.append(add(el('div',undefined,'row lc53-nav-return'),btn('← Назад',navigationBack)));const stat=el('div',status,'status'+(error?' error':''));stat.id='status';stat.setAttribute('role','status');main.append(stat);
- if(!cache)main.append(el('p','IndexedDB недоступен. Изменения только в памяти — скачивайте резервную копию до закрытия.','bad'));
+ if(!cache)main.append(pane('Режим работы только в памяти',el('p','IndexedDB недоступен. Изменения только в памяти — скачивайте резервную копию до закрытия.','bad'),btn('Скачать резервную копию из памяти',saveMemoryBackup,'primary')));
  if(ws.conflicts.length)main.append(pane('Локальные изменения заблокированы',el('p','Конфликт: '+ws.conflicts.length+' · Ожидают разрешения в очереди: '+ws.blockedPending.length+'. Эти записи пока не входят в реестры и показатели; они сохранены в локальной очереди.','bad'),btn('Открыть очередь изменений',()=>navigate('storage'))));
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
  if(employeeReturn&&page!=='person')main.append(add(el('div',undefined,'row employee-return'),btn('← К карточке сотрудника',()=>openEmployee(employeeReturn,{restore:true})),el('span',refName('person',employeeReturn),'muted')));
