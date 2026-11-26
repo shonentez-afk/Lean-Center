@@ -8,7 +8,7 @@ import {comparisonIndicators,retrainingQueue} from './modules/training/center-ov
 import {scheduleKind,schedulePending} from './modules/training/center-planning.js';
 import {frvRegistry} from './modules/library/frv-effect.js';
 import {assessmentIndicators} from './modules/training/assessment-review.js';
-import {centerAuditIndicators,pctText} from './modules/training/audit-analytics.js';
+import {centerAuditIndicators,pctText,annualAuditCoverage} from './modules/training/audit-analytics.js';
 import {employeeRelations,employeeSourceLinks} from './modules/master-data/employee-records.js';
 import {sopCriteriaFromDocx} from './modules/training/local-docx.js';
 import {BUILTIN_SOP,previewCriteria} from './modules/training/builtin-forms.js';
@@ -154,6 +154,7 @@ function home(main){
  const overdueTraining=one(ws.working,"SELECT count(*) n FROM training_assignment WHERE source_sha256 IS NOT NULL AND state IN('planned','in_progress') AND due_on<?",[todayIso]).n;
  const revisedTraining=one(ws.working,"SELECT count(*) n FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1)").n;
  needs.append(add(el('div',undefined,'attention-row'),el('strong',String(overdueTraining),overdueTraining?'warn':'muted'),el('span','Просроченные назначения обучения'),btn('Открыть',()=>goTraining('twi',{filter:'overdue'}))),add(el('div',undefined,'attention-row'),el('strong',String(revisedTraining),revisedTraining?'warn':'muted'),el('span','Обучение по прежним редакциям СОП'),btn('Открыть',()=>goTraining('retraining'))));
+ const annual=annualAuditCoverage(ws.working,todayIso.slice(0,4),todayIso);needs.append(add(el('div',undefined,'attention-row'),el('strong',String(annual.filter(x=>x.remaining).length),'muted'),el('span','Инструкторы: осталось выполнить годовую норму L1'),btn('Открыть',()=>goTraining('audit',{mode:'annual'}))));
  const ai=centerAuditIndicators(ws.working,todayIso),ass=assessmentIndicators(ws.working,todayIso),cmp=comparisonIndicators(ws.working,todayIso),plans=rows(ws.working,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(ws.working,x));
  const economic=effectOverview(ws.working,{day:todayIso,from:todayIso.slice(0,7)+'-01',to:todayIso});
  const auditAttention=[['Просрочено мероприятий',ai.overdue,'actions',{filter:'overdue'}],['Ожидают проверки эффективности',ai.verification,'actions',{filter:'implemented'}],['Потребности в переобучении и развитии (требуется решение)',retrainingQueue(ws.working,todayIso).filter(x=>x.status==='needs').length,'retraining',{filter:'needs'}],['Незакрытые планы аудитов',plans.filter(x=>scheduleKind(x)==='audit').length,'calendar',{month:'',plannedOnly:true}]];
