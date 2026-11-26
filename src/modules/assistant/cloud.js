@@ -1,4 +1,4 @@
-import {ATTENTION_RULES} from '../training/center-attention.js';
+import {ASSISTANT_RULES,CONTEXT_KINDS} from './context-rules.js';
 // Same pre-existing Stage43 proxy; no credentials or user input are accepted here.
 export const CENTER_PROXY='https://functions.yandexcloud.net/d4ehdpoue3sve6s0f92b';
 export const CENTER_MODEL='yandexgpt-lite';
@@ -18,16 +18,21 @@ export function modelFromProxy(value){
 export const MAX_CLOUD_RULES=8;
 const MAX_BYTES=32768;
 const exactKeys=(o,keys)=>o&&typeof o==='object'&&!Array.isArray(o)&&Object.keys(o).length===keys.length&&keys.every(k=>Object.hasOwn(o,k));
-const validId=id=>typeof id==='string'&&Object.hasOwn(ATTENTION_RULES,id);
-export function cloudRequest(ids,model=CENTER_MODEL){
+const validId=id=>typeof id==='string'&&Object.hasOwn(ASSISTANT_RULES,id);
+export function cloudRequest(ids,model=CENTER_MODEL,context=null){
  if(!validModel(model))throw Error('Выберите модель из разрешённого списка');
  if(!Array.isArray(ids)||!ids.length||ids.length>MAX_CLOUD_RULES||ids.some(x=>!validId(x))||new Set(ids).size!==ids.length)throw Error('Недопустимый набор проверок ИИ');
- // ONLY generic rule IDs and static labels, no counts, dates, free text, IDs from
- // the database, names, financial values or document contents.
- const rules=ids.map(id=>({id,topic:ATTENTION_RULES[id].label,guidance:ATTENTION_RULES[id].advice}));
+ // Default: only generic rule IDs and static labels. Optional context is a strict
+ // whitelist of positive integer signal counts, without identifying records.
+ const rules=ids.map(id=>({id,topic:ASSISTANT_RULES[id].label,guidance:ASSISTANT_RULES[id].advice}));
+ let packet=null;
+ if(context!==null){
+  if(!exactKeys(context,['kind','counts'])||typeof context.kind!=='string'||!Object.hasOwn(CONTEXT_KINDS,context.kind)||!Array.isArray(context.counts)||context.counts.length!==ids.length||context.counts.some((x,i)=>!exactKeys(x,['id','count'])||x.id!==ids[i]||!Number.isSafeInteger(x.count)||x.count<1||x.count>10000000))throw Error('Недопустимые обезличенные показатели');
+  packet={context:CONTEXT_KINDS[context.kind],rules:rules.map((r,i)=>({...r,count:context.counts[i].count}))};
+ }
  return {model,temperature:0.2,max_tokens:1200,task:'chat',messages:[
-  {role:'system',content:'Ты помощник Lean/TWI. Даны только общие темы контроля, без фактических данных предприятия. Предложи безопасные конкретные шаги проверки, не придумывай факты, числа, нормы, людей, допуски, финансовый эффект. Не утверждай документы и не назначай задачи. Ответ строго JSON: {"recommendations":[{"id":"код темы","text":"рекомендация на русском"}]}. Только переданные коды, не более одной рекомендации на код, до 600 символов на рекомендацию, без Markdown.'},
-  {role:'user',content:JSON.stringify(rules)}
+  {role:'system',content:'Ты помощник Lean/TWI. '+(packet?'Даны обезличенные количества сигналов контроля без идентификаторов и исходных данных. Не выводи причины или выводы о личности только по количествам. ':'Даны только общие темы контроля, без фактических данных предприятия. ')+'Предложи безопасные конкретные шаги проверки, не придумывай факты, числа, нормы, людей, допуски, финансовый эффект. Не утверждай документы и не назначай задачи. Ответ строго JSON: {"recommendations":[{"id":"код темы","text":"рекомендация на русском"}]}. Только переданные коды, не более одной рекомендации на код, до 600 символов на рекомендацию, без Markdown.'},
+  {role:'user',content:JSON.stringify(packet||rules)}
  ]}
 }
 export function parseCloudAdvice(raw,ids){
@@ -45,8 +50,8 @@ async function readBounded(response){
  const reader=response.body.getReader(),decoder=new TextDecoder();let total=0,text='';
  try{while(true){const {done,value}=await reader.read();if(done)break;total+=value.byteLength;if(total>MAX_BYTES)throw Error('Ответ ИИ превышает лимит');text+=decoder.decode(value,{stream:true})}return text+decoder.decode()}finally{try{await reader.cancel()}catch{}reader.releaseLock()}
 }
-export async function askCenterCloud(ids,{fetcher=globalThis.fetch,signal,model=CENTER_MODEL}={}){
- const payload=cloudRequest(ids,model),controller=new AbortController();
+export async function askCenterCloud(ids,{fetcher=globalThis.fetch,signal,model=CENTER_MODEL,context=null}={}){
+ const payload=cloudRequest(ids,model,context),controller=new AbortController();
  if(signal?.aborted)throw Error('Запрос ИИ отменён или превышено время ожидания');
  const cancel=()=>controller.abort();if(signal?.aborted)cancel();else signal?.addEventListener('abort',cancel,{once:true});
  const timer=setTimeout(cancel,45000);

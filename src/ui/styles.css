@@ -199,3 +199,14 @@ body.editor-active{overflow:hidden}.editor-host{position:fixed;inset:0;z-index:2
 
 /* LC7 read-only assistant, using the center's existing theme tokens. */
 .lc7-rule-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.lc7-rule-number{font-size:22px;font-variant-numeric:tabular-nums}.lc7-preview{white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;border:1px solid var(--line);padding:12px;border-radius:8px;background:var(--surface-alt);color:var(--text);font-size:12px}
+
+/* LC7.2 contextual assistant: overlay does not rebuild the underlying work form. */
+.lc72-helper-button{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.lc72-context-dialog{position:fixed;inset:0 0 0 auto;margin:0;width:min(620px,100vw);max-width:100vw;height:100dvh;max-height:100dvh;padding:0;border:0;border-left:1px solid var(--line);background:var(--surface);color:var(--text);box-shadow:-12px 0 40px #0003;overflow:hidden}
+.lc72-context-dialog::backdrop{background:#0005}
+.lc72-context-dialog[open]{display:flex;flex-direction:column}
+.lc72-context-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:16px;border-bottom:1px solid var(--line);flex-shrink:0}
+.lc72-context-head h2{margin:0 0 4px;font-size:18px}.lc72-context-head p{margin:0;overflow-wrap:anywhere}.lc72-context-body{padding:14px;overflow:auto;min-height:0;overscroll-behavior:contain}
+.lc72-facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin:0}.lc72-facts dt{color:var(--muted);overflow-wrap:anywhere}.lc72-facts dd{margin:0;font-weight:600;overflow-wrap:anywhere}.lc72-context-footer{color:var(--muted);overflow-wrap:anywhere}
+.lc72-context-body button{white-space:normal;overflow-wrap:anywhere;margin:3px}
+@media(max-width:600px){.lc72-context-dialog{width:100vw;border-left:0}.lc72-context-head{padding:12px}.lc72-context-body{padding:10px}.lc72-facts{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
