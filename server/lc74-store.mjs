@@ -116,6 +116,7 @@ export async function openPilot({dataDir,write=atomicReplace}){
  }
  return {
   get healthy(){return !closed&&!poisoned},
+  head(){ready();return structuredClone(current.manifest)},
   snapshot(){ready();return {manifest:structuredClone(current.manifest),bytes:new Uint8Array(current.bytes)}},
   commit,putSource,getSource,
   async close(){if(closed)return;closed=true;await tail;await release()}

@@ -3,6 +3,8 @@ meta:
   toolchain:
     name: npm
     version: 22
+build:
+  additionalCommands: node tools/build_folder.mjs --cloud
 run:
   scriptName: server/main.mjs
   containerPort: 8080

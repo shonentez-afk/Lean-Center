@@ -31,13 +31,17 @@ import {dashboard} from './modules/training/center-dashboard.js';
 import {configureMigrations,recordPayload,createDb,openDb,Workspace,definitions,list,rows,one,meta,uuid,canonical,sha256,prepareSnapshot,readSnapshot,backup,restore,encode,decode,invariant,MAX_PACKAGE,queueCapacity} from './core/db.js';
 import * as local from './storage/local.js';
 import * as net from './storage/network.js';
+import {cloudPilotTransport} from './storage/cloud-pilot.js';
 const root=document.getElementById('app');
 let registryConflict=null,registryPage=0,volatileChanges=0;
 const REGISTRY_PAGE_SIZE=100;
 const workFormDirty=()=>hasUnsavedForms(root);
 const allowDiscardForm=()=>!workFormDirty()||window.confirm('В форме есть несохранённые изменения. Уйти без сохранения?');
 let SQL,ws,cache,folder,generation=0,busy=false,master=false,page='home',theme=false,status='Готово',error=false,chart=null,edit=null,query='',incoming=[],importState=null,historyPerson=null,archiveFilter='active',libraryDraft=null,editorSession=null,libraryFilter='all';
-const contentStore=new ContentStore(()=>cache,()=>folder),readContent=ref=>contentStore.get(ref);
+const cloudBuild=window.LC_BUILD.cloudPilot===true;
+let cloud=null,cloudAccount=null,cloudTimer=null,cloudText='Вход не выполнен',cloudBad=false;
+const cloudReadonly=()=>cloudBuild&&cloudAccount?.role!=='editor';
+const contentStore=new ContentStore(()=>cache,()=>folder,()=>cloud),readContent=ref=>contentStore.get(ref);
 const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
 const planned={forms:'Бланки и методики',sop:'Каталог СОП',sop_constructor:'Конструктор СОП',frv:'ФРВ',twi_plans:'Планы инструктажа TWI',sop_evaluation:'Оценка СОП',my_plan:'Мой план',twi:'План производственного обучения',programs:'Ввод в профессию',internship:'Программы стажировки',preparation:'Подготовка сотрудников',knowledge_bank:'Банк вопросов',supplements:'Ходатайства о доплатах',instruction:'Инструктажи TWI',retraining:'Переобучение',journal:'Журнал заданий',skills:'Матрица компетенций',practical:'Практические оценки',development:'Планы развития',mentoring:'Наставники и ВТ',self_eval:'Самооценка',certification:'Сертификация',appointments:'Назначения',audit:'Аудиты 1-го уровня',calendar:'Календарь',actions:'Задачи и мероприятия',analytics:'Аналитика центра',metrics:'Дерево метрик',roi:'ROI-модель',ai:'Помощник центра',audit_import:'Импорт аудитов RC1',sop_review:'Сохранённая оценка СОП'};
 const labels={home:'Дашборд',...Object.fromEntries(Object.entries(definitions).map(([k,v])=>[k,v.label])),...planned,org_unit:'Структура предприятия',import_xlsx:'Импорт данных',storage:'Настройки и обмен'};
@@ -96,7 +100,7 @@ function navigate(p,{retainEmployee=false}={}){
 function goTraining(p,options={}){if(!navigate(p,{retainEmployee:!!employeeReturn}))return;setTrainingRoute(p,options);render()}
 function openImport(type){if(!navigate('import_xlsx'))return;importState={type,book:null,sheet:0,header:1,mapping:{},allowUpdates:false,plan:null,file:''};render()}
 function openHistory(id){if(!navigate('person_assignment',{retainEmployee:!!employeeReturn}))return;historyPerson=id;archiveFilter='all';render()}
-async function persist(){if(cache){try{generation=await local.saveWorkspace(cache,generation,ws.state());return true}catch(e){if(e.code==='WORKSPACE_GENERATION_CONFLICT')throw e;throw Object.assign(new Error('Локальная запись не выполнена',{cause:e}),{code:'WORKSPACE_WRITE_FAILED'})}}volatileChanges++;return false}
+async function persist(){if(cache){try{if(cloudBuild)invariant(!cloudReadonly(),'Тестовая учётная запись: только чтение');generation=await local.saveWorkspace(cache,generation,ws.state());if(cloud){if(ws.pending.length)cloudState('Сохранено локально · ожидают подтверждения: '+ws.pending.length);queueCloudSync(350)}return true}catch(e){if(e.code==='WORKSPACE_GENERATION_CONFLICT')throw e;throw Object.assign(new Error('Локальная запись не выполнена',{cause:e}),{code:'WORKSPACE_WRITE_FAILED'})}}volatileChanges++;return false}
 async function saveMemoryBackup(){if(busy)return;busy=true;try{download('lean-'+uuid()+'.leanbackup',await backupTransfer());message('Резервная копия сформирована. Проверьте скачанный файл перед выходом. Рабочая копия всё ещё только в памяти.')}catch(e){message('Не удалось сформировать копию: '+e.message,true)}finally{busy=false}}
 function replace(newWs){ws?.close();ws=newWs}
 function formControls(){return [...document.querySelectorAll('main input[name]:not([type=file]),main select[name],main textarea[name],main button.lc-directory-trigger[name]')]}
@@ -118,7 +122,7 @@ function restoreRejectedForm(s){
  const details=[...document.querySelectorAll('main details')];s.details.forEach((v,i)=>{const e=details[i];if(e&&(e.querySelector('summary')?.textContent||'')===v.label)e.open=v.open});
  requestAnimationFrame(()=>window.scrollTo(0,s.scroll||0));
 }
-async function run(fn,{save=true,retainForm=false}={}){if(busy)return;const prev=ws.state(),form=retainForm?captureRejectedForm():null,previousVolatile=volatileChanges;let failure=null;busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(!cache&&volatileChanges!==previousVolatile?'Изменения только в памяти. На диск не записаны — скачайте резервную копию.':m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));failure=e.code==='WORKSPACE_WRITE_FAILED'?'Локальная запись не выполнена. Изменения не записаны; проверьте доступ и свободное место браузера, затем повторите сохранение.':e.message;if(form&&page===form.page){edit=form.edit;setTrainingRoute(page,form.route);if(form.edit!==null&&e.code==='WORKSPACE_GENERATION_CONFLICT'){registryConflict={type:page,id:form.edit.id||null};failure='Другая вкладка изменила рабочую копию. Черновик сохранён в форме; загрузите актуальные данные и сверьте изменения.'}}message(failure,true)}finally{busy=false;render();if(failure&&form){restoreRejectedForm(form);message(failure,true)}}}
+async function run(fn,{save=true,retainForm=false}={}){if(busy)return;if(save&&cloudReadonly()){message('Тестовая учётная запись: только чтение',true);return}const prev=ws.state(),form=retainForm?captureRejectedForm():null,previousVolatile=volatileChanges;let failure=null;busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(!cache&&volatileChanges!==previousVolatile?'Изменения только в памяти. На диск не записаны — скачайте резервную копию.':m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));failure=e.code==='WORKSPACE_WRITE_FAILED'?'Локальная запись не выполнена. Изменения не записаны; проверьте доступ и свободное место браузера, затем повторите сохранение.':e.message;if(form&&page===form.page){edit=form.edit;setTrainingRoute(page,form.route);if(form.edit!==null&&e.code==='WORKSPACE_GENERATION_CONFLICT'){registryConflict={type:page,id:form.edit.id||null};failure='Другая вкладка изменила рабочую копию. Черновик сохранён в форме; загрузите актуальные данные и сверьте изменения.'}}message(failure,true)}finally{busy=false;render();if(failure&&form){restoreRejectedForm(form);message(failure,true)}}}
 function download(name,body){const url=URL.createObjectURL(new Blob([canonical(body)],{type:'application/json'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function pick(accept,fn,max=150*1024*1024){const i=el('input');i.type='file';i.accept=accept;i.onchange=()=>{const f=i.files?.[0];if(f)run(async()=>{invariant(f.size<=max,'Файл слишком большой');return await fn(JSON.parse(await f.text()))})};i.click()}
 const empty=()=>!ws.pending.length&&!ws.dirty&&!meta(ws.base,'publication_id')&&Object.keys(definitions).every(t=>list(ws.base,t).length===0)&&!one(ws.base,'SELECT id FROM document LIMIT 1')&&!one(ws.base,'SELECT id FROM frv_study LIMIT 1');
@@ -190,10 +194,10 @@ function form(type,v){
   if(d.history&&v?.valid_to&&k==='valid_to')input.disabled=true;
   grid.append(add(el('label',undefined,'field'),el('span',x.label),input));
  }
- const submit=el('button','Сохранить','primary');submit.type='submit';submit.disabled=busy;
+ const submit=el('button','Сохранить','primary');submit.type='submit';submit.disabled=busy||cloudReadonly();
  const values=()=>Object.fromEntries(Object.entries(controls).map(([k,n])=>[k,n.value||null]));
  f.dataset.registryForm='1';
- f.onsubmit=e=>{e.preventDefault();const payload=values();run(async()=>{ws.edit(type,v?.id||null,payload);edit=null;return 'Запись сохранена локально. Изменение ожидает публикации.'},{retainForm:true})};
+ f.onsubmit=e=>{e.preventDefault();if(cloudReadonly()){message('Только чтение',true);return}const payload=values();run(async()=>{ws.edit(type,v?.id||null,payload);edit=null;return 'Запись сохранена локально. Изменение ожидает публикации.'},{retainForm:true})};
  if(registryConflict?.type===type&&registryConflict.id===(v?.id||null)){
   const draft=()=>({entity_type:type,entity_id:v?.id||null,base_revision:v?.rev||0,payload:values()});
   const refresh=async()=>{
@@ -611,6 +615,7 @@ function editorPeople(){return directoryPeople(ws.working,today())}
 function assertContext(c){invariant(c.database===meta(ws.base,'database_id'),'Открыта другая база. Исходный JSON можно сохранить отдельно.');if(c.id){const row=one(ws.working,'SELECT * FROM '+(c.kind==='sop'?'document':'frv_study')+' WHERE id=?',[c.id]);invariant(row&&row.rev===c.expected,'Запись изменена после открытия. Не перезаписывайте её; сохраните JSON и откройте актуальную версию.')}}
 function libraryEvent(c,payload,operation=c.id?'update':'create'){assertContext(c);return {id:uuid(),entity_type:c.kind==='sop'?'document':'frv_study',entity_id:c.id||uuid(),operation,expected_revision:c.expected,payload,occurred_at:new Date().toISOString()}}
 async function chooseLibraryFile(kind,ctx=libraryContext(kind)){
+ if(cloudReadonly()){message('Тестовая учётная запись: только чтение',true);return}
  if(libraryDraft){message('Сначала завершите или отмените текущий предпросмотр.',true);return}
  const i=el('input');i.type='file';i.accept='.json,application/json';i.onchange=()=>{const file=i.files?.[0];if(file)run(async()=>{invariant(file.size<=MAX_CONTENT,'JSON до 30 МБ');const text=await file.text(),inspected=await inspectSource(text,kind);assertContext(ctx);libraryDraft={ctx,text,...inspected,editor:false};page=kind==='sop'?'sop':'frv';return 'Исходный файл проверен. Укажите связи и подтвердите запись.'},{save:false})};i.click()
 }
@@ -630,6 +635,7 @@ function disposeEditor(s,confirmed=false){
  clearTimeout(s.timeout);hideEditor(s);s.host.remove();editorSession=null;return true
 }
 function launchEditor(ctx){
+ if(cloudReadonly()){message('Тестовая учётная запись: только чтение',true);return}
  if(!allowDiscardForm())return;edit=null;registryConflict=null;
  if(libraryDraft){message('Сначала завершите или отмените текущий предпросмотр.',true);return}
  if(editorSession){
@@ -696,8 +702,8 @@ function libraryPreview(main,kind){
  const op=selectRef('operation','library_operation',c.operation_id);
  const observed=fieldInput('library_observed',c.observed_at,'date');observed.required=kind==='frv';
  const grid=el('div',undefined,'formgrid');if(kind==='sop'){if(c.id)grid.append(el('p','Код документа: '+c.code,'muted'));else grid.append(inputField('Код документа в Lean Center',code))}grid.append(inputField('Название',title),inputField('Операция (для согласования обязательна)',op));if(kind==='frv')grid.append(inputField('Фактическая дата наблюдения',observed));
- const confirm=el('button',c.command==='create'?'Сохранить новый черновик':c.command==='revise'?'Создать новую версию':'Сохранить изменения черновика','primary');confirm.type='submit';confirm.disabled=busy||!!ws.conflicts.length;
- form.onsubmit=e=>{e.preventDefault();run(async()=>{assertContext(c);const payload={command:c.command,title:title.value.trim(),operation_id:op.value||null,source:d.source,projection:p};if(kind==='sop'){if(c.command==='create')payload.code=code.value.trim();else payload.revision_id=c.command==='save'?c.revisionId:null}else payload.observed_at=observed.value;
+ const confirm=el('button',c.command==='create'?'Сохранить новый черновик':c.command==='revise'?'Создать новую версию':'Сохранить изменения черновика','primary');confirm.type='submit';confirm.disabled=busy||!!ws.conflicts.length||cloudReadonly();
+ form.onsubmit=e=>{e.preventDefault();if(cloudReadonly()){message('Только чтение',true);return}run(async()=>{assertContext(c);const payload={command:c.command,title:title.value.trim(),operation_id:op.value||null,source:d.source,projection:p};if(kind==='sop'){if(c.command==='create')payload.code=code.value.trim();else payload.revision_id=c.command==='save'?c.revisionId:null}else payload.observed_at=observed.value;
    // The complete original content is durable before its reference is written.
    await contentStore.put(d.source,d.text);const ev=libraryEvent(c,payload);const events=[ev];if(d.origin){invariant(c.command==='create','Проект из ФРВ должен быть новым документом');events.push({id:uuid(),entity_type:'document',entity_id:ev.entity_id,operation:'update',expected_revision:1,payload:{command:'origin',revision_id:ev.id,...d.origin},occurred_at:new Date().toISOString()})}await ws.applyContentEvents(events,readContent);await persist();
    libraryDraft=null;librarySelected=ev.entity_id;if(kind==='sop')libraryRevisionSelected=c.command==='save'?c.revisionId:ev.id;if(d.editor&&editorSession){if(cache)try{await editorSession.frame.contentWindow.lc54ClearCommittedRecovery?.(d.text)}catch{}disposeEditor(editorSession,true);}
@@ -793,13 +799,122 @@ const withNetworkWarning=s=>s+(networkIncomplete.length?' · '+networkWarning():
 async function scanNetwork(){networkIncomplete=[];return net.latestSnapshot(folder,SQL,null,{onIncomplete:rememberIncomplete})}
 async function refresh(){invariant(folder,'Сначала выберите папку');invariant(await net.permission(folder,true),'Нет разрешения');const s=await scanNetwork();invariant(s,withNetworkWarning('В папке нет опубликованной базы'));await useSnapshot(s.db);return withNetworkWarning(ws.conflicts.length?'Обновлено; есть конфликты локальных изменений':'Загружена опубликованная база')}
 async function publish(){invariant(master,'Включите режим издателя');invariant(folder,'Сначала выберите папку');invariant(await net.permission(folder,true),'Нет разрешения');const snapshot=await prepareSnapshot(ws);networkIncomplete=[];await net.publishSnapshot(folder,SQL,snapshot,readContent,{onIncomplete:rememberIncomplete});const db=await readSnapshot(SQL,snapshot.manifest,snapshot.bytes);replace(new Workspace(SQL,db,{device:ws.device}));return withNetworkWarning('База опубликована и проверена по SHA-256')}
-function storage(main){const mode=el('input');mode.type='checkbox';mode.checked=master;mode.onchange=()=>{master=mode.checked;render()};const summary=pane('Рабочая копия',el('p','ID базы: '+meta(ws.base,'database_id'),'muted'),el('p','Публикация: '+(meta(ws.base,'publication_id')||'ещё нет'),'muted'),el('p','Локальные изменения: '+ws.pending.length+' · Принято, но не опубликовано: '+(ws.dirty?'да':'нет')),add(el('label',undefined,'row'),mode,el('span','Режим единственного издателя (только уполномоченный сотрудник)')),el('p','Режим издателя — интерфейсный переключатель, не авторизация. Права папки настраиваются средствами предприятия.','muted'));main.append(summary);
+function storage(main){if(cloudBuild){cloudStorage(main);return}const mode=el('input');mode.type='checkbox';mode.checked=master;mode.onchange=()=>{master=mode.checked;render()};const summary=pane('Рабочая копия',el('p','ID базы: '+meta(ws.base,'database_id'),'muted'),el('p','Публикация: '+(meta(ws.base,'publication_id')||'ещё нет'),'muted'),el('p','Локальные изменения: '+ws.pending.length+' · Принято, но не опубликовано: '+(ws.dirty?'да':'нет')),add(el('label',undefined,'row'),mode,el('span','Режим единственного издателя (только уполномоченный сотрудник)')),el('p','Режим издателя — интерфейсный переключатель, не авторизация. Права папки настраиваются средствами предприятия.','muted'));main.append(summary);
  directoryOverview(main);
 const controls=add(el('div',undefined,'row'),btn('Выбрать сетевую папку',()=>run(async()=>{folder=await net.chooseFolder();networkIncomplete=[];if(cache)await local.save(cache,'folder',folder);return 'Выбрана папка: '+folder.name},{save:false}),'primary'),btn('Проверить доступ',()=>run(async()=>{invariant(folder,'Выберите папку');await net.testFolder(folder);return 'Чтение, запись и удаление тестового файла подтверждены'},{save:false}),'',!folder),btn('Обновить из папки',()=>run(refresh),'',!folder),btn('Отправить изменения',()=>run(async()=>{invariant(folder,'Выберите папку');const sent=await net.sendPackage(folder,await ws.package(),readContent);return sent.duplicate?'Эта очередь уже отправлена. Ожидается подтверждение опубликованной базой.':'Пакет отправлен. Изменения сохраняются до подтверждения опубликованной базой'},{save:false}),'',!folder||!ws.pending.length||!!ws.conflicts.length));const networkPanel=pane('Сетевая папка',el('p',folder?'Папка: '+folder.name:'Не выбрана','muted'),controls);if(folder&&networkIncomplete.length){const warning=el('p',networkWarning(),'warn');warning.id='lc-network-publication-warning';warning.setAttribute('role','status');networkPanel.append(warning)}main.append(networkPanel);
 const masterPanel=pane('Публикация и входящие изменения',el('p','Издатель принимает изменения и публикует новую проверенную версию. Исходные файлы не перезаписываются.','muted'),add(el('div',undefined,'row'),btn('Принять свои изменения',()=>run(async()=>{const n=await ws.acceptOwn(readContent);return 'Принято событий: '+n}),'',!master||!ws.pending.length||!!ws.conflicts.length),btn('Список входящих',()=>run(async()=>{invariant(await net.permission(folder,true),'Нет доступа');incoming=await net.listPackages(folder);return 'Найдено пакетов: '+incoming.length},{save:false}),'',!folder||!master),btn('Опубликовать базу',()=>run(publish),'primary',!folder||!master||!!ws.pending.length),btn('Импорт пакета вручную',()=>pick('.leanpkg,.json',async p=>{invariant(master,'Требуется режим издателя');const result=await acceptManualTransfer(p);return result.duplicate?'Пакет уже принят':'Принято событий: '+result.count},MAX_TRANSFER),'',!master)));for(const item of incoming){const p=item.p,known=p&&one(ws.base,'SELECT id FROM exchange_package WHERE id=?',[p.id]);masterPanel.append(add(el('div',undefined,'row'),el('span',item.name+' · '+(item.error|| (known?'принят':p.events?.length+' событий')),'muted'),btn('Принять',()=>run(async()=>{const x=await ws.accept(p,readContent);return x.duplicate?'Уже принято':'Принято: '+x.count}),'',!!known||!master||!p||!!ws.pending.length)))}main.append(masterPanel);
 main.append(pane('Перенос и резервирование',add(el('div',undefined,'row'),btn('Скачать пакет изменений',()=>run(async()=>{const p=await ws.package();download('change-'+p.id+'.leanpkg',await makeTransfer('package',p,refsForEvents(p.events),readContent));return 'Пакет сформирован'},{save:false}),'',!ws.pending.length||!!ws.conflicts.length),btn('Скачать резервную копию',()=>run(async()=>{download('lean-'+uuid()+'.leanbackup',await backupTransfer());return 'Копия сформирована'},{save:false})),btn('Копия на сетевой диск',()=>run(async()=>{await net.saveBackup(folder,await backupTransfer());return 'Копия записана и проверена'},{save:false}),'',!folder),btn('Восстановить копию',()=>pick('.leanbackup,.json',async obj=>{const next=await restoreBackupTransfer(obj);if(!empty()&&!confirm('Заменить рабочую копию? Убедитесь, что скачали её резервную копию.')){next.close();return 'Отменено'}replace(next);return 'Копия восстановлена; проверьте ID базы'})),btn('Создать снимок для ручного обмена',()=>run(async()=>{invariant(master,'Требуется режим издателя');const s=await prepareSnapshot(ws);download('snapshot-'+s.manifest.id+'.leansnapshot',await snapshotTransfer(s));replace(new Workspace(SQL,await readSnapshot(SQL,s.manifest,s.bytes),{device:ws.device}));return 'Снимок сформирован. Сохраните скачанный файл; ручная публикация обновлена'}),'',!master||!!ws.pending.length||!!folder),btn('Открыть снимок',()=>pick('.leansnapshot,.json',async obj=>{await openSnapshotTransfer(obj);return 'Снимок проверен и открыт'})))));
-if(ws.conflicts.length){const p=pane('Конфликты локальных изменений',el('p','Сохраните резервную копию. Конфликтующие события и последующие записи очереди не применены; исходные данные не перезаписаны.','bad'));for(const c of ws.conflicts){p.append(el('p',c.error,'bad'));const v=one(ws.working,'SELECT * FROM '+c.event.entity_type+' WHERE id=?',[c.event.entity_id]);p.append(el('pre','Локальное: '+JSON.stringify(c.event.payload,null,2)+'\nТекущее: '+JSON.stringify(v,null,2),'muted'))}if(ws.blockedPending.length){const blocked=pane('Ожидают разрешения конфликта: '+ws.blockedPending.length,el('p','Последующие события сохранены, но не воспроизводятся до разрешения предыдущего конфликта. Это защищает порядок зависимых изменений.','muted'));blocked.append(tableOf(['№','Раздел','Действие','Запись','Дата'],ws.blockedPending.map((e,i)=>[String(i+1),definitions[e.entity_type]?.label||DOMAIN_TYPES[e.entity_type]||e.entity_type,({create:'Создание',update:'Изменение',archive:'Архивирование'})[e.operation]||e.operation,e.payload?.display_name||e.payload?.name||e.payload?.title||e.payload?.code||e.entity_id,e.occurred_at])));p.append(blocked)}p.append(add(el('div',undefined,'row'),btn('Оставить опубликованное значение',()=>{if(confirm('Отменить конфликтующее локальное событие? Сохраните резервную копию.'))run(async()=>{ws.resolveConflict('discard');return 'Конфликтующее событие отменено'})},'danger'),btn('Повторить своё изменение',()=>{if(confirm('Применить ваше значение поверх текущей ревизии? Сохраните резервную копию.'))run(async()=>{ws.resolveConflict('reapply');return 'Создано новое локальное событие; оно ожидает публикации'})},'',Object.hasOwn(DOMAIN_TYPES,ws.conflicts[0].event.entity_type))));main.append(p)}
+renderLocalConflicts(main);
 main.append(pane('Демонстрация',el('p','Только в пустой локальной базе. Не используйте демонстрационную папку как рабочую.','muted'),btn('Новая пустая база',()=>{if(confirm('Создать отдельную пустую базу вместо текущей? Сначала сохраните резервную копию.'))run(async()=>{replace(new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration)));folder=null;networkIncomplete=[];incoming=[];master=false;importState=null;libraryDraft=null;if(cache)await local.save(cache,'folder',null);return 'Новая пустая база создана'})},'danger'),btn('Заполнить демо-данными',()=>run(async()=>{invariant(empty(),'Демо допустимо только в пустой базе');const u=ws.edit('org_unit',null,{code:'DEMO',name:'Учебное предприятие',kind:'Предприятие',parent_id:null});const v=ws.edit('org_unit',null,{code:'DEMO-M',name:'Учебный участок',kind:'Участок',parent_id:u});const p=ws.edit('profession',null,{code:'DEMO-MECH',name:'Механик'});const a=ws.edit('person',null,{employee_code:'DEMO-001',display_name:'Учебный сотрудник 01'});const e=ws.edit('equipment',null,{unit_id:v,code:'DEMO-E',name:'Учебный стенд'});ws.edit('operation',null,{unit_id:v,equipment_id:e,code:'DEMO-O',name:'Проверка стенда',criticality:'normal'});ws.edit('person_assignment',null,{person_id:a,unit_id:v,profession_id:p,shift_code:'1',valid_from:'2026-11-25',valid_to:null});return 'Добавлены демонстрационные записи'}),'',!empty())))}
+
+function renderLocalConflicts(main){if(ws.conflicts.length){const p=pane('Конфликты локальных изменений',el('p','Сохраните резервную копию. Конфликтующие события и последующие записи очереди не применены; исходные данные не перезаписаны.','bad'));for(const c of ws.conflicts){p.append(el('p',c.error,'bad'));const v=one(ws.working,'SELECT * FROM '+c.event.entity_type+' WHERE id=?',[c.event.entity_id]);p.append(el('pre','Локальное: '+JSON.stringify(c.event.payload,null,2)+'\nТекущее: '+JSON.stringify(v,null,2),'muted'))}if(ws.blockedPending.length){const blocked=pane('Ожидают разрешения конфликта: '+ws.blockedPending.length,el('p','Последующие события сохранены, но не воспроизводятся до разрешения предыдущего конфликта. Это защищает порядок зависимых изменений.','muted'));blocked.append(tableOf(['№','Раздел','Действие','Запись','Дата'],ws.blockedPending.map((e,i)=>[String(i+1),definitions[e.entity_type]?.label||DOMAIN_TYPES[e.entity_type]||e.entity_type,({create:'Создание',update:'Изменение',archive:'Архивирование'})[e.operation]||e.operation,e.payload?.display_name||e.payload?.name||e.payload?.title||e.payload?.code||e.entity_id,e.occurred_at])));p.append(blocked)}p.append(add(el('div',undefined,'row'),btn('Оставить опубликованное значение',()=>{if(confirm('Отменить конфликтующее локальное событие? Сохраните резервную копию.'))run(async()=>{ws.resolveConflict('discard');return 'Конфликтующее событие отменено'})},'danger'),btn('Повторить своё изменение',()=>{if(confirm('Применить ваше значение поверх текущей ревизии? Сохраните резервную копию.'))run(async()=>{ws.resolveConflict('reapply');return 'Создано новое локальное событие; оно ожидает публикации'})},'',Object.hasOwn(DOMAIN_TYPES,ws.conflicts[0].event.entity_type))));main.append(p)}}
+function cloudState(text,bad=false){
+ cloudText=text;cloudBad=bad;
+ for(const n of root.querySelectorAll('[data-lc-cloud-state]')){n.textContent=text;n.classList.toggle('bad',bad)}
+}
+function cloudStateNode(){
+ const n=el('span',cloudText,'lc-cloud-state'+(cloudBad?' bad':''));n.dataset.lcCloudState='1';n.setAttribute('role','status');return n
+}
+function queueCloudSync(delay=8000){
+ if(!cloud)return;clearTimeout(cloudTimer);
+ cloudTimer=setTimeout(()=>{syncCloud().catch(()=>{}).finally(()=>{if(cloud)queueCloudSync()})},delay)
+}
+function cloudCanSync(){return cloud&&ws&&cache&&!busy&&!editorSession&&!libraryDraft&&edit===null&&!importState?.plan&&!workFormDirty()&&!root.querySelector('dialog[open],.lc72-context-dialog')&&document.visibilityState==='visible'}
+async function checkCloudLease(){
+ const current=await local.load(cache,'workspace');
+ invariant(current?.generation===generation,'Эта рабочая копия изменена в другой вкладке. Обновите страницу и войдите снова.')
+}
+// Verified snapshot -> durable IndexedDB CAS -> live workspace swap.
+// A lost ACK or local failure cannot erase the pending queue.
+async function installCloudSnapshot(remote){
+ let next;
+ try{
+  const prev=ws.state();next=new Workspace(SQL,openDb(SQL,prev.base),prev);
+  const incoming=remote;remote=null;next.replaceBase(incoming);
+  const g=await local.saveWorkspace(cache,generation,next.state());
+  replace(next);next=null;generation=g
+ }finally{remote?.close();next?.close()}
+}
+async function pullCloud(){
+ const h=await cloud.head();invariant(h.database_id===meta(ws.base,'database_id'),'Облачная база изменена. Локальная копия сохранена; требуется проверка администратором.');
+ if(h.id===meta(ws.base,'publication_id'))return false;
+ await installCloudSnapshot(await cloud.snapshot(SQL));return true
+}
+async function cloudOutbox(){
+ const old=await local.load(cache,'cloud-outbox');
+ if(old&&old.database_id===meta(ws.base,'database_id')&&old.device_id===ws.device&&old.base_publication_id===meta(ws.base,'publication_id')&&canonical(old.events)===canonical(ws.pending))return old;
+ const pkg=await ws.package();await local.save(cache,'cloud-outbox',pkg);return pkg
+}
+async function syncCloud(manual=false){
+ if(!cloudCanSync()){
+  if(manual)cloudState('Завершите или закройте редактирование и повторите синхронизацию',true);
+  return
+ }
+ busy=true;root.inert=true;let changed=false;
+ try{
+  await checkCloudLease();
+  changed=await pullCloud();
+  if(ws.conflicts.length){cloudState('Конфликт: изменения сохранены локально. Откройте «Настройки и обмен».',true);return}
+  if(ws.pending.length){
+   if(cloudReadonly()){cloudState('Только чтение. Ранее сохранённая очередь не отправляется.',true);return}
+   cloudState('Отправка изменений: '+ws.pending.length);
+   const pkg=await cloudOutbox();
+   for(const ref of refsForEvents(pkg.events))await cloud.put(ref,await readContent(ref));
+   try{await cloud.send(pkg)}catch(e){
+    if(e.status===409){changed=(await pullCloud())||changed;if(ws.conflicts.length){cloudState('Конфликт: изменения сохранены локально. Откройте «Настройки и обмен».',true);return}}
+    throw e
+   }
+   changed=(await pullCloud())||changed;
+  }
+  if(ws.conflicts.length){cloudState('Конфликт: изменения сохранены локально. Откройте «Настройки и обмен».',true);return}
+  if(ws.pending.length){cloudState('Ожидают подтверждения: '+ws.pending.length,true);return}
+  cloudState('Синхронизировано · '+cloudAccount.user+(cloudReadonly()?' · только чтение':''));
+ }catch(e){cloudState('Облачный обмен не подтверждён: '+e.message+' · локальная очередь: '+ws.pending.length,true)}
+ finally{busy=false;root.inert=false;if(changed)render()}
+}
+function cloudStorage(main){
+ main.append(pane('Облачное хранение · испытательный стенд',
+  el('p','Учётная запись: '+cloudAccount.user+' · '+(cloudReadonly()?'только чтение':'редактор'),'muted'),
+  el('p','ID базы: '+meta(ws.base,'database_id'),'muted'),
+  el('p','Подтверждённая публикация: '+meta(ws.base,'publication_id'),'muted'),
+  el('p','Локальная очередь: '+ws.pending.length+' · конфликты: '+ws.conflicts.length),
+  cloudStateNode(),
+  el('p','Сначала локальная запись, затем подтверждение сервером. Издатель не нужен. При отключении сети не закрывайте вкладку. После перезагрузки потребуется повторный онлайн-вход.','muted'),
+  add(el('div',undefined,'row'),btn('Синхронизировать сейчас',()=>syncCloud(true),'primary'),btn('Скачать резервную копию',()=>run(async()=>{download('lean-'+uuid()+'.leanbackup',await backupTransfer());return 'Локальная копия сформирована'},{save:false})),btn('Выйти из облачной базы',cloudLogout))));
+ renderLocalConflicts(main)
+}
+function cloudLogout(){
+ if(busy||!allowDiscardForm())return;
+ if(editorSession||libraryDraft){message('Сначала завершите работу в редакторе',true);return}
+ if(ws.pending.length&&!confirm('Есть неподтверждённые события. Они останутся в локальном кэше этой учётной записи. Выйти?'))return;
+ clearTimeout(cloudTimer);cloud=null;location.reload()
+}
+function cloudLogin(){
+ document.documentElement.classList.toggle('dark',theme);
+ const token=el('input');token.type='password';token.name='pilot_token';token.required=true;token.autocomplete='off';token.maxLength=64;token.minLength=64;
+ const form=el('form'),notice=el('p','Только демонстрационные данные. Действующие корпоративные данные запрещены.','warn'),button=el('button','Войти','primary');button.type='submit';
+ const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div',undefined,'brand-text'),el('div','Центр TWI','brand'),el('div','Обучение на рабочем месте','brand-sub')),el('span',undefined,'brand-company'));
+ root.replaceChildren(add(el('section',undefined,'panel lc-cloud-login'),brand,el('h1','Облачный пилот LC7.4.1'),el('p','Введите токен тестовой учётной записи. Это не токен GitHub.','muted'),add(form,add(el('label',undefined,'field'),el('span','Тестовый токен'),token),button,notice)));
+ form.onsubmit=async e=>{
+  e.preventDefault();if(button.disabled)return;button.disabled=true;notice.textContent='Проверка подключения…';let accountCache,next,remote,transport;
+  try{
+   transport=cloudPilotTransport(token.value.trim());token.value='';
+   const account=await transport.session();
+   accountCache=await local.openCache('lean-center-cloud-v1-'+account.user);
+   const saved=await local.load(accountCache,'workspace');
+   remote=await transport.snapshot(SQL);
+   if(saved){
+    next=new Workspace(SQL,openDb(SQL,saved.state.base),saved.state);invariant(!next.dirty,'Непубликуемая локальная база; требуется отдельное восстановление');
+    const incoming=remote;remote=null;next.replaceBase(incoming)
+   }else{next=new Workspace(SQL,remote);remote=null}
+   const g=await local.saveWorkspace(accountCache,saved?.generation||0,next.state());
+   cache=accountCache;accountCache=null;generation=g;ws=next;next=null;folder=null;master=false;cloud=transport;cloudAccount=account;
+   cloudState(ws.conflicts.length?'Есть конфликт локальной очереди':ws.pending.length?'Ожидают подтверждения: '+ws.pending.length:'Синхронизировано · '+account.user+(cloudReadonly()?' · только чтение':''),!!ws.conflicts.length);
+   render();queueCloudSync(350);
+  }catch(e){remote?.close();next?.close();accountCache?.close();notice.textContent='Вход не выполнен: '+e.message;button.disabled=false}
+ }
+}
+
 function currentAssistantContext(main){
  const route=getTrainingRoute(),read=name=>{const x=main.querySelector('[name="'+name+'"]');return x?x.dataset.personId??x.value:undefined};
  // Use actual visible filters for L1 and tree metrics, not stale route defaults.
@@ -823,6 +938,7 @@ function render(){
  const brandCompany=el('span',undefined,'brand-company');brandCompany.setAttribute('role','img');brandCompany.setAttribute('aria-label','ТЕХНОНИКОЛЬ');
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),brandText,brandCompany);
  const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{if(!allowDiscardForm())return;edit=null;registryConflict=null;theme=!theme;try{localStorage.setItem('lean-center-theme',theme?'dark':'light')}catch{}render()}),btn('Хранение',()=>navigate('storage')));
+ if(cloudBuild)metaPanel.append(el('span','Облачный пилот · '+cloudAccount.user+(cloudReadonly()?' · чтение':''),'version lc-cloud-mode'),btn('Выйти',cloudLogout));
  if(editorSession&&editorSession.host.hidden&&!libraryDraft)metaPanel.append(btn('Вернуться в редактор',()=>showEditor(editorSession),'primary'));header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.id='lc53-sidebar';side.setAttribute('aria-label','Навигация');side.classList.toggle('lc53-menu-open',mobileMenu);const menu=btn(mobileMenu?'Закрыть меню':'Меню',()=>{mobileMenu=!mobileMenu;side.classList.toggle('lc53-menu-open',mobileMenu);menu.textContent=mobileMenu?'Закрыть меню':'Меню';menu.setAttribute('aria-expanded',String(mobileMenu))},'lc53-mobile-menu');menu.setAttribute('aria-controls',side.id);menu.setAttribute('aria-expanded',String(mobileMenu));header.append(menu);
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};
@@ -830,7 +946,8 @@ function render(){
  side.append(el('p','●  Запланированные разделы','nav-hint'));
  const main=el('main',undefined,'main');
  const section=navGroups.find(([,keys])=>keys.includes(page))?.[0]||'Рабочее пространство';
- const top=add(el('div',undefined,'top'),add(el('div'),el('div',section,'eyebrow'),el('h1',labels[page]),el('div','Локальная база · '+ws.pending.length+' ожидающих изменений','muted')),el('span',folder?'Сетевая папка выбрана':'Локальная рабочая копия','pill'));
+ const top=add(el('div',undefined,'top'),add(el('div'),el('div',section,'eyebrow'),el('h1',labels[page]),el('div',(cloudBuild?'Облачная база · локальная очередь: ':'Локальная база · ')+ws.pending.length+' ожидающих изменений','muted')),el('span',cloudBuild?'Общая облачная база':folder?'Сетевая папка выбрана':'Локальная рабочая копия','pill'));
+ if(cloudBuild)top.append(cloudStateNode());
  if(CONTEXT_PAGES.has(page)){const helper=btn('',()=>openCurrentAssistant(main),'lc72-helper-button'),label=el('span','Проверить раздел');helper.append(icon('ai'),label);top.append(helper);const update=()=>{if(!main.isConnected)return;const name=helperLabel(currentAssistantContext(main));if(label.textContent!==name)label.textContent=name};const obs=new MutationObserver(update);obs.observe(main,{childList:true,subtree:true});const parentObs=new MutationObserver(()=>{if(!main.isConnected){obs.disconnect();parentObs.disconnect()}});parentObs.observe(root,{childList:true});queueMicrotask(update)}
  main.append(top);if(navParent!==null)main.append(add(el('div',undefined,'row lc53-nav-return'),btn('← Назад',navigationBack)));const stat=el('div',status,'status'+(error?' error':''));stat.id='status';stat.setAttribute('role','status');main.append(stat);
  if(!cache)main.append(pane('Режим работы только в памяти',el('p','IndexedDB недоступен. Изменения только в памяти — скачивайте резервную копию до закрытия.','bad'),btn('Скачать резервную копию из памяти',saveMemoryBackup,'primary')));
@@ -839,8 +956,9 @@ function render(){
  if(employeeReturn&&page!=='person')main.append(add(el('div',undefined,'row employee-return'),btn('← К карточке сотрудника',()=>openEmployee(employeeReturn,{restore:true})),el('span',refName('person',employeeReturn),'muted')));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));main.inert=!!editorSession&&!editorSession.host.hidden;if(editorSession?.loaded)editorSession.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'theme',theme:theme?'dark':'light'},'*');
  if(page==='home')home(main);else if(page==='ai')assistantScreen(main,{db:ws.working,day:today(),el,add,btn,pane,openAttention});else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,goResearch,readContent,pick,downloadBytes,notify:message,openEmployee,rememberNavigation,allowDiscardForm:()=>busy||allowDiscardForm()});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
- main.append(el('p',(LC_BUILD.version||'Lean Center')+' · автономная рабочая копия · общий сетевой обмен','foot'))
+ main.append(el('p',(LC_BUILD.version||'Lean Center')+(cloudBuild?' · облачный тестовый стенд · без издателя':' · автономная рабочая копия · общий сетевой обмен'),'foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
-async function init(){configureMigrations(LC_BUILD.migration3,LC_BUILD.migration4,LC_BUILD.migration5,LC_BUILD.migration6,LC_BUILD.migration7,LC_BUILD.migration8,LC_BUILD.migration9,LC_BUILD.migration10,LC_BUILD.migration11,LC_BUILD.migration12,LC_BUILD.migration13,LC_BUILD.migration14,LC_BUILD.migration15,LC_BUILD.migration16,LC_BUILD.migration17);SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await scanNetwork();if(remote){await useSnapshot(remote.db);await persist();message(withNetworkWarning(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки'))}else if(networkIncomplete.length)message(withNetworkWarning('В папке нет опубликованной базы'),true)}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message(withNetworkWarning('Сетевая база не обновлена: '+e.message),true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}
+window.addEventListener('online',()=>{if(cloud)queueCloudSync(100)});document.addEventListener('visibilitychange',()=>{if(cloud&&document.visibilityState==='visible')queueCloudSync(100)});
+async function init(){configureMigrations(LC_BUILD.migration3,LC_BUILD.migration4,LC_BUILD.migration5,LC_BUILD.migration6,LC_BUILD.migration7,LC_BUILD.migration8,LC_BUILD.migration9,LC_BUILD.migration10,LC_BUILD.migration11,LC_BUILD.migration12,LC_BUILD.migration13,LC_BUILD.migration14,LC_BUILD.migration15,LC_BUILD.migration16,LC_BUILD.migration17);SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});if(cloudBuild){cloudLogin();return}try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await scanNetwork();if(remote){await useSnapshot(remote.db);await persist();message(withNetworkWarning(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки'))}else if(networkIncomplete.length)message(withNetworkWarning('В папке нет опубликованной базы'),true)}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message(withNetworkWarning('Сетевая база не обновлена: '+e.message),true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}
 init().catch(e=>{console.error(e);root.replaceChildren(el('h1','Не удалось открыть Lean Center'),el('p',e.message),el('p','Существующие локальные данные не удалены. Проверьте браузер или восстановите проверенную копию.'))});

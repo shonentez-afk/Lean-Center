@@ -6,7 +6,7 @@ import * as net from '../../storage/network.js';
 export const MAX_TRANSFER=150*1024*1024;
 const key=r=>'content:'+r.sha256;
 export class ContentStore{
- constructor(getCache,getFolder){this.getCache=getCache;this.getFolder=getFolder;this.memory=new Map()}
+ constructor(getCache,getFolder,getRemote=()=>null){this.getCache=getCache;this.getFolder=getFolder;this.getRemote=getRemote;this.memory=new Map()}
  async put(ref,text){
   await checkContent(ref,text);const cache=this.getCache();
   if(cache){const old=await local.load(cache,key(ref));if(old!==undefined){await checkContent(ref,old);return old}await local.save(cache,key(ref),text);return text}
@@ -17,6 +17,7 @@ export class ContentStore{
  async get(ref,{network=true}={}){
   validateRef(ref);const cache=this.getCache(),v=cache?await local.load(cache,key(ref)):this.memory.get(ref.sha256);
   if(v!==undefined)return checkContent(ref,v);
+  const remote=this.getRemote();if(network&&remote)return this.put(ref,await remote.get(ref));
   const h=this.getFolder();invariant(network&&h,'Исходный файл не в локальном кэше. Подключите общую папку или восстановите полную копию.');
   const text=await net.readContent(h,ref);return this.put(ref,text)
  }

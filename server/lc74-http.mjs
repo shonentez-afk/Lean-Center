@@ -1,4 +1,6 @@
 import http from 'node:http';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import {createHash,timingSafeEqual} from 'node:crypto';
 import {PilotError} from './lc74-store.mjs';
 import {MAX_PACKAGE} from '../src/core/db.js';
@@ -28,22 +30,43 @@ async function textBody(req,max){
  for await(const chunk of req){n+=chunk.length;if(n>max)throw new PilotError(413,'Запрос превышает лимит');chunks.push(chunk)}
  try{return new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks))}catch{throw new PilotError(400,'Неверный UTF-8')}
 }
-function reply(res,status,body,type='application/json; charset=utf-8'){
+function reply(res,status,body,type='application/json; charset=utf-8',csp="default-src 'none'; frame-ancestors 'none'; base-uri 'none'"){
  const b=Buffer.isBuffer(body)?body:Buffer.from(type.startsWith('application/json')?JSON.stringify(body):String(body));
- res.writeHead(status,{'Content-Type':type,'Content-Length':b.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'; base-uri 'none'"});res.end(b)
+ res.writeHead(status,{'Content-Type':type,'Content-Length':b.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':csp});res.end(b)
 }
 const landing='<!doctype html><html lang="ru"><meta charset="utf-8"><title>Центр TWI — LC7.4.0</title><h1>Центр TWI · серверный тестовый стенд</h1><p>Это экспериментальный API для синтетических данных, не рабочий интерфейс Центра TWI.</p><p>Доступность: <a href="/healthz">healthz</a>. Данные доступны только по токену.</p></html>';
-export function createPilotServer({store,users}){
+// Serve only checked public build assets. Never serve data or repository files.
+const cloudCsp="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob:; frame-src 'self' blob: data:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.webp':'image/webp','.svg':'image/svg+xml'};
+export async function pilotAssets(root){
+ const m=JSON.parse(await fs.readFile(path.join(root,'app-manifest.json'),'utf8'));
+ if(m.version!=='lc7.4.1-cloud-pilot')throw Error('Expected dedicated cloud build');
+ const files=new Map();
+ for(const item of m.files){
+  if(item.path!=='index.html'&&!/^versions\/lc7\.4\.1-cloud-pilot\/[a-zA-Z0-9._/-]+$/.test(item.path))continue;
+  if(item.path.split('/').some(x=>x==='.'||x==='..'||!x))throw Error('Invalid asset path');
+  const type=types[path.extname(item.path)];if(!type)continue;
+  const file=path.resolve(root,item.path),bytes=await fs.readFile(file);
+  if(bytes.length!==item.size||createHash('sha256').update(bytes).digest('hex')!==item.sha256)throw Error('Invalid cloud asset '+item.path);
+  files.set('/'+item.path,{file,type})
+ }
+ if(!files.has('/index.html'))throw Error('Missing cloud index');
+ files.set('/',files.get('/index.html'));
+ return files
+}
+export function createPilotServer({store,users,assets=null}){
  let active=0;
  const server=http.createServer(async(req,res)=>{
-  if(active>=12){reply(res,429,{error:'Сервер занят'});return}
+  if(active>=24){reply(res,429,{error:'Сервер занят'});return}
   active++;
   try{
    const url=new URL(req.url,'http://localhost'),p=url.pathname;
    if(req.method==='GET'&&p==='/healthz'){reply(res,store.healthy?200:503,{ok:store.healthy,pilot:'LC7.4.0'});return}
-   if(req.method==='GET'&&p==='/'){reply(res,200,landing,'text/html; charset=utf-8');return}
+   if(req.method==='GET'&&assets?.has(p)){const a=assets.get(p);reply(res,200,await fs.readFile(a.file),a.type,cloudCsp);return}
+   if(req.method==='GET'&&p==='/'&&!assets){reply(res,200,landing,'text/html; charset=utf-8');return}
    const user=authenticate(req,users);
    if(req.method==='GET'&&p==='/api/v1/session'){reply(res,200,{user:user.name,role:user.role,pilot:true});return}
+   if(req.method==='GET'&&p==='/api/v1/head'){reply(res,200,store.head());return}
    if(req.method==='GET'&&p==='/api/v1/snapshot'){
     const s=store.snapshot();reply(res,200,{manifest:s.manifest,sqlite_base64:Buffer.from(s.bytes).toString('base64')});return
    }
