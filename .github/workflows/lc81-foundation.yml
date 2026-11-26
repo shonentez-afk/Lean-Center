@@ -15,7 +15,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: node --test tests/lc81-read-policy.test.mjs tests/lc81-secure-qa.test.mjs
+      - run: node --test tests/lc81-read-policy.test.mjs tests/lc81-secure-qa.test.mjs tests/lc81-migration.test.mjs
       - run: node tools/lc81-inventory.mjs
       - run: npm test
       - run: node --test tests/lc74-server.test.mjs tests/lc74-save-state.test.mjs

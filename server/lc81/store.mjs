@@ -58,6 +58,10 @@ function security(db,accountId){
  }).map(g=>({...g,scope:JSON.parse(g.scope_json)}));
  return {accounts:[a],policies,grants};
 }
+function projectView(db,a,action,data,d){
+ if(action!=='task.read')return data;
+ return {...data,can_implement:a.bootstrap!==1&&['open','in_progress','ineffective'].includes(data.state)&&canImplementOwnTask(db,security(db,a.id),a.id,data.id,d)};
+}
 function permissionsFor(db,a){
  if(a.bootstrap===1)return [...READ_ACTIONS]; // Unbound bootstrap cannot perform personal decisions.
  const d=day(),s=security(db,a.id),out=new Set();
@@ -135,7 +139,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
  if(fresh&&(!normalizeLogin(login)||!validPassword(password))){await fs.rmdir(dataDir);throw new PilotError(503,'Требуется начальный секрет администратора')}
  const lock=path.join(dataDir,'writer.lock'),file=path.join(dataDir,'secure.lc81'),marker=path.join(dataDir,'initialized');
  const h=await fs.open(lock,'wx',0o600);await h.close();
- let current,poisoned=false,closed=false,tail=Promise.resolve(),queued=0;
+ let current,poisoned=false,closed=false,copying=false,tail=Promise.resolve(),queued=0;
  const release=()=>fs.rm(lock,{force:true});
  try{
   if(fresh){
@@ -172,7 +176,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
  const ready=()=>must(!closed&&!poisoned,503,'Защищённое хранилище требует проверки');
  const read=fn=>{ready();return fn(current)};
  function mutate(fn){
-  ready();must(queued<8,429,'Очередь сохранения занята');queued++;
+  ready();must(!copying&&queued<8,429,'Очередь сохранения занята');queued++;
   const task=tail.then(async()=>{
    ready();const candidate=openDb(SQL,bytesOf(current),{upgrade:false});
    try{
@@ -274,12 +278,12 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   readResource(actor,action,id){return read(db=>{
    const a=account(db,actor);if(!a)return null;
    const v=a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day()):readAuthorized(db,security(db,actor),actor,action,id,day());
-   return v?.data??null;
+   return v?projectView(db,a,action,v.data,day()):null;
   })},
   listResources(actor,action){return read(db=>{
    const a=account(db,actor);must(a,401,'Необходим вход');must(READ_ACTIONS.includes(action)&&permissionsFor(db,a).includes(action),404,'Раздел недоступен');
    const table=RESOURCE_TABLES[action];
-   const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day()):readAuthorized(db,s,actor,action,id,day())).filter(Boolean).map(v=>v.data);
+   const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day()):readAuthorized(db,s,actor,action,id,day())).filter(Boolean).map(v=>projectView(db,a,action,v.data,day()));
   })},
   implementOwnTask(actor,revision,input){
    return mutate(db=>{
@@ -299,9 +303,10 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   // Offline administrative maintenance only. No HTTP route exports this file.
   async copyCheckpoint(target){
    ready();must(path.isAbsolute(target),400,'Абсолютный путь новой папки');
-   must(queued===0,409,'Остановите сервер перед копированием');
-   await fs.mkdir(target,{mode:0o700}); // EEXIST is deliberate
+   must(queued===0&&!copying,409,'Остановите сервер перед копированием');
+   copying=true;let created=false;
    try{
+    await fs.mkdir(target,{mode:0o700});created=true; // EEXIST is deliberate
     const checkpoint=pack(current),id=meta(current,'database_id');
     await copySources(current,target,async sha=>new TextDecoder('utf-8',{fatal:true}).decode(await fs.readFile(path.join(dataDir,'documents',sha+'.json'))));
     await atomicReplace(path.join(target,'secure.lc81'),checkpoint);
@@ -310,7 +315,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     try{await checkSources(checked,target);must(meta(checked,'database_id')===id,503,'Копия другой базы')}finally{checked.close()}
     must((await fs.readFile(path.join(target,'secure.lc81'))).equals(checkpoint),503,'Копия не подтверждена');
     return {database_id:id,sha256:digest(checkpoint)};
-   }catch(e){await fs.rm(target,{recursive:true,force:true});throw e}
+   }catch(e){if(created)await fs.rm(target,{recursive:true,force:true});throw e}finally{copying=false}
   },
   async close(){if(closed)return;closed=true;await tail;current.close();await release()}
  };

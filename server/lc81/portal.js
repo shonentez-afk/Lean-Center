@@ -67,13 +67,13 @@ async function render(){
  if(!page){$('content').replaceChildren(panel('Личное рабочее пространство',el('p','Вам пока не назначены права на рабочие разделы. Обратитесь к администратору.')));return}
  if(!Object.hasOwn(actions,page))throw Error('Раздел недоступен');
  const data=await api('resources?action='+encodeURIComponent(page));if(serial!==sequence)return;
- const items=data.items;const cols=items.length?Object.keys(items[0]).filter(k=>k!=='steps'):[];
+ const items=data.items;const cols=items.length?Object.keys(items[0]).filter(k=>!['steps','can_implement','rev'].includes(k)):[];
  const labels={id:'ID',display_name:'Сотрудник',revision_id:'Редакция',version_no:'Версия',state:'Состояние',document_id:'Документ',code:'Код',title:'Название',operation_id:'Операция',trainee_id:'Обучаемый',sop_revision_id:'Версия СОП',due_on:'Срок'};
  const content=panel(actions[page],items.length?table(cols.map(k=>labels[k]||k),items.map(r=>cols.map(k=>r[k]))):el('p','Нет доступных записей.'));
  if(page==='sop.read_steps')for(const r of items){const details=el('details');details.append(el('summary',r.title+' · v'+r.version_no),table(['Шаг','Действие','Ключевые моменты','Причина','Секунды'],r.steps.map(s=>[s.position,s.action_text,s.key_points.join(' · '),s.reason_text,s.duration_seconds])));content.append(details)}
  if(page==='task.read'&&user.permissions.includes('task.implement_own')&&user.person_id){
   content.append(el('h3','Выполнить своё мероприятие'),el('p','Сервер проверит владельца, полномочия, версию и условия выполнения.'));
-  const candidates=items.filter(r=>['open','in_progress','ineffective'].includes(r.state));
+  const candidates=items.filter(r=>r.can_implement===true);
   if(candidates.length)content.append(form([select('id','Мероприятие',candidates.map(r=>[r.id,r.title])),input('result','Фактический результат')],'Подтвердить выполнение',async f=>{const r=candidates.find(x=>x.id===value(f,'id'));await api('tasks/implement',{id:r.id,expected_revision:r.rev,result:value(f,'result')});note('Выполнение подтверждено сервером');await render()}));
  }
  $('content').replaceChildren(content);
