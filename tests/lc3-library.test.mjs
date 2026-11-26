@@ -1,3 +1,5 @@
+import {currentStandard} from '../src/modules/training/domain.js';
+import {documentTitle} from '../src/modules/library/revision-title.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -187,3 +189,12 @@ test('TWI shared input tracks tool and material; rejected automatic and manual c
  assert.equal(full.deferred,0);assert.equal(full.result.sourceSignature,fresh);assert.equal(full.result.prepare.prep,'Новый инструмент');assert.equal(full.result.prepare.known,'Ручная рекомендация');assert.equal(full.result.generatedBaseline.prepare.known,'Старая рекомендация');
  assert.equal(linkedTwi({...s,twi:full.result}).outdated,false)
 });
+
+test('LC5.4.1 effective and historical SOP titles are revision snapshots, including legacy event metadata',async()=>{const w=fresh();try{
+ const {op,p}=masters(w),s=await sop(),d=createDoc(w,s,op),id=d.entity_id;await w.applyContentEvents([d],readFrom(s));await passport(w,id,d.id);for(const cmd of ['submit','approve','effect'])await action(w,id,d.id,p,cmd);
+ const e=event(w,'document',id,{command:'revise',revision_id:null,title:'QA новый черновик',operation_id:op,...projection(s)});await w.applyContentEvents([e],readFrom(s));
+ assert.equal(documentTitle(w.working,id),'Проверка');assert.equal(currentStandard(w.working,d.id).title,'Проверка');assert.equal(currentStandard(w.working,e.id).title,'QA новый черновик');assert.equal(one(w.working,'SELECT title FROM document WHERE id=?',[id]).title,'Проверка');
+ w.working.run("UPDATE document_revision SET payload_json=json_remove(payload_json,'$.title') WHERE id=?",[e.id]);assert.equal(documentTitle(w.working,id,e.id),'QA новый черновик');
+ await passport(w,id,e.id);for(const cmd of ['submit','approve','effect'])await action(w,id,e.id,p,cmd);
+ assert.equal(documentTitle(w.working,id),'QA новый черновик');assert.equal(currentStandard(w.working,d.id).title,'Проверка');assert.deepEqual(rows(w.working,'PRAGMA foreign_key_check'),[]);
+ }finally{w.close()}});

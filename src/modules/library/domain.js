@@ -1,3 +1,4 @@
+import {documentTitle} from './revision-title.js';
 import {verifyMobileEvent} from '../training/mobile-audit.js';
 import {verifyRC1Event} from '../training/rc1-import.js';
 import {TRAINING_TYPES,isTrainingEvent,applyTrainingEvent,verifyTrainingSource} from '../training/domain.js';
@@ -102,7 +103,7 @@ function register(db,ref){validateRef(ref);const old=one(db,'SELECT * FROM attac
 function link(db,ref,type,id){register(db,ref);db.run("DELETE FROM attachment_link WHERE entity_type=? AND entity_id=? AND purpose='stage43-source'",[type,id]);db.run('INSERT INTO attachment_link(id,sha256,entity_type,entity_id,purpose) VALUES(?,?,?,?,?)',[id+':source',ref.sha256,type,id,'stage43-source'])}
 function active(db,table,id){invariant(isId(id)&&one(db,'SELECT id FROM '+table+' WHERE id=? AND archived=0',[id]),'Выберите действующую запись: '+table)}
 function operation(db,id){if(id!==null)active(db,'operation',id)}
-function sourcePayload(p,kind){validateRef(p.source);invariant(p.source.kind===kind&&obj(p.projection)&&nonempty(p.title)&&string(p.projection.title,500),'Неверное содержимое');return canonical({source:p.source,projection:p.projection})}
+function sourcePayload(p,kind){validateRef(p.source);invariant(p.source.kind===kind&&obj(p.projection)&&nonempty(p.title)&&string(p.projection.title,500),'Неверное содержимое');return canonical({source:p.source,projection:p.projection,...(kind==='sop'?{title:p.title.trim()}:{})})}
 function docSteps(db,rid,p){invariant(Array.isArray(p.projection.steps)&&p.projection.steps.length<=1000,'Некорректные шаги');db.run('DELETE FROM document_step WHERE revision_id=?',[rid]);for(const [i,s] of p.projection.steps.entries()){invariant(string(s.action)&&Array.isArray(s.key_points)&&s.key_points.every(x=>string(x))&&string(s.reason)&&num(s.seconds),'Некорректный шаг');db.run('INSERT INTO document_step(id,revision_id,position,action_text,key_points_json,reason_text,duration_seconds) VALUES(?,?,?,?,?,?,?)',[rid+':'+(i+1),rid,i+1,s.action,canonical(s.key_points),s.reason,s.seconds])}}
 function revision(db,id,docId){const r=one(db,'SELECT * FROM document_revision WHERE id=? AND document_id=?',[id,docId]);invariant(r,'Версия не принадлежит документу');return r}
 function openRevision(db,id){return one(db,"SELECT id FROM document_revision WHERE document_id=? AND state IN ('draft','review','approved')",[id])}
@@ -150,14 +151,14 @@ export function applyDomainEvent(db,e,old){
    // The operation belongs to the document identity. Once effective versions
    // exist, association must not be silently changed for historical versions.
    invariant(old.operation_id===p.operation_id||!one(db,"SELECT id FROM document_revision WHERE document_id=? AND state IN ('approved','effective','superseded','withdrawn')",[id]),'Связь действовавшего СОП с операцией неизменяема');
-   db.run('UPDATE document SET title=?,operation_id=?,rev=rev+1 WHERE id=?',[p.title.trim(),p.operation_id,id]);return
+   const effective=one(db,"SELECT id FROM document_revision WHERE document_id=? AND state='effective'",[id]);db.run('UPDATE document SET title=?,operation_id=?,rev=rev+1 WHERE id=?',[effective?documentTitle(db,id,effective.id):p.title.trim(),p.operation_id,id]);return
   }
   exact(p,['command','revision_id','actor_id','note']);const v=revision(db,p.revision_id,id);invariant(string(p.note,2000),'Некорректное примечание');active(db,'person',p.actor_id);
   const transitions={submit:['draft','review'],return:['review','draft'],approve:['review','approved'],effect:['approved','effective'],withdraw:['effective','withdrawn']};
   const tr=Object.hasOwn(transitions,p.command)&&transitions[p.command];invariant(tr&&v.state===tr[0],'Недопустимый переход статуса');
   if(['submit','approve','effect'].includes(p.command)){active(db,'operation',old.operation_id);const steps=rows(db,'SELECT action_text FROM document_step WHERE revision_id=?',[v.id]);invariant(steps.length&&steps.every(s=>s.action_text.trim()),'Заполните действия всех шагов');invariant(v.print_format&&v.changed_on&&v.review_due,'Заполните паспорт: формат А3 и дата изменения');invariant(steps.length<=(v.print_format==='portrait'?9:12),'Количество шагов превышает формат А3');invariant(v.workplace_id&&one(db,'SELECT workplace_id FROM operation WHERE id=?',[old.operation_id])?.workplace_id===v.workplace_id,'Паспорт: подтвердите рабочее место операции');if(p.command!=='submit'){const src=JSON.parse(v.payload_json).projection;invariant(src.steps.every(s=>s.seconds>0&&s.key_points.some(k=>k.trim())&&s.reason.trim()&&s.photo),'Перед согласованием заполните время, ключевые моменты, причины и визуализацию всех шагов')}}
   if(p.command==='return'||p.command==='withdraw')invariant(p.note.trim(),'Укажите причину');
-  if(p.command==='effect'){db.run("UPDATE document_revision SET state='superseded' WHERE document_id=? AND state='effective'",[id]);db.run("UPDATE document_revision SET state='effective',effective_at=? WHERE id=?",[e.occurred_at,v.id])}
+  if(p.command==='effect'){db.run("UPDATE document_revision SET state='superseded' WHERE document_id=? AND state='effective'",[id]);db.run("UPDATE document_revision SET state='effective',effective_at=? WHERE id=?",[e.occurred_at,v.id]);db.run('UPDATE document SET title=? WHERE id=?',[documentTitle(db,id,v.id),id])}
   else db.run('UPDATE document_revision SET state=? WHERE id=?',[tr[1],v.id]);
   if(p.command==='approve'||p.command==='return')db.run('INSERT INTO document_approval(id,revision_id,actor_id,decision,decided_at,note) VALUES(?,?,?,?,?,?)',[e.id,v.id,p.actor_id,p.command==='approve'?'approved':'returned',e.occurred_at,p.note]);
   db.run('UPDATE document SET rev=rev+1 WHERE id=?',[id]);return

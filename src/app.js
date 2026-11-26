@@ -1,3 +1,4 @@
+import {REVISION_TITLE_SQL,documentTitle} from './modules/library/revision-title.js';
 import {assessmentAnalysis,renderAssessmentAnalysis} from './ui/assessment-analysis.js';
 import {comparisonIndicators} from './modules/training/center-overview.js';
 import {scheduleKind} from './modules/training/center-planning.js';
@@ -323,7 +324,7 @@ function evaluationForm(revision,source){
  select.onchange=()=>{if(!confirm('Сменить версию методики? Незавершённые ответы будут очищены.')){select.value=select.dataset.previous;return}select.dataset.previous=select.value;draw()};select.dataset.previous=select.value;draw();return panel
 }
 async function evaluationXlsx(id){
- const e=one(ws.working,'SELECT * FROM sop_evaluation WHERE id=?',[id]),v=one(ws.working,'SELECT * FROM document_revision WHERE id=?',[e.revision_id]),doc=one(ws.working,'SELECT * FROM document WHERE id=?',[v.document_id]);
+ const e=one(ws.working,'SELECT * FROM sop_evaluation WHERE id=?',[id]),v=one(ws.working,'SELECT * FROM document_revision WHERE id=?',[e.revision_id]),doc={...one(ws.working,'SELECT * FROM document WHERE id=?',[v.document_id]),title:documentTitle(ws.working,v.document_id,v.id)};
  const responses=rows(ws.working,'SELECT c.position,c.question,r.value,r.note FROM sop_evaluation_response r JOIN checklist_criterion c ON c.id=r.criterion_id WHERE r.evaluation_id=? ORDER BY c.position',[id]);const method=one(ws.working,'SELECT version_no FROM checklist_version WHERE id=?',[e.method_id]);
  const w=new ExcelJS.Workbook(),s=w.addWorksheet('Оценка СОП',{pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
  s.columns=[{width:7},{width:105},{width:13},{width:48}];s.mergeCells('A1:D1');s.getCell('A1').value='Чек-лист оценки СОП';s.getCell('A1').font={bold:true,size:16};s.mergeCells('A2:D2');s.getCell('A2').value=doc.code+' · '+doc.title+' · версия '+v.version_no;s.mergeCells('A3:D3');s.getCell('A3').value='Место: '+e.place+'    Дата: '+e.evaluated_on+'    Оценщик: '+e.actor_name+'    Методика v'+method.version_no;s.mergeCells('A4:D4');s.getCell('A4').value='Исходный SHA-256: '+e.source_sha256;
@@ -459,7 +460,7 @@ function editableRevision(doc,rev){
  return !doc.archived&&(rev.state==='draft'||(['effective','superseded','withdrawn'].includes(rev.state)&&!one(ws.working,"SELECT id FROM document_revision WHERE document_id=? AND state IN ('draft','review','approved')",[doc.id])))
 }
 function relatedRevisions(){
- return rows(ws.working,"SELECT r.*,d.id doc_id,d.code,d.title,d.archived,d.operation_id FROM document_revision r JOIN document d ON d.id=r.document_id WHERE d.kind='sop' ORDER BY d.code,r.version_no DESC")
+ return rows(ws.working,`SELECT r.*,d.id doc_id,d.code,${REVISION_TITLE_SQL} title,d.archived,d.operation_id FROM document_revision r JOIN document d ON d.id=r.document_id WHERE d.kind='sop' ORDER BY d.code,r.version_no DESC`)
 }
 function frvOriginPanel(revision){
  const origin=frvOriginSnapshot(ws.working,revision.id),panel=el('div');
@@ -542,7 +543,7 @@ function libraryContext(kind,id=null,revisionId=null){
  const row=id?one(ws.working,'SELECT * FROM '+(kind==='sop'?'document':'frv_study')+' WHERE id=?',[id]):null;
  const revision=kind==='sop'&&revisionId?one(ws.working,'SELECT * FROM document_revision WHERE id=? AND document_id=?',[revisionId,id]):null;
  invariant(!id||row,'Запись не найдена');invariant(!revisionId||revision,'Версия не найдена');
- return {kind,id,revisionId,expected:row?.rev||0,database:meta(ws.base,'database_id'),title:row?.title||'',code:row?.code||'',operation_id:row?.operation_id||null,observed_at:row?.observed_at||'',command:!id?'create':kind==='frv'?'save':revision?.state==='draft'?'save':'revise',source:revision?JSON.parse(revision.payload_json).source:kind==='frv'&&row?JSON.parse(row.context_json).source:null};
+ return {kind,id,revisionId,expected:row?.rev||0,database:meta(ws.base,'database_id'),title:kind==='sop'&&row?documentTitle(ws.working,id,revisionId):row?.title||'',code:row?.code||'',operation_id:row?.operation_id||null,observed_at:row?.observed_at||'',command:!id?'create':kind==='frv'?'save':revision?.state==='draft'?'save':'revise',source:revision?JSON.parse(revision.payload_json).source:kind==='frv'&&row?JSON.parse(row.context_json).source:null};
 }
 // Current directory entries, with historical print snapshots saved in the editor source.
 function editorPeople(){return directoryPeople(ws.working,today())}
@@ -651,7 +652,7 @@ function libraryHeader(main,kind){
 function libraryScreen(main,kind){
  const {search,filter,out}=libraryHeader(main,kind);
  function draw(){
-  out.replaceChildren();const items=rows(ws.working,kind==='sop'?'SELECT * FROM document ORDER BY code':'SELECT * FROM frv_study ORDER BY observed_at DESC,title');
+  out.replaceChildren();const items=rows(ws.working,kind==='sop'?'SELECT * FROM document ORDER BY code':'SELECT * FROM frv_study ORDER BY observed_at DESC,title').map(v=>kind==='sop'?{...v,title:documentTitle(ws.working,v.id,librarySelected===v.id?libraryRevisionSelected:null)||v.title}:v);
   const filtered=items.filter(v=>{const a=kind==='sop'?!!v.archived:v.state==='archived';let visible=libraryFilter==='all'||(libraryFilter==='active'&&!a)||(libraryFilter==='archive'&&a);
    if(kind==='sop'&&!a&&libraryFilter==='overdue')visible=!!one(ws.working,"SELECT id FROM document_revision WHERE document_id=? AND state='effective' AND review_due<?",[v.id,today()]);
    if(kind==='sop'&&!a&&libraryFilter==='missing_passport')visible=!!one(ws.working,"SELECT id FROM document_revision WHERE document_id=? AND state='draft' AND (print_format IS NULL OR workplace_id IS NULL)",[v.id]);
@@ -668,17 +669,18 @@ function libraryScreen(main,kind){
     if(libraryRevisionSelected)p.append(btn('Все версии СОП',()=>{libraryRevisionSelected=null;draw()}),el('p','Открыта редакция по связи из другого раздела.','muted'));
     for(const revision of versions.filter(x=>!libraryRevisionSelected||x.id===libraryRevisionSelected)){
      const data=JSON.parse(revision.payload_json),c=libraryContext(kind,v.id,revision.id),section=el('div',undefined,'library-version');section.dataset.revisionId=revision.id;
-     const header=add(el('div',undefined,'row'),el('strong','Версия '+revision.version_no),el('span',revisionLabels[revision.state]||revision.state,'pill'),el('span',revision.created_at.slice(0,10),'muted'));
+     const header=add(el('div',undefined,'row'),el('strong','Версия '+revision.version_no+' · '+documentTitle(ws.working,v.id,revision.id)),el('span',revisionLabels[revision.state]||revision.state,'pill'),el('span',revision.created_at.slice(0,10),'muted'));
      section.append(header,el('p',sourceSummary(data),'muted'),el('p','Пересмотр: '+(revision.review_due||'дата не задана')+' · '+(revision.print_format==='portrait'?'А3 книжный':revision.print_format==='landscape'?'А3 альбомный':'формат не выбран')+' · Рабочее место: '+(revision.workplace_name||'не определено'),revision.review_due&&revision.review_due<today()&&revision.state==='effective'?'bad':'muted'),sourceDetails(data));
      const tabs=el('div',undefined,'library-tabs'),body=el('div',undefined,'library-tab-body');
      const steps=()=>tableOf(['№','Действие','Сек','Ключевые моменты','Почему важно'],data.projection.steps.map((s,i)=>[i+1,s.action,s.seconds,s.key_points.join('\n'),s.reason]));
      const passport=()=>add(el('div'),el('p','Рабочее место: '+(revision.workplace_name||'—')+' · Оборудование: '+(revision.equipment_name||'—')+' · Дата изменения: '+(revision.changed_on||'—')),sourcePassport(data),...(!v.archived&&revision.state==='draft'?[passportForm(c,revision)]:[]));
-     const assessments=()=>add(el('div'),btn('Перейти в реестр оценок СОП',()=>goEvaluation(revision.id)),evaluationDetail(v,revision,data.source));
+     const revDoc={...v,title:documentTitle(ws.working,v.id,revision.id)};
+     const assessments=()=>add(el('div'),btn('Перейти в реестр оценок СОП',()=>goEvaluation(revision.id)),evaluationDetail(revDoc,revision,data.source));
      const materials=()=>materialsPanel(data);
      const history=()=>add(el('div'),tableOf(['Версия','Статус','Создана','Пересмотр'],versions.map(x=>[x.version_no,revisionLabels[x.state]||x.state,x.created_at.slice(0,10),x.review_due])),frvOriginPanel(revision));
      const stages=el('div',undefined,'lifecycle');for(const [k,n] of [['draft','Черновик'],['review','На согласовании'],['approved','Согласован'],['effective','Действует']])stages.append(el('span',n,'life-stage'+(revision.state===k?' current':'')));
      section.append(stages);
-     for(const [name,make] of [['Шаги и ключевые моменты',steps],['Паспорт документа',passport],['Версии',history],['ФРВ',()=>relatedPanel(v,revision,'frv')],['План TWI',()=>relatedPanel(v,revision,'twi')],['Оценка СОП',assessments],['Материалы',materials]]){const tab=btn(name,()=>{for(const t of tabs.children)t.classList.remove('selected');tab.classList.add('selected');body.replaceChildren(make())},'library-tab');tabs.append(tab)}tabs.firstChild.classList.add('selected');body.append(steps());section.append(tabs,body);
+     for(const [name,make] of [['Шаги и ключевые моменты',steps],['Паспорт документа',passport],['Версии',history],['ФРВ',()=>relatedPanel(revDoc,revision,'frv')],['План TWI',()=>relatedPanel(revDoc,revision,'twi')],['Оценка СОП',assessments],['Материалы',materials]]){const tab=btn(name,()=>{for(const t of tabs.children)t.classList.remove('selected');tab.classList.add('selected');body.replaceChildren(make())},'library-tab');tabs.append(tab)}tabs.firstChild.classList.add('selected');body.append(steps());section.append(tabs,body);
      const buttons=add(el('div',undefined,'row'),rawButton(data.source,'SOP-'+v.code+'-v'+revision.version_no+'.json'));
      const open=versions.some(x=>['draft','review','approved'].includes(x.state));
      if(!v.archived&&(revision.state==='draft'||(!open&&['effective','withdrawn','superseded'].includes(revision.state)))){
@@ -693,7 +695,7 @@ function libraryScreen(main,kind){
     if(!v.archived&&versions.length&&versions.every(x=>['superseded','withdrawn'].includes(x.state)))p.append(btn('Архивировать СОП',()=>{if(confirm('Архивировать документ без удаления истории?'))run(async()=>{await ws.applyContentEvents([libraryEvent(libraryContext(kind,v.id),null,'archive')],readContent);return 'Документ в архиве'})},'danger',!!ws.conflicts.length))
    }else{
     const data=JSON.parse(v.context_json),c=libraryContext(kind,v.id);p.append(el('p',revisionLabels[v.state]+' · Дата наблюдения: '+v.observed_at),el('p',sourceSummary(data),'muted'),sourceDetails(data),frvAnalysisPanel(v,data),btn('Создать мероприятие по ФРВ',()=>goTraining('actions',{mode:'new',sourceKind:'frv_study',sourceId:v.id})),btn('Аналитика ФРВ',()=>goTraining('analytics',{assessmentType:'frv'})),btn('ROI-модель',()=>goTraining('roi',{studyId:v.id})));
-    for(const link of rows(ws.working,'SELECT d.id,d.code,d.title,r.id revision_id,r.version_no,o.source_sha256 FROM sop_frv_origin o JOIN document_revision r ON r.id=o.revision_id JOIN document d ON d.id=r.document_id WHERE o.study_id=?',[v.id]))p.append(add(el('div',undefined,'row'),el('span',link.code+' · v'+link.version_no+' · '+(link.source_sha256===data.source.sha256?'Текущий исходник':'Ранее сохранённые замеры'),'muted'),btn('Открыть СОП',()=>goDocument(link.id,link.revision_id))));
+    for(const link of rows(ws.working,`SELECT d.id,d.code,${REVISION_TITLE_SQL} title,r.id revision_id,r.version_no,o.source_sha256 FROM sop_frv_origin o JOIN document_revision r ON r.id=o.revision_id JOIN document d ON d.id=r.document_id WHERE o.study_id=?`,[v.id]))p.append(add(el('div',undefined,'row'),el('span',link.code+' · v'+link.version_no+' · '+(link.source_sha256===data.source.sha256?'Текущий исходник':'Ранее сохранённые замеры'),'muted'),btn('Открыть СОП',()=>goDocument(link.id,link.revision_id))));
     const buttons=add(el('div',undefined,'row'),rawButton(data.source,'FRV-'+v.id+'.json'));if(v.state==='draft'){buttons.append(btn('Открыть редактор',()=>launchEditor(c),'primary',!!ws.conflicts.length),btn('Импорт изменений JSON',()=>chooseLibraryFile(kind,c),'',!!ws.conflicts.length));const det=el('details');det.append(el('summary','Завершить исследование'),libraryAction(c,'finalize','Завершить исследование'));p.append(det)}
     if(v.state!=='archived')buttons.append(btn('Архивировать',()=>{if(confirm('Архивировать исследование без удаления измерений?'))run(async()=>{await ws.applyContentEvents([libraryEvent(c,null,'archive')],readContent);return 'Исследование в архиве'})},'danger',!!ws.conflicts.length));p.append(buttons)
    }out.append(p)

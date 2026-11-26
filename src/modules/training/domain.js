@@ -1,3 +1,4 @@
+import {REVISION_TITLE_SQL,documentTitle} from '../library/revision-title.js';
 // LC4: explicit facts, reviewed qualifications and separately recorded admission.
 import {invariant,one,rows,canonical,isId,foldKey} from '../../core/db.js';
 import {directoryPeople,personKey} from '../master-data/people-directory.js';
@@ -71,7 +72,7 @@ function hasRole(db,id,day,allowed){person(db,id);invariant(roleMatches(db,id,da
 function roleForCredential(role){return role==='internal_trainer'?['internal_trainer']:role==='mentor'?['mentor']:['instructor']}
 function level(db,scale,levelValue){active(db,'rating_scale',scale);invariant(integer(levelValue,0,1000)&&one(db,'SELECT value FROM rating_level WHERE scale_id=? AND value=?',[scale,levelValue]),'Уровень отсутствует в выбранной шкале')}
 export function currentStandard(db,revisionId){
- const r=one(db,'SELECT r.*,d.operation_id,d.code,d.title,d.archived FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=? AND d.kind=?',[revisionId,'sop']);
+ const r=one(db,`SELECT r.*,d.operation_id,d.code,${REVISION_TITLE_SQL} title,d.archived FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=? AND d.kind=?`,[revisionId,'sop']);
  if(!r)return null;return {...r,source:JSON.parse(r.payload_json).source}
 }
 export function isCurrentStandard(db,revisionId){const r=currentStandard(db,revisionId);return !!(r&&r.state==='effective'&&!r.archived)}
@@ -191,7 +192,7 @@ export function applyTrainingEvent(db,e,old){
    invariant(r.position===expected&&r.instructor===roleMatches(db,r.person_id,p.base_on,['instructor','mentor','internal_trainer']),'Должность или роль сотрудника изменилась');
   }
   for(const c of p.columns){exact(c,['skill_id','document_id','title']);const s=active(db,'skill',c.skill_id);invariant(!skills.has(c.skill_id)&&required(c.title,500),'Повтор навыка или пустой заголовок');skills.add(c.skill_id);
-   if(c.document_id){const doc=active(db,'document',c.document_id);invariant(doc.kind==='sop'&&doc.operation_id===s.operation_id&&one(db,"SELECT id FROM document_revision WHERE document_id=? AND state='effective'",[doc.id])&&c.title===doc.code+' · '+doc.title,'СОП не соответствует навыку или не введён в действие')}
+   if(c.document_id){const doc=active(db,'document',c.document_id),current=one(db,"SELECT id FROM document_revision WHERE document_id=? AND state='effective'",[doc.id]);const titles=current?[documentTitle(db,doc.id,current.id),doc.title,documentTitle(db,doc.id,null,true)]:[];invariant(doc.kind==='sop'&&doc.operation_id===s.operation_id&&current&&titles.some(title=>c.title===doc.code+' · '+title),'СОП не соответствует навыку или не введён в действие')}
    else invariant(!s.operation_id&&c.title===s.name,'Операционный навык должен быть связан с действующим СОП');
   }
   // Baseline stores evidence-backed values as they were displayed, never future
