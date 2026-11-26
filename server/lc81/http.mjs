@@ -26,10 +26,10 @@ function reply(res,status,value,type='application/json; charset=utf-8',headers={
  const bytes=Buffer.isBuffer(value)?value:Buffer.from(JSON.stringify(value),'utf8');
  res.writeHead(status,{'Content-Type':type,'Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",...headers});res.end(bytes);
 }
-async function body(req){
+async function body(req,max=32768){
  must(/^application\/json(?:;|$)/i.test(req.headers['content-type']||''),415,'Ожидается JSON');
- const len=req.headers['content-length'];must(len===undefined||/^\d+$/.test(len)&&Number(len)<=32768,413,'Запрос слишком большой');
- const parts=[];let n=0;for await(const b of req){n+=b.length;must(n<=32768,413,'Запрос слишком большой');parts.push(b)}
+ const len=req.headers['content-length'];must(len===undefined||/^\d+$/.test(len)&&Number(len)<=max,413,'Запрос слишком большой');
+ const parts=[];let n=0;for await(const b of req){n+=b.length;must(n<=max,413,'Запрос слишком большой');parts.push(b)}
  try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(parts)))}catch{throw new PilotError(400,'Неверный JSON')}
 }
 function rawCookie(req){
@@ -40,7 +40,7 @@ function rawCookie(req){
 const cookie=(s,maxAge)=>COOKIE+'='+s+'; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age='+maxAge;
 export function createSecureQAServer({store,origin}){
  const u=new URL(origin);must(u.protocol==='https:'&&u.origin===origin,503,'Требуется точный HTTPS origin');
- const sessions=new Map(),attempts=new Map();let active=0,loginBusy=0;
+ const sessions=new Map(),attempts=new Map();let active=0,loginBusy=0,libraryBusy=0;
  const prune=now=>{for(const [k,v] of sessions)if(v.expires<=now)sessions.delete(k);for(const [k,v] of attempts)if(v.until<=now)attempts.delete(k)};
  const getSession=req=>{
   const raw=rawCookie(req),key=raw&&tokenDigest(raw),s=key&&sessions.get(key);
@@ -88,6 +88,21 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='POST'&&p==='/api/lc81/admin/grant'){reply(res,200,await store.grant(a.id,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/revoke'){const b=await body(req);must(keys(b,['id']),400,'Неверные поля');reply(res,200,await store.revoke(a.id,b.id));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/manager-policy'){reply(res,200,await store.upgradeManagerPolicy(a.id,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
+   if(req.method==='GET'&&p==='/api/lc81/library/detail'){
+    must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
+    try{reply(res,200,{data:await store.libraryDetail(a.id,a.credential_revision,url.searchParams.get('action'),url.searchParams.get('id'))});return}finally{libraryBusy--}
+   }
+   if(req.method==='POST'&&['/api/lc81/library/open','/api/lc81/library/save'].includes(p)){
+    must(a.permissions.some(x=>['sop.create','sop.edit_draft','sop.revise','frv.create','frv.edit_draft'].includes(x)),403,'Редактор недоступен');
+    must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
+    try{
+     const result=p.endsWith('/open')?await store.openLibrary(a.id,a.credential_revision,await body(req)):await store.saveLibrary(a.id,a.credential_revision,await body(req,2*30*1024*1024+65536));
+     reply(res,200,result);return;
+    }finally{libraryBusy--}
+   }
+   if(req.method==='POST'&&p==='/api/lc81/library/passport'){reply(res,200,await store.passportLibrary(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/library/finalize'){reply(res,200,await store.finalizeLibrary(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/sop/photo'){
     const pos=url.searchParams.get('position');must(/^\d{1,4}$/.test(pos||''),404,'Фото недоступно');
     const r=await store.sopPhoto(a.id,a.credential_revision,url.searchParams.get('revision_id'),Number(pos));reply(res,200,r.bytes,r.type);return;

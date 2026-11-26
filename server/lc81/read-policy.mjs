@@ -3,7 +3,7 @@
 // No client-supplied role, scope, actor, SQL, or resource attributes are accepted.
 import {one,rows,isId} from '../../src/core/primitives.js';
 
-import {READ_ACTIONS,PERMISSIONS,DIRECTORY_COMMANDS} from './access-contract.mjs';
+import {READ_ACTIONS,PERMISSIONS,DIRECTORY_COMMANDS,LIBRARY_COMMANDS} from './access-contract.mjs';
 import {documentTitle} from '../../src/modules/library/revision-title.js';
 export {READ_ACTIONS};
 const validDay=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
@@ -80,7 +80,7 @@ function resolve(db,action,id,day){
   return {data:r,self:null,units:[r.unit_id],assigned:[]};
  }
  if(action==='sop.read_history'||action==='sop.read_steps'){
-  const r=one(db,"SELECT r.id AS revision_id,r.version_no,r.state,r.created_at,r.effective_at,r.review_due,d.id AS document_id,d.code,o.id AS operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.id=? AND d.kind='sop' AND o.archived=0",[id]);
+  const r=one(db,"SELECT r.id AS revision_id,r.version_no,r.state,r.created_at,r.effective_at,r.review_due,r.print_format,r.changed_on,d.id AS document_id,d.code,d.rev AS document_rev,d.archived AS document_archived,o.id AS operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.id=? AND d.kind='sop' AND o.archived=0",[id]);
   if(!r||!lineage(db,r.unit_id)||action==='sop.read_steps'&&(r.state!=='effective'||!one(db,'SELECT id FROM document WHERE id=? AND archived=0',[r.document_id])))return null;
   const {unit_id,...data}=r;
   data.title=documentTitle(db,r.document_id,r.revision_id);
@@ -91,7 +91,7 @@ function resolve(db,action,id,day){
   return {data,self:null,units:[unit_id],assigned:[]};
  }
  if(action==='frv.read'){
-  const r=one(db,'SELECT f.id,f.title,f.state,f.observed_at,f.operation_id,f.revision_id,o.unit_id FROM frv_study f JOIN operation o ON o.id=f.operation_id WHERE f.id=? AND o.archived=0',[id]);
+  const r=one(db,'SELECT f.id,f.title,f.state,f.observed_at,f.operation_id,f.revision_id,f.rev,o.unit_id FROM frv_study f JOIN operation o ON o.id=f.operation_id WHERE f.id=? AND o.archived=0',[id]);
   if(!r||!lineage(db,r.unit_id))return null;
   if(r.revision_id&&!one(db,'SELECT r.id FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=? AND d.operation_id=?',[r.revision_id,r.operation_id]))return null;
   const {unit_id,...data}=r;return {data,self:null,units:[unit_id],assigned:[]};
@@ -179,7 +179,7 @@ function decide(db,security,accountId,action,resourceId,day,resourceAction=actio
   if(!role||assignment?.person_id!==account.person_id||assignment.role_id!==role.id||!activePeriod(assignment,day))continue;
   const policy=unique(security.policies,x=>x?.role_id===role.id);
   if(!policy||!Number.isSafeInteger(policy.revision)||policy.revision<1||grant.policy_revision!==policy.revision||!Array.isArray(policy.permissions)||!policy.permissions.includes(action))continue;
-  if((!DIRECTORY_COMMANDS.includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
+  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
  }
  return null;
 }
@@ -206,3 +206,10 @@ export function canChangeDirectory(db,security,accountId,action,anchorAction,id,
 }
 
 export function canReadSopPhoto(db,security,accountId,id,day){return !!decide(db,security,accountId,'sop.read_photo',id,day,'sop.read_steps')}
+
+// Closed command/detail actions with a trusted resource anchor. No client
+// selects the anchor type: library-commands.mjs fixes it for each operation.
+export function canUseLibrary(db,security,accountId,action,anchorAction,id,day){
+ const allowed=['sop.create','sop.edit_draft','sop.revise','sop.passport','sop.from_frv','frv.create','frv.edit_draft','frv.finalize','sop.read_twi','sop.read_linked_frv','frv.read_summary'];
+ return allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,anchorAction);
+}

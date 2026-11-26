@@ -48,7 +48,7 @@ test('first admin, explicit existing roles, scoped views, blocking and restart',
  const h=await harness(t);
  assert.equal((await h.request('/api/lc81/session')).status,401);
  const a=await h.login('admin',h.adminPassword),ac=a.cookie;
- assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,35);
+ assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,45);
  let d=await h.admin(ac);assert.equal(d.accounts.length,1);assert.equal(d.people.length,0);assert(d.roles.some(r=>r.id===ADMIN_ROLE));assert(d.roles.some(r=>r.id===MANAGER_ROLE));
  const root=d.site;
  async function ref(type,payload){return (await h.post(ac,'reference',{type,payload})).id}
