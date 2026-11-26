@@ -1,3 +1,5 @@
+import {variants,jiStages,progressFor,currentStandard,isCurrentStandard,certificateValid,latestVerification,latestAssessment,enrollmentTasks,sharedTrainingTask,preparationForEnrollment,preparationTrainingDone,within,beforeRevocation,latest,latestTaskAssignment} from './training-facts.js';
+export {variants,jiStages,progressFor,currentStandard,isCurrentStandard,certificateValid,latestVerification,latestAssessment,enrollmentTasks} from './training-facts.js';
 import {REVISION_TITLE_SQL,documentTitle} from '../library/revision-title.js';
 // LC4: explicit facts, reviewed qualifications and separately recorded admission.
 import {invariant,one,rows,canonical,isId,foldKey} from '../../core/primitives.js';
@@ -9,8 +11,8 @@ import {verifyMobileContext,recordMobileMapping,mobileObservationExists} from '.
 import {isRC1Import,applyRC1Event} from './rc1-import.js';
 import {LC5_TYPES,applyLC5Event} from './audit-domain.js';
 import {SELF_LEVELS} from './builtin-forms.js';
-import {STANDARD_TYPES,PROGRAM_DOCS,applyStandardEvent,sharedTrainingTask} from './standard-workflows.js';
-import {PREPARATION_FACT_TYPES,applyPreparationEvent,preparationForEnrollment,preparationFinishAllowed,preparationTrainingDone} from './preparation-results.js';
+import {STANDARD_TYPES,PROGRAM_DOCS,applyStandardEvent} from './standard-workflows.js';
+import {PREPARATION_FACT_TYPES,applyPreparationEvent,preparationFinishAllowed} from './preparation-results.js';
 import {validateJi2,ji2Stages,jiConfig} from './ji-v03.js';
 export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,...STANDARD_TYPES,...PREPARATION_FACT_TYPES,
  competency_matrix:'Матрица компетенций',audit_session:'Аудит инструктора',mentor_self_evaluation:'Самооценка наставника',mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
@@ -34,38 +36,11 @@ const integer=(x,min=0,max=100000)=>Number.isSafeInteger(x)&&x>=min&&x<=max;
 const date=x=>validDate(x);
 const period=(a,b)=>date(a)&&(b===null||date(b)&&b>=a);
 const plusDays=(day,n)=>{const v=new Date(day+'T00:00:00Z');v.setUTCDate(v.getUTCDate()+n);return v.toISOString().slice(0,10)};
-const within=(x,a,b)=>a<=x&&(!b||b>=x);
-const beforeRevocation=(x,d)=>!x||x.slice(0,10)>d;
 const sha=x=>typeof x==='string'&&/^[0-9a-f]{64}$/.test(x);
 const roles=['instructor','mentor','internal_trainer'];
 export const programKinds={entry:'Ввод в профессию',internship:'Стажировка',production:'Производственное обучение'};
 export const parts={general:'Общая часть',individual:'Индивидуальная часть',practice:'Практические навыки',knowledge:'Проверка знаний'};
-export const variants={classic:'Классический',special:'Специальные навыки',smed:'Сложность повтора / SMED',hazardous:'По опасным операциям',fractional:'Дробный инструктаж'};
 export const conclusions={not_meet:'Не соответствует',basic:'Соответствует базовому уровню',exceeds:'Превосходит базовый уровень'};
-const prepare=[['prepare','Подготовка']];
-const show=[['show1','Показ: действия'],['show2','Показ: действия и ключевые моменты'],['show3','Показ: действия, ключевые моменты и причины']];
-const practice=[['try1','Проба: выполнение'],['try2','Проба: объяснение действий'],['try3','Проба: действия и ключевые моменты'],['try4','Проба: действия, ключевые моменты и причины']];
-const support=[['support','Самостоятельное задание и последующая поддержка'],...Array.from({length:5},(_,i)=>['follow'+(i+1),'Контрольная проверка '+(i+1)])];
-export function jiStages(variant,config=null){
- if(config)return ji2Stages(variant,config);
- // JI-1 remains read/replay only for published historical packages and regression fixtures.
- invariant(Object.hasOwn(variants,variant),'Выберите вид инструктажа');
- let middle;
- if(variant==='classic')middle=[...show,...practice];
- if(variant==='special')middle=[...show.map(([k,v])=>[k,v+' · демонстратор и инструктор']),...practice];
- if(variant==='smed')middle=[...Array.from({length:3},(_,i)=>['show_sim'+(i+1),'Показ: имитация '+(i+1)]),['show_real','Показ: реальное выполнение'],...Array.from({length:3},(_,i)=>['try_sim'+(i+1),'Проба: имитация '+(i+1)]),['try_real','Проба: реальное выполнение']];
- if(variant==='hazardous')middle=[['show_explanation','Показ / видеоматериал с объяснением'],['try_preparatory','Подготовительные работы / тренажёр'],['try_individual','Практика: самостоятельное выполнение по разрешённым условиям'],['try_team','Практика в команде']];
- return [...prepare,...middle,...support].map(([code,label])=>({code,label,phase:code.startsWith('follow')?'followup':code==='support'?'support':code.startsWith('try')?'practice':code.startsWith('show')?'presentation':'prepare'}))
-}
-export function progressFor(db,a){
- const stages=jiStages(a.method_variant,jiConfig(a)),facts=rows(db,'SELECT * FROM training_session WHERE assignment_id=? AND stage_code IS NOT NULL ORDER BY held_at,recorded_at,id',[a.id]);
- const done=new Set(facts.filter(x=>x.result==='completed').map(x=>x.stage_code)),next=stages.find(x=>!done.has(x.code))||null;
- const intro=stages.filter(x=>!['support','followup'].includes(x.phase)).every(x=>done.has(x.code));
- const followup=stages.filter(x=>x.phase==='followup'&&done.has(x.code)).length;
- const supportOn=facts.find(x=>x.stage_code==='support'&&x.result==='completed')?.held_at.slice(0,10)||null;
- let followupDue=null;if(supportOn){const [y,m,d]=supportOn.split('-').map(Number);const end=new Date(Date.UTC(y,m,Math.min(d,new Date(Date.UTC(y,m+1,0)).getUTCDate())));followupDue=end.toISOString().slice(0,10)}
- return {stages,facts,done,next,intro,followup,followupRequired:stages.filter(x=>x.phase==='followup').length,followupDue,complete:!next,completed:stages.filter(x=>done.has(x.code)).length}
-}
 const active=(db,table,id)=>{invariant(isId(id),'Выберите запись: '+table);const x=one(db,'SELECT * FROM '+table+' WHERE id=?',[id]);invariant(x&&!x.archived,'Запись недоступна: '+table);return x};
 const person=(db,id)=>active(db,'person',id);
 const optional=(db,table,id)=>id===null?null:active(db,table,id);
@@ -76,18 +51,12 @@ function roleMatches(db,id,day,allowed){
 function hasRole(db,id,day,allowed){person(db,id);invariant(roleMatches(db,id,day,allowed),'У сотрудника нет действующего назначения нужной роли')}
 function roleForCredential(role){return role==='internal_trainer'?['internal_trainer']:role==='mentor'?['mentor']:['instructor']}
 function level(db,scale,levelValue){active(db,'rating_scale',scale);invariant(integer(levelValue,0,1000)&&one(db,'SELECT value FROM rating_level WHERE scale_id=? AND value=?',[scale,levelValue]),'Уровень отсутствует в выбранной шкале')}
-export function currentStandard(db,revisionId){
- const r=one(db,`SELECT r.*,d.operation_id,d.code,${REVISION_TITLE_SQL} title,d.archived FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=? AND d.kind=?`,[revisionId,'sop']);
- if(!r)return null;return {...r,source:JSON.parse(r.payload_json).source}
-}
-export function isCurrentStandard(db,revisionId){const r=currentStandard(db,revisionId);return !!(r&&r.state==='effective'&&!r.archived)}
 function effective(db,revisionId){const r=currentStandard(db,revisionId);invariant(r&&r.state==='effective'&&!r.archived&&r.operation_id&&r.source?.kind==='sop','Выберите действующую редакцию СОП, привязанную к операции');active(db,'operation',r.operation_id);return r}
 function names(db,ids){return Object.fromEntries(Object.entries(ids).map(([k,id])=>[k,id?person(db,id).display_name:'']))}
 // An official order must use the assigned position, not a profession fallback.
 export function orderPosition(db,id,day){
  return one(db,"SELECT pos.name FROM person_assignment a JOIN position pos ON pos.id=a.position_id WHERE a.person_id=? AND a.valid_from<=? AND coalesce(a.valid_to,'9999-12-31')>=? ORDER BY a.valid_from DESC,a.id LIMIT 1",[id,day,day])?.name||''
 }
-export function certificateValid(db,id,day){const x=one(db,'SELECT * FROM mentor_credential WHERE id=?',[id]);return x&&x.kind==='certificate'&&within(day,x.issued_on,x.valid_until)&&beforeRevocation(x.revoked_at,day)?x:null}
 function appointmentValid(db,id,day){
  const x=one(db,'SELECT * FROM mentor_appointment WHERE id=?',[id]);if(!x||!within(day,x.valid_from,x.valid_to)||x.acknowledged_on>day||!beforeRevocation(x.revoked_at,day))return null;
  const c=certificateValid(db,x.credential_id,day);return c&&c.person_id===x.person_id&&c.role===x.role?x:null
@@ -127,11 +96,6 @@ function createOnly(e,old){invariant(e.operation==='create'&&!old,'Истори�
 function changeOnly(e,old){invariant(e.operation==='update'&&old,'Недопустимая операция с записью')}
 function assignment(db,id){const a=one(db,'SELECT * FROM training_assignment WHERE id=? AND source_sha256 IS NOT NULL',[id]);invariant(a,'Назначение обучения не найдено');return a}
 function freshAssignment(db,p){const a=assignment(db,p.assignment_id);invariant(integer(p.assignment_rev,1)&&p.assignment_rev===a.rev,'Назначение изменилось. Откройте актуальную карточку.');return a}
-function latest(db,table,where,args,dayColumn){
- return one(db,'SELECT * FROM '+table+' WHERE '+where+' ORDER BY '+dayColumn+' DESC,recorded_at DESC,id DESC LIMIT 1',args)
-}
-export function latestVerification(db,id,kind){return latest(db,'training_verification','assignment_id=? AND kind=?',[id,kind],'evaluated_on')}
-export function latestAssessment(db,id,kind){return latest(db,'assessment_session',"assignment_id=? AND assessment_kind=? AND state='confirmed'",[id,kind],'assessed_at')}
 export function latestQualification(db,personId,skillId,day='9999-12-31'){
  return one(db,`SELECT i.*,s.person_id,s.assessed_at,s.standard_revision_id,s.evaluator_id,s.assignment_id,s.recorded_at
  FROM assessment_item i JOIN assessment_session s ON s.id=i.session_id
@@ -151,13 +115,6 @@ function admissionRecordStatus(db,a,day){
  return {record:a,status:'Допуск зарегистрирован',current:true}
 }
 export function admissionStatus(db,personId,operationId,day){return admissionRecordStatus(db,latest(db,'admission_decision','person_id=? AND operation_id=? AND decided_on<=?',[personId,operationId,day],'decided_on'),day)}
-export function enrollmentTasks(db,enrollment){
- return rows(db,'SELECT * FROM training_program_task WHERE program_id=? ORDER BY position',[enrollment.program_id]).map(task=>{
-  const shared=sharedTrainingTask(db,enrollment.id,task.id),a=latestTaskAssignment(db,shared?.enrollmentId||enrollment.id,shared?.taskId||task.id),result=latest(db,'training_task_result','enrollment_id=? AND task_id=?',[enrollment.id,task.id],'held_on');
-  return {...task,assignment:a,result,shared,done:task.sop_revision_id?(preparationForEnrollment(db,enrollment.id)?preparationTrainingDone(db,a):a?.state==='completed'):result?.result==='completed'}
- })
-}
-function latestTaskAssignment(db,enrollmentId,taskId){return one(db,"SELECT * FROM training_assignment WHERE enrollment_id=? AND program_task_id=? AND state<>'cancelled' ORDER BY assigned_on DESC,id DESC LIMIT 1",[enrollmentId,taskId])}
 function store(db,table,data){const ks=Object.keys(data);db.run('INSERT INTO '+table+'('+ks.join(',')+') VALUES('+ks.map(()=>'?').join(',')+')',ks.map(k=>data[k]))}
 function update(db,table,id,data){const ks=Object.keys(data);db.run('UPDATE '+table+' SET '+ks.map(k=>k+'=?').join(',')+',rev=rev+1 WHERE id=?',[...ks.map(k=>data[k]),id])}
 function revoke(db,table,e,old){

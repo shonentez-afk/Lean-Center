@@ -50,7 +50,7 @@ const handoffs=HANDOFFS.map(x=>({...x,from:anchor(x.from),to:anchor(x.to)}));
 const ownerOf=x=>graph.nodes.filter(n=>n.file===x.file&&['function','method'].includes(n.kind)&&n.line<=x.line&&n.endLine>=x.line).sort((a,b)=>(a.endLine-a.line)-(b.endLine-b.line))[0]?.id||x.file;
 for(const x of handoffs){x.fromNode=ownerOf(x.from);x.toNode=ownerOf(x.to);graph.edges.push({from:x.fromNode,to:x.toNode,kind:'reviewed-handoff',file:x.from.file,line:x.from.line,endLine:x.from.line,excerpt:x.from.excerpt,certainty:'reviewed '+x.kind+'; '+x.condition,contractId:x.id})}
 const fileNodes=graph.nodes.filter(x=>x.kind==='file').map(x=>x.id),adj=new Map(fileNodes.map(x=>[x,[]]));
-for(const e of graph.edges)if(e.kind==='import'&&adj.has(e.from)&&adj.has(e.to))adj.get(e.from).push(e.to);
+for(const e of graph.edges)if(['import','reexport','reexport-all'].includes(e.kind)&&adj.has(e.from)&&adj.has(e.to))adj.get(e.from).push(e.to);
 function scc(){
  let count=0;const i=new Map(),low=new Map(),stack=[],on=new Set(),groups=[];
  function dfs(x){i.set(x,count);low.set(x,count++);stack.push(x);on.add(x);for(const y of adj.get(x)||[]){if(!i.has(y)){dfs(y);low.set(x,Math.min(low.get(x),low.get(y)))}else if(on.has(y))low.set(x,Math.min(low.get(x),i.get(y)))}

@@ -1,3 +1,4 @@
+import {assertAnalyticsContracts} from './lc73b-analytics-contract.mjs';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -43,7 +44,7 @@ test('training stages, 5 followups, separate practical qualification and admissi
  await f.save('role_requirement',{profession_id:f.profession,skill_id:f.skill,scale_id:f.scale,required_level:2,criticality:'normal',valid_from:'2020-01-01',valid_to:null});
  await f.save('coverage_requirement',{unit_id:f.unit,skill_id:f.skill,scale_id:f.scale,required_level:2,shift_code:'QA-A',min_people:2});
  const m=matrixData(f.w.working,date);assert.equal(m.cells.get(f.trainee+':'+f.skill).fact.level,2);assert.equal(m.cells.get(f.trainee+':'+f.skill).qualified,true);assert.equal(coverageData(f.w.working,date,m)[0].actual,1);
- assert.equal(coverageData(f.w.working,date,m)[0].deficit,1);
+ assert.equal(coverageData(f.w.working,date,m)[0].deficit,1);assertAnalyticsContracts(f.w.working,date,f.unit,f.trainee);
  const pkg=await f.w.package(),other=new Workspace(SQL,openDb(SQL,bytesOf(f.w.base)));
  assert(refsForEvents(pkg.events).some(x=>x.sha256===f.source.source.sha256));
  await assert.rejects(other.accept(pkg),/комплект/);assert.equal((await other.accept(pkg,f.readContent)).count,pkg.events.length);assert.equal((await other.accept(pkg)).duplicate,true);
@@ -51,7 +52,7 @@ test('training stages, 5 followups, separate practical qualification and admissi
  const restored=await restore(SQL,await backup(f.w),f.readContent);assert.equal(admissionStatus(restored.working,f.trainee,f.operation,date).current,true);assert.equal(progressFor(restored.working,one(restored.working,'SELECT * FROM training_assignment WHERE id=?',[id])).followup,5);
  restored.close();other.close();await f.w.acceptOwn(f.readContent);
  const next=await prepareSnapshot(f.w),opened=await readSnapshot(SQL,next.manifest,next.bytes);assert.equal(meta(opened,'schema_version'),'17');assert.deepEqual(rows(opened,'PRAGMA foreign_key_check'),[]);opened.close();
- const r=await f.revise();assert.equal(admissionStatus(f.w.working,f.trainee,f.operation,date).current,false);assert.match(admissionStatus(f.w.working,f.trainee,f.operation,date).status,/прежней/);assert.equal(matrixData(f.w.working,date).cells.get(f.trainee+':'+f.skill).fact.level,2);assert.equal(coverageData(f.w.working,date)[0].actual,0);
+ const r=await f.revise();assert.equal(admissionStatus(f.w.working,f.trainee,f.operation,date).current,false);assert.match(admissionStatus(f.w.working,f.trainee,f.operation,date).status,/прежней/);assert.equal(matrixData(f.w.working,date).cells.get(f.trainee+':'+f.skill).fact.level,2);assert.equal(coverageData(f.w.working,date)[0].actual,0);assertAnalyticsContracts(f.w.working,date,f.unit,f.trainee);
  await assert.rejects(f.stage(id,'prepare'),/актуальное/);await f.addAssignment({revision_id:r.revision,source:r.source.source});assert.equal(one(f.w.working,'SELECT count(*) n FROM training_assignment').n,2)
  }finally{f.w.close()}
 });

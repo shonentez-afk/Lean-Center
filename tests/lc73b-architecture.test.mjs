@@ -56,3 +56,13 @@ test('LC7.3B atlas template cannot replace markers inside its own JSON source ex
  assert(m);assert.deepEqual(JSON.parse(m[1]),data);assert.equal(m[2],'console.log("ready")');
  assert.throws(()=>renderAtlas('/*__LC_ATLAS_DATA__*/',{},''),/Missing/);
 });
+
+test('LC7.3B independent source validators and training fact readers keep original public bindings',async()=>{
+ const [lib,source,train,facts,prep,standard,core,primitive]=await Promise.all([
+ import('../src/modules/library/domain.js'),import('../src/modules/library/source-validation.js'),import('../src/modules/training/domain.js'),import('../src/modules/training/training-facts.js'),import('../src/modules/training/preparation-results.js'),import('../src/modules/training/standard-workflows.js'),import('../src/core/db.js'),import('../src/core/primitives.js')]);
+ for(const k of ['MAX_CONTENT','validateRef','checkContent','inspectSource'])assert.equal(lib[k],source[k],k);
+ for(const k of ['variants','jiStages','progressFor','currentStandard','isCurrentStandard','certificateValid','latestVerification','latestAssessment','enrollmentTasks'])assert.equal(train[k],facts[k],k);
+ for(const k of ['preparationForEnrollment','preparationTrainingDone'])assert.equal(prep[k],facts[k],k);
+ assert.equal(standard.sharedTrainingTask,facts.sharedTrainingTask);for(const k of ['rows','one','invariant','sha256','canonical','tx','bytesOf'])assert.equal(core[k],primitive[k],k);
+ const f=await fixture();try{const id=await f.addAssignment();await f.approve(id);await f.stage(id,'prepare');const a=f.getAssignment(id);assert.equal(facts.progressFor(f.w.working,a).done.has('prepare'),true);assert(facts.isCurrentStandard(f.w.working,f.doc.id));assert(facts.certificateValid(f.w.working,f.certificate,date));const original=await source.inspectSource(f.sources.get(f.source.source.sha256).text,'sop');assert.deepEqual(original.source,f.source.source)}finally{f.w.close()}
+});

@@ -1,5 +1,5 @@
 import {invariant,sha256,uuid} from '../../core/primitives.js';
-import {inspectSource} from './domain.js';
+import {inspectSource} from './source-validation.js';
 const positive=v=>typeof v==='number'&&Number.isFinite(v)&&v>0;
 const mean=a=>a.length?a.reduce((s,n)=>s+n,0)/a.length:null;
 const median=a=>{const v=a.slice().sort((x,y)=>x-y);return v.length%2?v[v.length>>1]:(v[v.length/2-1]+v[v.length/2])/2};

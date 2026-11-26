@@ -1,3 +1,4 @@
+import {assertAnalyticsContracts} from './lc73b-analytics-contract.mjs';
 import {centerProjection} from '../src/modules/training/center-overview.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -64,8 +65,8 @@ test('LC6 direct action effect, currencies and voiding keep monetary facts separ
    const fact=(await f.save('economic_fact',{command:'create',effect_id:id,actual_event_id:r().actual_event_id,period_from:'2026-01-01',period_to:'2026-01-19',gross_minor:10000,recurring_minor:1000,investment_minor:500,registered_by:f.mentor,evidence:'QA документы'})).entity_id;await f.save('economic_fact',{command:'confirm',verifier_id:f.actor,note:'QA проверено'},fact);ids.push(fact)
   }
   assert.deepEqual(effectOverview(db,{day:date}).currencies.map(x=>[x.currency,x.net]),[['EUR',8500],['RUB',8500]]);
-  const proj=centerProjection(db,{day:date,from:'2026-01-01',to:date,unitId:f.unit},{withEvidence:true}),fm=proj.metrics.find(x=>x.id==='effect_facts');assert.equal(fm.value,2);assert.deepEqual(new Set(fm.evidence.map(x=>x.options.factId)),new Set(ids));assert.deepEqual(proj.currencies.map(x=>[x.currency,x.net]),[['EUR',8500],['RUB',8500]]);assert.deepEqual(new Set(fm.evidence.map(x=>x.currency)),new Set(['EUR','RUB']));
-  await f.save('economic_fact',{command:'void',actor_id:f.actor,reason:'QA исправление документа'},ids[0]);assert.deepEqual(effectOverview(db,{day:date}).currencies.map(x=>x.currency),['EUR']);assert.equal(one(db,'SELECT void_reason FROM economic_fact WHERE id=?',[ids[0]]).void_reason,'QA исправление документа');assert.equal(centerProjection(db,{day:date},{withEvidence:true}).metrics.find(x=>x.id==='effect_facts').value,1);assert.deepEqual(rows(db,'PRAGMA foreign_key_check'),[]);
+  const proj=centerProjection(db,{day:date,from:'2026-01-01',to:date,unitId:f.unit},{withEvidence:true}),fm=proj.metrics.find(x=>x.id==='effect_facts');assert.equal(fm.value,2);assert.deepEqual(new Set(fm.evidence.map(x=>x.options.factId)),new Set(ids));assert.deepEqual(proj.currencies.map(x=>[x.currency,x.net]),[['EUR',8500],['RUB',8500]]);assert.deepEqual(new Set(fm.evidence.map(x=>x.currency)),new Set(['EUR','RUB']));assertAnalyticsContracts(db,date,f.unit,f.mentor);
+  await f.save('economic_fact',{command:'void',actor_id:f.actor,reason:'QA исправление документа'},ids[0]);assert.deepEqual(effectOverview(db,{day:date}).currencies.map(x=>x.currency),['EUR']);assert.equal(one(db,'SELECT void_reason FROM economic_fact WHERE id=?',[ids[0]]).void_reason,'QA исправление документа');assert.equal(centerProjection(db,{day:date},{withEvidence:true}).metrics.find(x=>x.id==='effect_facts').value,1);assertAnalyticsContracts(db,date,f.unit,f.mentor);assert.deepEqual(rows(db,'PRAGMA foreign_key_check'),[]);
  }finally{f.w.close()}
 });
 
@@ -107,7 +108,7 @@ test('LC6.1 period coverage, signed deviations, recorded causes, stale review, c
   restored=await restore(SQL,await backup(reader),ref=>net.readContent(dir,ref));assert.equal(effectOverview(restored.working,scope).currencies[0].net,33000);assert.deepEqual(rows(restored.working,'PRAGMA foreign_key_check'),[]);
   await f.save('economic_fact',{command:'void',actor_id:f.actor,reason:'QA отменён документ'},twoId);assert(!get().complete);assert(!get().currentReview);assert.equal(get().delta,null);assert.equal(economicReport(effectOverview(f.w.working,scope)).matched.length,0);
   const replacement=(await f.save('economic_fact',{...input,period_from:'2026-01-11',period_to:date,gross_minor:10000})).entity_id;await f.save('economic_fact',{command:'confirm',verifier_id:f.actor,note:'QA исправлено'},replacement);
-  assert(get().shortfall);assert(!get().currentReview);assert.equal(get().delta,-10000);assert.equal(economicReport(effectOverview(f.w.working,scope)).causes[0].cause,'unreviewed');
+  assert(get().shortfall);assert(!get().currentReview);assert.equal(get().delta,-10000);assertAnalyticsContracts(f.w.working,scope.day,f.unit,f.mentor);assert.equal(economicReport(effectOverview(f.w.working,scope)).causes[0].cause,'unreviewed');
  }finally{restored?.close();reader?.close();master?.close();f.w.close()}
 });
 test('LC6.1 monthly and yearly aggregation keeps currencies, signed totals, ranks and target basis separate',()=>{

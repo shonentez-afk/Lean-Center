@@ -60,7 +60,8 @@ export function recommendedChecks(snapshot,group='all'){
 }
 
  // Exact unit scope. Bank of questions is enterprise/profession-wide and remains explicitly global.
- export function scopedAttention(db,day,unitId,global=centerAttention(db,day),projection=null){
+ export function scopedAttention(db,day,unitId='',global=centerAttention(db,day),projection=null){
+  if(global?.day!==day)global=centerAttention(db,day);
   // Reuse a projection only for the same current enterprise/unit slice, never a personal or stale report.
   const reusable=projection?.scope?.day===day&&(projection.scope.unitId||'')===(unitId||'')&&!projection.scope.personId&&projection.metrics?.every(m=>Array.isArray(m.evidence));
   const p=reusable?projection:centerProjection(db,{day,from:day.slice(0,7)+'-01',to:day,unitId},{withEvidence:true});
@@ -89,6 +90,6 @@ export function recommendedChecks(snapshot,group='all'){
    prep_finish:global.standard.items.filter(x=>(!unitId||x.unitId===unitId)&&x.status==='finish').map(x=>r(x.id,'preparation',{id:x.id},x.due,x.name)),
    supplements_draft:global.standard.supplements.filter(x=>x.state==='draft'&&unitPerson(x.person_id)).map(x=>r(x.id,'supplements',{id:x.id},x.month,'Ходатайство о доплате'))
   };
-  const items=global.items.map(x=>{if(!Object.hasOwn(exact,x.id))return {...x,scope:'global'};const records=exact[x.id];if(!unitId&&records.length!==x.count)return {...x,scope:'global',evidenceMismatch:true};return {...x,count:records.length,records,scope:unitId?'unit':'enterprise'}});
+  const items=global.items.map(x=>{if(x.id==='bank_stale')return {...x,scope:'global',records:global.standard.banks.filter(b=>b.stale).map(b=>r(b.id,'knowledge_bank',{id:b.id},b.reviewed_on,b.status))};if(!Object.hasOwn(exact,x.id))return {...x,scope:'global'};const records=exact[x.id];if(!unitId&&records.length!==x.count)return {...x,scope:'global',evidenceMismatch:true};return {...x,count:records.length,records,scope:unitId?'unit':'enterprise'}});
   return {...global,items,unitId};
  }

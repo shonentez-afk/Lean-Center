@@ -1,3 +1,4 @@
+import {assertAnalyticsContracts} from './lc73b-analytics-contract.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,SQL,schema,migrations,date} from './lc4-fixture.mjs';
@@ -14,7 +15,7 @@ test('LC6.4 original question bank: all 145 questions and independent 10 percent
  const newer={...p,reviewed_on:date,previous_id:first,note:'QA ежегодная редакция'};await assert.rejects(f.save('twi_knowledge_bank',newer),/10%/);
  const changed=structuredClone(base);for(const b of changed)for(let i=0;i<Math.ceil(b.questions.length*.1);i++)b.questions[i].text+=' (QA новая редакция '+i+')';
  assert(bankChanges(base,changed).every(b=>b.ok));await f.save('twi_knowledge_bank',{...newer,blocks:changed});
- assert.equal(bankRows(db).length,2);assert.equal(bankControl(db,date)[0].status,'Актуализация подтверждена');assert(bankControl(db,'2027-01-01')[0].stale);
+ assert.equal(bankRows(db).length,2);assert.equal(bankControl(db,date)[0].status,'Актуализация подтверждена');assert(bankControl(db,'2027-01-01')[0].stale);assertAnalyticsContracts(db,'2027-01-01',f.unit,f.mentor);
  const pkg=await f.w.package(),{hash,...body}=pkg,old={...body,schema_version:15};await assert.rejects(checkPackage({...old,hash:await sha256(canonical(old))}),/LC6.4/);
  const restored=await restore(SQL,await backup(f.w),f.readContent);assert.equal(bankRows(restored.working).length,2);restored.close()
  }finally{f.w.close()}
@@ -37,7 +38,7 @@ test('LC6.4 supplement: no duplicate tasks, threshold and manager decision, no a
  await assert.rejects(f.save('twi_supplement',{...p,tasks:[task,task]}),/уникальна/);
  const id=(await f.save('twi_supplement',p)).entity_id;await assert.rejects(f.save('twi_supplement',{command:'approve',actor_id:f.actor,note:'QA'},id),/минимальный/);
  await f.save('twi_supplement',{command:'revise',tasks:[task,{code:'sop',done_on:date,evidence:'QA СОП'}]},id);
- const rec=supplementRows(db,f.mentor)[0];assert.equal(rec.state,'draft');assert.deepEqual(supplementStatus(rec.role,rec.tasks),{count:2,minimum:2,amount:5000,eligible:true});await assert.rejects(f.save('twi_supplement',{command:'approve',actor_id:f.mentor,note:'QA'},id),/Решение/);
+ const rec=supplementRows(db,f.mentor)[0];assert.equal(rec.state,'draft');assertAnalyticsContracts(db,date,f.unit,f.mentor);assert.deepEqual(supplementStatus(rec.role,rec.tasks),{count:2,minimum:2,amount:5000,eligible:true});await assert.rejects(f.save('twi_supplement',{command:'approve',actor_id:f.mentor,note:'QA'},id),/Решение/);
  await f.save('twi_supplement',{command:'approve',actor_id:f.actor,note:'QA руководитель'},id);assert.equal(supplementRows(db)[0].state,'approved');await assert.rejects(f.save('twi_supplement',p),/уже существует/)
  }finally{f.w.close()}
 });

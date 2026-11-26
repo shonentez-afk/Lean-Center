@@ -1,3 +1,4 @@
+import {assertAnalyticsContracts} from './lc73b-analytics-contract.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,SQL,schema,migrations} from './lc4-fixture.mjs';
@@ -12,7 +13,7 @@ const day='2026-01-22';
 const action=(f,title,due)=>({response_id:null,title,owner_id:f.mentor,subject_id:null,due_on:due,kind:'corrective',priority:'normal'});
 test('LC7 empty working database: missing data is not readiness, no fictitious counts',()=>{
  const db=createDb(SQL,schema,migrations[0]);try{
-  const data=centerAttention(db,day);assert.equal(data.people,0);assert.equal(data.docs,0);
+  const data=centerAttention(db,day);assertAnalyticsContracts(db,day);assert.equal(data.people,0);assert.equal(data.docs,0);
   assert.deepEqual(recommendedChecks(data).map(x=>[x.id,x.count]),[['bank_unregistered',1]]);
   assert.equal(recommendedChecks(data,'roi').length,0);assert.equal(new Set(data.items.map(x=>x.id)).size,data.items.length);
  }finally{db.close()}
@@ -38,7 +39,7 @@ test('LC7 shared attention uses existing source projections and never writes; si
   f.advanceTo(day);await f.save('action_item',{command:'implement',result:'QA actual'},first);
   // Completed implementation awaiting verification may still be overdue according
   // to the existing CAPA rule: do not reinterpret it in the assistant.
-  const after=centerAttention(db,day);
+  const after=centerAttention(db,day);assertAnalyticsContracts(db,day,f.unit,f.mentor);
   assert.equal(after.items.find(x=>x.id==='action_verify').count,2);
   assert.equal(after.items.find(x=>x.id==='action_overdue').count,centerAuditIndicators(db,day).overdue);
  }finally{f.w.close()}

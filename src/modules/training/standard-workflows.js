@@ -1,3 +1,4 @@
+export {sharedTrainingTask} from './training-facts.js';
 // TWI standard 03: persisted preparation, knowledge-bank revisions and supplement requests.
 import {one,rows,invariant,canonical,isId} from '../../core/primitives.js';
 import {validDate} from '../library/sop-review.js';
@@ -49,9 +50,6 @@ const monthEnd=(d,m)=>{const [y,mo,n]=d.split('-').map(Number);const a=new Date(
 export function adaptationBounds(start,category){invariant(validDate(start)&&['new','transfer'].includes(category),'Укажите дату начала и категорию подготовки');return {min:monthEnd(start,1),max:monthEnd(start,category==='transfer'?1:3)}}
 const doc=(db,id)=>one(db,'SELECT e.*,p.title,p.kind,p.standard_kind,p.version_no FROM training_enrollment e JOIN training_program p ON p.id=e.program_id WHERE e.id=?',[id]);
 const key=t=>canonical([t.sop_revision_id,t.skill_id,t.scale_id,t.target_level]);
-export function sharedTrainingTask(db,enrollmentId,taskId){
- const x=one(db,'SELECT p.internship_id enrollmentId,s.internship_task_id taskId FROM twi_preparation_shared s JOIN twi_preparation p ON p.id=s.preparation_id WHERE p.adaptation_id=? AND s.adaptation_task_id=?',[enrollmentId,taskId]);return x||null
-}
 export function preparationRows(db,personId=''){
  return rows(db,'SELECT * FROM twi_preparation ORDER BY created_at DESC,id').map(x=>({...x,documents:[doc(db,x.adaptation_id),doc(db,x.safety_id),doc(db,x.internship_id)],shifts:JSON.parse(x.shifts_json),shared:rows(db,'SELECT * FROM twi_preparation_shared WHERE preparation_id=?',[x.id]),progress:preparationProgress(db,x)})).filter(x=>!personId||[x.trainee_id,x.manager_id,...x.documents.flatMap(d=>[d?.mentor_id,d?.manager_id])].includes(personId))
 }

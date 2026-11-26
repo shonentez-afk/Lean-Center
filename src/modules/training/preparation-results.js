@@ -1,7 +1,8 @@
 // Standard 03 §3.4. Independent evidence, no duplicate qualifications or automatic admission.
 import {one,rows,canonical,invariant,isId} from '../../core/primitives.js';
 import {validDate} from '../library/sop-review.js';
-import {enrollmentTasks,progressFor,latestAssessment,isCurrentStandard,certificateValid} from './domain.js';
+import {enrollmentTasks,progressFor,latestAssessment,isCurrentStandard,certificateValid,preparationForEnrollment,preparationTrainingDone} from './training-facts.js';
+export {preparationForEnrollment,preparationTrainingDone} from './training-facts.js';
 import {PRACTICAL_V03} from './standard-v03.js';
 
 export const PREPARATION_FACT_TYPES=Object.freeze({twi_preparation_fact:'Факт подготовки / протокол'});
@@ -19,7 +20,6 @@ const active=(db,t,id)=>isId(id)&&one(db,'SELECT id FROM '+t+' WHERE id=? AND ar
 const enrollment=(db,id)=>one(db,'SELECT * FROM training_enrollment WHERE id=?',[id]);
 const latest=(facts,kind)=>facts.find(f=>f.kind===kind)||null;
 export function preparationFacts(db,id){return rows(db,'SELECT * FROM twi_preparation_fact WHERE preparation_id=? ORDER BY fact_on DESC,recorded_at DESC,id DESC',[id]).map(x=>({...x,data:parse(x.payload_json)}))}
-export function preparationForEnrollment(db,id){return one(db,'SELECT * FROM twi_preparation WHERE adaptation_id=? OR safety_id=? OR internship_id=?',[id,id,id])}
 export function preparationShiftFacts(facts){const by=new Map();for(const f of facts.filter(x=>x.kind==='shift')){const k=f.fact_on+':'+f.data.shift_id;if(!by.has(k))by.set(k,f)}return [...by.values()].sort((a,b)=>a.fact_on.localeCompare(b.fact_on)||a.data.shift_id.localeCompare(b.data.shift_id))}
 export function exactPracticalMethod(db,id){
  const m=one(db,'SELECT methodology_json FROM checklist_version WHERE id=?',[id]);if(!m)return false;
@@ -27,9 +27,6 @@ export function exactPracticalMethod(db,id){
 }
 // Only the actual training through step 4 counts as completed training in preparation.
 // Subsequent checks remain open in their own instruction, not in the internship period.
-export function preparationTrainingDone(db,a){
- if(!a||a.state==='cancelled')return false;const p=progressFor(db,a);return p.intro&&p.done.has('support')
-}
 function taskEvidence(db,n,{mainOnly=false}={}){
  if(!n||n.state==='cancelled')return {tasks:[],operations:[],ready:false,positive:false,refs:[],dates:[]};
  const tasks=enrollmentTasks(db,n).filter(t=>!(mainOnly&&t.sop_revision_id&&t.shared));
