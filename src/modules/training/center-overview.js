@@ -64,6 +64,8 @@ export function centerMetrics(db,{day,from='',to=day,unitId='',personId=''}){
  count('Экономика','Карточки эффекта требуют проверки',economic.pending,'Открытые контрольные сроки или утратившие актуальность доказательства.','roi',{...f,filter:'pending'}),
  count('Экономика','Просроченные проверки эффекта',economic.overdue,'Текущие незакрытые контрольные сроки до сегодняшней даты.','roi',{...f,filter:'overdue'}),
  count('Экономика','Подтверждённые денежные факты',economic.facts.filter(x=>x.eligible).length,'Факты полностью в выбранном периоде с действующими доказательствами; не годовые сценарии.','roi',{...f,filter:'confirmed'}),
- count('Экономика','Черновики денежных фактов',economic.drafts,'Текущие денежные факты, ожидающие независимого подтверждения.','roi',{...f,filter:'drafts'})
+ count('Экономика','Черновики денежных фактов',economic.drafts,'Текущие денежные факты, ожидающие независимого подтверждения.','roi',{...f,filter:'drafts'}),
+ count('Экономика','Цели эффекта требуют внимания',economic.targetAttention.length,'Текущие открытые, неполные или требующие разбора цели.','roi',{...f,filter:'targets'}),
+ count('Экономика','Неразобранные отклонения',economic.allTargets.filter(t=>t.shortfall&&!t.currentReview).length,'Текущие цели с полным фактом ниже плана без актуального разбора.','roi',{...f,filter:'deviations'})
  ];
 }
