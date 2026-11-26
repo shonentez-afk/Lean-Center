@@ -1,3 +1,4 @@
+import {reportSnapshot,clearReport} from '../../ui/center-report.js';
 // LC6.2 view: source drill-downs, existing navigation, local ExcelJS.
 import {rows,one,invariant,uuid} from '../../core/db.js';
 import {economicEventPayload} from '../../core/business-clock.js';
@@ -23,8 +24,8 @@ export function twiAnalyticsView(c,h,route){
  const statRows=x=>[x.assignments,x.people,x.completed,x.granted,x.current,pct(x.firstPass,x.assessed),fmt(x.medianDays),x.durationN,fmt(x.meanMinutes===null?null:x.meanMinutes/60)];
  const statHeader=['Назначений','Людей','Завершено','Выдан допуск','Действует','Первая положительная','Медиана, дн.','Полное время, n','Среднее вводное время, ч'];
  function draw(){
-  out.replaceChildren();let s=scope(),x;try{x=twiOverview(db,s)}catch(e){out.append(msg(e.message,'warn'));return}
-  const z=x.stats,details=route.detail||'all',cohort=twiDetailRows(x.cohort,details);
+  out.replaceChildren();clearReport(out);let s=scope(),x;try{x=twiOverview(db,s)}catch(e){out.append(msg(e.message,'warn'));return}
+  const z=x.stats,details=route.detail||'all',cohort=twiDetailRows(x.cohort,details);reportSnapshot(out,'Эффективность TWI','Когорта '+(s.from||'с начала')+' — '+s.to+'; '+unit.selectedOptions[0]?.textContent+'; '+op.selectedOptions[0]?.textContent+'; '+revision.selectedOptions[0]?.textContent+'; '+program.selectedOptions[0]?.textContent+'; '+role.selectedOptions[0]?.textContent+'; сотрудник '+(who.value?n('person',who.value):'все'),[['Назначено',z.assignments],['Завершено',z.completed],['Первая положительная практика',z.firstPass+' / '+z.assessed],['Первый допуск',z.granted],['Действует',z.current],['Строк детализации',cohort.length]],['Практика не равна допуску.']);
   const buttons=[['Назначения',z.assignments,'all'],['Завершено',z.completed,'completed'],['Первый допуск зарегистрирован',z.granted,'granted'],['Действующий допуск',z.current,'current'],['Первая положительная практика',pct(z.firstPass,z.assessed),'first'],['Повторная практика после отрицательной',z.repeat,'repeat']];
   const tiles=el('div',undefined,'kpi-grid');for(const [label,value,key] of buttons){const b=btn('',()=>goScope(s,{detail:key}),'tile');b.append(el('span',label,'muted'),el('b',String(value)));tiles.append(b)}
   out.append(pane('Результативность подготовки TWI',msg('Назначения образуют когорту по дате начала, результаты до конца периода; завершение и актуальный допуск — текущие состояния. Первая положительная практика = базовый или выше, не допуск. Сумма по ролям не является уникальным числом сотрудников.'),tiles,msg('Уникальных обучаемых: '+z.people+' · Медиана до первого допуска: '+fmt(z.medianDays)+' дн. · Полные длительности до допуска: '+z.durationN+' · Повторно оценено: '+z.repeat+' · Положительный результат после отрицательной: '+z.recovered),btn('Все назначения когорты',()=>goScope(s,{detail:'all'}))),

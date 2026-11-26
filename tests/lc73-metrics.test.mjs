@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture,SQL,schema,migrations} from './lc4-fixture.mjs';
+import {createDb} from '../src/core/db.js';
+import {centerProjection,centerMetrics} from '../src/modules/training/center-overview.js';
+import {METRIC_DEFINITIONS,evidenceTotals,splitEvidence,metricScopeValid,metricValue} from '../src/modules/training/metric-catalog.js';
+const day='2026-01-22',scope={day,from:'2026-01-01',to:day,unitId:'',personId:''};
+function verify(db,s){const before=db.export(),p=centerProjection(db,s,{withEvidence:true});assert.equal(p.metrics.length,30);assert.equal(new Set(p.metrics.map(m=>m.id)).size,30);assert.deepEqual(p.metrics.map(m=>m.id),METRIC_DEFINITIONS.map(m=>m.id));for(const m of p.metrics){assert.deepEqual(evidenceTotals(m),{value:m.value,denominator:m.denominator});for(const d of m.dimensions){const g=splitEvidence(m,d);assert.equal(g.reduce((n,x)=>n+x.value,0),m.value);assert.equal(g.reduce((n,x)=>n+x.records.length,0),m.evidence.length);if(m.denominator!==null)assert.equal(g.reduce((n,x)=>n+x.denominator,0),m.denominator)}}assert.deepEqual(centerMetrics(db,s).map(m=>[m.id,m.value,m.denominator]),p.metrics.map(m=>[m.id,m.value,m.denominator]));assert.deepEqual(db.export(),before);return p}
+test('LC7.3A: all 30 metric definitions agree with exact rows on empty v17',()=>{const db=createDb(SQL,schema,migrations[0]);try{const p=verify(db,scope);assert.equal(metricValue(p.metrics.find(m=>m.id==='skill_coverage')),'— (нет знаменателя)');assert.equal(p.currencies.length,0);assert.equal(metricScopeValid({...scope,to:'2026-02-31'}),false)}finally{db.close()}});
+test('LC7.3A: evidence and figures in scoped fixture, no writes',async()=>{const f=await fixture();try{const a=await f.addAssignment({due_on:'2026-01-21'});await f.approve(a);const p=verify(f.w.working,scope);assert(p.metrics.find(m=>m.id==='training_overdue').value>=1);verify(f.w.working,{...scope,unitId:f.unit,personId:f.trainee});verify(f.w.working,{...scope,from:'2025-01-01',to:'2025-01-31'})}finally{f.w.working.close();f.w.base.close()}});

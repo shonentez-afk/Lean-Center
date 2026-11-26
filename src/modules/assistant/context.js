@@ -20,10 +20,10 @@ const byId=(db,table,id)=>id?one(db,'SELECT * FROM '+table+' WHERE id=?',[id]):n
 const text=(db,t,id)=>{const x=byId(db,t,id);return x?.display_name||x?.name||x?.title||'—'};
 const link=(label,page,options={})=>({label,page,options});
 const allowedPages=new Set(['person','skills','twi','instruction','practical','programs','internship','preparation','audit','mentoring','certification','appointments','actions','development','sop','frv','roi','analytics','metrics','retraining','knowledge_bank','supplements','calendar','self_eval','sop_evaluation','sop_review','twi_plans']);
-export const CONTEXT_PAGES=new Set(['person','skills','twi','instruction','practical','programs','internship','preparation','audit','mentoring','certification','appointments','actions','development','sop','frv','roi','analytics','metrics','retraining','self_eval','sop_evaluation','sop_review','twi_plans','my_plan','journal','calendar','knowledge_bank','supplements']);
+export const CONTEXT_PAGES=new Set(['home','person','skills','twi','instruction','practical','programs','internship','preparation','audit','mentoring','certification','appointments','actions','development','sop','frv','roi','analytics','metrics','retraining','self_eval','sop_evaluation','sop_review','twi_plans','my_plan','journal','calendar','knowledge_bank','supplements']);
 const groups={person:'training',skills:'training',twi:'training',instruction:'training',practical:'training',programs:'preparation',internship:'preparation',preparation:'preparation',audit:'audit',mentoring:'audit',certification:'audit',appointments:'audit',actions:'actions',development:'training',sop:'docs',frv:'docs',roi:'roi',retraining:'training',self_eval:'audit',sop_evaluation:'docs',sop_review:'docs',twi_plans:'docs',journal:'training',knowledge_bank:'preparation',supplements:'preparation'};
 const sections={person:'Сотрудники',skills:'Компетенции',twi:'Производственное обучение',instruction:'Инструктажи TWI',practical:'Практические оценки',programs:'Ввод в профессию',internship:'Стажировка',preparation:'Подготовка сотрудников',audit:'Аудит L1',mentoring:'Наставники и ВТ',certification:'Сертификация',appointments:'Назначения',actions:'Мероприятия',development:'Планы развития',sop:'Каталог СОП',frv:'ФРВ',roi:'Экономический эффект',analytics:'Аналитика',metrics:'Дерево метрик',self_eval:'Самооценка'};
-export function contextSelection(page,{route={},employeeId=null,documentId=null,revisionId=null}={}){
+export function contextSelection(page,{route={},employeeId=null,documentId=null,revisionId=null,report=null}={}){
  let kind='section',id=null;
  if(page==='person'&&employeeId){kind='person';id=employeeId}
  else if((page==='mentoring'||page==='my_plan')&&route.personId){kind='person';id=route.personId}
@@ -38,8 +38,8 @@ export function contextSelection(page,{route={},employeeId=null,documentId=null,
  else if(page==='development'&&route.id){kind='development';id=route.id}
  else if(['sop','frv','sop_evaluation'].includes(page)&&documentId){kind=page==='sop_evaluation'?'sop':page;id=documentId}
  else if(page==='roi'&&(route.id||route.studyId||route.actionId)){kind='roi';id=route.id||null}
- else if(['analytics','metrics'].includes(page))kind='analytics';
- return {page,kind,id,revisionId:revisionId||null,route:{...route}}
+ else if(['home','analytics','metrics'].includes(page))kind='analytics';
+ return {page,kind,id,revisionId:revisionId||null,route:{...route},report}
 }
 export function analyzeContext(db,day,ctx){
  const out={kind:ctx.kind,title:sections[ctx.page]||'Рабочий раздел',day,scope:'Сохранённые записи текущей рабочей копии',facts:[],checks:[],notices:[],available:true};
@@ -137,6 +137,8 @@ export function analyzeContext(db,day,ctx){
   check('roi_drafts',effectFacts(db,x.id).filter(f=>f.state==='draft').length,'',dest);
   const targets=periodTargets(db,x,day);check('ctx_roi_period',targets.filter(targetNeedsAttention).length,'',targets.filter(targetNeedsAttention).map(t=>link(t.from+' — '+t.to,'roi',{id:x.id,targetId:t.id})));check('roi_deviations',targets.filter(t=>!t.cancel&&t.shortfall&&!t.currentReview).length,'',dest);
  }else if(ctx.kind==='analytics'){
+  if(ctx.report){out.title=ctx.report.title;out.scope=ctx.report.scope;out.facts=ctx.report.facts;out.notices.push(...ctx.report.notices);notice('Локальный срез отображённого отчёта. Числовые факты не отправляются в облако.');check('ctx_metric_review',out.facts.length,'Проверьте определения и основания выбранного отчёта.',[]);return out}
+  if(ctx.page==='home'){out.available=false;notice('Нет корректного отображённого среза. Уточните фильтры дашборда.');return out}
   const from=r.from||'',to=r.to||day;if(from&&!validDate(from)||!validDate(to)||from&&from>to){notice('Некорректный период анализа.');return out}
   const scope={day,from,to,unitId:r.unitId||'',personId:r.personId||''};
   out.scope='Период '+(from||'с начала данных')+' — '+to+'; '+(scope.unitId?text(db,'org_unit',scope.unitId):'все подразделения')+'; '+(scope.personId?text(db,'person',scope.personId):'все сотрудники');
