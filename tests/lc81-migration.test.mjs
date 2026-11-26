@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
-import {fixture,SQL} from './lc4-fixture.mjs';
+import {fixture,SQL,makeSop} from './lc4-fixture.mjs';
 import {prepareSnapshot,readSnapshot,openDb,one,rows,uuid,meta} from '../src/core/db.js';
 import {openPilot,copyPilotCheckpoint,PILOT_STATE} from '../server/lc74-store.mjs';
 import {openSecureQA} from '../server/lc81/store.mjs';
@@ -59,7 +59,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
  }finally{legacy.close();secured.close()}
  for(const [hash,src] of x.f.sources){assert.equal(await fs.readFile(path.join(x.target,'documents',hash+'.json'),'utf8'),src.text)}
  let store=await openSecureQA({dataDir:x.target});
- let manager,worker,workerPass=password();
+ let manager,worker,workerPass=password(),savedDraft,savedRequest,fromFrv;
  try{
   const admin=store.authenticate('admin',pass);assert(admin?.admin);
   const d=store.adminData(admin.id);assert.deepEqual(d.protectedRoles,[x.adminRole,x.managerRole]);assert.equal(d.site,x.site);
@@ -99,6 +99,58 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await assert.rejects(store.sopPhoto(manager.id,1,x.f.doc.id,1),/недоступно/,'superseded revision must not disclose its photo');
   await assert.rejects(store.sopPhoto(manager.id,1,x.revision.revision,2),/недоступно/);
 
+  // Real LC3 commands and verified source bytes, not a parallel document model.
+  const ctx=(kind,command,operation_id,id=null,revision_id=null,origin_id=null,origin_revision=null)=>({kind,command,id,revision_id,operation_id,origin_id,origin_revision});
+  const req=(context,expected_revision,title,code,observed_at,text)=>({request_id:uuid(),context,expected_revision,title,code,observed_at,text});
+  const op=x.f.operation,editContext=ctx('sop','revise',op,x.f.doc.entity_id,x.revision.revision);
+  const original=await store.openLibrary(manager.id,1,editContext);
+  assert.equal(original.text,x.revision.source.text);
+  assert.equal((await store.libraryDetail(manager.id,1,'sop.read_twi',x.revision.revision)).exists,true);
+  assert.equal((await store.libraryDetail(manager.id,1,'sop.read_linked_frv',x.revision.revision)).source,'linked_sop_not_measured');
+  const draftSource=await makeSop('Учебная новая редакция LC81');
+  const revised=await store.saveLibrary(manager.id,1,req(editContext,original.expected_revision,'Новая редакция',null,null,draftSource.text));
+  assert.equal(store.readResource(manager.id,'sop.read_history',revised.revision_id).state,'draft');
+  assert.equal(store.readResource(manager.id,'sop.read_effective',x.revision.revision).state,'effective');
+  await assert.rejects(store.openLibrary(manager.id,1,editContext),/текущую редакцию/);
+  const passport=await store.passportLibrary(manager.id,1,{id:revised.id,revision_id:revised.revision_id,expected_revision:revised.rev,print_format:'portrait',changed_on:'2026-01-20'});
+  assert.equal(store.readResource(manager.id,'sop.read_history',revised.revision_id).print_format,'portrait');
+  const saveContext=ctx('sop','save',op,revised.id,revised.revision_id);
+  const editSource=await makeSop('Учебный изменённый шаг LC81');
+  const edited=await store.saveLibrary(manager.id,1,req(saveContext,passport.rev,'Новая редакция',null,null,editSource.text));
+  assert.equal(edited.revision_id,revised.revision_id);
+  assert.equal(store.readResource(manager.id,'sop.read_history',edited.revision_id).print_format,null,'source edit resets passport');
+  await assert.rejects(store.saveLibrary(manager.id,1,req(saveContext,passport.rev,'Устаревшее',null,null,editSource.text)),/изменился/);
+  const createContext=ctx('sop','create',op);
+  savedRequest=req(createContext,0,'Учебный новый СОП','LC81-NEW-SOP',null,draftSource.text);
+  savedDraft=await store.saveLibrary(manager.id,1,savedRequest);
+  const retry=await store.saveLibrary(manager.id,1,savedRequest);assert.equal(retry.id,savedDraft.id);assert.equal(retry.revision_id,savedDraft.revision_id);assert.equal(retry.duplicate,true);
+  await assert.rejects(store.saveLibrary(manager.id,1,{...savedRequest,title:'Подмена'}),/ID уже использован/);
+  await assert.rejects(store.saveLibrary(manager.id,1,{...req(createContext,0,'Плохой исходник','LC81-BAD',null,'{}')}),/не прошёл проверку/);
+  await assert.rejects(store.openLibrary(manager.id,1,{...createContext,command:'approve'}),/Неверный контекст/);
+  await assert.rejects(store.saveLibrary(manager.id,1,{...savedRequest,actor_id:admin.id}),/Неверные поля/);
+  const frvRaw=JSON.stringify({schemaVersion:'FRV-1.3',study:{studyId:'QA-LC81-FRV',operationId:'Учебная операция',status:'Draft'},cycles:[{id:'c1',cycleNo:1,phase:'baseline',observations:[{id:'o1',actionRaw:'Учебный замер',valueType:'VA',durationSec:12,standardCandidate:true}]}],standard:{outdated:false,steps:[{action:'Учебный замер',plannedTimeSec:10,sourceObservationIds:['o1'],keyMoment:'КМ',reason:'Причина',valueType:'VA'}]}});
+  const frvRequest=req(ctx('frv','create',op),0,'Учебное ФРВ',null,'2026-01-20',frvRaw);
+  const frv=await store.saveLibrary(manager.id,1,frvRequest);
+  assert.equal((await store.saveLibrary(manager.id,1,frvRequest)).id,frv.id);
+  const frvContext=ctx('frv','save',op,frv.id);
+  assert.equal((await store.openLibrary(manager.id,1,frvContext)).text,frvRaw);
+  const finalized=await store.finalizeLibrary(manager.id,1,{id:frv.id,expected_revision:frv.rev,note:'Учебное завершение'});
+  assert.equal(finalized.state,'final');
+  assert.equal((await store.libraryDetail(manager.id,1,'frv.read_summary',frv.id)).baselineCount,1);
+  await assert.rejects(store.openLibrary(manager.id,1,frvContext),/только черновик/);
+  const originCtx=ctx('sop','create',op,null,null,frv.id,finalized.rev),origin=await store.openLibrary(manager.id,1,originCtx);
+  assert.equal(JSON.parse(origin.text).constructor.steps[0].frvSource.observedTimeSec,12);
+  fromFrv=await store.saveLibrary(manager.id,1,req(originCtx,0,'Проект из замеров','LC81-FRV-SOP',null,origin.text));
+  assert.equal(store.readResource(manager.id,'sop.read_history',fromFrv.revision_id).state,'draft');
+  // Cross-unit editor with the same action names still cannot open this operation.
+  const editorRole=(await store.createReference(admin.id,'business_role',{code:'LC81-OTHER-EDITOR',name:'Редактор другого участка'})).id;
+  const editorAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.personB,role_id:editorRole,valid_from:'2020-01-01',valid_to:null})).id;
+  const otherEditor=await store.createAccount(admin.id,{person_id:x.personB,login:'other-editor',password:password(),generate:false});
+  await store.setPolicy(admin.id,{role_id:editorRole,revision:0,permissions:['operation.read','sop.read_history','sop.create','sop.edit_draft','sop.revise','frv.read','sop.from_frv']});
+  await store.grant(admin.id,{account_id:otherEditor.id,assignment_id:editorAssignment,scope:{kind:'unit_tree',unit_id:x.unitB},valid_to:null});
+  await assert.rejects(store.openLibrary(otherEditor.id,1,createContext),/Операция недоступна/);
+  await assert.rejects(store.openLibrary(otherEditor.id,1,saveContext),/Операция недоступна/);
+  await assert.rejects(store.saveLibrary(otherEditor.id,1,req(createContext,0,'Чужой СОП','LC81-DENIED',null,draftSource.text)),/Операция недоступна/);
   worker=await store.createAccount(admin.id,{person_id:x.f.trainee,login:'worker@example.invalid',password:workerPass,generate:false});
   const rights=['person.read_basic','task.read','task.implement_own','training.read'];
   await store.setPolicy(admin.id,{role_id:x.workerRole,revision:0,permissions:rights});
@@ -128,7 +180,13 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(store.authenticate('worker@example.invalid',workerPass).id,worker.id);
   assert.equal(store.readResource(worker.id,'task.read',x.ownTask).state,'implemented');
   assert.equal(store.readResource(worker.id,'task.read',x.otherTask),null);
+  assert.equal((await store.saveLibrary(manager.id,1,savedRequest)).id,savedDraft.id,'receipt survives restore');
+  const imported=await store.openLibrary(manager.id,1,{kind:'sop',command:'save',operation_id:x.f.operation,id:fromFrv.id,revision_id:fromFrv.revision_id,origin_id:null,origin_revision:null});
+  assert.equal(JSON.parse(imported.text).constructor.steps[0].frvSource.observedTimeSec,12);
  }finally{await store.close()}
+ const privateCopy=await fs.readFile(path.join(restored,'secure.lc81'));
+ const verified=openDb(SQL,new Uint8Array(privateCopy.subarray('LC81QA1\\n'.length+65)),{upgrade:false});
+ try{assert(one(verified,'SELECT study_id FROM sop_frv_origin WHERE revision_id=?',[fromFrv.revision_id]));assert(one(verified,'SELECT count(*) n FROM lc81_library_receipt').n>=5)}finally{verified.close()}
  const srcFile=path.join(restored,'documents',x.f.source.source.sha256+'.json');
  await fs.writeFile(srcFile,'corrupted');
  await assert.rejects(openSecureQA({dataDir:restored}));

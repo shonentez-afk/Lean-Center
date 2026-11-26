@@ -134,7 +134,7 @@ const labels={id:'ID',display_name:'Сотрудник',revision_id:'Редак�
 const states={draft:'Черновик',review:'На согласовании',approved:'Согласован (старый статус)',effective:'Действует',superseded:'Заменён',withdrawn:'Выведен',planned:'Запланировано',in_progress:'В работе',completed:'Завершено',active:'Активно',cancelled:'Отменено',implemented:'Выполнено',verified:'Проверено',ineffective:'Неэффективно',open:'Открыто',final:'Завершено',retired:'Архив',void:'Аннулировано',declined:'Отклонено'};
 function resourcePanel(items){
  // IDs are internal navigation anchors, not useful visible table columns.
- const cols=items.length?Object.keys(items[0]).filter(k=>!['steps','can_implement','can_read_photo','rev','id'].includes(k)&&!k.endsWith('_id')):[];
+ const cols=items.length?Object.keys(items[0]).filter(k=>!['steps','rev','id','document_rev','document_archived'].includes(k)&&!k.startsWith('can_')&&!k.endsWith('_id')):[];
  const content=panel(actions[page],items.length?table(cols.map(k=>labels[k]||k),items.map(r=>cols.map(k=>k==='state'?states[r[k]]||r[k]:r[k]))):el('p','Нет доступных записей','empty'));
  if(page==='sop.read_steps')for(const r of items){
   const details=el('details');details.append(el('summary',r.title+' · v'+r.version_no));
