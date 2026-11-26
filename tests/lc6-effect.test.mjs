@@ -44,7 +44,7 @@ test('LC6 FRV plan, checked exact measurements, deduplication, period fact, conf
   await assert.rejects(f.save('economic_effect',{command:'plan',plan:timePlan,plan_basis:'QA'},id),/зафиксирован/);
   const p={command:'create',effect_id:id,actual_event_id:get().actual_event_id,period_from:'2026-01-01',period_to:'2026-01-15',gross_minor:40000,recurring_minor:5000,investment_minor:2000,registered_by:f.mentor,evidence:'QA акт №1'};
   const fact=(await f.save('economic_fact',p)).entity_id;
-  assert.equal(effectOverview(db,{day:date}).currencies.length,0);assert.equal(effectOverview(db,{day:date}).drafts,1);
+  assert.equal(effectOverview(db,{day:date}).currencies.length,0);assert.equal(effectOverview(db,{day:date}).drafts,1);assertAnalyticsContracts(db,date,f.unit,f.mentor);
   await assert.rejects(f.save('economic_fact',{...p,period_from:'2026-01-15',period_to:'2026-01-19'}),/пересекается/);
   await assert.rejects(f.save('economic_fact',{command:'confirm',verifier_id:f.mentor,note:'QA'},fact),/независимый/);
   await f.save('economic_fact',{command:'confirm',verifier_id:f.actor,note:'QA документы'},fact);

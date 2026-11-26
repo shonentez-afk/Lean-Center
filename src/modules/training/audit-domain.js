@@ -1,4 +1,6 @@
-import {economicEventDay,recordedBusinessDate} from '../../core/business-clock.js';
+import {economicEventDay} from '../../core/business-clock.js';
+import {actionCompletionDate,actionCompletionDates,actionEvidenceDay,actionVerificationBasis,ACTION_VERIFY_DATE_BASIS} from './action-calendar.js';
+export {actionCompletionDate,actionCompletionDates} from './action-calendar.js';
 import {REVISION_TITLE_SQL} from '../library/revision-title.js';
 // LC5: one audit, explicit decisions and independently verified corrective actions.
 import {rows,one,invariant,isId} from '../../core/primitives.js';
@@ -60,43 +62,29 @@ export function actionSourceOf(db,a){
  for(const [k,id] of [['practical',a.source_assessment_id],['self_eval',a.source_self_id],['sop_evaluation',a.source_evaluation_id],['weighted_sop',a.source_weighted_event_id],['assignment',a.source_assignment_id],['development_goal',a.goal_id],['frv_study',a.study_id],['document_revision',a.document_revision_id]])if(id){const x=actionSource(db,k,id,a.source_criterion_id||a.source_weighted_position||null);if(x)return x}
  return null
 }
-export function practicalEvidenceForAction(db,a){
+export function practicalEvidenceForAction(db,a,basis=ACTION_VERIFY_DATE_BASIS){
  if(!a.source_assessment_id||!a.implemented_at)return [];
  const s=one(db,"SELECT * FROM assessment_session WHERE id=? AND state='confirmed' AND assessment_kind='practical'",[a.source_assessment_id]);if(!s)return [];
- return rows(db,"SELECT id,assessed_at,conclusion,assignment_id,responses_json FROM assessment_session WHERE state='confirmed' AND assessment_kind='practical' AND person_id=? AND operation_id=? AND standard_revision_id=? AND method_id=? AND substr(assessed_at,1,10)>? ORDER BY assessed_at,id",[s.person_id,s.operation_id,s.standard_revision_id,s.method_id,a.implemented_at.slice(0,10)])
+ return rows(db,"SELECT id,assessed_at,conclusion,assignment_id,responses_json FROM assessment_session WHERE state='confirmed' AND assessment_kind='practical' AND person_id=? AND operation_id=? AND standard_revision_id=? AND method_id=? AND substr(assessed_at,1,10)>? ORDER BY assessed_at,id",[s.person_id,s.operation_id,s.standard_revision_id,s.method_id,actionEvidenceDay(db,a,basis)])
 }
-function practicalEffect(db,a,id){const e=practicalEvidenceForAction(db,a),value=x=>a.source_criterion_id?JSON.parse(x.responses_json).find(r=>r.criterion_id===a.source_criterion_id)?.value:null;return e.some(x=>x.id===id&&['basic','exceeds'].includes(x.conclusion)&&(!a.source_criterion_id||value(x)===1))&&!e.some(x=>x.conclusion==='not_meet'||(a.source_criterion_id&&value(x)===0))}
-export function actionCompletionDates(db){
- const map=new Map();
- for(const e of rows(db,"SELECT entity_id,occurred_at,json_extract(payload_json,'$.business_offset_minutes') offset FROM change_event WHERE entity_type='action_item' AND json_extract(payload_json,'$.command')='implement' ORDER BY expected_revision,id")){
-  map.set(e.entity_id+'|'+e.occurred_at,recordedBusinessDate(e.occurred_at,e.offset));
- }
- return map
-}
-export function actionCompletionDate(db,a,dates=null){
- if(!a.implemented_at)return recordedBusinessDate(null);
- const key=a.id+'|'+a.implemented_at;
- if(dates)return dates.get(key)||recordedBusinessDate(a.implemented_at);
- const e=one(db,"SELECT json_extract(payload_json,'$.business_offset_minutes') offset FROM change_event WHERE entity_type='action_item' AND entity_id=? AND occurred_at=? AND json_extract(payload_json,'$.command')='implement' ORDER BY expected_revision DESC,id DESC LIMIT 1",[a.id,a.implemented_at]);
- return recordedBusinessDate(a.implemented_at,e?.offset)
-}
+function practicalEffect(db,a,id,basis=ACTION_VERIFY_DATE_BASIS){const e=practicalEvidenceForAction(db,a,basis),value=x=>a.source_criterion_id?JSON.parse(x.responses_json).find(r=>r.criterion_id===a.source_criterion_id)?.value:null;return e.some(x=>x.id===id&&['basic','exceeds'].includes(x.conclusion)&&(!a.source_criterion_id||value(x)===1))&&!e.some(x=>x.conclusion==='not_meet'||(a.source_criterion_id&&value(x)===0))}
 export function actionRows(db){
  return rows(db,`SELECT a.*,f.audit_response_id,f.study_id,f.document_revision_id,f.state finding_state,r.criterion_id,r.response,c.question,c.section_code,s.id audit_id,s.state audit_state,s.mentor_id,s.auditor_id,s.trainee_id,s.operation_id,s.standard_revision_id,s.version_id,s.observed_at,ps.person_id assessed_person_id,ps.evaluator_id assessment_evaluator_id,ms.person_id self_person_id,ta.mentor_id assessment_mentor_id,se.actor_id sop_evaluator_id,json_extract(we.payload_json,'$.actor_id') weighted_evaluator_id FROM action_item a LEFT JOIN finding f ON f.id=a.finding_id LEFT JOIN audit_response r ON r.id=f.audit_response_id LEFT JOIN checklist_criterion c ON c.id=r.criterion_id LEFT JOIN audit_session s ON s.id=r.audit_id LEFT JOIN assessment_session ps ON ps.id=a.source_assessment_id LEFT JOIN mentor_self_evaluation ms ON ms.id=a.source_self_id LEFT JOIN training_assignment ta ON ta.id=a.source_assignment_id LEFT JOIN sop_evaluation se ON se.id=a.source_evaluation_id LEFT JOIN change_event we ON we.id=a.source_weighted_event_id ORDER BY a.due_on,a.id`);
 }
 export const actionPeople=a=>[...new Set([a.owner_id,a.subject_id,a.mentor_id,a.auditor_id,a.trainee_id,a.assessed_person_id,a.assessment_evaluator_id,a.self_person_id,a.assessment_mentor_id,a.sop_evaluator_id,a.weighted_evaluator_id].filter(Boolean))];
-export function evidenceForAction(db,a){
+export function evidenceForAction(db,a,basis=ACTION_VERIFY_DATE_BASIS){
  if(!a.audit_id||!a.implemented_at||!a.operation_id||!a.standard_revision_id||a.audit_state!=='final')return [];
  // Day precision: a same-day record cannot prove it was after implementation.
- return rows(db,`SELECT s.id,s.observed_at,r.response,r.note FROM audit_session s JOIN training_session t ON t.id=s.training_session_id LEFT JOIN audit_response r ON r.audit_id=s.id AND r.criterion_id=? WHERE s.state='final' AND s.mentor_id=? AND s.operation_id=? AND s.standard_revision_id=? AND s.version_id=? AND substr(s.observed_at,1,10)>? AND substr(t.held_at,1,10)>? ORDER BY s.observed_at,s.id`,[a.criterion_id,a.mentor_id,a.operation_id,a.standard_revision_id,a.version_id,a.implemented_at.slice(0,10),a.implemented_at.slice(0,10)]);
+ return rows(db,`SELECT s.id,s.observed_at,r.response,r.note FROM audit_session s JOIN training_session t ON t.id=s.training_session_id LEFT JOIN audit_response r ON r.audit_id=s.id AND r.criterion_id=? WHERE s.state='final' AND s.mentor_id=? AND s.operation_id=? AND s.standard_revision_id=? AND s.version_id=? AND substr(s.observed_at,1,10)>? AND substr(t.held_at,1,10)>? ORDER BY s.observed_at,s.id`,[a.criterion_id,a.mentor_id,a.operation_id,a.standard_revision_id,a.version_id,actionEvidenceDay(db,a,basis),actionEvidenceDay(db,a,basis)]);
 }
-export function effectiveEvidence(db,a,auditId){
- const evidence=evidenceForAction(db,a),selected=evidence.find(x=>x.id===auditId);
+export function effectiveEvidence(db,a,auditId,basis=ACTION_VERIFY_DATE_BASIS){
+ const evidence=evidenceForAction(db,a,basis),selected=evidence.find(x=>x.id===auditId);
  return !!selected&&selected.response==='yes'&&!evidence.some(x=>x.response==='no');
 }
 export function actionStatus(db,a){
- if(a.state==='verified'&&a.audit_id){const v=one(db,"SELECT audit_id FROM action_verification WHERE action_id=? AND outcome='effective' ORDER BY checked_at DESC,id DESC LIMIT 1",[a.id]);if(!v||!effectiveEvidence(db,a,v.audit_id))return 'ineffective'}
- if(a.state==='verified'&&a.source_assessment_id&&(a.kind==='trainee_training'||a.source_criterion_id)){const v=one(db,"SELECT assessment_session_id FROM action_verification WHERE action_id=? AND outcome='effective' ORDER BY checked_at DESC,id DESC LIMIT 1",[a.id]);if(!v||!practicalEffect(db,a,v.assessment_session_id))return 'ineffective'}
- if(a.state==='verified'&&(a.source_weighted_event_id||a.source_evaluation_id&&a.source_criterion_id)){const v=one(db,"SELECT sop_evaluation_id,weighted_event_id FROM action_verification WHERE action_id=? AND outcome='effective' ORDER BY checked_at DESC,id DESC LIMIT 1",[a.id]);if(!v||!sopEffect(db,a,v.sop_evaluation_id||v.weighted_event_id))return 'ineffective'}
+ if(a.state==='verified'&&a.audit_id){const v=one(db,"SELECT id,audit_id FROM action_verification WHERE action_id=? AND outcome='effective' ORDER BY checked_at DESC,id DESC LIMIT 1",[a.id]);if(!v||!effectiveEvidence(db,a,v.audit_id,actionVerificationBasis(db,v.id)))return 'ineffective'}
+ if(a.state==='verified'&&a.source_assessment_id&&(a.kind==='trainee_training'||a.source_criterion_id)){const v=one(db,"SELECT id,assessment_session_id FROM action_verification WHERE action_id=? AND outcome='effective' ORDER BY checked_at DESC,id DESC LIMIT 1",[a.id]);if(!v||!practicalEffect(db,a,v.assessment_session_id,actionVerificationBasis(db,v.id)))return 'ineffective'}
+ if(a.state==='verified'&&(a.source_weighted_event_id||a.source_evaluation_id&&a.source_criterion_id)){const v=one(db,"SELECT id,sop_evaluation_id,weighted_event_id FROM action_verification WHERE action_id=? AND outcome='effective' ORDER BY checked_at DESC,id DESC LIMIT 1",[a.id]);if(!v||!sopEffect(db,a,v.sop_evaluation_id||v.weighted_event_id,actionVerificationBasis(db,v.id)))return 'ineffective'}
  return a.state;
 }
 export function applyLC5Event(db,e,old){
@@ -127,14 +115,14 @@ export function applyLC5Event(db,e,old){
   if(p.command==='start'){exact(p,['command']);invariant(['open','ineffective'].includes(actionStatus(db,a)),'Мероприятие уже в работе или закрыто');update(db,t,id,{state:'in_progress',result_note:null,implemented_at:null});if(a.finding_id)db.run("UPDATE finding SET state='open' WHERE id=?",[a.finding_id]);return}
   if(p.command==='implement'){exact(p,['command','result',...(Object.hasOwn(p,'business_offset_minutes')?['business_offset_minutes']:[])]);economicEventDay(e);invariant(['open','in_progress','ineffective'].includes(actionStatus(db,a))&&required(p.result),'Укажите фактический результат выполнения');for(const [table,id] of [['training_assignment',a.followup_assignment_id],['training_enrollment',a.followup_enrollment_id],['development_plan',a.followup_plan_id]])if(id)invariant(one(db,'SELECT state FROM '+table+' WHERE id=?',[id])?.state==='completed','Связанное обучение / план ещё не завершены');update(db,t,id,{state:'implemented',result_note:p.result,implemented_at:e.occurred_at});return}
   if(p.command==='cancel'){exact(p,['command','reason']);invariant(['open','in_progress','ineffective','implemented'].includes(actionStatus(db,a))&&required(p.reason),'Укажите основание отмены');update(db,t,id,{state:'cancelled',result_note:p.reason});return}
-  exact(p,['command','verifier_id','audit_id','outcome','evidence',...(Object.hasOwn(p,'assessment_id')?['assessment_id']:[]),...(Object.hasOwn(p,'sop_evaluation_id')?['sop_evaluation_id']:[]),...(Object.hasOwn(p,'weighted_event_id')?['weighted_event_id']:[])]);invariant(p.command==='verify'&&old.state==='implemented'&&['effective','ineffective','insufficient'].includes(p.outcome)&&required(p.evidence),'Требуется выполненное мероприятие и результат проверки');
+  exact(p,['command','verifier_id','audit_id','outcome','evidence',...(Object.hasOwn(p,'assessment_id')?['assessment_id']:[]),...(Object.hasOwn(p,'sop_evaluation_id')?['sop_evaluation_id']:[]),...(Object.hasOwn(p,'weighted_event_id')?['weighted_event_id']:[]),...(Object.hasOwn(p,'verification_date_basis')?['verification_date_basis']:[])]);invariant(!Object.hasOwn(p,'verification_date_basis')||p.verification_date_basis===ACTION_VERIFY_DATE_BASIS,'Неизвестное правило календаря проверки');const basis=p.verification_date_basis||'legacy-utc';invariant(p.command==='verify'&&old.state==='implemented'&&['effective','ineffective','insufficient'].includes(p.outcome)&&required(p.evidence),'Требуется выполненное мероприятие и результат проверки');
   person(db,p.verifier_id);invariant(p.verifier_id!==old.owner_id,'Проверяющий должен отличаться от исполнителя');
-  if(p.audit_id!==null)invariant(evidenceForAction(db,a).some(x=>x.id===p.audit_id&&x.observed_at.slice(0,10)<=day(e)),'Нужен последующий аудит того же инструктора, операции, СОП и версии методики');
-  if(p.outcome==='effective'&&a.audit_id)invariant(effectiveEvidence(db,a,p.audit_id),'Эффект не подтверждён: нет положительного повторного аудита или нарушение повторилось');
-  if(p.assessment_id)invariant(a.source_assessment_id&&practicalEvidenceForAction(db,a).some(x=>x.id===p.assessment_id&&x.assessed_at.slice(0,10)<=day(e)),'Требуется последующая практическая оценка того же сотрудника и операции');
-  if(p.outcome==='effective'&&a.source_assessment_id&&(a.kind==='trainee_training'||a.source_criterion_id))invariant(practicalEffect(db,a,p.assessment_id),'Эффект переобучения не подтверждён последующей практической оценкой');
-  if(p.sop_evaluation_id||p.weighted_event_id)invariant(!(p.sop_evaluation_id&&p.weighted_event_id)&&!!(p.sop_evaluation_id?a.source_evaluation_id&&a.source_criterion_id:a.source_weighted_event_id)&&sopEvidence(db,a).some(x=>x.id===(p.sop_evaluation_id||p.weighted_event_id)&&x.date<=day(e)),'Выберите сопоставимую повторную оценку того же СОП и методики');
-  if(p.outcome==='effective'&&(a.source_weighted_event_id||a.source_evaluation_id&&a.source_criterion_id))invariant(sopEffect(db,a,p.sop_evaluation_id||p.weighted_event_id),'Эффект не подтверждён повторной оценкой конкретного критерия СОП');
+  if(p.audit_id!==null)invariant(evidenceForAction(db,a,basis).some(x=>x.id===p.audit_id&&x.observed_at.slice(0,10)<=day(e)),'Нужен последующий аудит того же инструктора, операции, СОП и версии методики');
+  if(p.outcome==='effective'&&a.audit_id)invariant(effectiveEvidence(db,a,p.audit_id,basis),'Эффект не подтверждён: нет положительного повторного аудита или нарушение повторилось');
+  if(p.assessment_id)invariant(a.source_assessment_id&&practicalEvidenceForAction(db,a,basis).some(x=>x.id===p.assessment_id&&x.assessed_at.slice(0,10)<=day(e)),'Требуется последующая практическая оценка того же сотрудника и операции');
+  if(p.outcome==='effective'&&a.source_assessment_id&&(a.kind==='trainee_training'||a.source_criterion_id))invariant(practicalEffect(db,a,p.assessment_id,basis),'Эффект переобучения не подтверждён последующей практической оценкой');
+  if(p.sop_evaluation_id||p.weighted_event_id)invariant(!(p.sop_evaluation_id&&p.weighted_event_id)&&!!(p.sop_evaluation_id?a.source_evaluation_id&&a.source_criterion_id:a.source_weighted_event_id)&&sopEvidence(db,a,basis).some(x=>x.id===(p.sop_evaluation_id||p.weighted_event_id)&&x.date<=day(e)),'Выберите сопоставимую повторную оценку того же СОП и методики');
+  if(p.outcome==='effective'&&(a.source_weighted_event_id||a.source_evaluation_id&&a.source_criterion_id))invariant(sopEffect(db,a,p.sop_evaluation_id||p.weighted_event_id,basis),'Эффект не подтверждён повторной оценкой конкретного критерия СОП');
   insert(db,'action_verification',{id:e.id,action_id:id,verifier_id:p.verifier_id,checked_at:e.occurred_at,outcome:p.outcome,audit_id:p.audit_id,assessment_session_id:p.assessment_id||null,sop_evaluation_id:p.sop_evaluation_id||null,weighted_event_id:p.weighted_event_id||null,evidence_note:p.evidence});
   update(db,t,id,{state:p.outcome==='effective'?'verified':p.outcome==='ineffective'?'ineffective':'implemented'});
   if(a.finding_id){const unresolved=one(db,"SELECT id FROM action_item WHERE finding_id=? AND state<>'verified' AND state<>'cancelled'",[a.finding_id]);if(!unresolved&&p.outcome==='effective')db.run("UPDATE finding SET state='resolved' WHERE id=?",[a.finding_id])}return

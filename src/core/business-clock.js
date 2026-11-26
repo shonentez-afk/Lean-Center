@@ -4,6 +4,7 @@ export function businessDay(instant=new Date(),offsetMinutes=-instant.getTimezon
  return new Date(instant.getTime()+offsetMinutes*60000).toISOString().slice(0,10)
 }
 export function economicEventPayload(type,payload,instant=new Date()){
+ if(type==='action_item'&&payload?.command==='verify')return {...payload,verification_date_basis:'implementation-civil-v1'};
  return (['economic_effect','economic_fact'].includes(type)||type==='action_item'&&payload?.command==='implement')?{...payload,business_offset_minutes:-instant.getTimezoneOffset()}:payload
 }
 export function economicEventDay(event){

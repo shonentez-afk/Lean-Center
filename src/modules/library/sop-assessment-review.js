@@ -1,3 +1,5 @@
+import {actionCompletionDate,actionEvidenceDay,ACTION_VERIFY_DATE_BASIS} from '../training/action-calendar.js';
+import {recordedBusinessDate} from '../../core/business-clock.js';
 import {REVISION_TITLE_SQL} from './revision-title.js';
 // Independent corporate binary evaluations and historical weighted snapshots.
 import {rows,one,canonical} from '../../core/primitives.js';
@@ -26,17 +28,17 @@ export function sopCriterionSource(db,kind,id,criterionId){
  }
  return null
 }
-export function sopEvidence(db,a){
+export function sopEvidence(db,a,basis=ACTION_VERIFY_DATE_BASIS){
  if(!a.implemented_at)return [];
- const after=a.implemented_at.slice(0,10);
+ const after=actionEvidenceDay(db,a,basis),offset=basis===ACTION_VERIFY_DATE_BASIS?actionCompletionDate(db,a).offsetMinutes:null;
  if(a.source_evaluation_id&&a.source_criterion_id){const s=one(db,query+' WHERE e.id=?',[a.source_evaluation_id]);if(!s)return [];
   return corporateEvaluations(db).filter(e=>e.document_id===s.document_id&&e.method_id===s.method_id&&e.revision_no>=s.revision_no&&e.date>after&&e.recorded_at>a.implemented_at).map(e=>({...e,value:corporateAnswers(db,e.id).find(q=>q.id===a.source_criterion_id)?.value??null}))
  }
  if(a.source_weighted_event_id){const history=weightedHistory(db),s=history.find(x=>x.id===a.source_weighted_event_id);if(!s)return [];
-  return history.filter(e=>e.document_id===s.document_id&&e.methodKey===s.methodKey&&e.revision_no>=s.revision_no&&e.date>after&&e.occurred_at>a.implemented_at&&e.actor_id).map(e=>{const q=e.questions.find(x=>x.id===a.source_weighted_position);return {...e,value:q?.scoreSource==='manual'?q.score:null}})
+  return history.map(e=>({...e,date:recordedBusinessDate(e.occurred_at,offset).date})).filter(e=>e.document_id===s.document_id&&e.methodKey===s.methodKey&&e.revision_no>=s.revision_no&&e.date>after&&e.occurred_at>a.implemented_at&&e.actor_id).map(e=>{const q=e.questions.find(x=>x.id===a.source_weighted_position);return {...e,value:q?.scoreSource==='manual'?q.score:null}})
  }
  return []
 }
-export function sopEffect(db,a,id){
- const evidence=sopEvidence(db,a),s=evidence.find(x=>x.id===id);return s?.value===1&&!evidence.some(x=>x.date>=s.date&&x.value!==null&&x.value<1)
+export function sopEffect(db,a,id,basis=ACTION_VERIFY_DATE_BASIS){
+ const evidence=sopEvidence(db,a,basis),s=evidence.find(x=>x.id===id);return s?.value===1&&!evidence.some(x=>x.date>=s.date&&x.value!==null&&x.value<1)
 }

@@ -66,3 +66,11 @@ test('LC7.3B independent source validators and training fact readers keep origin
  assert.equal(standard.sharedTrainingTask,facts.sharedTrainingTask);for(const k of ['rows','one','invariant','sha256','canonical','tx','bytesOf'])assert.equal(core[k],primitive[k],k);
  const f=await fixture();try{const id=await f.addAssignment();await f.approve(id);await f.stage(id,'prepare');const a=f.getAssignment(id);assert.equal(facts.progressFor(f.w.working,a).done.has('prepare'),true);assert(facts.isCurrentStandard(f.w.working,f.doc.id));assert(facts.certificateValid(f.w.working,f.certificate,date));const original=await source.inspectSource(f.sources.get(f.source.source.sha256).text,'sop');assert.deepEqual(original.source,f.source.source)}finally{f.w.close()}
 });
+
+test('LC7.3B civil calendar marker is generated only for new action verification, with explicit old replay basis',async()=>{
+ const {economicEventPayload,recordedBusinessDate}=await import('../src/core/business-clock.js');
+ const {ACTION_VERIFY_DATE_BASIS}=await import('../src/modules/training/action-calendar.js');
+ assert.equal(economicEventPayload('action_item',{command:'verify'}).verification_date_basis,ACTION_VERIFY_DATE_BASIS);
+ assert.deepEqual(economicEventPayload('action_item',{command:'cancel'}),{command:'cancel'});
+ assert.equal(recordedBusinessDate('2026-11-01T02:30:00Z',-300).date,'2026-10-31');
+});

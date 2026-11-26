@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import {bytesOf} from '../src/core/db.js';
 import {centerProjection,centerMetrics} from '../src/modules/training/center-overview.js';
 import {ATTENTION_RULES,centerAttention,scopedAttention} from '../src/modules/training/center-attention.js';
@@ -40,5 +42,7 @@ export function assertAnalyticsContracts(db,day,unitId='',personId=''){
  if(unitId){const s={...scope,unitId},q=centerProjection(db,s,{withEvidence:true});verifyProjection(q,s);verifySignals(q,scopedAttention(db,day,unitId,global,q),false)}
  if(personId){const s={...scope,personId,unitId},q=centerProjection(db,s,{withEvidence:true});verifyProjection(q,s)}
  assert.deepEqual(bytesOf(db),bytes,'Analytical projections changed DB bytes');
- return {metrics:p.metrics.map(m=>({id:m.id,value:m.value,denominator:m.denominator})),signals:global.items.map(x=>({id:x.id,count:x.count}))}
+ const snapshot={metrics:p.metrics.map(m=>({id:m.id,value:m.value,denominator:m.denominator})),signals:global.items.map(x=>({id:x.id,count:x.count}))};
+ const dir=process.env.LC_ANALYTICS_COVERAGE_DIR;if(dir){fs.mkdirSync(dir,{recursive:true});const site=(new Error().stack||'').match(/tests[\\/](?!lc73b-analytics-contract)([\w.-]+\.mjs):(\d+):\d+/);fs.appendFileSync(path.join(dir,'case-'+process.pid+'.ndjson'),JSON.stringify({test:site?site[1]+':'+site[2]:'unknown',...snapshot})+'\n')}
+ return snapshot
 }

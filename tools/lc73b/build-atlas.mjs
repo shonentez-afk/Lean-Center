@@ -58,6 +58,7 @@ function scc(){
  for(const x of adj.keys())if(!i.has(x))dfs(x);return groups.sort((a,b)=>b.length-a.length)
 }
 for(const e of graph.edges)if(!knownNodes.has(e.from)||!knownNodes.has(e.to))throw Error('Dangling edge '+JSON.stringify(e));
+if(scc().length)throw Error('Architecture import cycle regression: '+JSON.stringify(scc()));
 const stats={primaryFiles:primary.length,stageFiles:stageFiles.length,stageRuntimeParsed:!graph.errors.some(x=>x.file===release),parsed:graph.files.length-graph.errors.length,parseErrors:graph.errors.length,functions:graph.nodes.filter(x=>['function','method'].includes(x.kind)).length,classes:graph.nodes.filter(x=>x.kind==='class').length,tables:tables.length,foreignKeys:graph.edges.filter(x=>x.kind==='foreign-key').length,imports:graph.edges.filter(x=>x.kind==='import').length,calls:graph.edges.filter(x=>['call','construct'].includes(x.kind)).length,unresolved:graph.unresolved.length,handoffs:handoffs.length,callbacks:graph.edges.filter(x=>x.kind==='callback-registration').length,sqlSites:graph.sqlSites.length,sqlEdges:graph.edges.filter(x=>x.kind.startsWith('sql-')).length,cycles:scc().length};
 const model={format:2,stageRuntime:{file:release,line,sha:releaseSha,scope:'pinned original HTML runtime, before Lean Center buildEditor patches'},title:'Lean Center · LC7.3B архитектурный атлас',sha,base,schemaVersion,stats,inventory,scenarios,review,handoffs,cycles:scc(),...graph};
 const out=process.env.LC_ATLAS_OUT||'artifacts/lc73b';fs.mkdirSync(out,{recursive:true});

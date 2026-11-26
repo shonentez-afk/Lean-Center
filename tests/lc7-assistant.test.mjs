@@ -26,7 +26,7 @@ test('LC7 shared attention uses existing source projections and never writes; si
   const second=(await f.save('action_item',action(f,'QA check result','2026-02-01'))).entity_id;await f.save('action_item',{command:'implement',result:'QA result'},second);
   await f.save('economic_effect',{command:'create',study_id:null,action_id:first,owner_id:f.mentor,unit_id:f.unit,currency:'RUB',method:'direct',title:'QA confidential plan',plan:{annualGross:123456,investment:200,annualCost:100},plan_basis:'QA secret basis',review_due:'2026-01-21'});
   const pending=f.w.pending.length,before=db.export(),data=centerAttention(db,day),get=id=>data.items.find(x=>x.id===id)?.count;
-  assert.equal(data.people,4);assert.equal(data.docs,1);assert.equal(get('training_overdue'),1);assert.equal(get('action_overdue'),1);assert.equal(get('action_verify'),1);assert.equal(get('roi_overdue'),1);
+  assert.equal(data.people,4);assert.equal(data.docs,1);assert.equal(get('training_overdue'),1);assert.equal(get('action_overdue'),1);assert.equal(get('action_verify'),1);assert.equal(get('roi_overdue'),1);assertAnalyticsContracts(db,day,f.unit,f.mentor);
   assert.equal(get('annual_l1'),annualAuditCoverage(db,day.slice(0,4),day).filter(x=>x.remaining).length);
   const ai=centerAuditIndicators(db,day),economic=effectOverview(db,{day,from:day.slice(0,7)+'-01',to:day}),prep=standardControls(db,day);
   assert.equal(get('action_overdue'),ai.overdue);assert.equal(get('roi_pending'),economic.pending);assert.equal(get('roi_targets'),economic.targetAttention.length);assert.equal(get('prep_review'),prep.stats.review);assert.equal(get('retraining_need'),retrainingQueue(db,day).filter(x=>x.status==='needs').length);
