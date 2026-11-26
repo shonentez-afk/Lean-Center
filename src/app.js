@@ -366,7 +366,7 @@ function personInputField(label,picker){return add(el('div',undefined,'field'),e
 function downloadRaw(name,text){const url=URL.createObjectURL(new Blob([text],{type:'application/json;charset=utf-8'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function contentEvent(type,payload){return {id:uuid(),entity_type:type,entity_id:uuid(),operation:'create',expected_revision:0,payload,occurred_at:new Date().toISOString()}}
 function tableOf(headers,data){
- const t=el('table'),h=el('tr');headers.forEach(v=>h.append(el('th',v)));t.append(add(el('thead'),h));const body=el('tbody');
+ const t=el('table'),h=el('tr');headers.forEach(v=>{const th=el('th',v);th.setAttribute('scope','col');h.append(th)});t.append(add(el('thead'),h));const body=el('tbody');
  for(const r of data){const tr=el('tr');for(const v of r)tr.append(v instanceof Node?add(el('td'),v):el('td',String(v??'—')));body.append(tr)}t.append(body);return add(el('div',undefined,'tablewrap detail-table'),t)
 }
 function evaluationForm(revision,source){
