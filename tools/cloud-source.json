@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "ac208d045edb4fe969f8f81cdea199aeb1b467c1",
+  "sourceCommit": "d0cbcd0187b636797e71990f7673e8623db2421a",
   "files": [
     {
       "path": "amvera.yml",
@@ -115,15 +115,19 @@
     },
     {
       "path": "server/lc81/access-contract.mjs",
-      "sha": "727e627e14152f05133088d4d32f476144c168b0"
+      "sha": "58442fa7d9203cb13b62a08f4c365d1652a83dbd"
     },
     {
       "path": "server/lc81/credentials.mjs",
       "sha": "2c2a981c0c55915a5f5cf484fd84af4879bfc04d"
     },
     {
+      "path": "server/lc81/directory-commands.mjs",
+      "sha": "cc7d1db2601f2edf9dc0a661d287a1c80bb65f5d"
+    },
+    {
       "path": "server/lc81/http.mjs",
-      "sha": "ee5d5858348568bd6abc5c66b1ff8a1259b2ee6c"
+      "sha": "1c3ccfa022ea0c7a740c39669dde9748b8b44545"
     },
     {
       "path": "server/lc81/maintenance.mjs",
@@ -131,27 +135,31 @@
     },
     {
       "path": "server/lc81/portal.css",
-      "sha": "04383e7fbcacf6d51bc5dd32d1cd71642f3e4e65"
+      "sha": "55d0c87fd64eae82949dee5c91157932fec54068"
     },
     {
       "path": "server/lc81/portal.html",
-      "sha": "fb526f32e5af123a7056a735b8eb9ea412b88762"
+      "sha": "8bf1bfdb8a69404ffd32dc21e90002889b75b70b"
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "3d4f436e3aafff027b01a0626740e2c1b9e95232"
+      "sha": "62d51d4687ca8bdb80570ab2a2f4f5b1fb007408"
     },
     {
       "path": "server/lc81/read-policy.mjs",
-      "sha": "a0cf4de65f719664e905d28b11cb637930c9ca96"
+      "sha": "90874741e5d913e0c667d6ece5e5aa81d603c417"
     },
     {
       "path": "server/lc81/security-schema.sql",
       "sha": "b5207ce631c9aab61b703a91f00b6ecd5787e1ef"
     },
     {
+      "path": "server/lc81/sop-photo.mjs",
+      "sha": "a69ff1c743228c80907780f2ba653d35103dfc85"
+    },
+    {
       "path": "server/lc81/store.mjs",
-      "sha": "2df79deaa6021ee4f0d575bda6b0a4a212d44453"
+      "sha": "167183784e1c06a80be127f1549616ff7f484c81"
     },
     {
       "path": "server/main.mjs",
@@ -167,7 +175,7 @@
     },
     {
       "path": "src/app.js",
-      "sha": "bde7c6d374c0884b71c931b3832e0a769d49e888"
+      "sha": "bc9744dc7fd2fd80fb6bef4b41612ed7f5494806"
     },
     {
       "path": "src/core/business-clock.js",
@@ -498,12 +506,20 @@
       "sha": "d72475bf3956edeeaca58a1ccaa9ab9705855180"
     },
     {
+      "path": "src/ui/navigation.js",
+      "sha": "d6c1ea225ac3f2a52fa8f28e2d520d4f50f9bb16"
+    },
+    {
       "path": "src/ui/people-picker.css",
       "sha": "717202ff2556825edbe19e8f0fd1501472f5cdf9"
     },
     {
       "path": "src/ui/people-picker.js",
       "sha": "0948aa33a61dbbaa26544b4a05a7223e8a7b4e69"
+    },
+    {
+      "path": "src/ui/registry-fields.js",
+      "sha": "19d19b953574a4911489d006cdb500cdc15538a7"
     },
     {
       "path": "src/ui/styles.css",
@@ -567,7 +583,7 @@
     },
     {
       "path": "tools/lc81-inventory.mjs",
-      "sha": "be3dbc896c125a9aa85dcd467ed8cceac423c472"
+      "sha": "19989fa5ecfcebdeea9250960ec969afb552985b"
     },
     {
       "path": "tools/package_folder.py",
