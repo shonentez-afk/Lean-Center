@@ -79,7 +79,7 @@ try{
  await docRow.getByRole('button',{name:'Открыть редактор',exact:true}).click();
  const frame=await m.p.locator('#lc81-editor-frame').elementHandle();assert(frame);
  const editor=await frame.contentFrame();assert(editor);
- await editor.waitForFunction(()=>document.getElementById('lc-editor-status')?.textContent.includes('Рабочая копия готова'),{},{timeout:40000});
+ await editor.locator('#lc-editor-status').filter({hasText:'Рабочая копия готова'}).waitFor({timeout:40000});
  assert.equal(await editor.locator('#meta-operation').inputValue(),'Учебная операция');
  assert.equal(await editor.evaluate(()=>state.steps[0].hasPhoto&&!!state.steps[0].imageData),true);
  const isolation=await editor.evaluate(async()=>{

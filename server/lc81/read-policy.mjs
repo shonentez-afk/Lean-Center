@@ -3,7 +3,7 @@
 // No client-supplied role, scope, actor, SQL, or resource attributes are accepted.
 import {one,rows,isId} from '../../src/core/primitives.js';
 
-import {READ_ACTIONS,PERMISSIONS,DIRECTORY_COMMANDS,LIBRARY_COMMANDS} from './access-contract.mjs';
+import {READ_ACTIONS,PERMISSIONS,DIRECTORY_COMMANDS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
 import {documentTitle} from '../../src/modules/library/revision-title.js';
 export {READ_ACTIONS};
 const validDay=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
@@ -27,7 +27,51 @@ function unitsFor(db,person,day){
 }
 // Fixed SQL, fixed output allowlists. No source JSON, full snapshots, logs,
 // credentials, personal assessments, or attachment bytes in these projections.
+// Composite resources must include every affected unit and current participant.
+// The callers are server-only command handlers, never request-provided attributes.
+export function trainingResource(db,operationId,people,day,extraDay=null){
+ const op=one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[operationId]);
+ if(!op||!lineage(db,op.unit_id)||!Array.isArray(people)||!people.length)return null;
+ const units=[op.unit_id];
+ for(const person of new Set(people.filter(Boolean))){
+  if(!activePerson(db,person))return null;
+  const current=unitsFor(db,person,day),historical=extraDay?unitsFor(db,person,extraDay):current;
+  if(current.length!==1||historical.length!==1)return null;
+  units.push(...current,...historical);
+ }
+ return {data:{},self:null,units:[...new Set(units)],assigned:[]};
+}
+export function trainingAssignmentResource(db,id,day,extraPeople=[],extraDay=null){
+ const a=one(db,'SELECT * FROM training_assignment WHERE id=?',[id]);
+ if(!a||!a.source_sha256)return null;
+ const resource=trainingResource(db,a.operation_id,[a.trainee_id,a.mentor_id,a.supervisor_id,...extraPeople],day,extraDay);
+ if(!resource)return null;
+ return {...resource,self:a.trainee_id,assigned:a.state!=='cancelled'?[a.trainee_id,a.mentor_id,a.supervisor_id].filter(Boolean):[]};
+}
+export function matrixResource(db,unit,roster,columns,day,baseOn){
+ if(!lineage(db,unit)||!Array.isArray(roster)||!roster.length||!Array.isArray(columns)||!columns.length)return null;
+ const units=[unit];
+ for(const r of roster){
+  if(!activePerson(db,r.person_id))return null;
+  const current=unitsFor(db,r.person_id,day),historical=unitsFor(db,r.person_id,baseOn);
+  if(current.length!==1||historical.length!==1||![...current,...historical].every(x=>inside(db,unit,x)))return null;
+  units.push(...current,...historical);
+ }
+ for(const col of columns){
+  const x=one(db,'SELECT s.operation_id,o.unit_id FROM skill s JOIN operation o ON o.id=s.operation_id WHERE s.id=? AND s.archived=0 AND o.archived=0',[col.skill_id]);
+  const doc=one(db,"SELECT operation_id FROM document WHERE id=? AND kind='sop'",[col.document_id]);
+  if(!x||!doc||doc.operation_id!==x.operation_id||!inside(db,unit,x.unit_id))return null;
+  units.push(x.unit_id);
+ }
+ return {data:{},self:null,units:[...new Set(units)],assigned:[]};
+}
 function resolve(db,action,id,day){
+ if(action==='matrix.read'){
+  const m=one(db,'SELECT * FROM competency_matrix WHERE id=?',[id]);if(!m)return null;
+  const roster=JSON.parse(m.roster_json),columns=JSON.parse(m.columns_json),resource=matrixResource(db,m.unit_id,roster,columns,day,m.base_on);
+  if(!resource)return null;
+  return {...resource,data:{id:m.id,code:m.code,title:m.title,version_no:m.version_no,base_on:m.base_on,target_on:m.target_on,state:m.state,rev:m.rev,unit_id:m.unit_id,people:roster.length,skills:columns.length}};
+ }
  if(action==='person.read_basic'){
   const p=activePerson(db,id);
   if(!p)return null;
@@ -164,13 +208,13 @@ function scopeAllows(db,scope,person,resource){
 // Each grant binds ONE existing business_role and role_assignment to ONE scope.
 // Policy revision changes fail closed until grants are reconfirmed. The current
 // policy per role must be unique. Business roles alone never give permissions.
-function decide(db,security,accountId,action,resourceId,day,resourceAction=action){
+function decide(db,security,accountId,action,resourceId,day,resourceAction=action,trustedResource=null){
  if(!PERMISSIONS.includes(action)||!isId(accountId)||!isId(resourceId)||!validDay(day))return null;
  const account=unique(security?.accounts,x=>x?.id===accountId);
  if(account?.state!=='active'||!activePerson(db,account.person_id))return null;
  if(security.accounts.filter(x=>x?.person_id===account.person_id&&x.state==='active').length!==1)return null;
  if(!Array.isArray(security.grants)||!Array.isArray(security.policies))return null;
- const resource=resolve(db,resourceAction,resourceId,day);
+ const resource=trustedResource||resolve(db,resourceAction,resourceId,day);
  if(!resource||action==='task.implement_own'&&resource.self!==account.person_id)return null;
  for(const grant of security.grants){
   if(grant?.account_id!==accountId||grant.state!=='active'||grant.revoked_at!==null||!activePeriod(grant,day)||!isId(grant.id)||!isId(grant.role_id)||!isId(grant.assignment_id))continue;
@@ -179,7 +223,7 @@ function decide(db,security,accountId,action,resourceId,day,resourceAction=actio
   if(!role||assignment?.person_id!==account.person_id||assignment.role_id!==role.id||!activePeriod(assignment,day))continue;
   const policy=unique(security.policies,x=>x?.role_id===role.id);
   if(!policy||!Number.isSafeInteger(policy.revision)||policy.revision<1||grant.policy_revision!==policy.revision||!Array.isArray(policy.permissions)||!policy.permissions.includes(action))continue;
-  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
+  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS.filter(x=>x!=='training.stage'),'matrix.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
  }
  return null;
 }
@@ -217,4 +261,15 @@ export function canUseLibrary(db,security,accountId,action,anchorAction,id,day){
 export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
  const action=kind==='sop'?'sop.read_history':kind==='frv'?'frv.read':null;
  return !!action&&!!decide(db,security,accountId,action,id,day,'operation.read');
+}
+
+export function canUseTrainingResource(db,security,accountId,action,id,day,resource){
+ const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail'];
+ return !!resource&&allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,action,resource);
+}
+export function bootstrapTrainingScope(db,site,resource){
+ return !!resource&&scopeAllows(db,{kind:'unit_tree',unit_id:site},null,resource);
+}
+export function canReadPersonCard(db,security,accountId,id,day){
+ return !!decide(db,security,accountId,'person.read_card',id,day,'person.read_basic');
 }

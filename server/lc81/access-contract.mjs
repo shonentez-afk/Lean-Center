@@ -8,6 +8,7 @@ export const RESOURCE_TABLES=Object.freeze({
  'workplace.read':'workplace',
  'sop.read_effective':'document_revision',
  'training.read':'training_assignment',
+ 'matrix.read':'competency_matrix',
  'task.read':'action_item',
  "org.read":"org_unit",
  "operation.read":"operation",
@@ -34,7 +35,8 @@ export const DIRECTORIES=Object.freeze({
 });
 export const DIRECTORY_COMMANDS=Object.freeze(Object.values(DIRECTORIES).flatMap(d=>[d.create,d.update,d.archive].filter(Boolean)));
 export const LIBRARY_COMMANDS=Object.freeze(['sop.create','sop.edit_draft','sop.revise','sop.passport','sop.from_frv','frv.create','frv.edit_draft','frv.finalize']);
-export const COMMAND_ACTIONS=Object.freeze(['task.implement_own',...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS]);
-export const DETAIL_ACTIONS=Object.freeze(['sop.read_photo','sop.read_twi','sop.read_linked_frv','frv.read_summary']);
+export const TRAINING_COMMANDS=Object.freeze(['training.create','training.approve_responsible','training.approve_head','training.reschedule','training.cancel','training.stage','training.verify','training.practical','training.qualify','training.admit','matrix.create','matrix.retire']);
+export const COMMAND_ACTIONS=Object.freeze(['task.implement_own',...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS]);
+export const DETAIL_ACTIONS=Object.freeze(['sop.read_photo','sop.read_twi','sop.read_linked_frv','frv.read_summary','training.detail','training.read_sop','matrix.detail','person.read_card']);
 export const PERMISSIONS=Object.freeze([...READ_ACTIONS,...COMMAND_ACTIONS,...DETAIL_ACTIONS]);
 export const REFERENCE_CREATE_TYPES=Object.freeze(['person','org_unit','business_role','role_assignment','person_assignment']);
