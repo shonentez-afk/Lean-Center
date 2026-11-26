@@ -188,7 +188,7 @@ async function render(){
    $('content').replaceChildren(directoryPanel(info,data.items));return;
   }
   $('content').replaceChildren(resourcePanel(data.items));
- }finally{checking=false;refreshIndicator()}
+ }catch(e){$('content').replaceChildren();throw e}finally{checking=false;refreshIndicator()}
 }
 $('menu').addEventListener('click',()=>{const open=$('nav').classList.toggle('lc53-menu-open');$('menu').setAttribute('aria-expanded',String(open))});
 $('content').addEventListener('input',refreshIndicator,true);$('content').addEventListener('change',refreshIndicator,true);
