@@ -64,7 +64,7 @@ test('limited projections, own vs assigned work, no unpublished SOP or raw data'
  db.run("UPDATE document_revision SET state='draft' WHERE id=?",[i.revisionA]);assert.equal(read('sop.read_effective',i.revisionA),null);
  assert.equal(read('training.read',i.trainA).data.id,i.trainA);
  security.grants[1].scope={kind:'self'};assert.equal(read('training.read',i.trainA),null);assert.equal(read('task.read',i.taskA).data.id,i.taskA);
- security.grants[1].scope={kind:'unit_tree',unit_id:i.unitA};assert.equal(read('training.read',i.trainA),null,'trainee outside scope');assert.equal(read('task.read',i.taskA),null,'linked task scope not yet resolved');
+ security.grants[1].scope={kind:'unit_tree',unit_id:i.unitA};assert.equal(read('training.read',i.trainA),null,'trainee outside scope');assert.equal(read('task.read',i.taskA).data.id,i.taskA,'standalone task follows owner scope');
  security.grants[1].scope={kind:'assigned'};db.run("UPDATE training_assignment SET state='cancelled' WHERE id=?",[i.trainA]);assert.equal(read('training.read',i.trainA),null);
 });
 test('unknown actions, invalid IDs, duplicate policies, ambiguous accounts and corrupt hierarchy deny',t=>{

@@ -49,18 +49,19 @@ function resolve(db,action,id,day){
   if(!r||!activePerson(db,r.owner_id))return null;
   // Owner-based access only: linked finding/goal can have a different scope.
   const {owner_id,...data}=r;
-  return {data,self:owner_id,units:[],assigned:[]};
+  const standalone=one(db,'SELECT id FROM action_item WHERE id=? AND finding_id IS NULL AND goal_id IS NULL',[id]);
+  return {data,self:owner_id,units:standalone?unitsFor(db,owner_id,day):[],assigned:[]};
  }
  return null;
 }
 function scopeAllows(db,scope,person,resource){
  if(!scope||typeof scope!=='object')return false;
- if(scope.kind==='self')return Object.keys(scope).length===1&&resource.self===person;
+ if(scope.kind==='self')return Object.keys(scope).length===1&&!!person&&resource.self===person;
  if(scope.kind==='assigned')return Object.keys(scope).length===1&&resource.assigned.includes(person);
  if(scope.kind==='unit_tree'){
   if(Object.keys(scope).length!==2||!isId(scope.unit_id)||!lineage(db,scope.unit_id)||!resource.units.length)return false;
-  return resource.units.some(id=>inside(db,scope.unit_id,id))&&
-   (!resource.participantUnits||resource.participantUnits.some(id=>inside(db,scope.unit_id,id)));
+  return resource.units.every(id=>inside(db,scope.unit_id,id))&&
+   (!resource.participantUnits||resource.participantUnits.length>0&&resource.participantUnits.every(id=>inside(db,scope.unit_id,id)));
  }
  return false;
 }
@@ -85,4 +86,12 @@ export function readAuthorized(db,security,accountId,action,resourceId,day){
   if(scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
  }
  return null;
+}
+
+// Only called for the explicit server bootstrap manager profile. No request
+// can supply this identity or its scope. Unimplemented linked tasks stay denied.
+export function readManagerProjection(db,site,action,id,day){
+ if(!READ_ACTIONS.includes(action)||!isId(site)||!isId(id)||!validDay(day))return null;
+ const resource=resolve(db,action,id,day);
+ return resource&&scopeAllows(db,{kind:'unit_tree',unit_id:site},null,resource)?{data:resource.data}:null;
 }
