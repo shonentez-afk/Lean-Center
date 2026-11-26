@@ -1,7 +1,7 @@
-name: LC7.4.5 Amvera stability regression
+name: LC7.4.6 cloud save status regression
 on:
   push:
-    branches: [feature/lc7.4-amvera, feature/lc7.4-amvera-secrets, feature/lc7.4-amvera-ai, feature/lc7.4.5-amvera-stability]
+    branches: [feature/lc7.4-amvera, feature/lc7.4-amvera-secrets, feature/lc7.4-amvera-ai, feature/lc7.4.5-amvera-stability, feature/lc7.4.6-cloud-status]
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,7 +16,7 @@ jobs:
           node-version: '22'
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
-      - run: node --test tests/lc74-server.test.mjs
+      - run: node --test tests/lc74-server.test.mjs tests/lc74-save-state.test.mjs
       - name: Verify pinned source commit
         run: |
           pin=$(node -p "require('./tools/cloud-source.json').sourceCommit")
@@ -36,6 +36,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LC7.4.5-stability-test-evidence
+          name: LC7.4.6-status-test-evidence
           path: artifacts
           if-no-files-found: warn

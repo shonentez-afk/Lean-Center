@@ -32,6 +32,7 @@ import {configureMigrations,recordPayload,createDb,openDb,Workspace,definitions,
 import * as local from './storage/local.js';
 import * as net from './storage/network.js';
 import {cloudPilotTransport} from './storage/cloud-pilot.js';
+import {cloudSaveState} from './ui/cloud-save-state.js';
 const root=document.getElementById('app');
 let registryConflict=null,registryPage=0,volatileChanges=0;
 const REGISTRY_PAGE_SIZE=100;
@@ -39,7 +40,7 @@ const workFormDirty=()=>hasUnsavedForms(root);
 const allowDiscardForm=()=>!workFormDirty()||window.confirm('В форме есть несохранённые изменения. Уйти без сохранения?');
 let SQL,ws,cache,folder,generation=0,busy=false,master=false,page='home',theme=false,status='Готово',error=false,chart=null,edit=null,query='',incoming=[],importState=null,historyPerson=null,archiveFilter='active',libraryDraft=null,editorSession=null,libraryFilter='all';
 const cloudBuild=window.LC_BUILD.cloudPilot===true;
-let cloud=null,cloudAccount=null,cloudTimer=null,cloudText='Вход не выполнен',cloudBad=false,cloudFailures=0,cloudNextDelay=8000,cloudNoticeIds=[];
+let cloud=null,cloudAccount=null,cloudTimer=null,cloudText='Вход не выполнен',cloudBad=false,cloudFailures=0,cloudNextDelay=8000,cloudNoticeIds=[],cloudSyncing=false,cloudChecking=false;
 const CLOUD_PENDING_NOTICE='Сохранено локально. Ожидается подтверждение сервером.';
 const cloudReadonly=()=>cloudBuild&&cloudAccount?.role!=='editor';
 const contentStore=new ContentStore(()=>cache,()=>folder,()=>cloud),readContent=ref=>contentStore.get(ref);
@@ -63,7 +64,7 @@ function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefine
 function add(parent,...children){parent.append(...children);return parent}
 function btn(label,fn,cls='',disabled=false){const n=el('button',label,cls);n.type='button';n.disabled=disabled||busy;n.addEventListener('click',fn);return n}
 function pane(title,...children){return add(el('section',undefined,'panel'),el('h2',title),...children)}
-function message(s,bad=false){status=s;error=bad;cloudNoticeIds=cloudBuild&&s===CLOUD_PENDING_NOTICE&&!bad?ws.pending.map(e=>e.id):[];const n=document.getElementById('status');if(n){n.textContent=s;n.className='status'+(bad?' error':'')}}
+function message(s,bad=false){status=s;error=bad;cloudNoticeIds=cloudBuild&&s===CLOUD_PENDING_NOTICE&&!bad?ws.pending.map(e=>e.id):[];const n=document.getElementById('status');if(n){n.textContent=s;n.className='status'+(bad?' error':'')}refreshCloudIndicator()}
 // Navigation snapshots stay in memory; the browser stores only an opaque history ID.
 let mobileMenu=false,navSerial=0,navCurrent=null,navParent=null,navSupported=true,restoringNav=false;
 const navSnapshots=new Map();
@@ -633,7 +634,7 @@ function openRelated(c,tab){launchEditor({...c,editorTab:tab})}
 function disposeEditor(s,confirmed=false){
  if(editorSession!==s)return false;
  if(!confirmed&&!window.confirm('Закрыть рабочую копию редактора? Непереданные изменения могут быть потеряны. Сначала скачайте JSON или передайте в Lean Center.'))return false;
- clearTimeout(s.timeout);hideEditor(s);s.host.remove();editorSession=null;return true
+ clearTimeout(s.timeout);hideEditor(s);s.host.remove();editorSession=null;refreshCloudIndicator();return true
 }
 function launchEditor(ctx){
  if(cloudReadonly()){message('Тестовая учётная запись: только чтение',true);return}
@@ -656,7 +657,7 @@ function launchEditor(ctx){
   const back=btn('К библиотеке',()=>{hideEditor(s);navigate(s.ctx.kind==='frv'?'frv':'sop')});
   const close=btn('Закрыть редактор',()=>{if(disposeEditor(s)){message('Редактор закрыт. База не изменена.');navigate(s.ctx.kind==='frv'?'frv':'sop')}});
   s.close=close;
-  bar.append(el('strong',frame.title),note,back,close);host.append(bar,frame);
+  bar.append(el('strong',frame.title),note,back,close);if(cloudBuild)bar.append(cloudIndicatorNode());host.append(bar,frame);
   editorSession=s;document.body.append(host);showEditor(s);
   s.timeout=setTimeout(()=>{if(!s.loaded){editorStatus(s,'Редактор не подтвердил загрузку. Закройте его и проверьте комплект файлов и ограничения браузера.',true);message('Редактор не подтвердил готовность. Данные не изменены.',true)}},30000);
   frame.srcdoc=template.replace(marker,()=> 'window.LC_EDITOR_CONTEXT='+JSON.stringify({session,kind:ctx.kind,tab:ctx.editorTab||null,draftKey,cloudPilot:cloudBuild,cloudAiEnabled:!cloudBuild||cloudAccount?.aiEnabled===true})+';/* LC_EMBED_CONTEXT */');
@@ -691,7 +692,7 @@ window.addEventListener('message',async e=>{
   if(error){reply(status);showEditor(s)}else{reply('Документ подготовлен к сохранению в Lean Center.');hideEditor(s);render()}
  }else if(m.type==='error'){clearTimeout(s.timeout);editorStatus(s,'Ошибка: '+String(m.message||'ошибка'),true);message('Редактор: '+String(m.message||'ошибка'),true)}
 });
-window.addEventListener('beforeunload',e=>{if(editorSession||libraryDraft||workFormDirty()||!cache&&volatileChanges>0||busy){e.preventDefault();e.returnValue=''}});
+window.addEventListener('beforeunload',e=>{if(editorSession||libraryDraft||workFormDirty()||!cache&&volatileChanges>0||busy||cloudBuild&&cloud&&ws?.pending.length){e.preventDefault();e.returnValue=''}});
 function sourceSummary(d){
  const p=d.projection;return d.source.kind==='sop'?'Шагов: '+p.steps.length+' · Фото: '+p.photos+' · TWI: '+(p.twi?'есть':'нет'):'Циклов: '+p.cycles+' · Полных: '+p.complete+' · Измерений: '+p.measurements.length+' · Без измерения/действия: '+p.unmeasured
 }
@@ -809,9 +810,19 @@ renderLocalConflicts(main);
 main.append(pane('Демонстрация',el('p','Только в пустой локальной базе. Не используйте демонстрационную папку как рабочую.','muted'),btn('Новая пустая база',()=>{if(confirm('Создать отдельную пустую базу вместо текущей? Сначала сохраните резервную копию.'))run(async()=>{replace(new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration)));folder=null;networkIncomplete=[];incoming=[];master=false;importState=null;libraryDraft=null;if(cache)await local.save(cache,'folder',null);return 'Новая пустая база создана'})},'danger'),btn('Заполнить демо-данными',()=>run(async()=>{invariant(empty(),'Демо допустимо только в пустой базе');const u=ws.edit('org_unit',null,{code:'DEMO',name:'Учебное предприятие',kind:'Предприятие',parent_id:null});const v=ws.edit('org_unit',null,{code:'DEMO-M',name:'Учебный участок',kind:'Участок',parent_id:u});const p=ws.edit('profession',null,{code:'DEMO-MECH',name:'Механик'});const a=ws.edit('person',null,{employee_code:'DEMO-001',display_name:'Учебный сотрудник 01'});const e=ws.edit('equipment',null,{unit_id:v,code:'DEMO-E',name:'Учебный стенд'});ws.edit('operation',null,{unit_id:v,equipment_id:e,code:'DEMO-O',name:'Проверка стенда',criticality:'normal'});ws.edit('person_assignment',null,{person_id:a,unit_id:v,profession_id:p,shift_code:'1',valid_from:'2026-11-25',valid_to:null});return 'Добавлены демонстрационные записи'}),'',!empty())))}
 
 function renderLocalConflicts(main){if(ws.conflicts.length){const p=pane('Конфликты локальных изменений',el('p','Сохраните резервную копию. Конфликтующие события и последующие записи очереди не применены; исходные данные не перезаписаны.','bad'));for(const c of ws.conflicts){p.append(el('p',c.error,'bad'));const v=one(ws.working,'SELECT * FROM '+c.event.entity_type+' WHERE id=?',[c.event.entity_id]);p.append(el('pre','Локальное: '+JSON.stringify(c.event.payload,null,2)+'\nТекущее: '+JSON.stringify(v,null,2),'muted'))}if(ws.blockedPending.length){const blocked=pane('Ожидают разрешения конфликта: '+ws.blockedPending.length,el('p','Последующие события сохранены, но не воспроизводятся до разрешения предыдущего конфликта. Это защищает порядок зависимых изменений.','muted'));blocked.append(tableOf(['№','Раздел','Действие','Запись','Дата'],ws.blockedPending.map((e,i)=>[String(i+1),definitions[e.entity_type]?.label||DOMAIN_TYPES[e.entity_type]||e.entity_type,({create:'Создание',update:'Изменение',archive:'Архивирование'})[e.operation]||e.operation,e.payload?.display_name||e.payload?.name||e.payload?.title||e.payload?.code||e.entity_id,e.occurred_at])));p.append(blocked)}p.append(add(el('div',undefined,'row'),btn('Оставить опубликованное значение',()=>{if(confirm('Отменить конфликтующее локальное событие? Сохраните резервную копию.'))run(async()=>{ws.resolveConflict('discard');return 'Конфликтующее событие отменено'})},'danger'),btn('Повторить своё изменение',()=>{if(confirm('Применить ваше значение поверх текущей ревизии? Сохраните резервную копию.'))run(async()=>{ws.resolveConflict('reapply');return 'Создано новое локальное событие; оно ожидает публикации'})},'',Object.hasOwn(DOMAIN_TYPES,ws.conflicts[0].event.entity_type))));main.append(p)}}
+function cloudIndicatorNode(){
+ const n=el('span',undefined,'lc-cloud-indicator');n.dataset.lcCloudIndicator='1';n.setAttribute('role','status');n.setAttribute('aria-live','polite');return n
+}
+function refreshCloudIndicator(){
+ if(!cloudBuild||!cloud||!ws)return;
+ const value=cloudSaveState({pending:ws.pending.length,conflicts:ws.conflicts.length,dirty:workFormDirty(),editorOpen:!!editorSession,preview:!!libraryDraft,saving:busy&&!cloudSyncing,syncing:cloudSyncing,offline:navigator.onLine===false,exchangeFailed:cloudFailures>0||cloudBad,checking:cloudChecking,saveFailed:error,readonly:cloudReadonly()});
+ const detail=(error?status+' · ':'')+cloudText;
+ for(const n of document.querySelectorAll('[data-lc-cloud-indicator]')){if(n.dataset.kind!==value.kind)n.dataset.kind=value.kind;if(n.textContent!==value.text)n.textContent=value.text;if(n.title!==detail)n.title=detail}
+}
 function cloudState(text,bad=false){
  cloudText=text;cloudBad=bad;
  for(const n of root.querySelectorAll('[data-lc-cloud-state]')){n.textContent=text;n.classList.toggle('bad',bad)}
+ refreshCloudIndicator();
 }
 function cloudStateNode(){
  const n=el('span',cloudText,'lc-cloud-state'+(cloudBad?' bad':''));n.dataset.lcCloudState='1';n.setAttribute('role','status');return n
@@ -853,7 +864,7 @@ async function syncCloud(manual=false){
   if(manual)cloudState('Завершите или закройте редактирование и повторите синхронизацию',true);
   return
  }
- busy=true;root.inert=true;let changed=false;
+ busy=true;cloudSyncing=true;root.inert=true;let changed=false;refreshCloudIndicator();
  try{
   await checkCloudLease();
   changed=await pullCloud();
@@ -870,7 +881,7 @@ async function syncCloud(manual=false){
    changed=(await pullCloud())||changed;
   }
   if(ws.conflicts.length){cloudState('Конфликт: изменения сохранены локально. Откройте «Настройки и обмен».',true);return}
-  cloudFailures=0;cloudNextDelay=8000;
+  cloudFailures=0;cloudNextDelay=8000;cloudChecking=false;
   if(ws.pending.length){cloudNextDelay=750;cloudState('Ожидают подтверждения: '+ws.pending.length);return}
   // Do not confirm an HTTP ACK alone or a discarded/conflicted event.
   if(status===CLOUD_PENDING_NOTICE&&cloudNoticeIds.length){
@@ -879,7 +890,7 @@ async function syncCloud(manual=false){
   }
   cloudState('Синхронизировано · '+cloudAccount.user+(cloudReadonly()?' · только чтение':''));
  }catch(e){cloudFailures=Math.min(cloudFailures+1,6);cloudNextDelay=Math.min(60000,Math.max(2000*2**(cloudFailures-1)+Math.floor(Math.random()*1000),e.retryAfterMs||0));cloudState('Облачный обмен не подтверждён: '+e.message+' · локальная очередь: '+ws.pending.length+' · повтор через '+Math.ceil(cloudNextDelay/1000)+' с',true)}
- finally{busy=false;root.inert=false;if(changed)render()}
+ finally{busy=false;cloudSyncing=false;root.inert=false;if(changed)render();refreshCloudIndicator()}
 }
 function cloudStorage(main){
  main.append(pane('Облачное хранение · испытательный стенд',
@@ -949,7 +960,7 @@ function render(){
  const brandCompany=el('span',undefined,'brand-company');brandCompany.setAttribute('role','img');brandCompany.setAttribute('aria-label','ТЕХНОНИКОЛЬ');
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),brandText,brandCompany);
  const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{if(!allowDiscardForm())return;edit=null;registryConflict=null;theme=!theme;try{localStorage.setItem('lean-center-theme',theme?'dark':'light')}catch{}render()}),btn('Хранение',()=>navigate('storage')));
- if(cloudBuild)metaPanel.append(el('span',LC_BUILD.cloudRelease+' · '+LC_BUILD.sourceCommit.slice(0,8)+' · '+cloudAccount.user+(cloudReadonly()?' · чтение':''),'version lc-cloud-mode'),btn('Выйти',cloudLogout));
+ if(cloudBuild)metaPanel.append(cloudIndicatorNode(),el('span',LC_BUILD.cloudRelease+' · '+LC_BUILD.sourceCommit.slice(0,8)+' · '+cloudAccount.user+(cloudReadonly()?' · чтение':''),'version lc-cloud-mode'),btn('Выйти',cloudLogout));
  if(editorSession&&editorSession.host.hidden&&!libraryDraft)metaPanel.append(btn('Вернуться в редактор',()=>showEditor(editorSession),'primary'));header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.id='lc53-sidebar';side.setAttribute('aria-label','Навигация');side.classList.toggle('lc53-menu-open',mobileMenu);const menu=btn(mobileMenu?'Закрыть меню':'Меню',()=>{mobileMenu=!mobileMenu;side.classList.toggle('lc53-menu-open',mobileMenu);menu.textContent=mobileMenu?'Закрыть меню':'Меню';menu.setAttribute('aria-expanded',String(mobileMenu))},'lc53-mobile-menu');menu.setAttribute('aria-controls',side.id);menu.setAttribute('aria-expanded',String(mobileMenu));header.append(menu);
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};
@@ -967,9 +978,13 @@ function render(){
  if(employeeReturn&&page!=='person')main.append(add(el('div',undefined,'row employee-return'),btn('← К карточке сотрудника',()=>openEmployee(employeeReturn,{restore:true})),el('span',refName('person',employeeReturn),'muted')));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));main.inert=!!editorSession&&!editorSession.host.hidden;if(editorSession?.loaded)editorSession.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'theme',theme:theme?'dark':'light'},'*');
  if(page==='home')home(main);else if(page==='ai')assistantScreen(main,{db:ws.working,day:today(),el,add,btn,pane,openAttention});else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,goResearch,readContent,pick,downloadBytes,notify:message,openEmployee,rememberNavigation,allowDiscardForm:()=>busy||allowDiscardForm()});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
- main.append(el('p',(LC_BUILD.version||'Lean Center')+(cloudBuild?' · облачный тестовый стенд · без издателя':' · автономная рабочая копия · общий сетевой обмен'),'foot'))
+ main.append(el('p',(LC_BUILD.version||'Lean Center')+(cloudBuild?' · облачный тестовый стенд · без издателя':' · автономная рабочая копия · общий сетевой обмен'),'foot'));
+ refreshCloudIndicator();
 }
 window.addEventListener('resize',()=>chart?.resize());
-window.addEventListener('online',()=>{if(cloud)queueCloudSync(100)});document.addEventListener('visibilitychange',()=>{if(cloud&&document.visibilityState==='visible')queueCloudSync(100)});
+window.addEventListener('online',()=>{if(cloud){cloudChecking=true;refreshCloudIndicator();queueCloudSync(100)}});
+window.addEventListener('offline',refreshCloudIndicator);
+document.addEventListener('visibilitychange',()=>{if(cloud&&document.visibilityState==='visible'){cloudChecking=true;refreshCloudIndicator();queueCloudSync(100)}});
+if(cloudBuild){let scheduled=false;const update=()=>{if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;refreshCloudIndicator()})};for(const event of ['input','change','click','lc-person-change'])root.addEventListener(event,update,true);}
 async function init(){configureMigrations(LC_BUILD.migration3,LC_BUILD.migration4,LC_BUILD.migration5,LC_BUILD.migration6,LC_BUILD.migration7,LC_BUILD.migration8,LC_BUILD.migration9,LC_BUILD.migration10,LC_BUILD.migration11,LC_BUILD.migration12,LC_BUILD.migration13,LC_BUILD.migration14,LC_BUILD.migration15,LC_BUILD.migration16,LC_BUILD.migration17);SQL=await window.initSqlJs({wasmBinary:decode(window.LC_BUILD.wasm)});if(cloudBuild){cloudLogin();return}try{cache=await local.openCache();const s=await local.load(cache,'workspace');generation=s?.generation||0;folder=await local.load(cache,'folder');ws=s?new Workspace(SQL,openDb(SQL,s.state.base),s.state):new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));if(!s)await persist();if(folder&&await net.permission(folder,false)){const prev=ws.state();try{const remote=await scanNetwork();if(remote){await useSnapshot(remote.db);await persist();message(withNetworkWarning(ws.conflicts.length?'База обновлена, есть конфликты':'База обновлена из сетевой папки'))}else if(networkIncomplete.length)message(withNetworkWarning('В папке нет опубликованной базы'),true)}catch(e){replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message(withNetworkWarning('Сетевая база не обновлена: '+e.message),true)}}}catch(e){if(!cache){ws=new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration));message('IndexedDB недоступен, ручной режим: '+e.message,true)}else if(ws){message('Локальная копия не записана: '+e.message,true);cache=null}else throw e}render()}
 init().catch(e=>{console.error(e);root.replaceChildren(el('h1','Не удалось открыть Lean Center'),el('p',e.message),el('p','Существующие локальные данные не удалены. Проверьте браузер или восстановите проверенную копию.'))});
