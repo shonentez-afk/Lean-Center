@@ -41,3 +41,25 @@ test('LC5 same-day planning accepts local today across UTC rollover; old deadlin
  assert.deepEqual(rows(db,'PRAGMA foreign_key_check'),[]);
  }finally{f.w.close()}
 });
+
+import {BUILTIN_SELF} from '../src/modules/training/builtin-forms.js';
+import {jiStages} from '../src/modules/training/domain.js';
+import {assessmentRegistry,assessmentAnswers,assessmentScore,assessmentSummary,assessmentIndicators} from '../src/modules/training/assessment-review.js';
+import {actionSourceOf,actionPeople} from '../src/modules/training/audit-domain.js';
+import {employeeRelations} from '../src/modules/master-data/employee-records.js';
+test('LC5.1 migrates accepted v11 without rewriting employee identities',()=>{const d=new SQL.Database();d.run(schema);for(const m of migrations.slice(0,-1))d.run(m);setMeta(d,'database_id',uuid());const id=uuid();d.run('INSERT INTO person(id,employee_code,display_name) VALUES(?,?,?)',[id,'LC51','QA']);const n=openDb(SQL,bytesOf(d));assert.equal(meta(d,'schema_version'),'11');assert.equal(meta(n,'schema_version'),'12');assert.equal(one(n,'SELECT id FROM person').id,id);assert.deepEqual(rows(n,'PRAGMA foreign_key_check'),[]);n.close();d.close()});
+test('LC5.1 self and practical journals, criterion links, participant roles and separate statistics survive backup',async()=>{const f=await fixture();try{
+ const db=f.w.working,assignment=await f.addAssignment();await f.approve(assignment);for(const s of jiStages('classic').filter(x=>!['support','followup'].includes(x.phase)))await f.stage(assignment,s.code);
+ const practical=(await f.assess(assignment)).entity_id,p=assessmentRegistry(db,'practical')[0],qa=assessmentAnswers(db,p,'practical'),bad=qa.find(x=>x.value===0);assert.equal(p.id,practical);assert.equal(assessmentScore(qa,'practical').sum,10);assert.equal(assessmentScore(qa,'practical').count,11);
+ const method=(await f.save('checklist_version',BUILTIN_SELF)).entity_id,criteria=rows(db,'SELECT id FROM checklist_criterion WHERE version_id=? ORDER BY position',[method]),self=(await f.save('mentor_self_evaluation',{person_id:f.mentor,method_id:method,evaluated_on:date,place:'QA',responses:criteria.map(q=>({criterion_id:q.id,value:3,note:'QA'})),feedback:'QA'})).entity_id;
+ const selfRow=assessmentRegistry(db,'self_eval')[0];assert.equal(selfRow.id,self);assert.equal(assessmentScore(assessmentAnswers(db,selfRow,'self_eval'),'self_eval').value,3);assert.equal(selfRow.unit_id,f.unit);
+ const action={response_id:null,title:'QA',owner_id:f.actor,subject_id:f.trainee,due_on:'2026-02-01',kind:'corrective',priority:'normal',source_link:{kind:'practical',id:practical,criterion_id:bad.id}};
+ const act=(await f.save('action_item',action)).entity_id;await assert.rejects(f.save('action_item',action),/уже есть/);await assert.rejects(f.save('action_item',{...action,kind:'trainee_training'}),/отрицательного заключения/);await assert.rejects(f.save('action_item',{...action,source_link:{kind:'practical',id:practical,criterion_id:qa[0].id}}),/недоступен/);
+ const sa=(await f.save('action_item',{...action,kind:'development',subject_id:f.mentor,source_link:{kind:'self_eval',id:self,criterion_id:criteria[0].id}})).entity_id;
+ await assert.rejects(f.save('action_item',{...action,kind:'development',subject_id:f.other,source_link:{kind:'self_eval',id:self,criterion_id:criteria[0].id}}),/совпадать/);
+ const linked=actionRows(db).find(x=>x.id===act);assert.equal(linked.source_criterion_id,bad.id);assert.equal(actionSourceOf(db,linked).criterion_id,bad.id);assert(actionPeople(linked).includes(f.mentor));assert(actionPeople(linked).includes(f.actor));assert.equal(actionRows(db).find(x=>x.id===sa).source_self_id,self);
+ assert.equal(assessmentSummary(db,'practical',{versionId:f.method}).stats.sum,10);assert.equal(assessmentSummary(db,'self_eval',{versionId:method}).stats.value,3);assert.equal(assessmentSummary(db,'self_eval',{versionId:f.method}).records.length,0);assert.equal(assessmentSummary(db,'self_eval',{versionId:method}).actions.length,1);assert.equal(assessmentIndicators(db,date).practical,1);
+ assert(employeeRelations(db,f.trainee).assessments.some(x=>x.dest?.options?.assessmentId===practical));assert(employeeRelations(db,f.mentor).development.some(x=>x.id===sa));assert(employeeRelations(db,f.actor).development.some(x=>x.id===act));assert.equal(one(db,"SELECT count(*) n FROM assessment_item").n,0);
+ await f.save('action_item',{command:'implement',result:'QA'},act);await assert.rejects(f.save('action_item',{command:'verify',verifier_id:f.other,audit_id:null,assessment_id:null,outcome:'effective',evidence:'QA'},act),/не подтверждён/);
+ const restored=await restore(SQL,await backup(f.w),f.readContent);assert.equal(actionRows(restored.working).find(x=>x.id===sa).source_self_id,self);assert.deepEqual(rows(restored.working,'PRAGMA foreign_key_check'),[]);restored.close()
+ }finally{f.w.close()}});
