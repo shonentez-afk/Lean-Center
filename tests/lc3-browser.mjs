@@ -26,7 +26,21 @@ try{
   const content=payload.task==='twi_generate'?JSON.stringify(mockPlan):'OK';
   return route.fulfill({status:200,headers,body:JSON.stringify({choices:[{message:{content}}]})});
  });
- await page.addInitScript(()=>{window.open=()=>{throw Error('Unexpected popup: editor must not call window.open')}});
+ // Test-only wire observation. Never record source content, IDs or session tokens in the report.
+ const wireEvidence=[];
+ await page.addInitScript(()=>{
+  window.open=()=>{throw Error('Unexpected popup: editor must not call window.open')};
+  if(window===window.parent){window.__lcWire=[];window.addEventListener('message',e=>{
+   const m=e.data,f=document.getElementById('lc-editor-frame');if(m?.protocol!=='lean-editor-v1'||!f)return;
+   const sameSource=e.source===f.contentWindow,sameSession=m.session===f.contentWindow.LC_EDITOR_CONTEXT?.session;
+   if(['ready','loaded','source','modal'].includes(m.type))window.__lcWire.push({type:m.type,sameSource,sameSession,...(m.type==='modal'?{open:m.open===true}:{})})
+  })}
+ });
+ const wire=()=>page.evaluate(()=>window.__lcWire.slice());
+ const readKv=key=>page.evaluate(key=>new Promise((resolve,reject)=>{
+  const open=indexedDB.open('lean-center-lc1',1);open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result,t=db.transaction('kv','readonly'),r=t.objectStore('kv').get(key);let value;r.onsuccess=()=>{value=r.result};t.oncomplete=()=>{db.close();resolve(value??null)};t.onerror=()=>{db.close();reject(t.error)}}
+ }),key);
+
  let popups=0;page.on('popup',()=>popups++);
  async function editorFrame(){const frame=page.locator('#lc-editor-frame');await frame.waitFor();const editor=await (await frame.elementHandle()).contentFrame();assert(editor);await editor.locator('#lc-editor-status').waitFor({timeout:30000});await editor.waitForFunction(()=>{const t=document.getElementById('lc-editor-status')?.textContent||'';return t.includes('Рабочая копия готова')||t.includes('Ошибка загрузки:')},{},{timeout:30000});assert.match(await editor.locator('#lc-editor-status').textContent(),/Рабочая копия готова/);await page.getByText('Редактор готов',{exact:true}).waitFor();return editor}
  async function checkEditorNotifications(frame,label){
@@ -62,6 +76,23 @@ try{
  await page.getByRole('button',{name:'Конструктор СОП',exact:true}).first().click();
  await page.getByRole('button',{name:'Создать СОП',exact:true}).click();
  const emptyEditor=await editorFrame();
+ const handshake=(await wire()).filter(e=>e.sameSource&&e.sameSession).map(e=>e.type);
+ assert(handshake.indexOf('ready')>=0&&handshake.indexOf('loaded')>handshake.indexOf('ready'));
+ wireEvidence.push({id:'editor-handshake',observed:handshake.filter(t=>t==='ready'||t==='loaded'),assertion:'active iframe ready precedes loaded; host and editor show ready'});
+ // Real messages from the active iframe with a wrong session and from the wrong window.
+ await emptyEditor.evaluate(()=>parent.postMessage({protocol:'lean-editor-v1',session:'invalid-session',type:'modal',open:true},'*'));
+ await page.waitForFunction(()=>window.__lcWire.some(e=>e.type==='modal'&&e.sameSource&&!e.sameSession));
+ assert.equal(await page.locator('.editor-host-bar').evaluate(e=>e.inert),false);
+ await page.evaluate(()=>window.postMessage({protocol:'lean-editor-v1',session:document.getElementById('lc-editor-frame').contentWindow.LC_EDITOR_CONTEXT.session,type:'modal',open:true},'*'));
+ await page.waitForFunction(()=>window.__lcWire.some(e=>e.type==='modal'&&!e.sameSource&&e.sameSession));
+ assert.equal(await page.locator('.editor-host-bar').evaluate(e=>e.inert),false);
+ const denied=await page.evaluate(async()=>{
+  const f=document.getElementById('lc-editor-frame').contentWindow,s=f.LC_EDITOR_CONTEXT.session;
+  const denied=async(caller,session)=>{try{await window.LCSopRecovery(caller,session,'read');return false}catch(e){return /Редактор уже закрыт/.test(e.message)}};
+  return [await denied(window,s),await denied(f,'invalid-session')]
+ });
+ assert.deepEqual(denied,[true,true]);wireEvidence.push({id:'editor-rejected-boundary',wrongSession:true,wrongWindow:true,rpcRejected:2});
+
  assert.equal(await page.locator('.sidebar').isVisible(),true);assert.equal(await page.locator('.sidebar .nav.active').textContent(),'Конструктор СОП');
  assert.equal(aiTasks.length,0,'No automatic AI requests');
  await ctx.setOffline(false);
@@ -158,6 +189,8 @@ try{
  await clickPoint(.10,.12);await emptyEditor.locator('[data-ill-mode=callout]').click();await emptyEditor.locator('#illTextInput').fill('Проверить кнопку');
  await canvas.scrollIntoViewIfNeeded();const box=await canvas.boundingBox();await page.mouse.move(box.x+box.width*.65,box.y+box.height*.65);await page.mouse.down();await page.mouse.move(box.x+box.width*.72,box.y+box.height*.23,{steps:8});await page.mouse.up();
  await emptyEditor.locator('#illSave').click();await emptyEditor.locator('#illustrationEditorOverlay').waitFor({state:'detached'});await page.waitForFunction(()=>!document.querySelector('.editor-host-bar').inert);
+ const modalWire=(await wire()).filter(e=>e.type==='modal'&&e.sameSource&&e.sameSession).map(e=>e.open);assert(modalWire.includes(true)&&modalWire.lastIndexOf(false)>modalWire.indexOf(true));wireEvidence.push({id:'editor-modal',observed:modalWire,assertion:'host toolbar inert during actual modal, restored on close'});
+
  assert.deepEqual(await emptyEditor.evaluate(()=>state.steps[0].photoAnnotations.filter(x=>['label','callout'].includes(x.type)).map(x=>x.text)),['Проверить зелёный индикатор','Проверить кнопку']);
  await page.setViewportSize(normalViewport);
  for(const orientation of ['portrait','landscape'])await exportAndInspect(emptyEditor,orientation,[true,false],'with-photo');
@@ -254,7 +287,24 @@ try{
  await choosePerson(editor,'Обучаемый','Уч обу');assert.equal(await editor.locator('#twi-trainee').inputValue(),'Учебный обучаемый');
  await page.screenshot({path:'artifacts/lc3/twi-editor.png',fullPage:true});
  await editor.locator('[data-tab="checklist"]').click();await editor.locator('[data-score="1"]').selectOption('0.7');await editor.locator('[data-comment="1"]').fill('Учебный комментарий из конструктора');
- await editor.locator('#lc-editor-send').click();await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();await page.getByRole('button',{name:'Сохранить изменения черновика'}).click();await page.getByText('Черновик сохранён. Ожидает общей публикации базы.',{exact:true}).waitFor();
+ const oldKey=await editor.evaluate(()=>window.LC_EDITOR_CONTEXT.draftKey),oldGeneration=(await readKv('workspace')).generation;
+ await editor.locator('#lc-editor-send').click();await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();
+ assert((await wire()).some(e=>e.type==='source'&&e.sameSource&&e.sameSession));
+ const checkpoint=await readKv(oldKey);assert(checkpoint?.token&&checkpoint.text);assert.equal(JSON.parse(checkpoint.text).constructor.steps[0].action,'Проверить повторно');assert.equal((await readKv('workspace')).generation,oldGeneration);
+ // Inject a failure in the workspace transaction, not the content store or recovery write.
+ await page.evaluate(()=>{window.__lcOldPut=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(v,k){if(k==='workspace')throw new DOMException('QA workspace quota','QuotaExceededError');return window.__lcOldPut.call(this,v,k)}});
+ try{
+  await page.getByRole('button',{name:'Сохранить изменения черновика'}).click();await page.getByText(/Локальная запись не выполнена. Изменения не записаны/).waitFor();
+  await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();
+  assert.equal((await readKv('workspace')).generation,oldGeneration);
+  assert.deepEqual(await readKv(oldKey),checkpoint);
+ }finally{await page.evaluate(()=>{IDBObjectStore.prototype.put=window.__lcOldPut;delete window.__lcOldPut})}
+ wireEvidence.push({id:'editor-transfer-and-rollback',sourceDelivered:true,previewNotCommitted:true,failedCommitPreservedCheckpoint:true});
+ await page.getByRole('button',{name:'Сохранить изменения черновика'}).click();await page.getByText('Черновик сохранён. Ожидает общей публикации базы.',{exact:true}).waitFor();
+ await page.locator('#lc-editor-host').waitFor({state:'detached'});
+ assert.equal(await readKv(oldKey),null);assert.equal((await readKv('workspace')).generation,oldGeneration+1);
+ wireEvidence.push({id:'editor-commit-clear',workspaceCommitted:true,matchingRecoveryRemoved:true});
+
  await page.locator('#lc-editor-host').waitFor({state:'detached'});
  await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();await page.getByRole('heading',{name:'QA-SOP · Проверить учебный стенд'}).waitFor();
  const dl2=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать JSON',exact:true}).click();await (await dl2).saveAs(path.join(tmp,'edited.json'));const edited=JSON.parse(await fs.readFile(path.join(tmp,'edited.json'),'utf8'));assert.equal(edited.constructor.steps[0].action,'Проверить повторно');assert.equal(edited.constructor.steps[0].keyMoments.length,6);assert.equal(edited.constructor.steps[0].keyMoments[5],'Шестой КМ — сохранить без потери');assert(edited.photoAssets['1'].original.startsWith('data:image/'));assert.equal(edited.constructor.leanCenterPeople.length,4);assert.equal(edited.constructor.leanCenterPeople[0].display_name,'Учебный оценщик');assert.match(edited.constructor.leanCenterPeople[0].person_id,/^[0-9a-f-]{36}$/);assert.equal(edited.constructor.twi.trainer,'Учебный оценщик');assert(edited.constructor.twi.prepare.purpose);assert.equal(Number(edited.constructor.steps[0].frv.m1),3);
@@ -375,5 +425,6 @@ try{
  await page.getByRole('button',{name:'Настройки и обмен',exact:true}).click();const bdl=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать резервную копию',exact:true}).click();const bp=path.join(tmp,'full.leanbackup');await (await bdl).saveAs(bp);const backup=JSON.parse(await fs.readFile(bp,'utf8'));assert.equal(backup.format,'lean-content-bundle-v1');assert.equal(backup.contents.length,4);
  await ctx.close();const c2=await browser.newContext({offline:true,acceptDownloads:true}),p2=await c2.newPage();p2.on('dialog',d=>d.accept());await p2.goto(entry);await p2.getByRole('button',{name:'Настройки и обмен',exact:true}).click();const bc=p2.waitForEvent('filechooser');await p2.getByRole('button',{name:'Восстановить копию',exact:true}).click();await (await bc).setFiles(bp);await p2.getByText('Копия восстановлена; проверьте ID базы',{exact:true}).waitFor();await p2.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await p2.getByRole('button',{name:'Открыть',exact:true}).click();await p2.getByRole('heading',{name:'QA-SOP · Проверить учебный стенд'}).waitFor();
  const rdl=p2.waitForEvent('download');await p2.getByRole('button',{name:'Скачать JSON',exact:true}).click();await (await rdl).saveAs(path.join(tmp,'restored.json'));assert.equal(JSON.parse(await fs.readFile(path.join(tmp,'restored.json'),'utf8')).constructor.steps[0].action,'Проверить повторно');assert.deepEqual(errors,[]);await c2.close();
+ await fs.mkdir('artifacts/lc73b-runtime',{recursive:true});await fs.writeFile('artifacts/lc73b-runtime/editor-wire.json',JSON.stringify({format:1,scope:'synthetic test-only observations; not a full runtime call graph',checks:wireEvidence},null,2)+'\n');
  console.log('LC3 browser PASS: exact SOP source, original photo, Stage43 embedded frame roundtrip (new/edit, no popups, explicit missing asset error), independent FRV, full backup/restore');
 }finally{await browser.close();await fs.rm(tmp,{recursive:true,force:true})}

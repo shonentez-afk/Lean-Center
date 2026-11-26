@@ -1,3 +1,4 @@
+import {summarizeUnresolved} from './unresolved-summary.mjs';
 import {buildEmbeddedEditor} from '../build_editor.mjs';
 import {DERIVED_FILE,DERIVED_VIEW,extractDerivedRuntime,derivedSourceViewer} from './derived-runtime.mjs';
 import fs from 'node:fs';
@@ -70,7 +71,8 @@ for(const e of graph.edges)if(!knownNodes.has(e.from)||!knownNodes.has(e.to))thr
 if(scc().length)throw Error('Architecture import cycle regression: '+JSON.stringify(scc()));
 const stats={primaryFiles:primary.length,stageFiles:stageFiles.length,stageRuntimeParsed:!graph.errors.some(x=>x.file===release),derivedRuntimeParsed:!graph.errors.some(x=>x.file===DERIVED_FILE),derivedCrossCalls,parsed:graph.files.length-graph.errors.length,parseErrors:graph.errors.length,functions:graph.nodes.filter(x=>['function','method'].includes(x.kind)).length,classes:graph.nodes.filter(x=>x.kind==='class').length,tables:tables.length,foreignKeys:graph.edges.filter(x=>x.kind==='foreign-key').length,imports:graph.edges.filter(x=>x.kind==='import').length,calls:graph.edges.filter(x=>['call','construct'].includes(x.kind)).length,unresolved:graph.unresolved.length,handoffs:handoffs.length,callbacks:graph.edges.filter(x=>x.kind==='callback-registration').length,sqlSites:graph.sqlSites.length,sqlEdges:graph.edges.filter(x=>x.kind.startsWith('sql-')).length,cycles:scc().length};
 const generatedSources={[DERIVED_FILE]:{viewer:DERIVED_VIEW,sha256:derived.sha256,htmlSha256:derived.htmlSha256,segments:derived.segments}};
-const model={format:2,generatedSources,stageRuntime:{file:release,line,sha:releaseSha,scope:'pinned original HTML runtime, before Lean Center buildEditor patches'},title:'Lean Center · LC7.3B архитектурный атлас',sha,base,schemaVersion,stats,inventory,scenarios,review,handoffs,cycles:scc(),...graph};
+const unresolvedSummary=summarizeUnresolved(graph.unresolved);
+const model={format:2,unresolvedSummary,generatedSources,stageRuntime:{file:release,line,sha:releaseSha,scope:'pinned original HTML runtime, before Lean Center buildEditor patches'},title:'Lean Center · LC7.3B архитектурный атлас',sha,base,schemaVersion,stats,inventory,scenarios,review,handoffs,cycles:scc(),...graph};
 const out=process.env.LC_ATLAS_OUT||'artifacts/lc73b';fs.mkdirSync(out,{recursive:true});
 fs.mkdirSync(path.join(out,'generated'),{recursive:true});fs.writeFileSync(path.join(out,DERIVED_FILE),derived.source);fs.writeFileSync(path.join(out,DERIVED_VIEW),derivedSourceViewer(derived.source));
 const json=JSON.stringify(model);fs.writeFileSync(path.join(out,'atlas.json'),json);
@@ -81,6 +83,7 @@ fs.writeFileSync(path.join(out,'LeanCenter-LC7.3B-Architecture.html'),html);
 const csv=(xs)=>'\ufeff'+xs.map(line=>line.map(x=>'"'+String(x??'').replaceAll('"','""')+'"').join(';')).join('\r\n');
 fs.writeFileSync(path.join(out,'review.csv'),csv([['ID','Серьёзность','Статус','Название','Наблюдение','Проверка','Источники'],...review.map(x=>[x.id,x.severity,x.state,x.title,x.finding,x.verification,x.proof.map(q=>q.file+':'+q.line).join(' | ')])]));
 fs.writeFileSync(path.join(out,'unresolved-calls.csv'),csv([['Файл','Строка','Владелец','Выражение','Тип неопределённости','Фрагмент'],...graph.unresolved.map(x=>[x.file,x.line,x.owner,x.name,x.reason,x.excerpt])]));
+fs.writeFileSync(path.join(out,'unresolved-summary.csv'),csv([['Scope','Reason','Count'],...unresolvedSummary.byReason.map(x=>[x.scope,x.reason,x.count])]));
 fs.writeFileSync(path.join(out,'source-inventory.csv'),csv([['Файл','Байт','SHA256','Покрытие'],...inventory.map(x=>[x.path,x.bytes,x.sha256,x.coverage])]));
 fs.writeFileSync(path.join(out,'summary.json'),JSON.stringify({sha,base,schemaVersion,stats,generatedSources,cycles:model.cycles,parseErrors:graph.errors},null,2)+'\n');
 console.log(JSON.stringify({sha,schemaVersion,stats,cycles:model.cycles,parseErrors:graph.errors},null,2));

@@ -44,6 +44,12 @@ jobs:
         run: npx playwright install chromium
       - run: npm run smoke
       - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LC7.3B-Runtime-Evidence-${{ runner.os }}
+          path: artifacts/lc73b-runtime
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
         with:
           name: LeanCenter-LC7.3b-standard-dev-${{ runner.os }}
           path: releases/LeanCenter-LC7.3b-standard-dev.zip
