@@ -1,4 +1,4 @@
-import {definitions,foldKey,identityKey,recordPayload,openDb,bytesOf,rows,list,one,meta,uuid,now,canonical,tx,applyEvent,invariant} from '../../core/db.js';
+import {definitions,foldKey,identityKey,recordPayload,openDb,bytesOf,rows,list,one,meta,uuid,now,canonical,tx,applyEvent,invariant,queueCapacity} from '../../core/db.js';
 
 export const MAX_ROWS=1000, MAX_COLUMNS=100, MAX_XLSX=20*1024*1024;
 const MAX_EXPANDED=100*1024*1024;
@@ -132,10 +132,10 @@ export function planImport(ws,type,source,{allowUpdates=false}={}){
   }
   results.sort((a,b)=>a.row-b.row);
   const counts=Object.fromEntries(Object.keys(statusLabels).map(k=>[k,results.filter(x=>x.status===k).length]));
-  return {type,token:workspaceToken(ws),results,counts,events:counts.error?[]:events};
+  const checked=counts.error?[]:events;return {type,token:workspaceToken(ws),results,counts,events:checked,capacity:queueCapacity(ws.pending,checked)};
  }finally{db.close()}
 }
-export function commitImport(ws,plan){invariant(plan&&plan.counts.error===0&&plan.events.length>0,'Нет проверенных изменений для импорта');invariant(plan.token===workspaceToken(ws),'Рабочая копия изменилась; выполните предварительную проверку снова');return ws.applyBatch(plan.events)}
+export function commitImport(ws,plan){invariant(plan&&plan.counts.error===0&&plan.events.length>0,'Нет проверенных изменений для импорта');invariant(plan.token===workspaceToken(ws),'Рабочая копия изменилась; выполните предварительную проверку снова');const capacity=queueCapacity(ws.pending,plan.events);invariant(!capacity.error,capacity.error+'; передайте или примите предыдущие изменения и повторите проверку');return ws.applyBatch(plan.events)}
 export async function makeTemplate(ExcelJS,type){
  const book=new ExcelJS.Workbook(),sheet=book.addWorksheet(definitions[type].label.slice(0,31));
  sheet.columns=importFields(type).map(([k,f])=>({header:fieldLabel(type,k),key:k,width:f.multiline?55:f.ref?26:28,style:{numFmt:'@'}}));

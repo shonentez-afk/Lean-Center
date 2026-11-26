@@ -12,6 +12,9 @@ const exact=(p,keys)=>invariant(p&&typeof p==='object'&&!Array.isArray(p)&&Objec
 const text=(x,max=2000)=>typeof x==='string'&&x.trim().length>0&&x.length<=max;
 const bounded=(x,min,max)=>typeof x==='number'&&Number.isFinite(x)&&x>=min&&x<=max;
 const day=e=>economicEventDay(e);
+// Period dates are inclusive. A period closes only on the following business day.
+export const periodClosed=(end,asOf)=>end<asOf;
+export const lastClosedDay=day=>new Date(Date.parse(day)-86400000).toISOString().slice(0,10);
 const date=x=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x))&&new Date(x).toISOString().slice(0,10)===x;
 const person=(db,id)=>invariant(one(db,'SELECT id FROM person WHERE id=? AND archived=0',[id]),'Выберите действующего сотрудника');
 const due=(e,d)=>invariant(date(d)&&d>=day(e),'Укажите контрольный срок не раньше даты записи');
@@ -55,7 +58,7 @@ export function effectOverview(db,{day,from='',to=day,unitId='',personId=''}){
  const actions=actionRows(db),effects=effectRows(db).filter(r=>(!unitId||r.unit_id===unitId)&&(!personId||r.owner_id===personId)),facts=[],currencies=new Map();
  let pending=0,overdue=0,stale=0,drafts=0;
  for(const r of effects){const current=effectCurrent(db,r,actions);if(effectPending(db,r,actions)){pending++;if(r.review_due<day)overdue++}if(r.state==='active'&&r.actual_json&&!current)stale++;
-  for(const f of effectFacts(db,r.id)){if(f.state==='draft'&&r.state==='active')drafts++;if(f.state!=='confirmed'||f.period_from<from||f.period_to>to||f.period_to>day)continue;
+  for(const f of effectFacts(db,r.id)){if(f.state==='draft'&&r.state==='active')drafts++;if(f.state!=='confirmed'||f.period_from<from||f.period_to>to||!periodClosed(f.period_to,day))continue;
    const eligible=factCurrent(db,r,f,actions);facts.push({...f,effect:r,eligible});if(!eligible)continue;
    const v=currencies.get(r.currency)||{currency:r.currency,count:0,gross:0,recurring:0,investment:0,net:0};v.count++;v.gross+=f.gross_minor;v.recurring+=f.recurring_minor;v.investment+=f.investment_minor;v.net+=factNet(f);currencies.set(r.currency,v);
   }
@@ -65,7 +68,7 @@ export function effectOverview(db,{day,from='',to=day,unitId='',personId=''}){
 }
 function factValues(db,e,p,r,exclude=null){
  invariant(r.state==='active'&&effectCurrent(db,r)&&r.actual_event_id===p.actual_event_id,'Нужен действующий проверенный расчёт');
- invariant(date(p.period_from)&&date(p.period_to)&&p.period_from<=p.period_to&&p.period_to<=day(e),'Укажите завершённый период факта');
+ invariant(date(p.period_from)&&date(p.period_to)&&p.period_from<=p.period_to&&periodClosed(p.period_to,day(e)),'Укажите завершённый период факта: последний день должен быть раньше текущей местной даты');
  invariant([p.gross_minor,p.recurring_minor,p.investment_minor].every(Number.isSafeInteger)&&bounded(p.gross_minor,-1e12,1e12)&&bounded(p.recurring_minor,0,1e12)&&bounded(p.investment_minor,0,1e12),'Суммы в сотых долях денежной единицы; проверьте диапазон');
  person(db,p.registered_by);invariant(text(p.evidence),'Укажите первичные документы и основание денежного факта');
  invariant(!one(db,"SELECT id FROM economic_fact WHERE effect_id=? AND state<>'void' AND id<>? AND period_from<=? AND period_to>=? LIMIT 1",[r.id,exclude||'',p.period_to,p.period_from]),'Период пересекается с существующим фактом этой карточки');
@@ -81,9 +84,9 @@ export function periodTargets(db,r,asOf,actions=actionRows(db)){
  const events=rows(db,"SELECT id,occurred_at,expected_revision,payload_json FROM change_event WHERE entity_type='economic_effect' AND entity_id=? ORDER BY expected_revision,id",[r.id]).map(e=>({...e,p:JSON.parse(e.payload_json)})),targets=events.filter(e=>e.p?.command==='period_target'),facts=effectFacts(db,r.id);
  return targets.map(t=>{
   const p=t.p,cancel=events.find(e=>e.p?.command==='period_target_cancel'&&e.p.target_id===t.id);
-  const available=facts.filter(f=>f.period_from>=p.from&&f.period_to<=p.to&&f.period_to<=asOf&&f.state==='confirmed'&&factCurrent(db,r,f,actions));
+  const available=facts.filter(f=>f.period_from>=p.from&&f.period_to<=p.to&&periodClosed(f.period_to,asOf)&&f.state==='confirmed'&&factCurrent(db,r,f,actions));
   let cursor=p.from;for(const f of available){if(f.period_from!==cursor)break;cursor=nextDay(f.period_to)}
-  const closed=p.to<=asOf,complete=closed&&cursor===nextDay(p.to)&&!cancel&&r.state==='active',actual=available.reduce((s,f)=>s+factNet(f),0),signature=available.map(f=>f.id+':'+f.rev).join('|');
+  const closed=periodClosed(p.to,asOf),complete=closed&&cursor===nextDay(p.to)&&!cancel&&r.state==='active',actual=available.reduce((s,f)=>s+factNet(f),0),signature=available.map(f=>f.id+':'+f.rev).join('|');
   const reviews=events.filter(e=>e.p?.command==='period_review'&&e.p.target_id===t.id),review=reviews.at(-1)||null;
   const currentReview=complete&&review?.p.signature===signature&&review?.p.actual_minor===actual;
   const delta=complete?actual-p.target_minor:null,shortfall=delta!==null&&delta<0;
@@ -98,7 +101,7 @@ function applyPeriodCommand(db,e,r){
  const p=economicCommand(e.payload),ts=periodTargets(db,r,day(e)),t=ts.find(x=>x.id===p.target_id);
  if(p.command==='period_target'){
   exact(p,['command','from','to','target_minor','basis','actor_id']);
-  person(db,p.actor_id);invariant(date(p.from)&&date(p.to)&&p.from<=p.to&&p.to>=day(e),'Укажите период цели, который ещё не завершён');
+  person(db,p.actor_id);invariant(date(p.from)&&date(p.to)&&p.from<=p.to&&!periodClosed(p.to,day(e)),'Укажите период цели, который ещё не завершён');
   invariant(Number.isSafeInteger(p.target_minor)&&bounded(p.target_minor,-1e12,1e12)&&text(p.basis),'Укажите чистую денежную цель и основание');
   invariant(!ts.some(x=>!x.cancel&&x.from<=p.to&&x.to>=p.from),'Период пересекается с существующей целью');
   invariant(!effectFacts(db,r.id).some(f=>f.state!=='void'&&f.period_from<=p.to&&f.period_to>=p.from),'Цель нельзя назначать задним числом после регистрации факта');
@@ -163,6 +166,6 @@ export function applyEconomicEvent(db,e,old){
  const r=one(db,'SELECT * FROM economic_effect WHERE id=?',[old.effect_id]);
  invariant(e.operation==='update'&&old.state!=='void','Факт аннулирован или недоступен');
  if(p.command==='save'){exact(p,['command',...fields]);invariant(old.state==='draft'&&p.registered_by===old.registered_by,'Редактируется только черновик его регистратора');update(db,t,id,factValues(db,e,p,r,id));return}
- if(p.command==='confirm'){exact(p,['command','verifier_id','note']);person(db,p.verifier_id);invariant(old.state==='draft'&&p.verifier_id!==r.owner_id&&p.verifier_id!==old.registered_by&&text(p.note),'Нужен независимый проверяющий и основание подтверждения');invariant(r.actual_event_id===old.actual_event_id&&effectCurrent(db,r),'Исходное подтверждение расчёта утратило актуальность');update(db,t,id,{state:'confirmed',verifier_id:p.verifier_id,confirmed_at:e.occurred_at,confirmation_note:p.note.trim()});return}
+ if(p.command==='confirm'){exact(p,['command','verifier_id','note']);person(db,p.verifier_id);invariant(periodClosed(old.period_to,day(e)),'Подтвердить можно только завершённый период факта');invariant(old.state==='draft'&&p.verifier_id!==r.owner_id&&p.verifier_id!==old.registered_by&&text(p.note),'Нужен независимый проверяющий и основание подтверждения');invariant(r.actual_event_id===old.actual_event_id&&effectCurrent(db,r),'Исходное подтверждение расчёта утратило актуальность');update(db,t,id,{state:'confirmed',verifier_id:p.verifier_id,confirmed_at:e.occurred_at,confirmation_note:p.note.trim()});return}
  exact(p,['command','actor_id','reason']);person(db,p.actor_id);invariant(p.command==='void'&&text(p.reason),'Укажите причину аннулирования');if(old.state==='confirmed')invariant(p.actor_id!==old.registered_by&&p.actor_id!==r.owner_id,'Аннулирование подтверждённого факта требует независимого проверяющего');update(db,t,id,{state:'void',void_by:p.actor_id,void_reason:p.reason.trim(),void_at:e.occurred_at});
 }

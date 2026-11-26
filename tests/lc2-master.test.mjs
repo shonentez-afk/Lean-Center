@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import initSqlJs from 'sql.js';
 import {webcrypto} from 'node:crypto';
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
-import {configureMigrations,createDb,openDb,bytesOf,Workspace,meta,rows,list,one,uuid,now,sha256,canonical,setMeta,prepareSnapshot,readSnapshot,restore,encode,backup,mergePackage} from '../src/core/db.js';
+import {configureMigrations,createDb,openDb,bytesOf,Workspace,meta,rows,list,one,uuid,now,sha256,canonical,setMeta,prepareSnapshot,readSnapshot,restore,encode,backup,mergePackage,queueCapacity,MAX_QUEUE_EVENTS,MAX_QUEUE_BYTES} from '../src/core/db.js';
 import {planImport,commitImport,autoMap,checkXlsxContainer} from '../src/modules/master-data/import-xlsx.js';
 const SQL=await initSqlJs(),schema=fs.readFileSync('db/schema_v1.sql','utf8'),migration=fs.readFileSync('db/migrations/002_lc1.sql','utf8');
 configureMigrations(fs.readFileSync('db/migrations/003_lc2.sql','utf8'),fs.readFileSync('db/migrations/004_lc3.sql','utf8'),fs.readFileSync('db/migrations/005_lc3_requirements.sql','utf8'),fs.readFileSync('db/migrations/006_stage43_checklist.sql','utf8'),fs.readFileSync('db/migrations/007_lc4_training.sql','utf8'),fs.readFileSync('db/migrations/008_lc4_corporate_forms.sql','utf8'),fs.readFileSync('db/migrations/009_lc42_methods.sql','utf8'),fs.readFileSync('db/migrations/010_lc43_matrix.sql','utf8'),fs.readFileSync('db/migrations/011_lc5_audit.sql','utf8'),fs.readFileSync('db/migrations/012_lc51_assessments.sql','utf8'),fs.readFileSync('db/migrations/013_lc52_integration.sql','utf8'),fs.readFileSync('db/migrations/014_lc6_effect.sql','utf8'),fs.readFileSync('db/migrations/015_lc63_twi_standard.sql','utf8'),fs.readFileSync('db/migrations/016_lc64_twi_workflows.sql','utf8'),fs.readFileSync('db/migrations/017_lc65_preparation_results.sql','utf8'));
@@ -48,5 +48,17 @@ test('LC5.4.1 transfer preview closes old assignment before creating new regardl
   assert.equal(one(w.working,'SELECT valid_to FROM person_assignment WHERE id=?',[oldId]).valid_to,'2026-06-30');
   assert.equal(one(w.working,"SELECT unit_id FROM person_assignment WHERE valid_from='2026-07-01'").unit_id,v);
   assert.deepEqual(rows(w.working,'PRAGMA foreign_key_check'),[]);
+ }finally{w.close()}
+});
+
+test('LC6.7.3 import preflight and commit share queue count and byte limits',()=>{
+ const w=fresh();try{
+  // Seed 1999 valid, independent events in one transaction, not a fabricated workspace state.
+  const events=Array.from({length:MAX_QUEUE_EVENTS-1},(_,i)=>({id:uuid(),entity_id:uuid(),entity_type:'person',operation:'create',expected_revision:0,payload:person('CAP-'+i,'QA '+i),occurred_at:now()}));
+  w.applyBatch(events);let p=planImport(w,'person',[rec(2,person('CAP-EXTRA','QA 2000')),rec(3,person('CAP-OVER','QA 2001'))]);
+  assert.equal(p.counts.create,2);assert.equal(p.capacity.remaining,1);assert.equal(p.capacity.totalCount,2001);assert.match(p.capacity.error,/Превышен лимит очереди/);assert.throws(()=>commitImport(w,p),/лимит очереди/);assert.equal(w.pending.length,1999);assert.equal(list(w.working,'person').length,1999);
+  p=planImport(w,'person',[rec(2,person('CAP-EXTRA','QA 2000'))]);assert.equal(p.capacity.error,null);assert.equal(commitImport(w,p),1);
+  p=planImport(w,'person',[rec(2,person('CAP-OVER','QA 2001'))]);assert.equal(p.capacity.remaining,0);assert.match(p.capacity.error,/лимит очереди/);assert.throws(()=>commitImport(w,p),/лимит очереди/);assert.equal(w.pending.length,2000);
+  const bytes=queueCapacity([{payload:'x'.repeat(MAX_QUEUE_BYTES-100)}],[{payload:'я'.repeat(100)}]);assert(bytes.totalCount<MAX_QUEUE_EVENTS);assert.match(bytes.error,/лимит пакета/);
  }finally{w.close()}
 });

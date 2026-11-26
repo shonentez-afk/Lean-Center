@@ -56,7 +56,9 @@ function sopBlank(ExcelJS){
  row(s,r++,['','Шаг 1','Шаг 2','Шаг 3','Шаг 4'],true);for(const [name,height] of [['Визуализация / фото / схема',90],['Действие — что делать',58],['Время, сек',23],['Ключевой момент — как делать',58],['Причина — почему именно так',58]]){row(s,r,[name]);s.getRow(r++).height=height}finish(s,r-1,r-6);return w
 }
 function matrixBlank(ExcelJS){
- const w=new ExcelJS.Workbook(),s=sheet(w,'Матрица компетенций',[7,30,24,...Array(10).fill(20),20,20,20]);
+ const w=new ExcelJS.Workbook(),s=sheet(w,'Матрица компетенций',[6,28,22,...Array(10).fill(10),14,11,13]);
+ // Ten SOP columns + fifteen employees + totals/legend on one readable A3 page.
+ s.pageSetup.paperSize=8;s.pageSetup.fitToHeight=1;
  let r=head(s,'ПРИЛОЖЕНИЕ 7. Матрица компетенций',{'Предприятие / подразделение':'','Смена':'','Утверждаю / дата':'','Разработал / дата':''});
  band(s,r++,'СОП от простых к сложным · инструкторы выделяются жирным · потребности обучения отмечаются красным',36);const h=r;row(s,r++,['№','ФИО','Должность',...Array.from({length:10},(_,i)=>'СОП '+(i+1)),'Компетенции сотрудника','Цель','Потребность'],true);
  for(let i=0;i<15;i++){const rr=r++;row(s,rr,[i+1]);for(let col=4;col<=13;col++)s.getCell(rr,col).dataValidation={type:'list',allowBlank:true,formulae:['"1,2,3,4,x"']};s.getCell(rr,14).value={formula:'IF(COUNT(D'+rr+':M'+rr+')=0,"",SUM(D'+rr+':M'+rr+'))',result:''};s.getCell(rr,16).value={formula:'IF(OR(N'+rr+'="",O'+rr+'=""),"",MAX(0,O'+rr+'-N'+rr+'))',result:''}}
