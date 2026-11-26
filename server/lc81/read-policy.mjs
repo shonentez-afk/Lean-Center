@@ -1,9 +1,10 @@
-// LC8.1A: server-only policy/projection foundation. NOT connected to HTTP.
+// LC8.1 QA: server-only policy/projection foundation. Used by the isolated HTTP service.
 // All account, grant, policy and date inputs MUST come from trusted server state.
 // No client-supplied role, scope, actor, SQL, or resource attributes are accepted.
 import {one,rows,isId} from '../../src/core/primitives.js';
 
-export const READ_ACTIONS=Object.freeze(['person.read_basic','sop.read_effective','training.read','task.read']);
+import {READ_ACTIONS} from './access-contract.mjs';
+export {READ_ACTIONS};
 const validDay=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
 const activePeriod=(x,day)=>!!x&&validDay(x.valid_from)&&x.valid_from<=day&&(x.valid_to===null||validDay(x.valid_to)&&day<=x.valid_to);
 const unique=(items,predicate)=>{if(!Array.isArray(items))return null;const found=items.filter(predicate);return found.length===1?found[0]:null};
@@ -47,7 +48,7 @@ function resolve(db,action,id,day){
  if(action==='task.read'){
   const r=one(db,'SELECT id,title,due_on,state,owner_id FROM action_item WHERE id=?',[id]);
   if(!r||!activePerson(db,r.owner_id))return null;
-  // Owner-based access only: linked finding/goal can have a different scope.
+  // Owner-based access; standalone tasks also support unit scope. Linked finding/goal scope is not yet verified.
   const {owner_id,...data}=r;
   const standalone=one(db,'SELECT id FROM action_item WHERE id=? AND finding_id IS NULL AND goal_id IS NULL',[id]);
   return {data,self:owner_id,units:standalone?unitsFor(db,owner_id,day):[],assigned:[]};

@@ -8,6 +8,7 @@ import {pilotSql,atomicReplace,PilotError} from '../lc74-store.mjs';
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
 import {READ_ACTIONS,readAuthorized,readManagerProjection} from './read-policy.mjs';
+import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES} from './access-contract.mjs';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
 const SITE='8c810000-0000-4000-8000-000000000003';
 const MAGIC=Buffer.from('LC81QA1\n'),MAX=24*1024*1024;
@@ -158,10 +159,10 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   createReference(actor,type,payload){
    return mutate(db=>{
     requireAdmin(db,actor);
-    must(['person','org_unit','business_role','role_assignment','person_assignment'].includes(type),403,'Неизвестное действие');
+    must(REFERENCE_CREATE_TYPES.includes(type),403,'Неизвестное действие');
     must(payload&&typeof payload==='object'&&!Array.isArray(payload),400,'Неверные поля');
     // Only QA references; no generic writes, imports or business events.
-    if(type==='org_unit')must(payload.parent_id&&rootUnit(db,payload.parent_id)===SITE,400,'Подразделение вне учебной площадки');
+    if(type==='org_unit')must(payload.parent_id&&rootUnit(db,payload.parent_id)===SITE&&payload.kind!=='Предприятие',400,'Подразделение вне учебной площадки');
     if(type==='business_role')must(typeof payload.code==='string'&&!payload.code.toUpperCase().startsWith('LC81_'),400,'Системный код защищён');
     if(type==='role_assignment')must(payload.role_id!==ADMIN_ROLE,403,'Системный администратор защищён');
     if(type==='person_assignment')must(rootUnit(db,payload.unit_id)===SITE,400,'Подразделение вне учебной площадки');
@@ -227,7 +228,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   })},
   listResources(actor,action){return read(db=>{
    const a=account(db,actor);must(a,401,'Необходим вход');must(permissionsFor(db,a).includes(action),404,'Раздел недоступен');
-   const table={'person.read_basic':'person','sop.read_effective':'document_revision','training.read':'training_assignment','task.read':'action_item'}[action];
+   const table=RESOURCE_TABLES[action];
    const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,SITE,action,id,day()):readAuthorized(db,s,actor,action,id,day())).filter(Boolean).map(v=>v.data);
   })},
   async close(){if(closed)return;await tail;closed=true;current.close();await release()}
