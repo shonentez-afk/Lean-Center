@@ -237,7 +237,7 @@ function employeeCard(main,id){
   body.replaceChildren();
   if(key==='overview'){
    body.append(pane('Рабочие записи сотрудника',add(el('div',undefined,'row'),btn('Мой план',()=>employeeDestination(id,{page:'my_plan',options:{personId:id}})),btn('Метрики сотрудника',()=>employeeDestination(id,{page:'metrics',options:{personId:id}})),btn('Календарь',()=>employeeDestination(id,{page:'calendar',options:{personId:id,month:''}})),btn('Мероприятия',()=>employeeDestination(id,{page:'actions',options:{personId:id}})),btn('Самооценка и аудиты',()=>employeeDestination(id,{page:'analytics',options:{assessmentType:'comparison',personId:id}})))));
-   body.append(pane('Связанные данные',el('p','Все сведения берутся из общей базы по идентификатору сотрудника. Для исходных СОП и ФРВ предусмотрен отдельный поиск сохранённых ссылок.','muted'),add(el('div',undefined,'employee-overview'),...employeeTabs.slice(1).map(([k,label])=>btn(label+' · '+groups[k].length,()=>show(k),'employee-section-button')))));
+   body.append(pane('Связанные данные',el('p','Все сведения берутся из общей базы по идентификатору сотрудника. Для исходных СОП и ФРВ предусмотрен отдельный поиск сохранённых ссылок.','muted'),add(el('div',undefined,'employee-overview'),...employeeTabs.slice(1).map(([k,label])=>btn(label+(k==='effectiveness'?'':' · '+groups[k].length),()=>show(k),'employee-section-button')))));
    const open=groups.training.filter(x=>['active','planned','in_progress'].includes(x.state));if(open.length)body.append(pane('Действующее обучение',recordsTable(open.slice(0,10))));
    const active=groups.matrices.filter(x=>x.state==='active');if(active.length)body.append(pane('Действующие матрицы',recordsTable(active)));return
   }
@@ -261,7 +261,7 @@ function employeeCard(main,id){
   body.append(section)
  }
  function recordsTable(items){return tableOf(['Запись','Роль сотрудника','Дата','Состояние','Сведения',''],items.map(r=>[r.title,r.role,r.date,employeeStates[r.state]||r.state||'—',r.extra,r.dest?btn('Открыть',()=>employeeDestination(id,r.dest),'primary'):'—']))}
- for(const [key,title] of employeeTabs){const b=btn(title+(key==='overview'?'':' ('+groups[key].length+')'),()=>show(key),'library-tab');b.dataset.tab=key;nav.append(b)}
+ for(const [key,title] of employeeTabs){const b=btn(title+(['overview','effectiveness'].includes(key)?'':' ('+groups[key].length+')'),()=>show(key),'library-tab');b.dataset.tab=key;nav.append(b)}
  main.append(nav,body);show(employeeTab)
 }
 function registry(main,type){

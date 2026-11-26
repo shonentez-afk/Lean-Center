@@ -133,7 +133,7 @@ export function applyEconomicEvent(db,e,old){
    exact(p,['command','scope','comparison','actor_id','note']);person(db,p.actor_id);invariant(old.action_id&&!old.study_id&&old.method==='time'&&text(p.note),'Основание TWI связывается с карточкой мероприятия с методом времени');
    const scope=p.scope;exact(scope,['kind','source_id','unit_id','before_from','before_to','after_from','after_to']);const c=twiComparison(db,scope,day(e));invariant(c.comparable&&c.unit_id===old.unit_id&&canonical(c)===canonical(p.comparison),'Требуются сопоставимые завершённые группы TWI того же подразделения');
    invariant(!one(db,"SELECT id FROM economic_fact WHERE effect_id=? AND state='draft'",[id]),'Сначала разрешите черновики денежных фактов');
-   const previous=twiBasis(db,id);invariant(!previous||!one(db,"SELECT id FROM economic_fact WHERE effect_id=? AND state='confirmed'",[id]),'Для замены основания сначала разрешите подтверждённые денежные факты; история сохранится');
+   invariant(!one(db,"SELECT id FROM economic_fact WHERE effect_id=? AND state='confirmed'",[id]),'Для изменения основания сначала разрешите подтверждённые денежные факты; история сохранится');
    const keys=x=>[...x.flatMap(a=>[...a.facts.map(f=>f[0]),...(a.assignmentIds||[]),a.id])],ids=new Set(keys(c.after));for(const other of effectRows(db).filter(x=>x.id!==id&&x.state==='active')){const b=twiBasis(db,other.id);invariant(!b||!keys(b.p.comparison.after).some(k=>ids.has(k)),'Эти результаты TWI уже учтены в другой активной карточке');}
    update(db,t,id,{reviewed_at:null});return
   }
