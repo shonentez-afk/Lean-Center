@@ -7,7 +7,7 @@ import {centerAuditIndicators,annualAuditCoverage} from '../src/modules/training
 import {effectOverview} from '../src/modules/effect/domain.js';
 import {standardControls} from '../src/modules/training/standard-overview.js';
 import {retrainingQueue} from '../src/modules/training/center-overview.js';
-import {cloudRequest,parseCloudAdvice,askCenterCloud,CENTER_PROXY,CENTER_MODEL} from '../src/modules/assistant/cloud.js';
+import {cloudRequest,parseCloudAdvice,askCenterCloud,CENTER_PROXY,CENTER_MODEL,CENTER_MODELS,modelFromProxy} from '../src/modules/assistant/cloud.js';
 const day='2026-01-22';
 const action=(f,title,due)=>({response_id:null,title,owner_id:f.mentor,subject_id:null,due_on:due,kind:'corrective',priority:'normal'});
 test('LC7 empty working database: missing data is not readiness, no fictitious counts',()=>{
@@ -53,11 +53,28 @@ test('LC7 exact outbound contract: arbitrary inputs, unknown IDs and invalid mod
 test('LC7 transport: fixed endpoint, no credentials, no redirects, bounded response, error and cancellation',async()=>{
  const ids=['action_overdue'],answer={recommendations:[{id:ids[0],text:'Уточнить причины задержки.'}]},outer={choices:[{message:{content:JSON.stringify(answer)}}]};
  const opts=[];const mock=async(url,o)=>{opts.push({url,o});return new Response(JSON.stringify(outer))};
- assert.deepEqual(await askCenterCloud(ids,{fetcher:mock}),answer.recommendations);
+ assert.deepEqual(await askCenterCloud(ids,{fetcher:mock}),{recommendations:answer.recommendations,requested:CENTER_MODEL,reported:null});
  assert.equal(opts[0].url,CENTER_PROXY);assert.equal(opts[0].o.credentials,'omit');assert.equal(opts[0].o.redirect,'error');assert.equal(opts[0].o.referrerPolicy,'no-referrer');assert.deepEqual(JSON.parse(opts[0].o.body),cloudRequest(ids));
- assert.deepEqual(await askCenterCloud(ids,{fetcher:async()=>new Response(JSON.stringify({result:{alternatives:[{message:{text:JSON.stringify(answer)}}]}}))}),answer.recommendations);
+ assert.deepEqual((await askCenterCloud(ids,{fetcher:async()=>new Response(JSON.stringify({result:{alternatives:[{message:{text:JSON.stringify(answer)}}]}}))})).recommendations,answer.recommendations);
  await assert.rejects(askCenterCloud(ids,{fetcher:async()=>new Response('secret error',{status:403})}),/HTTP 403/);
  await assert.rejects(askCenterCloud(ids,{fetcher:async()=>new Response('x'.repeat(33000))}),/лимит/);
  await assert.rejects(askCenterCloud(ids,{fetcher:async()=>{throw new TypeError('network')}}),/сеть, CORS/);
  const c=new AbortController();c.abort();await assert.rejects(askCenterCloud(ids,{signal:c.signal,fetcher:async()=>{throw Error('Must not request')}}),/отменён/);
+});
+
+test('LC7 model selection: allowlist, exact model aliases, honest route confirmation and mismatch',async()=>{
+ const ids=['action_overdue'],recommendations=[{id:ids[0],text:'Проверить сроки.'}];
+ for(const [model,entry] of Object.entries(CENTER_MODELS)){
+  const request=cloudRequest(ids,model);assert.equal(request.model,model);
+  assert.deepEqual(request.messages,cloudRequest(ids).messages);
+  const result=await askCenterCloud(ids,{model,fetcher:async(url,options)=>{
+   assert.deepEqual(JSON.parse(options.body),request);
+   return new Response(JSON.stringify({model:entry.route,choices:[{message:{content:JSON.stringify({recommendations})}}]}))
+  }});
+  assert.deepEqual(result,{recommendations,requested:model,reported:model});
+ }
+ const result=await askCenterCloud(ids,{model:'yandexgpt-5',fetcher:async()=>new Response(JSON.stringify({model:'yandexgpt-lite/latest',choices:[{message:{content:JSON.stringify({recommendations})}}]}))});
+ assert.equal(result.requested,'yandexgpt-5');assert.equal(result.reported,CENTER_MODEL);
+ assert.equal(modelFromProxy('gpt://private-folder/other'),null);assert.equal(modelFromProxy(undefined),null);
+ for(const bad of ['gpt://other/model','__proto__',null,{},'yandexgpt-6'])assert.throws(()=>cloudRequest(ids,bad),/разрешённого списка/);
 });
