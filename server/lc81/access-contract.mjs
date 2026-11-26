@@ -34,5 +34,6 @@ export const DIRECTORIES=Object.freeze({
 });
 export const DIRECTORY_COMMANDS=Object.freeze(Object.values(DIRECTORIES).flatMap(d=>[d.create,d.update,d.archive].filter(Boolean)));
 export const COMMAND_ACTIONS=Object.freeze(['task.implement_own',...DIRECTORY_COMMANDS]);
-export const PERMISSIONS=Object.freeze([...READ_ACTIONS,...COMMAND_ACTIONS]);
+export const DETAIL_ACTIONS=Object.freeze(['sop.read_photo']);
+export const PERMISSIONS=Object.freeze([...READ_ACTIONS,...COMMAND_ACTIONS,...DETAIL_ACTIONS]);
 export const REFERENCE_CREATE_TYPES=Object.freeze(['person','org_unit','business_role','role_assignment','person_assignment']);

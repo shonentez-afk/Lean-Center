@@ -204,3 +204,5 @@ export function canImplementOwnTask(db,security,accountId,id,day){
 export function canChangeDirectory(db,security,accountId,action,anchorAction,id,day){
  return DIRECTORY_COMMANDS.includes(action)&&!!decide(db,security,accountId,action,id,day,anchorAction);
 }
+
+export function canReadSopPhoto(db,security,accountId,id,day){return !!decide(db,security,accountId,'sop.read_photo',id,day,'sop.read_steps')}

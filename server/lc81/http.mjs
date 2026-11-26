@@ -9,12 +9,22 @@ const must=(ok,status,msg)=>{if(!ok)throw new PilotError(status,msg)};
 const publicFiles=new Map(await Promise.all([
  ['/', './portal.html','text/html; charset=utf-8'],
  ['/portal.js','./portal.js','text/javascript; charset=utf-8'],
- ['/portal.css','./portal.css','text/css; charset=utf-8']
+ ['/portal.css','./portal.css','text/css; charset=utf-8'],
+ ['/assets/styles.css','../../src/ui/styles.css','text/css; charset=utf-8'],
+ ['/assets/cloud-pilot.css','../../src/ui/cloud-pilot.css','text/css; charset=utf-8'],
+ ['/assets/twi-workplace.webp','../../src/ui/brand/twi-workplace.webp','image/webp'],
+ ['/assets/tn-two-line-light.svg','../../src/ui/brand/tn-two-line-light.svg','image/svg+xml'],
+ ['/assets/tn-two-line-dark.svg','../../src/ui/brand/tn-two-line-dark.svg','image/svg+xml'],
+ ['/assets/favicon.png','../../src/ui/brand/favicon.png','image/png'],
+ ['/shared/navigation.js','../../src/ui/navigation.js','text/javascript; charset=utf-8'],
+ ['/shared/registry-fields.js','../../src/ui/registry-fields.js','text/javascript; charset=utf-8'],
+ ['/shared/form-guard.js','../../src/ui/form-guard.js','text/javascript; charset=utf-8'],
+ ['/shared/cloud-save-state.js','../../src/ui/cloud-save-state.js','text/javascript; charset=utf-8']
 ].map(async ([url,file,type])=>[url,{type,bytes:await fs.readFile(fileURLToPath(new URL(file,import.meta.url)))}])));
 const keys=(o,k)=>o&&typeof o==='object'&&!Array.isArray(o)&&Object.keys(o).length===k.length&&k.every(x=>Object.hasOwn(o,x));
 function reply(res,status,value,type='application/json; charset=utf-8',headers={}){
  const bytes=Buffer.isBuffer(value)?value:Buffer.from(JSON.stringify(value),'utf8');
- res.writeHead(status,{'Content-Type':type,'Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",...headers});res.end(bytes);
+ res.writeHead(status,{'Content-Type':type,'Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",...headers});res.end(bytes);
 }
 async function body(req){
  must(/^application\/json(?:;|$)/i.test(req.headers['content-type']||''),415,'Ожидается JSON');
@@ -77,6 +87,11 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='POST'&&p==='/api/lc81/admin/policy'){reply(res,200,await store.setPolicy(a.id,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/grant'){reply(res,200,await store.grant(a.id,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/revoke'){const b=await body(req);must(keys(b,['id']),400,'Неверные поля');reply(res,200,await store.revoke(a.id,b.id));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/manager-policy'){reply(res,200,await store.upgradeManagerPolicy(a.id,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/sop/photo'){
+    const pos=url.searchParams.get('position');must(/^\d{1,4}$/.test(pos||''),404,'Фото недоступно');
+    const r=await store.sopPhoto(a.id,a.credential_revision,url.searchParams.get('revision_id'),Number(pos));reply(res,200,r.bytes,r.type);return;
+   }
    if(req.method==='GET'&&p==='/api/lc81/directory/info'){reply(res,200,store.directoryInfo(a.id,url.searchParams.get('type')));return}
    if(req.method==='POST'&&p==='/api/lc81/directory/change'){reply(res,200,await store.changeDirectory(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/tasks/implement'){reply(res,200,await store.implementOwnTask(a.id,a.credential_revision,await body(req)));return}

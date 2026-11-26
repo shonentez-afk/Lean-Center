@@ -7,8 +7,9 @@ import {fileURLToPath} from 'node:url';
 import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-store.mjs';
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
-import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory} from './read-policy.mjs';
-import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY_COMMANDS} from './access-contract.mjs';
+import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto} from './read-policy.mjs';
+import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY_COMMANDS,DETAIL_ACTIONS} from './access-contract.mjs';
+import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {refsForDb,checkContent,MAX_CONTENT} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
@@ -71,12 +72,14 @@ function directoryView(db,a,action,data,d){
  const def=DIRECTORIES[type];
  return {...data,can_update:directoryAllowed(db,a,def.update,action,data.id,d),can_archive:!!def.archive&&directoryAllowed(db,a,def.archive,action,data.id,d)};
 }
+function photoAllowed(db,a,id,d){return !!readFor(db,a,'sop.read_steps',id,d)&&(a.bootstrap===1||canReadSopPhoto(db,security(db,a.id),a.id,id,d))}
 function projectView(db,a,action,data,d){
+ if(action==='sop.read_steps')return {...data,can_read_photo:photoAllowed(db,a,data.revision_id,d)};
  if(action!=='task.read')return directoryView(db,a,action,data,d);
  return {...data,can_implement:a.bootstrap!==1&&['open','in_progress','ineffective'].includes(data.state)&&canImplementOwnTask(db,security(db,a.id),a.id,data.id,d)};
 }
 function permissionsFor(db,a){
- if(a.bootstrap===1)return [...READ_ACTIONS,...DIRECTORY_COMMANDS]; // Unbound bootstrap cannot perform personal decisions.
+ if(a.bootstrap===1)return [...READ_ACTIONS,...DIRECTORY_COMMANDS,...DETAIL_ACTIONS]; // Unbound bootstrap cannot perform personal decisions.
  const d=day(),s=security(db,a.id),out=new Set();
  for(const g of s.grants){
   if(g.revoked_at!==null||!period(g,d)||!roleRow(db,g.role_id))continue;
@@ -298,6 +301,35 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const table=RESOURCE_TABLES[action];
    const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day()):readAuthorized(db,s,actor,action,id,day())).filter(Boolean).map(v=>projectView(db,a,action,v.data,day()));
   })},
+  async sopPhoto(actor,revision,id,position){
+   must(isId(id)&&Number.isSafeInteger(position)&&position>=1&&position<=1000,404,'Фото недоступно');
+   const descriptor=read(db=>{
+    const a=account(db,actor);must(a&&a.credential_revision===revision&&photoAllowed(db,a,id,day()),404,'Фото недоступно');
+    return photoDescriptor(db,id,position);
+   });
+   must(descriptor,404,'Фото недоступно');
+   const file=path.join(dataDir,'documents',descriptor.source.sha256+'.json');
+   const st=await fs.stat(file);must(st.isFile()&&st.size===descriptor.source.size&&st.size<=MAX_CONTENT,503,'Исходник не подтверждён');
+   const text=new TextDecoder('utf-8',{fatal:true}).decode(await fs.readFile(file));
+   const result=await extractPhoto(descriptor,text);
+   // Authorization and effective revision may have changed during I/O.
+   read(db=>{
+    const a=account(db,actor),latest=photoDescriptor(db,id,position);
+    must(a&&a.credential_revision===revision&&photoAllowed(db,a,id,day())&&latest?.source.sha256===descriptor.source.sha256&&latest.sourceId===descriptor.sourceId,404,'Фото недоступно');
+   });
+   return result;
+  },
+  upgradeManagerPolicy(actor,input){
+   return mutate(db=>{
+    requireAdmin(db,actor);must(keys(input,['revision']),400,'Неверные поля политики');
+    const id=config(db).manager,old=one(db,'SELECT * FROM lc81_policy WHERE role_id=?',[id]);
+    must(old&&old.revision===input.revision,409,'Политика изменилась');
+    if(JSON.stringify([...JSON.parse(old.permissions_json)].sort())===JSON.stringify([...PERMISSIONS].sort()))return {revision:old.revision};
+    db.run('UPDATE lc81_policy SET revision=revision+1,permissions_json=? WHERE role_id=?',[JSON.stringify(PERMISSIONS),id]);
+    audit(db,actor,'policy.manager_upgrade',id);
+    return {revision:old.revision+1};
+   });
+  },
   directoryInfo(actor,type){
    return read(db=>{
     const a=account(db,actor);
@@ -308,7 +340,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     for(const [t,action] of [['org_unit','org.read'],['equipment','equipment.read'],['workplace','workplace.read']]){
      refs[t]=rows(db,'SELECT id FROM '+t+' WHERE archived=0 ORDER BY id').flatMap(({id})=>{
       const r=readFor(db,a,action,id,date);
-      return r?[{id,label:r.data.name,unit_id:r.data.unit_id??null,can_create:type==='org_unit'||type==='person'||type==='equipment'||type==='workplace'||type==='operation'?t==='org_unit'&&directoryAllowed(db,a,d.create,'org.read',id,date):false}]:[];
+      return r?[{id,label:r.data.name,unit_id:r.data.unit_id??null,can_create:t==='org_unit'&&directoryAllowed(db,a,d.create,'org.read',id,date)}]:[];
      });
     }
     return {type,definition:directorySchema(type),refs,can_create:refs.org_unit.some(x=>x.can_create),day:date};
