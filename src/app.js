@@ -5,12 +5,10 @@ import {twiEffectsFor} from './modules/effect/domain.js';
 import {effectOverview,effectForSource} from './modules/effect/domain.js';
 import {REVISION_TITLE_SQL,documentTitle} from './modules/library/revision-title.js';
 import {assessmentAnalysis,renderAssessmentAnalysis} from './ui/assessment-analysis.js';
-import {comparisonIndicators,retrainingQueue} from './modules/training/center-overview.js';
-import {scheduleKind,schedulePending} from './modules/training/center-planning.js';
+import {centerAttention} from './modules/training/center-attention.js';
+import {assistantScreen} from './modules/assistant/screen.js';
 import {frvRegistry} from './modules/library/frv-effect.js';
-import {assessmentIndicators} from './modules/training/assessment-review.js';
-import {standardControls} from './modules/training/standard-overview.js';
-import {centerAuditIndicators,pctText,annualAuditCoverage} from './modules/training/audit-analytics.js';
+import {pctText} from './modules/training/audit-analytics.js';
 import {employeeRelations,employeeSourceLinks} from './modules/master-data/employee-records.js';
 import {sopCriteriaFromDocx} from './modules/training/local-docx.js';
 import {BUILTIN_SOP,previewCriteria} from './modules/training/builtin-forms.js';
@@ -41,7 +39,7 @@ const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
 const planned={forms:'Бланки и методики',sop:'Каталог СОП',sop_constructor:'Конструктор СОП',frv:'ФРВ',twi_plans:'Планы инструктажа TWI',sop_evaluation:'Оценка СОП',my_plan:'Мой план',twi:'План производственного обучения',programs:'Ввод в профессию',internship:'Программы стажировки',preparation:'Подготовка сотрудников',knowledge_bank:'Банк вопросов',supplements:'Ходатайства о доплатах',instruction:'Инструктажи TWI',retraining:'Переобучение',journal:'Журнал заданий',skills:'Матрица компетенций',practical:'Практические оценки',development:'Планы развития',mentoring:'Наставники и ВТ',self_eval:'Самооценка',certification:'Сертификация',appointments:'Назначения',audit:'Аудиты 1-го уровня',calendar:'Календарь',actions:'Задачи и мероприятия',analytics:'Аналитика центра',metrics:'Дерево метрик',roi:'ROI-модель',ai:'ИИ-помощник',audit_import:'Импорт аудитов RC1',sop_review:'Сохранённая оценка СОП'};
 const labels={home:'Дашборд',...Object.fromEntries(Object.entries(definitions).map(([k,v])=>[k,v.label])),...planned,org_unit:'Структура предприятия',import_xlsx:'Импорт данных',storage:'Настройки и обмен'};
 const navGroups=[
- ['Ежедневная работа',['home','my_plan','calendar','actions']],
+ ['Ежедневная работа',['home','ai','my_plan','calendar','actions']],
  ['Стандартизация и улучшения',['sop','sop_constructor','frv','sop_evaluation']],
  ['Производственное обучение',['twi_plans','twi','programs','internship','preparation','knowledge_bank','instruction','retraining','journal']],
  ['Люди и компетенции',['person','workplace','skills','practical','development']],
@@ -50,7 +48,7 @@ const navGroups=[
  ['Управление центром',['org_unit','forms','import_xlsx','storage']],
  ['Справочники',['profession','position','work_shift','equipment','operation','person_assignment','business_role','role_assignment','skill_category','skill','rating_scale']]
 ];
-const implemented=new Set(['home','sop','sop_constructor','frv','twi_plans','sop_evaluation','storage','import_xlsx',...TRAINING_PAGES,...Object.keys(definitions)]);
+const implemented=new Set(['home','ai','sop','sop_constructor','frv','twi_plans','sop_evaluation','storage','import_xlsx',...TRAINING_PAGES,...Object.keys(definitions)]);
 const collapsedNav=new Set(['Производственное обучение','Наставники и ВТ','Аналитика','Справочники']);
 let librarySelected=null,libraryRevisionSelected=null,evaluationSelected=null,evaluationTab='weighted',evaluationSearch='',employeeSelected=null,employeeTab='overview',employeeReturn=null,employeeSources=null;
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n}
@@ -157,22 +155,14 @@ function icon(key,cls='nav-icon'){
 }
 function navButton(k){const n=btn('',()=>navigate(k),'nav'+(page===k?' active':'')+(!implemented.has(k)?' nav-planned':''));n.append(icon(k),el('span',labels[k]));if(page===k)n.setAttribute('aria-current','page');if(!implemented.has(k)){n.title='Запланировано на следующие этапы';const dot=el('span','', 'planned-dot');dot.setAttribute('aria-hidden','true');n.append(dot)}return n}
 function sectionHeading(title,caption){return add(el('div',undefined,'section-heading'),el('h2',title),el('span',caption,'muted'))}
+function openAttention(item){
+ if(item.page==='sop'){if(!navigate('sop'))return;libraryFilter=item.options.filter||'all';render();return}
+ goTraining(item.page,item.options)
+}
 function home(main){
- const todayIso=today(),overdue=one(ws.working,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='effective' AND d.archived=0 AND r.review_due<?",[todayIso]).n;
- const without=one(ws.working,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='draft' AND d.archived=0 AND (r.print_format IS NULL OR r.workplace_id IS NULL)").n;
- const needs=pane('Требует внимания',add(el('div',undefined,'attention-row'),el('strong',String(overdue),overdue?'bad':'muted'),el('span','Просроченный пересмотр действующих СОП'),btn('Открыть',()=>{navigate('sop');libraryFilter='overdue';render()})),add(el('div',undefined,'attention-row'),el('strong',String(without),without?'warn':'muted'),el('span','Черновики без подтверждённого паспорта'),btn('Открыть',()=>{navigate('sop');libraryFilter='missing_passport';render()})));
- const overdueTraining=one(ws.working,"SELECT count(*) n FROM training_assignment WHERE source_sha256 IS NOT NULL AND state IN('planned','in_progress') AND due_on<?",[todayIso]).n;
- const revisedTraining=one(ws.working,"SELECT count(*) n FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1)").n;
- needs.append(add(el('div',undefined,'attention-row'),el('strong',String(overdueTraining),overdueTraining?'warn':'muted'),el('span','Просроченные назначения обучения'),btn('Открыть',()=>goTraining('twi',{filter:'overdue'}))),add(el('div',undefined,'attention-row'),el('strong',String(revisedTraining),revisedTraining?'warn':'muted'),el('span','Обучение по прежним редакциям СОП'),btn('Открыть',()=>goTraining('retraining'))));
- const standard=standardControls(ws.working,todayIso),prep=standard.stats;
- const annual=standard.annual;needs.append(add(el('div',undefined,'attention-row'),el('strong',String(annual.filter(x=>x.remaining).length),'muted'),el('span','Инструкторы: осталось выполнить годовую норму L1'),btn('Открыть',()=>goTraining('audit',{mode:'annual'}))));
- const ai=centerAuditIndicators(ws.working,todayIso),ass=assessmentIndicators(ws.working,todayIso),cmp=comparisonIndicators(ws.working,todayIso),plans=rows(ws.working,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(ws.working,x));
- const economic=effectOverview(ws.working,{day:todayIso,from:todayIso.slice(0,7)+'-01',to:todayIso});
- const auditAttention=[['Просрочено мероприятий',ai.overdue,'actions',{filter:'overdue'}],['Ожидают проверки эффективности',ai.verification,'actions',{filter:'implemented'}],['Потребности в переобучении и развитии (требуется решение)',retrainingQueue(ws.working,todayIso).filter(x=>x.status==='needs').length,'retraining',{filter:'needs'}],['Незакрытые планы аудитов',plans.filter(x=>scheduleKind(x)==='audit').length,'calendar',{month:'',plannedOnly:true}]];
- auditAttention.push(['Практические оценки: требуется решение',ass.needs,'practical',{filter:'needs'}],['Запланировано практических оценок',plans.filter(x=>scheduleKind(x)==='practical').length,'calendar',{month:'',scheduleType:'practical'}],['Запланировано самооценок',plans.filter(x=>scheduleKind(x)==='self_eval').length,'calendar',{month:'',scheduleType:'self_eval'}],['Инструкторы: самооценка и наблюдения требуют обсуждения',cmp.people,'analytics',{assessmentType:'comparison',discussionOnly:true}]);
- auditAttention.push(['Проверки экономического эффекта',economic.pending,'roi',{filter:'pending'}],['Просрочены проверки экономического эффекта',economic.overdue,'roi',{filter:'overdue'}],['Черновики денежных фактов',economic.drafts,'roi',{filter:'drafts'}],['Цели эффекта требуют внимания',economic.targetAttention.length,'roi',{filter:'targets'}],['Неразобранные отклонения эффекта',economic.allTargets.filter(t=>t.shortfall&&!t.currentReview).length,'roi',{filter:'deviations'}]);
- auditAttention.push(['Подготовка: просроченные этапы / смены',prep.overdue,'preparation',{filter:'overdue'}],['Подготовка: решения требуют повторной проверки',prep.review,'preparation',{filter:'review'}],['Подготовка: положительное решение, документы не закрыты',prep.finish,'preparation',{filter:'finish'}],['Банк вопросов: '+(standard.bankUnregistered?'исходная редакция не зарегистрирована':'требуется годовая актуализация'),standard.bankUnregistered?1:standard.bankStale,'knowledge_bank',{}],['Ходатайства: ожидают решения руководителя',standard.supplementDrafts,'supplements',{month:'',filter:'draft'}]);
- for(const [label,count,dest,options] of auditAttention)needs.append(add(el('div',undefined,'attention-row'),el('strong',String(count),count?'warn':'muted'),el('span',label),btn('Открыть',()=>goTraining(dest,options))));
+ const todayIso=today(),attention=centerAttention(ws.working,todayIso),{prep,ai,ass,economic}=attention;
+ const needs=pane('Требует внимания',btn('ИИ-помощник · рекомендации по данным',()=>navigate('ai'),'primary'));
+ for(const item of attention.items)needs.append(add(el('div',undefined,'attention-row'),el('strong',String(item.count),item.id==='annual_l1'?'muted':item.count?(item.id==='sop_overdue'?'bad':'warn'):'muted'),el('span',item.label),btn('Открыть',()=>openAttention(item))));
  main.append(needs,pane('Аудит L1 · текущий месяц',add(el('div',undefined,'kpi-grid'),...[[String(ai.auditCount),'Проведено аудитов','audit',{from:todayIso.slice(0,7)+'-01',to:todayIso,state:'final'}],[ai.month?pctText(ai.month.stats.pct):'—','Доля положительных наблюдений','analytics',{versionId:ai.versionId,from:todayIso.slice(0,7)+'-01',to:todayIso}],[ai.repeated===null?'—':String(ai.repeated),'Повторяющиеся отклонения','analytics',{versionId:ai.versionId,from:todayIso.slice(0,7)+'-01',to:todayIso}]].map(([value,label,dest,options])=>{const b=btn('',()=>goTraining(dest,options),'tile');b.append(el('span',label,'muted'),el('b',value));return b})),el('p',ai.methodCount>1?'В месяце несколько версий методики: общего среднего нет.':'Результаты учитывают только наблюдавшиеся критерии.','muted')));
  main.append(pane('Подготовка сотрудников · текущие состояния',el('p','Комплекты подготовки, не отдельные документы и не допуски.','muted'),add(el('div',undefined,'kpi-grid'),...[[prep.open,'В процессе / к завершению','open'],[prep.complete,'Комплект завершён','complete'],[prep.overdue,'Просрочены','overdue'],[prep.review,'Требуется повторная проверка','review']].map(([value,label,filter])=>{const b=btn('',()=>goTraining('preparation',{filter}),'tile');b.append(el('span',label,'muted'),el('b',String(value)));return b})),btn('Аналитика подготовки',()=>goTraining('analytics',{assessmentType:'preparation'}))));
  const assessmentTiles=[[String(ass.practical),'Практических оценок','practical',{from:todayIso.slice(0,7)+'-01',to:todayIso}],[String(ass.negative),'Заключение «Не соответствует»','practical',{filter:'not_meet',from:todayIso.slice(0,7)+'-01',to:todayIso}],[String(ass.self),'Самооценок наставников','self_eval',{from:todayIso.slice(0,7)+'-01',to:todayIso}]];
@@ -830,7 +820,7 @@ function render(){
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
  if(employeeReturn&&page!=='person')main.append(add(el('div',undefined,'row employee-return'),btn('← К карточке сотрудника',()=>openEmployee(employeeReturn,{restore:true})),el('span',refName('person',employeeReturn),'muted')));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));main.inert=!!editorSession&&!editorSession.host.hidden;if(editorSession?.loaded)editorSession.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'theme',theme:theme?'dark':'light'},'*');
- if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,goResearch,readContent,pick,downloadBytes,notify:message,openEmployee,rememberNavigation,allowDiscardForm:()=>busy||allowDiscardForm()});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
+ if(page==='home')home(main);else if(page==='ai')assistantScreen(main,{db:ws.working,day:today(),el,add,btn,pane,openAttention});else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,goResearch,readContent,pick,downloadBytes,notify:message,openEmployee,rememberNavigation,allowDiscardForm:()=>busy||allowDiscardForm()});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
  main.append(el('p',(LC_BUILD.version||'Lean Center')+' · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
