@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "1d3482773a1858f1261ff05411a5401d8fd7ca0a",
+  "sourceCommit": "2a481e109b34c869be18f6c15e384b8641c6c01f",
   "files": [
     {
       "path": "amvera.yml",
@@ -115,7 +115,7 @@
     },
     {
       "path": "server/lc81/access-contract.mjs",
-      "sha": "5555d83f0b37c9898dcb6fef9e191569fca71fa5"
+      "sha": "3f9dc15f1618d551e04e98c5d55f2b200b695abe"
     },
     {
       "path": "server/lc81/credentials.mjs",
@@ -135,7 +135,7 @@
     },
     {
       "path": "server/lc81/http.mjs",
-      "sha": "51293fe9be1d2d355eed1cbf5bcd7565c3328a53"
+      "sha": "0656f000fa5dd9611d7cfd7facab166f72660fa5"
     },
     {
       "path": "server/lc81/library-commands.mjs",
@@ -154,8 +154,16 @@
       "sha": "9d46223186cd6a3ff752b661a8fe8b2b7ec862f1"
     },
     {
+      "path": "server/lc81/matrix-commands.mjs",
+      "sha": "03b0366160ee85c5a11a67e4aa771ff9c6729023"
+    },
+    {
+      "path": "server/lc81/person-card.mjs",
+      "sha": "8347a6e7c6865020480786497bd5e006e8359798"
+    },
+    {
       "path": "server/lc81/portal.css",
-      "sha": "62a7470cfd86eb31995b14be9cb421aae21d2fba"
+      "sha": "7e705a023d3a27ba49db747a8d47ab279c113371"
     },
     {
       "path": "server/lc81/portal.html",
@@ -163,11 +171,11 @@
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "1d2f54b713e0e7f63f888bc1db7d0e00915435c5"
+      "sha": "d6d9b8338f9389d79b70a07f866a394b8c7c8766"
     },
     {
       "path": "server/lc81/read-policy.mjs",
-      "sha": "1e66c8911694eae83054586df9a6a0639a40be3c"
+      "sha": "eeda7cabe62589b689b7e9c2c77018387c6efff0"
     },
     {
       "path": "server/lc81/security-schema.sql",
@@ -179,7 +187,15 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "b1a0c7c5eee01a468ba18eeeb09d25099bd644ce"
+      "sha": "2ed3e3f0782ffe414d0e7b36b05bcdc0a183e808"
+    },
+    {
+      "path": "server/lc81/training-commands.mjs",
+      "sha": "91c1079fca50b4e377f8d6c71d22933a3fcb1abd"
+    },
+    {
+      "path": "server/lc81/training-ui.js",
+      "sha": "69ced8f8dfc417aa5d941aa70cc738fe80e83004"
     },
     {
       "path": "server/main.mjs",
@@ -603,7 +619,7 @@
     },
     {
       "path": "tools/lc81-inventory.mjs",
-      "sha": "3fdc109106af7d6631040a096a61465604f9bb8f"
+      "sha": "c8d433784a7b5e2059f5e45868151dd0eaa1626b"
     },
     {
       "path": "tools/package_folder.py",
