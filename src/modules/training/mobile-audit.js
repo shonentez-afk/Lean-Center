@@ -18,9 +18,21 @@ export function mobileContext(db,record){
  invariant(record.database_id===meta(db,'database_id')&&a&&a.state!=='cancelled'&&a.approval_json&&a.sop_revision_id===record.revision_id&&a.mentor_id===record.mentor_id&&a.trainee_id===record.trainee_id&&m&&m.methodology_json===record.method_json,'Другая база, изменённое назначение или несовпадающая методика');
  return {assignment:a,method:m}
 }
+export function mobileObservationExists(db,r,sessionId){
+ return !!one(db,"SELECT id FROM audit_session WHERE state='final' AND training_session_id=? AND auditor_id=? AND version_id=? AND substr(observed_at,1,10)=?",[sessionId,r.auditor_id,r.method_id,r.observed_on])
+}
+export function mobileSelectionConflicts(db,selected){
+ const collisions=new Map(),groups=new Map();
+ for(const {record,sessionId} of selected){if(!sessionId)continue;
+  if(mobileObservationExists(db,record,sessionId))collisions.set(record.id,'Этот факт уже занят действующим аудитом того же ВТ, методики и даты.');
+  const key=JSON.stringify([sessionId,record.auditor_id,record.method_id,record.observed_on]);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(record.id)
+ }
+ for(const ids of groups.values())if(ids.length>1)for(const id of ids)collisions.set(id,'Конфликт выбранных строк: один факт, ВТ, методика и дата. Выберите другой факт или снимите отметку импорта.');
+ return collisions
+}
 export async function mobilePlan(db,raw){
  invariant(raw?.type==='lean-l1-mobile-v1'&&raw.schemaVersion===1&&Array.isArray(raw.audits)&&raw.audits.length<=100,'Ожидается мобильный пакет Lean-Center до 100 аудитов');
- const seen=new Set(),items=[];for(const r of raw.audits){try{const record=mobileRecord(r);invariant(!seen.has(record.id),'Повтор ID в пакете');seen.add(record.id);const hash=await sha256(canonical(record)),existing=mobileMapping(db,record.id);if(existing){items.push({record,hash,existing,status:existing.source_hash===hash?'duplicate':'conflict'});continue}const context=mobileContext(db,record);const facts=rows(db,"SELECT * FROM training_session WHERE assignment_id=? AND stage_code IS NOT NULL AND substr(held_at,1,10)<=? ORDER BY held_at DESC,id",[record.assignment_id,record.observed_on]);items.push({record,hash,existing,context,facts,status:existing?(existing.source_hash===hash?'duplicate':'conflict'):facts.length?'ready':'waiting'})}catch(e){items.push({status:'invalid',error:e.message})}}return items
+ const seen=new Set(),items=[];for(const r of raw.audits){try{const record=mobileRecord(r);invariant(!seen.has(record.id),'Повтор ID в пакете');seen.add(record.id);const hash=await sha256(canonical(record)),existing=mobileMapping(db,record.id);if(existing){items.push({record,hash,existing,status:existing.source_hash===hash?'duplicate':'conflict'});continue}const context=mobileContext(db,record);const candidates=rows(db,"SELECT * FROM training_session WHERE assignment_id=? AND stage_code IS NOT NULL AND substr(held_at,1,10)<=? ORDER BY held_at DESC,id",[record.assignment_id,record.observed_on]),facts=candidates.filter(f=>!mobileObservationExists(db,record,f.id)),occupied=candidates.length-facts.length;items.push({record,hash,existing,context,facts,occupied,status:facts.length?'ready':occupied?'conflict':'waiting',...(occupied&&!facts.length?{error:'Все подходящие факты уже заняты действующими аудитами этого ВТ, методики и даты.'}:{})})}catch(e){items.push({status:'invalid',error:e.message})}}return items
 }
 export function verifyMobileContext(db,p,a){
  const r=mobileRecord(p.mobile_record);const c=mobileContext(db,r);

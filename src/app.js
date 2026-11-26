@@ -85,7 +85,25 @@ function openImport(type){importState={type,book:null,sheet:0,header:1,mapping:{
 function openHistory(id){navigate('person_assignment',{retainEmployee:!!employeeReturn});historyPerson=id;archiveFilter='all';render()}
 async function persist(){if(cache)generation=await local.saveWorkspace(cache,generation,ws.state())}
 function replace(newWs){ws?.close();ws=newWs}
-async function run(fn,{save=true}={}){if(busy)return;const prev=ws.state();busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));message(e.message,true)}finally{busy=false;render()}}
+function formControls(){return [...document.querySelectorAll('main input[name]:not([type=file]),main select[name],main textarea[name],main button.lc-directory-trigger[name]')]}
+function captureRejectedForm(){
+ const fields=formControls(),details=[...document.querySelectorAll('main details')];
+ return {page,route:getTrainingRoute(),scroll:window.scrollY,fields:fields.map(e=>({name:e.name,tag:e.tagName,type:e.type,person:typeof e.lcRestorePerson==='function',value:e.dataset.personId??e.value,checked:e.checked})),details:details.map(e=>({label:e.querySelector('summary')?.textContent||'',open:e.open}))}
+}
+function restoreRejectedForm(s){
+ if(!s||s.page!==page)return;
+ const fields=formControls(),seen=new Map(),changed=[],people=[];
+ for(const v of s.fields){const key=v.name+'|'+v.tag+'|'+v.type,idx=seen.get(key)||0;seen.set(key,idx+1);const e=fields.filter(x=>x.name===v.name&&x.tagName===v.tag&&x.type===v.type)[idx];if(!e)continue;
+  if(v.person){people.push([e,v.value]);continue}
+  if(e.type==='checkbox'||e.type==='radio'){if(e.checked!==v.checked){e.checked=v.checked;changed.push(e)}}
+  else if(e.value!==v.value&&(!e.options||[...e.options].some(o=>o.value===v.value))){e.value=v.value;changed.push(e)}
+ }
+ for(const [e,v] of people)if(e.isConnected)e.lcRestorePerson?.(v);
+ for(const e of changed)if(e.isConnected)e.dispatchEvent(new Event('change',{bubbles:true}));
+ const details=[...document.querySelectorAll('main details')];s.details.forEach((v,i)=>{const e=details[i];if(e&&(e.querySelector('summary')?.textContent||'')===v.label)e.open=v.open});
+ requestAnimationFrame(()=>window.scrollTo(0,s.scroll||0));
+}
+async function run(fn,{save=true,retainForm=false}={}){if(busy)return;const prev=ws.state(),form=retainForm?captureRejectedForm():null;let failure=null;busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));failure=e.message;if(form&&page===form.page)setTrainingRoute(page,form.route);message(e.message,true)}finally{busy=false;render();if(failure&&form){restoreRejectedForm(form);message(failure,true)}}}
 function download(name,body){const url=URL.createObjectURL(new Blob([canonical(body)],{type:'application/json'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function pick(accept,fn,max=150*1024*1024){const i=el('input');i.type='file';i.accept=accept;i.onchange=()=>{const f=i.files?.[0];if(f)run(async()=>{invariant(f.size<=max,'Файл слишком большой');return await fn(JSON.parse(await f.text()))})};i.click()}
 const empty=()=>!ws.pending.length&&!ws.dirty&&!meta(ws.base,'publication_id')&&Object.keys(definitions).every(t=>list(ws.base,t).length===0)&&!one(ws.base,'SELECT id FROM document LIMIT 1')&&!one(ws.base,'SELECT id FROM frv_study LIMIT 1');

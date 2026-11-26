@@ -6,7 +6,7 @@ import {corporateEvaluations,corporateAnswers,weightedHistory,sopEvidence} from 
 import {compareMentor,comparisonContext} from './mentor-comparison.js';
 import {scheduleKind,scheduleLabels,schedulePeople,plannedAssessmentFacts,plannedAuditFacts} from './center-planning.js';
 import {assessmentRegistry,assessmentAnswers,assessmentScore,assessmentSummary,assessmentIndicators,ASSESSMENT_LABELS} from './assessment-review.js';
-import {mobileAuditHtml,mobilePlan,mobileReceipt} from './mobile-audit.js';
+import {mobileAuditHtml,mobilePlan,mobileReceipt,mobileSelectionConflicts} from './mobile-audit.js';
 import {rc1Plan,personMatch,rc1Mapping,rc1ArchiveEventData} from './rc1-import.js';
 import {auditDetails,actionRows,actionStatus,evidenceForAction,actionSource,actionSourceOf,practicalEvidenceForAction,actionPeople,ACTION_KINDS,ACTION_STATES,RESPONSE_LABELS} from './audit-domain.js';
 import {auditRegistry,summarizeAudits,pctText} from './audit-analytics.js';
@@ -66,7 +66,7 @@ export function trainingScreen(main,page,c){
  function event(type,payload,old=null){return {id:uuid(),entity_type:type,entity_id:old?.id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload,occurred_at:new Date().toISOString()}}
  async function write(type,payload,old=null){const e=event(type,payload,old);await ws.applyContentEvents([e],readContent);return e.entity_id}
  function save(label,type,payload,old=null,done=()=>{},disabled=false){
-  return action(label,()=>run(async()=>{const id=await write(type,typeof payload==='function'?payload():payload,old);done(id);return 'Запись сохранена. Ожидает публикации базы.'}),'primary',disabled)
+  return action(label,()=>run(async()=>{const id=await write(type,typeof payload==='function'?payload():payload,old);done(id);return 'Запись сохранена. Ожидает публикации базы.'},{retainForm:type==='training_enrollment'||type==='action_item'}),'primary',disabled)
  }
  const reasonInput=()=>note('reason','','Основание изменения');
  function closeRecord(label,type,old,command){
@@ -1021,10 +1021,20 @@ export function trainingScreen(main,page,c){
  }
  function receiptButton(){return btn('Скачать подтверждение приёма по исходному мобильному JSON',()=>pick('.json',async raw=>{const receipt=await mobileReceipt(ws.base,raw);invariant(receipt.accepted.length,'Нет принятых совпадающих записей. Сначала примите локальные изменения в «Настройки и обмен»; затем выберите исходный пакет.');downloadBytes('LeanCenter-L1-confirmation.json',new TextEncoder().encode(JSON.stringify(receipt,null,2)));return 'Подтверждение сформировано: '+receipt.accepted.length+' из '+raw.audits.length+' записей.'},5*1024*1024))}
  function nativeMobileImportPage(items){
-  const root=pane('Импорт мобильного пакета Lean-Center',back(),msg('Дубли пропускаются; изменения ранее переданной записи не перезаписываются. Требуется фактически зарегистрированный инструктаж. После импорта примите изменения в «Настройки и обмен», затем скачайте подтверждение по исходному пакету.'),msg('Готово '+items.filter(x=>x.status==='ready').length+' · Дубли '+items.filter(x=>x.status==='duplicate').length+' · Ожидают факта '+items.filter(x=>x.status==='waiting').length+' · Конфликты / ошибки '+items.filter(x=>['conflict','invalid'].includes(x.status)).length)),controls=[];
+  const summary=msg(''),root=pane('Импорт мобильного пакета Lean-Center',back(),msg('Дубли пропускаются; изменения ранее переданной записи не перезаписываются. Требуется фактически зарегистрированный инструктаж. После импорта примите изменения в «Настройки и обмен», затем скачайте подтверждение по исходному пакету.'),summary),controls=[];
   for(const x of items){if(x.status!=='ready'){if(x.status!=='duplicate')root.append(msg((x.record?.id||'Запись')+': '+(x.error||(x.status==='waiting'?'Требуется факт инструктажа':'Конфликт исходной записи')),'warn'));continue}
-   const a=x.context.assignment,rec=x.record,session=select('mobile_import_fact_'+controls.length,x.facts.map(s=>[s.id,s.held_at+' · '+s.stage_code])),include=check('mobile_include_'+controls.length,'Импортировать');include.input.checked=true;controls.push({x,session,include});root.append(pane(rec.observed_on+' · '+assignmentName(a),msg('ВТ: '+n('person',rec.auditor_id)+' · '+rec.responses.length+' критериев'),f('Фактически наблюдавшийся инструктаж',session),include.element))}
-  if(controls.length)root.append(action('Подтвердить импорт мобильных аудитов',()=>run(async()=>{const selected=controls.filter(c=>c.include.input.checked);invariant(selected.length&&selected.every(c=>c.session.value),'Выберите записи и факты');if(!confirm('Импортировать '+selected.length+' мобильных аудитов?'))return 'Импорт отменён';const events=selected.map(c=>{const r=c.x.record,a=one(db,'SELECT * FROM training_assignment WHERE id=?',[r.assignment_id]);return event('audit_session',{command:'mobile_lc5',assignment_id:a.id,assignment_rev:a.rev,method_id:r.method_id,auditor_id:r.auditor_id,session_id:c.session.value,observed_on:r.observed_on,responses:r.responses,feedback:r.feedback,mobile_record:r,mobile_hash:c.x.hash})});await ws.applyContentEvents(events,readContent);route={page:'audit_import'};return 'Импортировано: '+events.length+'. Ожидает приёма изменений. После приёма скачайте подтверждение.'})));root.append(receiptButton());return root
+   const a=x.context.assignment,rec=x.record,session=select('mobile_import_fact_'+controls.length,x.facts.map(s=>[s.id,s.held_at+' · '+s.stage_code])),include=check('mobile_include_'+controls.length,'Импортировать'),state=msg('');
+   include.input.checked=true;controls.push({x,session,include,state});root.append(pane(rec.observed_on+' · '+assignmentName(a),msg('ВТ: '+n('person',rec.auditor_id)+' · '+rec.responses.length+' критериев'),...(x.occupied?[msg('Занятые факты исключены: '+x.occupied,'warn')]:[]),f('Фактически наблюдавшийся инструктаж',session),include.element,state))
+  }
+  const selected=()=>controls.filter(c=>c.include.input.checked);
+  const conflicts=()=>mobileSelectionConflicts(db,selected().map(c=>({record:c.x.record,sessionId:c.session.value})));
+  const submit=action('Подтвердить импорт мобильных аудитов',()=>run(async()=>{const chosen=selected();invariant(chosen.length&&chosen.every(c=>c.session.value),'Выберите записи и факты');invariant(!conflicts().size,'Устраните конфликты выбранных строк');if(!confirm('Импортировать '+chosen.length+' мобильных аудитов?'))return 'Импорт отменён';const events=chosen.map(c=>{const r=c.x.record,a=one(db,'SELECT * FROM training_assignment WHERE id=?',[r.assignment_id]);return event('audit_session',{command:'mobile_lc5',assignment_id:a.id,assignment_rev:a.rev,method_id:r.method_id,auditor_id:r.auditor_id,session_id:c.session.value,observed_on:r.observed_on,responses:r.responses,feedback:r.feedback,mobile_record:r,mobile_hash:c.x.hash})});await ws.applyContentEvents(events,readContent);route={page:'audit_import'};return 'Импортировано: '+events.length+'. Ожидает приёма изменений. После приёма скачайте подтверждение.'},{retainForm:true}));
+  function refresh(){const errors=conflicts(),chosen=selected();for(const c of controls){const err=errors.get(c.x.record.id);c.state.textContent=!c.include.input.checked?'Исключено из текущего импорта':err||(!c.session.value?'Выберите факт инструктажа':'Готово к импорту');c.state.className=err?'bad':'muted'}
+   summary.textContent='Готово '+chosen.filter(c=>c.session.value&&!errors.has(c.x.record.id)).length+' · Дубли '+items.filter(x=>x.status==='duplicate').length+' · Ожидают факта '+items.filter(x=>x.status==='waiting').length+' · Ожидают выбора '+chosen.filter(c=>!c.session.value).length+' · Конфликты / ошибки '+(items.filter(x=>['conflict','invalid'].includes(x.status)).length+errors.size);
+   submit.disabled=blocked||!chosen.length||chosen.some(c=>!c.session.value)||!!errors.size
+  }
+  for(const c of controls){c.session.onchange=refresh;c.include.input.onchange=refresh}
+  if(controls.length)root.append(submit);root.append(receiptButton());refresh();return root
  }
  function auditImportPage(){
   if(route.mobileItems)return nativeMobileImportPage(route.mobileItems);
