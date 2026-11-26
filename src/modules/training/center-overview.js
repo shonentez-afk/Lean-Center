@@ -1,3 +1,4 @@
+import {effectOverview} from '../effect/domain.js';
 // Read-only queues and KPI definitions over authoritative records.
 import {rows,one} from '../../core/db.js';
 import {matrixData} from './domain.js';
@@ -42,7 +43,7 @@ export function centerMetrics(db,{day,from='',to=day,unitId='',personId=''}){
  const requirements=matrixData(db,day),cells=requirements.people.filter(p=>scope(p.unit_id,p.id)).flatMap(p=>requirements.skills.map(s=>requirements.cells.get(p.id+':'+s.id)).filter(c=>c.goal));
  const count=(group,label,value,definition,page,options={})=>({group,label,value,denominator:null,definition,page,options});
  const ratio=(group,label,value,denominator,definition,page,options={})=>({group,label,value,denominator,definition,page,options});
- const f={from,to,personId,unitId};
+ const f={from,to,personId,unitId},economic=effectOverview(db,{day,from,to,unitId,personId});
  return [
  count('Обучение','Назначено обучения',planned.length,'Назначения, созданные в период; без отменённых. Сотрудник — обучаемый.','twi',{}),
  ratio('Обучение','Завершено из назначенных',completed.length,planned.length,'Текущие состояния назначений, созданных в период; не исторический срез закрытий.','twi',{}),
@@ -59,6 +60,10 @@ export function centerMetrics(db,{day,from='',to=day,unitId='',personId=''}){
  count('ФРВ','Завершённые исследования',frv.length,'Финальные исследования в период, сотрудник — сохранённый автор. Не денежный эффект.','analytics',{...f,assessmentType:'frv'}),
  count('Мероприятия','Открытые мероприятия',pending.length,'Текущие открытые/в работе/ожидают проверки/неэффективны. Подразделение исполнителя; сотрудник — участник.','actions',{personId,unitId}),
  count('Мероприятия','Просроченные мероприятия',pending.filter(x=>x.due_on&&x.due_on<day).length,'Незакрытые мероприятия со сроком до текущей даты.','actions',{personId,unitId,filter:'overdue'}),
- ratio('Мероприятия','Подтверждён эффект',verified.length,implemented.length,'Из мероприятий с фактом выполнения в период; проверка эффективности учитывает повторные нарушения.','actions',{personId,unitId,filter:'verified'})
+ ratio('Мероприятия','Подтверждён эффект',verified.length,implemented.length,'Из мероприятий с фактом выполнения в период; проверка эффективности учитывает повторные нарушения.','actions',{personId,unitId,filter:'verified'}),
+ count('Экономика','Карточки эффекта требуют проверки',economic.pending,'Открытые контрольные сроки или утратившие актуальность доказательства.','roi',{...f,filter:'pending'}),
+ count('Экономика','Просроченные проверки эффекта',economic.overdue,'Текущие незакрытые контрольные сроки до сегодняшней даты.','roi',{...f,filter:'overdue'}),
+ count('Экономика','Подтверждённые денежные факты',economic.facts.filter(x=>x.eligible).length,'Факты полностью в выбранном периоде с действующими доказательствами; не годовые сценарии.','roi',{...f,filter:'confirmed'}),
+ count('Экономика','Черновики денежных фактов',economic.drafts,'Текущие денежные факты, ожидающие независимого подтверждения.','roi',{...f,filter:'drafts'})
  ];
 }
