@@ -54,12 +54,23 @@ export function buildEditor(bridge,editorCSS=''){
  replace("p.media.map((m,i)=>'<option value=\"'+i+'\">'+stage42Esc(m.source)+","p.media.map((m,i)=>m.serviceImage?'':'<option value=\"'+i+'\">'+stage42Esc(m.source)+");
  replace("m.auxiliary?'Служебный фон (дублирующий слой Excel)'","m.serviceImage?'Служебное изображение шапки (логотип / знак безопасности)':m.auxiliary?'Служебный фон (дублирующий слой Excel)'");
  replace("'</small><button type=\"button\" data-stage42-pick-photo=\"'+i+'\">К выбранному шагу</button></div>';","'</small><button type=\"button\" '+(m.serviceImage?'disabled title=\"Служебное изображение шаблона\" ':'')+'data-stage42-pick-photo=\"'+i+'\">К выбранному шагу</button></div>';");
- // LC6.7.6: literal responsibility statement, only on the SOP worksheet.
- replace('    // === ФРВ: геометрия и подписи как в исходном шаблоне ===',`    const responsibilityRow=ws.rowCount+1;
-    M(responsibilityRow,orientation==='landscape'?1:2,responsibilityRow,orientation==='landscape'?13:12,'Ответственность за поддержание в рабочем состоянии СОП возлагается на ДОЛЖНОСТЬ',{font:{size:11},alignment:{horizontal:'left',vertical:'middle',wrapText:true}});
-    ws.getRow(responsibilityRow).height=30;
-    ws.pageSetup.printArea=orientation==='landscape'?'A1:M'+responsibilityRow:'A1:M'+responsibilityRow;
+ // LC6.7.6 hotfix: attach the footer to the explicit final template row
+ // in each writer, independent of ExcelJS's allocated rowCount.
+ const responsibility=JSON.stringify('Ответственность за поддержание в рабочем состоянии СОП возлагается на ДОЛЖНОСТЬ');
+ replace("    ws.getRow(r).height=26;\n\n    }\n\n    // === ФРВ: геометрия и подписи как в исходном шаблоне ===",`    ws.getRow(r).height=26;
+    r++;
+    M(r,2,r,12,${responsibility},{font:{size:11},alignment:L});
+    ws.getRow(r).height=30;
+    ws.pageSetup.printArea='A1:M'+r;
+
+    }
+
     // === ФРВ: геометрия и подписи как в исходном шаблоне ===`);
+ replace("  ws.pageSetup.printArea='A1:M'+r;\n  return photoCount;",`  r++;
+  M(r,1,r,13,${responsibility},{font:{size:11},alignment:L});
+  ws.getRow(r).height=30;
+  ws.pageSetup.printArea='A1:M'+r;
+  return photoCount;`);
  replace('</head>','<style id="lc-editor-style">'+editorCSS+'</style>\n</head>');
  replace('</body>','<script>\n'+bridge.replace(/<\/script/gi,'<\\/script')+'\n</script>\n</body>');
  return html

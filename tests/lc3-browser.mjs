@@ -110,11 +110,39 @@ try{
  await times.nth(0).fill('12:99');assert.equal(await times.nth(0).getAttribute('aria-invalid'),'true');assert.equal(await emptyEditor.evaluate(()=>state.steps[0].durationSeconds),12);
  await emptyEditor.locator('#lc-editor-send').click();await emptyEditor.locator('#lc-editor-status').getByText(/Исправьте некорректное время шага/).waitFor();assert.equal(await page.getByRole('heading',{name:'Проверенный исходный файл'}).count(),0);
  await times.nth(0).fill('12');
+ // Inspect serialized Excel bytes BEFORE the import wizard accesses cells.
+ // Reading via getCell can allocate blank rows; the print range and actual
+ // master cell, not the mutable rowCount, identify the printed final line.
+ async function checkSopFooter(frame,file,orientation,tag){
+  const bytes=await fs.readFile(file);
+  await fs.mkdir('artifacts/lc3/export-qa',{recursive:true});
+  await fs.copyFile(file,path.join('artifacts/lc3/export-qa',tag+'-'+orientation+'.xlsx'));
+  const info=await frame.evaluate(async a=>{
+   const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));
+   const sh=w.getWorksheet('СОП'),phrase='Ответственность за поддержание в рабочем состоянии СОП возлагается на ДОЛЖНОСТЬ',hits=[],otherHits=[];
+   let lastDataRow=0;
+   for(const sheet of w.worksheets)sheet.eachRow(row=>row.eachCell(cell=>{
+    if(cell.isMerged&&cell.master.address!==cell.address)return;
+    if(sheet===sh&&cell.value!==null&&cell.value!==undefined&&cell.value!=='')lastDataRow=Math.max(lastDataRow,row.number);
+    if(cell.value===phrase)(sheet===sh?hits:otherHits).push({address:cell.address,row:row.number,value:cell.value});
+   }));
+   const printArea=String(sh.pageSetup.printArea||'').replace(/\$/g,'');
+   return {orientation:sh.pageSetup.orientation,printArea,lastDataRow,hits,otherHits,merges:sh.model.merges||[],lastNote:sh.getCell(Math.max(1,lastDataRow-1),sh.pageSetup.orientation==='portrait'?2:1).text};
+  },Array.from(bytes));
+  console.log('LC6.7.6 SOP footer QA',tag,orientation,JSON.stringify(info));
+  assert.equal(info.orientation,orientation);assert.equal(info.hits.length,1,'Exactly one literal SOP footer');assert.deepEqual(info.otherHits,[]);
+  const hit=info.hits[0],col=orientation==='portrait'?'B':'A',end=orientation==='portrait'?'L':'M';
+  assert.equal(hit.value,'Ответственность за поддержание в рабочем состоянии СОП возлагается на ДОЛЖНОСТЬ');
+  assert.equal(hit.address,col+hit.row);assert.equal(hit.row,info.lastDataRow);
+  assert(info.merges.includes(col+hit.row+':'+end+hit.row),'Footer must span the template');
+  assert.equal(info.printArea,'A1:M'+hit.row,'Footer must be included in the print area');
+  assert.equal(info.lastNote,'! Время действия писать в формате: мм:сс','Footer follows existing template note');
+ }
  async function exportAndInspect(frame,orientation,expectedPhotos,tag){
   await frame.locator('#stage43EditorExportFormat [data-stage43-export-format="'+orientation+'"]').click();
-  const wait=page.waitForEvent('download',{timeout:85000});await frame.locator('#generateBtn').click();const file=path.join(tmp,tag+'-'+orientation+'.xlsx');await (await wait).saveAs(file);
-  const info=await frame.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const sh=w.getWorksheet('СОП'),p=stage42ParseSelectedSheet(w,sh,'QA.xlsx');const output={photos:p.steps.map(s=>s.photoIndex>=0),seconds:p.steps.map(s=>s.durationSeconds),imageCount:sh.getImages().length,service:p.media.filter(m=>m.serviceImage).length,footer:sh.getCell(sh.rowCount,sh.pageSetup.orientation==='portrait'?2:1).text};stage42ReleaseProposal(p);return output},Array.from(await fs.readFile(file)));
-  assert.deepEqual(info.photos,expectedPhotos,tag+' '+orientation+' photo assignment');assert.deepEqual(info.seconds,[12,23]);assert(info.imageCount>=2,'Workbook must include logo and safety pictogram');assert(info.service>=2);assert.equal(info.footer,'Ответственность за поддержание в рабочем состоянии СОП возлагается на ДОЛЖНОСТЬ');
+  const wait=page.waitForEvent('download',{timeout:85000});await frame.locator('#generateBtn').click();const file=path.join(tmp,tag+'-'+orientation+'.xlsx');await (await wait).saveAs(file);await checkSopFooter(frame,file,orientation,tag);
+  const info=await frame.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const sh=w.getWorksheet('СОП'),p=stage42ParseSelectedSheet(w,sh,'QA.xlsx');const output={photos:p.steps.map(s=>s.photoIndex>=0),seconds:p.steps.map(s=>s.durationSeconds),imageCount:sh.getImages().length,service:p.media.filter(m=>m.serviceImage).length};stage42ReleaseProposal(p);return output},Array.from(await fs.readFile(file)));
+  assert.deepEqual(info.photos,expectedPhotos,tag+' '+orientation+' photo assignment');assert.deepEqual(info.seconds,[12,23]);assert(info.imageCount>=2,'Workbook must include logo and safety pictogram');assert(info.service>=2);
  }
  for(const orientation of ['portrait','landscape'])await exportAndInspect(emptyEditor,orientation,[false,false],'no-photos');
  // Synthetic photo; use the real photo load and annotation controls.
@@ -168,9 +196,9 @@ try{
   await editor.evaluate(n=>{state.steps=[...window.__lcOriginalSteps,...Array.from({length:n-1},(_,i)=>{const s=createEmptyStep();s.action='Учебный шаг '+(i+2);s.durationSeconds=i+2;s.keyMoments=['КМ'];s.reason='Причина';return s})];stateToHtml();htmlFieldToState()},count);
   await editor.locator('#stage43EditorExportFormat [data-stage43-export-format="'+orientation+'"]').click();
   const dl=page.waitForEvent('download',{timeout:85000});await editor.locator('#generateBtn').click();const d=await dl;const file=path.join(tmp,orientation+'.xlsx');await d.saveAs(file);
-  const data=await fs.readFile(file);
-  const result=await editor.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const sh=w.getWorksheet('СОП');const total=sh.getCell(sh.pageSetup.orientation==='portrait'?'G5':'F3').value;return {names:w.worksheets.map(x=>x.name),orientation:sh.pageSetup.orientation,paperSize:sh.pageSetup.paperSize,images:sh.getImages().length,total:total.result instanceof Date?(total.result.getTime()-Date.UTC(1899,11,30))/86400000:total.result,formula:total.formula,footer:sh.getCell(sh.rowCount,sh.pageSetup.orientation==='portrait'?2:1).text,printArea:sh.pageSetup.printArea,lastRow:sh.rowCount,last:sh.getCell(sh.pageSetup.orientation==='portrait'?'J24':'K18').text}},Array.from(data));
-  assert.deepEqual(result.names,['СОП','ФРВ','Чек-лист оценки СОП']);assert.equal(result.orientation,orientation);assert.equal(result.paperSize,8);assert.equal(result.footer,'Ответственность за поддержание в рабочем состоянии СОП возлагается на ДОЛЖНОСТЬ');assert.equal(result.printArea,'A1:M'+result.lastRow);assert(result.images>=1);assert.equal(Math.round(result.total*86400),15+(count*(count+1)/2-1));assert.match(result.last,new RegExp('Учебный шаг '+count));if(orientation==='landscape')for(const cell of ['D18','H18','J18','M18'])assert(result.formula.includes(cell));
+  await checkSopFooter(editor,file,orientation,'multi-group');const data=await fs.readFile(file);
+  const result=await editor.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const sh=w.getWorksheet('СОП');const total=sh.getCell(sh.pageSetup.orientation==='portrait'?'G5':'F3').value;return {names:w.worksheets.map(x=>x.name),orientation:sh.pageSetup.orientation,paperSize:sh.pageSetup.paperSize,images:sh.getImages().length,total:total.result instanceof Date?(total.result.getTime()-Date.UTC(1899,11,30))/86400000:total.result,formula:total.formula,last:sh.getCell(sh.pageSetup.orientation==='portrait'?'J24':'K18').text}},Array.from(data));
+  assert.deepEqual(result.names,['СОП','ФРВ','Чек-лист оценки СОП']);assert.equal(result.orientation,orientation);assert.equal(result.paperSize,8);assert(result.images>=1);assert.equal(Math.round(result.total*86400),15+(count*(count+1)/2-1));assert.match(result.last,new RegExp('Учебный шаг '+count));if(orientation==='landscape')for(const cell of ['D18','H18','J18','M18'])assert(result.formula.includes(cell));
  }
  await editor.evaluate(()=>{state.steps=window.__lcOriginalSteps;stateToHtml();htmlFieldToState()});
  assert.equal(await editor.locator('[data-step-field=action]').first().inputValue(),'Проверить');
