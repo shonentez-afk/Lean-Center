@@ -220,7 +220,7 @@ function form(type,v){
   f.append(el('p','Конфликт вкладок: введённые значения сохранены. Скачайте черновик или загрузите актуальную копию для сверки. Ничего не перезаписывается автоматически.','warn'),add(el('div',undefined,'row'),btn('Скачать черновик',()=>download('LeanCenter-черновик-'+type+'.json',draft())),btn('Загрузить актуальную копию и сверить',refresh,'primary')))
  }
  if(d.history&&v?.id)f.append(el('p','История неизменяема: можно только закрыть открытое назначение датой окончания. Для перевода создайте новое назначение после закрытия.','muted'));
- if(type==='rating_scale')f.append(el('p','После сохранения шкала неизменяема. Для новой методики создайте следующую версию. Уровни задаются пользователем; корпоративские пороги не предустановлены.','muted'));
+ if(type==='rating_scale')f.append(el('p','После сохранения шкала неизменяема. Для новой методики создайте следующую версию. Уровни задаются пользователем; корпоративные пороги не предустановлены.','muted'));
  return protectWorkForm(add(f,grid,add(el('div',undefined,'row'),submit,btn('Отмена',()=>{if(!allowDiscardForm())return;registryConflict=null;edit=null;render()}))))
 }
 function orgTree(panel,items){
@@ -411,7 +411,7 @@ async function stage43Xlsx(doc,revision,source,data,actorName){
  data.forEach((x,i)=>{const n=i+5,row=s.addRow([x.id,x.req,x.score,x.weight,{formula:'C'+n+'*D'+n,result:x.score*x.weight},x.comment,stage43SourceLabels[x.scoreSource]]);row.alignment={vertical:'top',wrapText:true};row.height=Math.max(28,15*Math.ceil(Math.max(x.req.length/75,x.comment.length/43)))});
  const r=weightedResult(data),total=s.addRow(['','ИТОГО','',{formula:'SUM(D5:D17)',result:r.weight},{formula:'SUM(E5:E17)',result:r.points},'','']);total.font={bold:true};
  const result=s.addRow(['','Взвешенный результат',{formula:'E18/D18',result:r.fraction},'','','','']);result.getCell(3).numFmt='0.0%';
- s.mergeCells('A20:G20');s.getCell('A20').value=r.seed?'Стартовые оценки не подтверждены: '+r.seed+'; результат предварительный.':'Отдельная методика Stage43; не корпоративская бинарная оценка.';
+ s.mergeCells('A20:G20');s.getCell('A20').value=r.seed?'Стартовые оценки не подтверждены: '+r.seed+'; результат предварительный.':'Отдельная методика Stage43; не корпоративная бинарная оценка.';
  s.pageSetup.printArea='A1:G20';downloadBytes('Чек-лист-Stage43-'+doc.code+'-v'+revision.version_no+'.xlsx',await w.xlsx.writeBuffer())
 }
 function stage43Panel(doc,revision,source){
@@ -419,7 +419,7 @@ function stage43Panel(doc,revision,source){
  void(async()=>{try{
   const raw=JSON.parse(await readContent(source)),original=stage43Checklist(raw.constructor);
   if(!panel.isConnected)return;
-  panel.replaceChildren(el('h2','Чек-лист конструктора СОП · 13 критериев'),el('p','Привязан к точному исходнику версии '+revision.version_no+'. Шкала 0 / 0,3 / 0,7 / 1 и веса сохранены. Не является 20-пунктной корпоративской оценкой.','muted'));
+  panel.replaceChildren(el('h2','Чек-лист конструктора СОП · 13 критериев'),el('p','Привязан к точному исходнику версии '+revision.version_no+'. Шкала 0 / 0,3 / 0,7 / 1 и веса сохранены. Не является 20-пунктной корпоративной оценкой.','muted'));
   const records=stage43Checks(ws.working,revision.id),old=records.find(x=>x.source_sha256===source.sha256);
   if(!original.length){panel.append(el('p','В исходном JSON нет чек-листа. Сохраните СОП из конструктора с чек-листом.','muted'));appendHistory();return}
   const data=old?JSON.parse(old.rows_json):original,items=[],analysis=el('div',undefined,'panel lc53-analysis'),progress=el('p',weightedLabel(data),'muted'),actor=personPickerField('stage43_actor','Оценщик чек-листа',old?.actor_id||null,{historicalName:old?.actor_name||''}),editable=!doc.archived&&!ws.conflicts.length;
@@ -463,7 +463,7 @@ function evaluationRegistry(){
   p.append(add(el('div',undefined,'row'),btn('К списку оценок',()=>{evaluationSelected=null;evaluationTab='weighted';render()}),btn('Карточка СОП',()=>goDocument(doc.id,v.id))),el('h2',v.code+' · '+v.title+' · версия '+v.version_no),el('p','Операция: '+refName('operation',v.operation_id)+' · '+(v.archived?'Архив':revisionLabels[v.state]||v.state),'muted'),evaluationDetail(doc,v,source,{registry:true}));const evals=rows(ws.working,'SELECT id,evaluated_on FROM sop_evaluation WHERE revision_id=? ORDER BY evaluated_on DESC',[v.id]);if(evals.length)p.append(pane('Мероприятия по сохранённым оценкам',...evals.map(e=>btn('Создать мероприятие · '+e.evaluated_on,()=>goTraining('actions',{mode:'new',sourceKind:'sop_evaluation',sourceId:e.id})))));return p
  }
  const search=fieldInput('evaluation_search',evaluationSearch,'search'),out=el('div');search.placeholder='Поиск по коду, названию или операции';
- p.append(el('p','Откройте нужную редакцию СОП. Чек-лист конструктора и корпоративская оценка ведутся отдельно.','muted'),search,out);
+ p.append(el('p','Откройте нужную редакцию СОП. Чек-лист конструктора и корпоративная оценка ведутся отдельно.','muted'),search,out);
  let generation=0;
  function draw(){
   const epoch=++generation,q=search.value.trim().toLocaleLowerCase('ru-RU');evaluationSearch=search.value;
@@ -819,7 +819,9 @@ function openAssistantTarget(x){
 function render(){
  initNav();chart?.dispose();chart=null;document.documentElement.classList.toggle('dark',theme);
  const header=el('header',undefined,'corp-header');
- const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div'),el('div','LEAN CENTER','brand'),el('div','Обучение на рабочем месте · TWI','brand-sub')));
+ const brandText=add(el('div',undefined,'brand-text'),el('div','Центр TWI','brand'),el('div','Обучение на рабочем месте','brand-sub'));
+ const brandCompany=el('span',undefined,'brand-company');brandCompany.setAttribute('role','img');brandCompany.setAttribute('aria-label','ТЕХНОНИКОЛЬ');
+ const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),brandText,brandCompany);
  const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{if(!allowDiscardForm())return;edit=null;registryConflict=null;theme=!theme;try{localStorage.setItem('lean-center-theme',theme?'dark':'light')}catch{}render()}),btn('Хранение',()=>navigate('storage')));
  if(editorSession&&editorSession.host.hidden&&!libraryDraft)metaPanel.append(btn('Вернуться в редактор',()=>showEditor(editorSession),'primary'));header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.id='lc53-sidebar';side.setAttribute('aria-label','Навигация');side.classList.toggle('lc53-menu-open',mobileMenu);const menu=btn(mobileMenu?'Закрыть меню':'Меню',()=>{mobileMenu=!mobileMenu;side.classList.toggle('lc53-menu-open',mobileMenu);menu.textContent=mobileMenu?'Закрыть меню':'Меню';menu.setAttribute('aria-expanded',String(mobileMenu))},'lc53-mobile-menu');menu.setAttribute('aria-controls',side.id);menu.setAttribute('aria-expanded',String(mobileMenu));header.append(menu);

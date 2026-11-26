@@ -5,6 +5,8 @@ const safe=s=>s.replace(/<\/script/gi,'<\\/script');const script=s=>{const conte
 const settings={schema:read('db/schema_v1.sql'),migration:read('db/migrations/002_lc1.sql'),wasm:fs.readFileSync('node_modules/sql.js/dist/sql-wasm.wasm').toString('base64')};
 const license=read('node_modules/sql.js/LICENSE')+'\n'+read('node_modules/echarts/LICENSE');
 const scripts=script('window.LC_BUILD='+JSON.stringify(settings).replace(/</g,'\\u003c')+';')+script(read('node_modules/sql.js/dist/sql-wasm.js'))+script(read('node_modules/echarts/dist/echarts.min.js'))+script(js);
-const html=read('src/ui/index.html').replace('</body>',()=> '<!-- Third-party licenses\n'+license.replace(/--/g,'- -')+'\n--></body>').replace('__LC_CSS__',()=>read('src/ui/styles.css')).replace('__LC_SCRIPTS__',()=>scripts);
+const brandUri=name=>'data:'+({'webp':'image/webp','svg':'image/svg+xml','png':'image/png'}[path.extname(name).slice(1)])+';base64,'+fs.readFileSync(path.join(root,'src/ui/brand',name)).toString('base64');
+const css=read('src/ui/styles.css').replace(/url\('\./(twi-workplace\.webp|tn-two-line-(?:light|dark)\.svg)'\)/g,(_m,name)=>"url('"+brandUri(name)+"')");
+const html=read('src/ui/index.html').replace('__LC_FAVICON__',()=>brandUri('favicon.png')).replace('</body>',()=> '<!-- Third-party licenses\n'+license.replace(/--/g,'- -')+'\n--></body>').replace('__LC_CSS__',()=>css).replace('__LC_SCRIPTS__',()=>scripts);
 const found=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];if(found.length!==4)throw Error('Wrong number of script blocks');for(const [i,m] of found.entries())new Script(m[1],{filename:'inline-'+i+'.js'});
 fs.mkdirSync('releases',{recursive:true});fs.writeFileSync('releases/LeanCenter-LC1.html',html);console.log('LC1 standalone',Buffer.byteLength(html),'bytes');

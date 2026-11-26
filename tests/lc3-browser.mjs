@@ -326,6 +326,7 @@ try{
  // The weighted checklist is immediately available in the assessment registry.
  await page.getByRole('button',{name:'Оценка СОП',exact:true}).first().click();
  await page.getByRole('heading',{name:'Реестр оценок СОП'}).waitFor();
+ await page.getByText('Откройте нужную редакцию СОП. Чек-лист конструктора и корпоративная оценка ведутся отдельно.',{exact:true}).waitFor();
  assert.equal(await page.locator('select[name=stage43_score_1]').count(),0,'Registry must not open assessment automatically');
  await page.locator('input[name=evaluation_search]').fill('Нет совпадений');await page.getByText('Нет СОП по заданному поиску.',{exact:true}).waitFor();
  await page.locator('input[name=evaluation_search]').fill('QA-SOP');

@@ -14,7 +14,7 @@ export function originalChecklistMatch(method,id){
  const m=methods[id];return !!m&&method?.format===m.format&&JSON.stringify(method.criteria?.map(q=>[q.code,q.section,q.question]))===JSON.stringify(m.criteria.map(q=>[q.code,q.section,q.question]))
 }
 export function assessmentMatrixWorkbook(ExcelJS,id,records=[],{method=methods[id],place='',date='',trainee=''}={}){
- invariant(originalChecklistMatch(method,id),'Для корпоративской ведомости нужна исходная методика приложения '+id);
+ invariant(originalChecklistMatch(method,id),'Для корпоративной ведомости нужна исходная методика приложения '+id);
  invariant(records.length<=100,'Выберите не более 100 наблюдений одной методики');
  const blank=!records.length,cols=blank?Array.from({length:id===14?4:6},()=>({})):records,last=cols.length+1,w=new ExcelJS.Workbook(),s=sheet(w,'Сводная ведомость',[86,...cols.map(()=>24)]);
  band(s,1,last,'ПРИЛОЖЕНИЕ '+id+'. '+titles[id],36);

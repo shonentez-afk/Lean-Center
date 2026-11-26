@@ -24,6 +24,8 @@ put(releasePath+'/licenses/exceljs/LICENSE.txt',read('baselines/sop-stage43/src/
 code('app/main.js',js);
 code('editor/Stage43-data.js','window.LC_EDITOR_HTML='+JSON.stringify(buildEmbeddedEditor(read))+';\n');
 put(releasePath+'/assets/styles.css',read('src/ui/styles.css')+'\n'+read('src/ui/people-picker.css'));
+// Copy only the four local brand assets; preserve the supplied logo bytes.
+for(const name of ['twi-workplace.webp','tn-two-line-light.svg','tn-two-line-dark.svg','favicon.png'])put(releasePath+'/assets/'+name,fs.readFileSync(path.join(root,'src/ui/brand',name)));
 for(const name of ['sql.js','echarts','zrender','tslib']){
  const dir=path.join(root,'node_modules',name);
  if(fs.existsSync(dir))for(const file of fs.readdirSync(dir).sort())if(/^(LICENSE|NOTICE|COPYING)/i.test(file)&&fs.statSync(path.join(dir,file)).isFile())put(releasePath+'/licenses/'+name+'/'+file,fs.readFileSync(path.join(dir,file)));

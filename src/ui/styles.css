@@ -28,10 +28,13 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .danger{color:var(--danger)}
 .shell{display:grid;grid-template-columns:var(--side) minmax(0,1fr);grid-template-rows:var(--header) 1fr;min-height:100vh}
 .corp-header{grid-column:1/-1;position:sticky;top:0;z-index:30;display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface);border-top:4px solid var(--tn-red);border-bottom:1px solid var(--line);padding:0 24px;box-shadow:var(--shadow)}
-.brand-lockup{display:flex;align-items:center;min-width:0;gap:12px}
-.brand-mark{width:6px;height:34px;background:var(--tn-red);flex:none}
-.brand{font-size:22px;font-weight:700;letter-spacing:.015em;white-space:nowrap;line-height:1.05}
-.brand-sub{color:var(--muted);font-size:11px;letter-spacing:.04em;margin-top:4px;text-transform:uppercase;white-space:nowrap}
+.brand-lockup{display:flex;align-items:center;min-width:238px;min-height:44px;gap:8px}
+.brand-mark{width:36px;height:36px;flex:none;background:url('./twi-workplace.webp') center / contain no-repeat}
+.brand-text{flex:none;width:84px}
+.brand{font-size:16px;font-weight:700;line-height:1.05;white-space:nowrap}
+.brand-sub{color:var(--muted);font-size:11px;line-height:1.05;margin-top:2px}
+.brand-company{width:85px;height:27px;flex:none;margin-inline-start:5px;background:url('./tn-two-line-light.svg') center / contain no-repeat}
+:root.dark .brand-company{background-image:url('./tn-two-line-dark.svg')}
 .header-meta{min-width:0;display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
 .header-meta button{min-height:32px;padding:7px 10px;font-size:12px}
 .version{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.035em}
@@ -97,7 +100,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
  :root{--header:64px}
  .shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto 1fr}
  .corp-header{position:static;flex-wrap:wrap;min-height:64px;padding:10px 12px;gap:8px}
- .brand{font-size:18px}.brand-sub{font-size:10px}.header-meta{justify-content:flex-start}
+ .brand-lockup{min-width:218px;min-height:38px}.brand-mark{width:32px;height:32px}.brand-text{width:78px}.brand{font-size:15px}.brand-sub{font-size:10px;line-height:1}.header-meta{justify-content:flex-start}
  .sidebar{grid-row:2;position:static;height:auto;display:flex;flex-wrap:wrap;gap:3px;padding:9px}
  .navgroup{width:100%;margin:9px 5px 3px}
  .nav{width:auto;min-height:34px;font-size:12px;padding:6px;gap:5px}

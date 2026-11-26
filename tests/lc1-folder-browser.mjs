@@ -4,6 +4,7 @@ import {pathToFileURL} from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import os from 'node:os';
+import {createHash} from 'node:crypto';
 
 const temp=await fs.mkdtemp(path.join(os.tmpdir(),'Lean Center тест '));
 const dest=path.join(temp,'Сетевой диск','Lean Center');
@@ -39,9 +40,27 @@ try{
  assert.equal(await page.evaluate(()=>document.querySelectorAll('script:not([src])').length),0);
  assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--tn-red').trim()),'#E30613');
  assert.match(await page.evaluate(()=>getComputedStyle(document.documentElement).fontFamily),/Proxima Nova Rg/);
+ // Verify the actual offline brand assets, not just the presence of CSS classes.
+ const expectedAssets={'twi-workplace.webp':'33bfdef314a7aa1cf68fcdd79c439f42528b60e2f82b4737567e27877dbb9f86','tn-two-line-light.svg':'2b9aab7c09c7e2e766eaa4af5ba83c4b4d56686963cc3eededb07a5b60211f2c','tn-two-line-dark.svg':'f82f859447bfee8ae7506706edbef1262a8eee1a4598bae5bfd15b77b0f63478','favicon.png':'43c2a86b2191dd43748b2bfcd40a3748a693e4b69f9f2df615980fcc0c531191'};
+ const release=path.join(dest,'versions','lc7.3b-standard-dev','assets'),manifest=JSON.parse(await fs.readFile(path.join(dest,'app-manifest.json'),'utf8'));
+ for(const [name,hash] of Object.entries(expectedAssets)){
+  assert.equal(createHash('sha256').update(await fs.readFile(path.join(release,name))).digest('hex'),hash);
+  assert.equal(manifest.files.find(x=>x.path.endsWith('/assets/'+name))?.sha256,hash);
+ }
+ const brandImage=async(selector,name,width)=>{const info=await page.evaluate(async selector=>{
+  const node=document.querySelector(selector);if(!node)throw Error('Missing brand asset: '+selector);
+  const bg=getComputedStyle(node).backgroundImage,url=node.tagName==='LINK'?node.href:bg.slice(5,-2);
+  const im=new Image();im.src=url;await im.decode();return {url,width:im.naturalWidth}
+ },selector);assert(info.url.endsWith('/assets/'+name),info.url);assert.equal(info.width,width)};
+ assert.equal(await page.locator('.brand').textContent(),'Центр TWI');
+ assert.equal(await page.locator('.brand-sub').textContent(),'Обучение на рабочем месте');
+ await page.getByRole('img',{name:'ТЕХНОНИКОЛЬ',exact:true}).waitFor();
+ await brandImage('.brand-mark','twi-workplace.webp',136);
+ await brandImage('.brand-company','tn-two-line-light.svg',1000);
+ await brandImage('link[rel=icon]','favicon.png',64);
  await chartColor(page,'#242E40');
- await page.getByRole('button',{name:'Тёмная тема',exact:true}).click();assert.equal(await page.locator('html').evaluate(n=>n.classList.contains('dark')),true);await chartColor(page,'#A9BCD4');
- await page.getByRole('button',{name:'Светлая тема',exact:true}).click();await chartColor(page,'#242E40');
+ await page.getByRole('button',{name:'Тёмная тема',exact:true}).click();assert.equal(await page.locator('html').evaluate(n=>n.classList.contains('dark')),true);await chartColor(page,'#A9BCD4');await brandImage('.brand-company','tn-two-line-dark.svg',1000);
+ await page.getByRole('button',{name:'Светлая тема',exact:true}).click();await chartColor(page,'#242E40');await brandImage('.brand-company','tn-two-line-light.svg',1000);
  await storage(page);
  await page.getByRole('button',{name:'Заполнить демо-данными'}).click();
  await page.getByText('Добавлены демонстрационные записи',{exact:true}).waitFor();

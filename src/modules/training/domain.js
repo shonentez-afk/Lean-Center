@@ -152,7 +152,7 @@ export function applyTrainingEvent(db,e,old){
   invariant(required(p.code,80)&&required(p.title,200)&&period(p.base_on,p.target_on)&&p.target_on&&p.base_on<=eventDay(e),'Укажите код, название, дату среза и целевую дату');
   person(db,p.author_id);if(p.unit_id)active(db,'org_unit',p.unit_id);if(p.shift_id)active(db,'work_shift',p.shift_id);
   const scale=active(db,'rating_scale',p.scale_id),levels=rows(db,'SELECT value,label FROM rating_level WHERE scale_id=? ORDER BY value',[p.scale_id]);
-  invariant(scale.name==='Производственная компетенция (1–4)'&&canonical(levels.map(x=>[x.value,x.label]))===canonical([[1,'Обучен'],[2,'Выполняет работу самостоятельно'],[3,'Выполняет работу мастерски'],[4,'Инструктор-наставник']]),'Для матрицы нужна точная корпоративская шкала 1–4');
+  invariant(scale.name==='Производственная компетенция (1–4)'&&canonical(levels.map(x=>[x.value,x.label]))===canonical([[1,'Обучен'],[2,'Выполняет работу самостоятельно'],[3,'Выполняет работу мастерски'],[4,'Инструктор-наставник']]),'Для матрицы нужна точная корпоративная шкала 1–4');
   invariant(Array.isArray(p.roster)&&p.roster.length>0&&p.roster.length<=300&&Array.isArray(p.columns)&&p.columns.length>0&&p.columns.length<=150&&p.roster.length*p.columns.length<=12000,'Выберите 1–300 сотрудников и 1–150 навыков; до 12000 ячеек');
   const people=new Set(),skills=new Set();
   const allowedUnits=new Set(p.unit_id?rows(db,'WITH RECURSIVE scope(id) AS (SELECT ? UNION SELECT u.id FROM org_unit u JOIN scope s ON u.parent_id=s.id) SELECT id FROM scope',[p.unit_id]).map(x=>x.id):[]);

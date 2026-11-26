@@ -1,0 +1,2 @@
+# Keep exact user-supplied local branding bytes on all platforms.
+src/ui/brand/* -text
