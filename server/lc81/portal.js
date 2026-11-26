@@ -58,10 +58,13 @@ function adminPanel(d){
 }
 async function render(){
  const serial=++sequence;
- const nav=$('nav');nav.replaceChildren();const sections=[...Object.entries(actions),...(user.admin?[['admin','Пользователи и права доступа']]:[])];
+ const fresh=await api('session');if(serial!==sequence)return;user=fresh.user;
+ const nav=$('nav');nav.replaceChildren();const sections=[...Object.entries(actions).filter(([id])=>user.permissions.includes(id)),...(user.admin?[['admin','Пользователи и права доступа']]:[])];
+ if(!sections.some(([id])=>id===page))page=sections[0]?.[0]||'';
  for(const [id,title] of sections){const b=button(title,async()=>{page=id;await render()});b.setAttribute('aria-current',String(id===page));nav.append(b)}
  if(page==='admin'&&user.admin){const data=await api('admin');if(serial===sequence)$('content').replaceChildren(...adminPanel(data));return}
- if(!Object.hasOwn(actions,page))page='person.read_basic';
+ if(!page){$('content').replaceChildren(panel('Личное рабочее пространство',el('p','Вам пока не назначены права на рабочие разделы. Обратитесь к администратору.')));return}
+ if(!Object.hasOwn(actions,page))throw Error('Раздел недоступен');
  const data=await api('resources?action='+encodeURIComponent(page));if(serial!==sequence)return;
  const items=data.items;const cols=items.length?Object.keys(items[0]):[];
  const labels={id:'ID',display_name:'Сотрудник',revision_id:'Редакция',version_no:'Версия',state:'Состояние',document_id:'Документ',code:'Код',title:'Название',operation_id:'Операция',trainee_id:'Обучаемый',sop_revision_id:'Версия СОП',due_on:'Срок'};

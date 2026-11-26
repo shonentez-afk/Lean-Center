@@ -1,4 +1,4 @@
-name: LC8.1A server policy foundation
+name: LC8.1 integrated access QA
 on:
   push:
     branches: [feature/lc8.1-access-foundation]
@@ -8,14 +8,14 @@ permissions:
 jobs:
   foundation:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: node --test tests/lc81-read-policy.test.mjs
+      - run: node --test tests/lc81-read-policy.test.mjs tests/lc81-secure-qa.test.mjs
       - run: npm test
       - run: node --test tests/lc74-server.test.mjs tests/lc74-save-state.test.mjs
       - run: node tools/build_folder.mjs --cloud

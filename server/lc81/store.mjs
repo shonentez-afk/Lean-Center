@@ -37,7 +37,7 @@ function account(db,id){
 function requireAdmin(db,id){const a=account(db,id);must(a?.bootstrap===1,403,'Требуются полномочия администратора');return a}
 function sanitized(db,a){
  const p=a.person_id&&activePerson(db,a.person_id);
- return {id:a.id,person_id:a.person_id,login:a.login,state:a.state,display_name:p?.display_name||'Администратор',admin:a.bootstrap===1,credential_revision:a.credential_revision};
+ return {id:a.id,person_id:a.person_id,login:a.login,state:a.state,display_name:p?.display_name||(a.bootstrap===1?'Администратор':'Сотрудник недоступен'),admin:a.bootstrap===1,credential_revision:a.credential_revision,permissions:a.state==='active'&&account(db,a.id)?permissionsFor(db,a):[]};
 }
 function auditView(db){return rows(db,'SELECT id,actor_account_id,action,target_id,occurred_at FROM lc81_audit ORDER BY occurred_at DESC,id LIMIT 100')}
 function security(db,accountId){
@@ -49,6 +49,18 @@ function security(db,accountId){
   return s.kind!=='unit_tree'||rootUnit(db,s.unit_id)===rootUnit(db,emp.unit_id);
  }).map(g=>({...g,scope:JSON.parse(g.scope_json)}));
  return {accounts:[a],policies,grants};
+}
+function permissionsFor(db,a){
+ if(a.bootstrap===1)return [...READ_ACTIONS];
+ const d=day(),s=security(db,a.id),out=new Set();
+ for(const g of s.grants){
+  if(g.revoked_at!==null||!period(g,d)||!roleRow(db,g.role_id))continue;
+  const arow=one(db,'SELECT person_id,role_id,valid_from,valid_to FROM role_assignment WHERE id=?',[g.assignment_id]);
+  if(!arow||arow.person_id!==a.person_id||arow.role_id!==g.role_id||!period(arow,d))continue;
+  const policy=s.policies.find(p=>p.role_id===g.role_id&&p.revision===g.policy_revision);
+  for(const p of policy?.permissions||[])out.add(p);
+ }
+ return READ_ACTIONS.filter(p=>out.has(p));
 }
 function checkPrivate(db){
  verifyDb(db);
@@ -214,7 +226,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    return v?.data??null;
   })},
   listResources(actor,action){return read(db=>{
-   const a=account(db,actor);must(a,401,'Необходим вход');must(READ_ACTIONS.includes(action),404,'Раздел не найден');
+   const a=account(db,actor);must(a,401,'Необходим вход');must(permissionsFor(db,a).includes(action),404,'Раздел недоступен');
    const table={'person.read_basic':'person','sop.read_effective':'document_revision','training.read':'training_assignment','task.read':'action_item'}[action];
    const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,SITE,action,id,day()):readAuthorized(db,s,actor,action,id,day())).filter(Boolean).map(v=>v.data);
   })},
