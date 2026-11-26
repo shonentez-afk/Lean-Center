@@ -1,5 +1,3 @@
-import {currentStandard} from '../src/modules/training/domain.js';
-import {documentTitle} from '../src/modules/library/revision-title.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,6 +8,8 @@ import {configureMigrations,createDb,openDb,bytesOf,Workspace,meta,rows,one,uuid
 import {inspectSource,refsForDb,refsForEvents,unionRefs,checkContent,frvOriginSnapshot} from '../src/modules/library/domain.js';
 import {ContentStore,makeTransfer,unpackTransfer,restoreContents} from '../src/modules/library/content.js';
 import * as net from '../src/storage/network.js';
+import {currentStandard} from '../src/modules/training/domain.js';
+import {documentTitle} from '../src/modules/library/revision-title.js';
 const SQL=await initSqlJs(),schema=fs.readFileSync('db/schema_v1.sql','utf8'),m2=fs.readFileSync('db/migrations/002_lc1.sql','utf8'),m3=fs.readFileSync('db/migrations/003_lc2.sql','utf8'),m4=fs.readFileSync('db/migrations/004_lc3.sql','utf8');
 configureMigrations(m3,m4,fs.readFileSync('db/migrations/005_lc3_requirements.sql','utf8'),fs.readFileSync('db/migrations/006_stage43_checklist.sql','utf8'),fs.readFileSync('db/migrations/007_lc4_training.sql','utf8'),fs.readFileSync('db/migrations/008_lc4_corporate_forms.sql','utf8'),fs.readFileSync('db/migrations/009_lc42_methods.sql','utf8'),fs.readFileSync('db/migrations/010_lc43_matrix.sql','utf8'),fs.readFileSync('db/migrations/011_lc5_audit.sql','utf8'),fs.readFileSync('db/migrations/012_lc51_assessments.sql','utf8'),fs.readFileSync('db/migrations/013_lc52_integration.sql','utf8'));
 const fresh=()=>new Workspace(SQL,createDb(SQL,schema,m2));
