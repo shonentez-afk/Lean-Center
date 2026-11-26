@@ -1,3 +1,4 @@
+import {twiOverview} from './twi-effectiveness.js';
 import {effectOverview} from '../effect/domain.js';
 // Read-only queues and KPI definitions over authoritative records.
 import {rows,one} from '../../core/db.js';
@@ -43,10 +44,14 @@ export function centerMetrics(db,{day,from='',to=day,unitId='',personId=''}){
  const requirements=matrixData(db,day),cells=requirements.people.filter(p=>scope(p.unit_id,p.id)).flatMap(p=>requirements.skills.map(s=>requirements.cells.get(p.id+':'+s.id)).filter(c=>c.goal));
  const count=(group,label,value,definition,page,options={})=>({group,label,value,denominator:null,definition,page,options});
  const ratio=(group,label,value,denominator,definition,page,options={})=>({group,label,value,denominator,definition,page,options});
- const f={from,to,personId,unitId},economic=effectOverview(db,{day,from,to,unitId,personId});
+ const f={from,to,personId,unitId},twi=twiOverview(db,{...f,day,role:'trainee'}),ts=twi.stats,economic=effectOverview(db,{day,from,to,unitId,personId});
  return [
  count('Обучение','Назначено обучения',planned.length,'Назначения, созданные в период; без отменённых. Сотрудник — обучаемый.','twi',{}),
  ratio('Обучение','Завершено из назначенных',completed.length,planned.length,'Текущие состояния назначений, созданных в период; не исторический срез закрытий.','twi',{}),
+ count('Эффективность TWI','Уникальные обучаемые',ts.people,'Уникальные люди среди назначений, начатых в периоде.','analytics',{...f,assessmentType:'twi_effect',role:'trainee'}),
+ ratio('Эффективность TWI','Первое положительное заключение',ts.firstPass,ts.assessed,'Первая действующая подтверждённая практика назначения до конца периода; базовый уровень или выше, не допуск.','analytics',{...f,assessmentType:'twi_effect',role:'trainee',detail:'first'}),
+ count('Эффективность TWI','Назначения с первым зарегистрированным допуском',ts.granted,'Первый зарегистрированный допуск до конца периода, независимо от текущего статуса.','analytics',{...f,assessmentType:'twi_effect',role:'trainee',detail:'granted'}),
+ count('Эффективность TWI','Действующие допуски по назначениям',ts.current,'Текущее решение по операции и действующие доказательства; исторические решения отдельно.','analytics',{...f,assessmentType:'twi_effect',role:'trainee',detail:'current'}),
  count('Обучение','Просрочено обучений',a.filter(x=>['planned','in_progress'].includes(x.state)&&x.due_on<day).length,'Открытые назначения со сроком до текущей даты.','twi',{filter:'overdue'}),
  count('Наставничество','Аудиты L1',audit.length,'Зафиксированные аудиты инструктора в период; версии не смешиваются в процент.','audit',{...f,role:'mentor',state:'final'}),
  count('Наставничество','Самооценки',self.length,'Факты самооценки наставника в период.','self_eval',f),
