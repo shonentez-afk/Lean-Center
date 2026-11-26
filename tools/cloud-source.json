@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "6895ad1c6238a5c116d78a725bc1adc2dddc40b6",
+  "sourceCommit": "ac208d045edb4fe969f8f81cdea199aeb1b467c1",
   "files": [
     {
       "path": "amvera.yml",
@@ -110,8 +110,12 @@
       "sha": "1f0791a2d1559335817c621e941c743caa8371b7"
     },
     {
+      "path": "server/lc81-maintenance.mjs",
+      "sha": "da99188ecfc0f903c6ee0e44603496fa9b3f2297"
+    },
+    {
       "path": "server/lc81/access-contract.mjs",
-      "sha": "d999b77a768ea9a358b35258b0974f214a45ac88"
+      "sha": "727e627e14152f05133088d4d32f476144c168b0"
     },
     {
       "path": "server/lc81/credentials.mjs",
@@ -119,7 +123,11 @@
     },
     {
       "path": "server/lc81/http.mjs",
-      "sha": "100a720252f0bf367b6b153f760ce854d17163c5"
+      "sha": "ee5d5858348568bd6abc5c66b1ff8a1259b2ee6c"
+    },
+    {
+      "path": "server/lc81/maintenance.mjs",
+      "sha": "9d46223186cd6a3ff752b661a8fe8b2b7ec862f1"
     },
     {
       "path": "server/lc81/portal.css",
@@ -131,11 +139,11 @@
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "3b8cda64887788034a805f2c944c078c942d037a"
+      "sha": "3d4f436e3aafff027b01a0626740e2c1b9e95232"
     },
     {
       "path": "server/lc81/read-policy.mjs",
-      "sha": "6823b5ee0de07c8aaf584383dfc376abea66ad4b"
+      "sha": "a0cf4de65f719664e905d28b11cb637930c9ca96"
     },
     {
       "path": "server/lc81/security-schema.sql",
@@ -143,7 +151,7 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "937ffcf7ce3b7c47472354b7ff3aec47472db1c5"
+      "sha": "2df79deaa6021ee4f0d575bda6b0a4a212d44453"
     },
     {
       "path": "server/main.mjs",
@@ -559,7 +567,7 @@
     },
     {
       "path": "tools/lc81-inventory.mjs",
-      "sha": "d60a946795421d23a62b6d2b6574f874e69a45a9"
+      "sha": "be3dbc896c125a9aa85dcd467ed8cceac423c472"
     },
     {
       "path": "tools/package_folder.py",
