@@ -1,7 +1,8 @@
 // No tokens or domain snapshot in localStorage/IndexedDB. Cookies are HttpOnly.
 const $=id=>document.getElementById(id),el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);return n};
 let user=null,page='person.read_basic',busy=false,sequence=0;
-const actions={'person.read_basic':'Сотрудники','sop.read_effective':'Действующие СОП','training.read':'Обучение','task.read':'Мои задачи / мероприятия'};
+const actions={'person.read_basic':'Сотрудники','sop.read_effective':'Действующие СОП','training.read':'Обучение','task.read':'Мои задачи / мероприятия',"org.read":"Структура предприятия","operation.read":"Операции","sop.read_history":"Редакции СОП","sop.read_steps":"Шаги действующих СОП","frv.read":"ФРВ","training.enrollment.read":"Персональные программы","preparation.read":"Комплекты подготовки","credential.read":"Подготовка наставников","appointment.read":"Приказы о назначении","development.read":"Планы развития","audit.read":"Аудиты","supplement.read":"Доплаты","roi.read":"Экономический эффект","calendar.read":"Личный календарь"};
+const actionLabels={...actions,'task.implement_own':'Выполнение собственных задач'};
 const note=(text,bad=false)=>{$('status').textContent=text;$('status').className=bad?'bad':''};
 async function api(url,data){
  const options={cache:'no-store',credentials:'same-origin'};
@@ -32,7 +33,7 @@ function adminPanel(d){
   addRef('Подразделение','org_unit',[input('code','Код'),input('name','Название'),select('parent_id','В составе',options(d.units)),select('kind','Тип',[['Цех','Цех'],['Участок','Участок'],['Служба','Служба'],['Группа','Группа']])],f=>({code:value(f,'code'),name:value(f,'name'),kind:value(f,'kind'),parent_id:value(f,'parent_id')})),
   addRef('Назначение сотрудника','person_assignment',[select('person_id','Сотрудник',options(d.people)),select('unit_id','Подразделение',options(d.units)),input('valid_from','С','date')],f=>({person_id:value(f,'person_id'),unit_id:value(f,'unit_id'),profession_id:null,position_id:null,shift_id:null,shift_code:null,valid_from:value(f,'valid_from'),valid_to:null})),
   addRef('Роль сотрудников','business_role',[input('code','Код'),input('name','Название')],f=>({code:value(f,'code'),name:value(f,'name')})),
-  addRef('Назначение роли','role_assignment',[select('person_id','Сотрудник',options(d.people)),select('role_id','Роль',options(d.roles.filter(r=>r.code!=='LC81_ACCESS_ADMIN'))),input('valid_from','С','date')],f=>({person_id:value(f,'person_id'),role_id:value(f,'role_id'),valid_from:value(f,'valid_from'),valid_to:null}))
+  addRef('Назначение роли','role_assignment',[select('person_id','Сотрудник',options(d.people)),select('role_id','Роль',options(d.roles.filter(r=>r.id!==d.protectedRoles[0]))),input('valid_from','С','date')],f=>({person_id:value(f,'person_id'),role_id:value(f,'role_id'),valid_from:value(f,'valid_from'),valid_to:null}))
  );
  const userForm=form([select('person_id','Сотрудник',options(d.people.filter(p=>!d.accounts.some(a=>a.person_id===p.id)))),input('login','Рабочая почта или логин'),input('password','Пароль (12–128 байт)','password',false),check('generate','Сгенерировать пароль на сервере')],'Создать пользователя',async f=>{
   const generate=f.elements.generate.checked,password=value(f,'password');
@@ -44,7 +45,7 @@ function adminPanel(d){
  const policyForms=d.roles.map(r=>{
   const p=d.policies.find(x=>x.role_id===r.id);
   if(d.protectedRoles.includes(r.id))return panel(r.name,el('p','Защищённая системная политика'));
-  const checks=el('div');checks.className='checks';for(const a of d.actions)checks.append(check(a,actions[a],p?.permissions.includes(a)));
+  const checks=el('div');checks.className='checks';for(const a of d.actions)checks.append(check(a,actionLabels[a],p?.permissions.includes(a)));
   return panel(r.name,form([checks],'Сохранить права',f=>post('policy',{role_id:r.id,revision:p?.revision||0,permissions:d.actions.filter(a=>f.elements.namedItem(a).checked)},'Права сохранены; прежние гранты требуют подтверждения')));
  });
  const grantForm=form([
@@ -66,9 +67,16 @@ async function render(){
  if(!page){$('content').replaceChildren(panel('Личное рабочее пространство',el('p','Вам пока не назначены права на рабочие разделы. Обратитесь к администратору.')));return}
  if(!Object.hasOwn(actions,page))throw Error('Раздел недоступен');
  const data=await api('resources?action='+encodeURIComponent(page));if(serial!==sequence)return;
- const items=data.items;const cols=items.length?Object.keys(items[0]):[];
+ const items=data.items;const cols=items.length?Object.keys(items[0]).filter(k=>k!=='steps'):[];
  const labels={id:'ID',display_name:'Сотрудник',revision_id:'Редакция',version_no:'Версия',state:'Состояние',document_id:'Документ',code:'Код',title:'Название',operation_id:'Операция',trainee_id:'Обучаемый',sop_revision_id:'Версия СОП',due_on:'Срок'};
- $('content').replaceChildren(panel(actions[page],items.length?table(cols.map(k=>labels[k]||k),items.map(r=>cols.map(k=>r[k]))):el('p','Нет доступных записей.')));
+ const content=panel(actions[page],items.length?table(cols.map(k=>labels[k]||k),items.map(r=>cols.map(k=>r[k]))):el('p','Нет доступных записей.'));
+ if(page==='sop.read_steps')for(const r of items){const details=el('details');details.append(el('summary',r.title+' · v'+r.version_no),table(['Шаг','Действие','Ключевые моменты','Причина','Секунды'],r.steps.map(s=>[s.position,s.action_text,s.key_points.join(' · '),s.reason_text,s.duration_seconds])));content.append(details)}
+ if(page==='task.read'&&user.permissions.includes('task.implement_own')&&user.person_id){
+  content.append(el('h3','Выполнить своё мероприятие'),el('p','Сервер проверит владельца, полномочия, версию и условия выполнения.'));
+  const candidates=items.filter(r=>['open','in_progress','ineffective'].includes(r.state));
+  if(candidates.length)content.append(form([select('id','Мероприятие',candidates.map(r=>[r.id,r.title])),input('result','Фактический результат')],'Подтвердить выполнение',async f=>{const r=candidates.find(x=>x.id===value(f,'id'));await api('tasks/implement',{id:r.id,expected_revision:r.rev,result:value(f,'result')});note('Выполнение подтверждено сервером');await render()}));
+ }
+ $('content').replaceChildren(content);
 }
 $('login').addEventListener('submit',e=>{e.preventDefault();run(async()=>{const f=e.currentTarget;const b=await api('login',{login:value(f,'login'),password:value(f,'password')});f.reset();showUser(b.user);page=b.user.admin?'admin':'person.read_basic';note('Вход выполнен');await render()})});
 run(async()=>{try{const b=await api('session');showUser(b.user);page=b.user.admin?'admin':'person.read_basic';await render()}catch(e){if(e.status!==401)throw e;showLogin()}});

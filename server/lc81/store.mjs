@@ -7,8 +7,8 @@ import {fileURLToPath} from 'node:url';
 import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-store.mjs';
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
-import {READ_ACTIONS,readAuthorized,readManagerProjection} from './read-policy.mjs';
-import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES} from './access-contract.mjs';
+import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask} from './read-policy.mjs';
+import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS} from './access-contract.mjs';
 import {refsForDb,checkContent,MAX_CONTENT} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
 const SITE='8c810000-0000-4000-8000-000000000003';
@@ -59,7 +59,7 @@ function security(db,accountId){
  return {accounts:[a],policies,grants};
 }
 function permissionsFor(db,a){
- if(a.bootstrap===1)return [...READ_ACTIONS];
+ if(a.bootstrap===1)return [...READ_ACTIONS]; // Unbound bootstrap cannot perform personal decisions.
  const d=day(),s=security(db,a.id),out=new Set();
  for(const g of s.grants){
   if(g.revoked_at!==null||!period(g,d)||!roleRow(db,g.role_id))continue;
@@ -68,7 +68,7 @@ function permissionsFor(db,a){
   const policy=s.policies.find(p=>p.role_id===g.role_id&&p.revision===g.policy_revision);
   for(const p of policy?.permissions||[])out.add(p);
  }
- return READ_ACTIONS.filter(p=>out.has(p));
+ return PERMISSIONS.filter(p=>out.has(p));
 }
 function checkPrivate(db){
  verifyDb(db);
@@ -78,7 +78,7 @@ function checkPrivate(db){
  must(isId(cfg.site)&&isId(cfg.admin)&&isId(cfg.manager)&&cfg.admin!==cfg.manager&&admins.length===1&&admins[0].state==='active'&&roleRow(db,cfg.admin)&&roleRow(db,cfg.manager)&&rootUnit(db,cfg.site)===cfg.site,503,'Нарушена целостность начального администратора');
  for(const a of rows(db,'SELECT login,password_hash FROM lc81_account'))must(normalizeLogin(a.login)===a.login&&validHash(a.password_hash),503,'Повреждены данные авторизации');
  for(const p of rows(db,'SELECT * FROM lc81_policy')){
-  const ps=JSON.parse(p.permissions_json);must(Array.isArray(ps)&&new Set(ps).size===ps.length&&ps.every(x=>READ_ACTIONS.includes(x))&&p.role_id!==cfg.admin,503,'Неверная политика');
+  const ps=JSON.parse(p.permissions_json);must(Array.isArray(ps)&&new Set(ps).size===ps.length&&ps.every(x=>PERMISSIONS.includes(x))&&p.role_id!==cfg.admin,503,'Неверная политика');
  }
  must(!!one(db,'SELECT role_id FROM lc81_policy WHERE role_id=?',[cfg.manager]),503,'Нет политики управляющего');
 }
@@ -154,7 +154,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     must(admin!==manager,422,'Административная и рабочая роли должны различаться');
     for(const [k,v] of [['site_id',site],['admin_role_id',admin],['manager_role_id',manager]])current.run('INSERT INTO lc81_meta VALUES(?,?)',[k,v]);
     if(seed)current.run("INSERT INTO lc81_meta VALUES('migrated_snapshot_sha256',?)",[seed.snapshot.manifest.snapshot_sha256]);
-    current.run('INSERT INTO lc81_policy VALUES(?,1,?)',[manager,JSON.stringify(READ_ACTIONS)]);
+    current.run('INSERT INTO lc81_policy VALUES(?,1,?)',[manager,JSON.stringify(PERMISSIONS)]);
     const id=uuid();current.run('INSERT INTO lc81_account(id,person_id,login,password_hash,state,bootstrap,created_at) VALUES(?,NULL,?,?,\'active\',1,?)',[id,normalizeLogin(login),hashPassword(password),at()]);
     audit(current,id,seed?'bootstrap.migrated':'bootstrap',id);
    });
@@ -204,7 +204,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     employment:rows(db,'SELECT id,person_id,unit_id,valid_from,valid_to FROM person_assignment'),
     policies:rows(db,'SELECT * FROM lc81_policy').map(p=>({role_id:p.role_id,revision:p.revision,permissions:JSON.parse(p.permissions_json)})),
     grants:rows(db,'SELECT id,account_id,role_id,assignment_id,employment_id,scope_json,policy_revision,state,valid_from,valid_to FROM lc81_grant').map(g=>({...g,scope:JSON.parse(g.scope_json)})),
-    actions:READ_ACTIONS,audit:auditView(db),site:config(db).site,protectedRoles:[config(db).admin,config(db).manager]};
+    actions:PERMISSIONS,audit:auditView(db),site:config(db).site,protectedRoles:[config(db).admin,config(db).manager]};
   })},
   createReference(actor,type,payload){
    return mutate(db=>{
@@ -245,7 +245,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     requireAdmin(db,actor);must(keys(input,['role_id','revision','permissions']),400,'Неверные поля политики');
     const {role_id,revision,permissions}=input;
     must(roleRow(db,role_id)&&role_id!==config(db).admin&&role_id!==config(db).manager,403,'Системная политика защищена');
-    must(Array.isArray(permissions)&&permissions.length<=READ_ACTIONS.length&&new Set(permissions).size===permissions.length&&permissions.every(p=>READ_ACTIONS.includes(p)),422,'Неизвестное право');
+    must(Array.isArray(permissions)&&permissions.length<=PERMISSIONS.length&&new Set(permissions).size===permissions.length&&permissions.every(p=>PERMISSIONS.includes(p)),422,'Неизвестное право');
     const old=one(db,'SELECT revision FROM lc81_policy WHERE role_id=?',[role_id]);must(revision===(old?.revision||0),409,'Политика изменилась');
     db.run('INSERT INTO lc81_policy VALUES(?,?,?) ON CONFLICT(role_id) DO UPDATE SET revision=excluded.revision,permissions_json=excluded.permissions_json',[role_id,revision+1,JSON.stringify([...permissions].sort())]);
     audit(db,actor,'policy.update',role_id);return {revision:revision+1};
@@ -277,10 +277,25 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    return v?.data??null;
   })},
   listResources(actor,action){return read(db=>{
-   const a=account(db,actor);must(a,401,'Необходим вход');must(permissionsFor(db,a).includes(action),404,'Раздел недоступен');
+   const a=account(db,actor);must(a,401,'Необходим вход');must(READ_ACTIONS.includes(action)&&permissionsFor(db,a).includes(action),404,'Раздел недоступен');
    const table=RESOURCE_TABLES[action];
    const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day()):readAuthorized(db,s,actor,action,id,day())).filter(Boolean).map(v=>v.data);
   })},
+  implementOwnTask(actor,revision,input){
+   return mutate(db=>{
+    const a=account(db,actor);
+    must(a&&a.credential_revision===revision,401,'Сеанс завершён');
+    must(keys(input,['id','expected_revision','result'])&&isId(input.id)&&Number.isSafeInteger(input.expected_revision)&&input.expected_revision>0&&typeof input.result==='string'&&input.result.trim().length>0&&input.result.length<=2000,400,'Неверные поля выполнения');
+    const sec=security(db,actor),d=day();
+    must(a.bootstrap!==1&&canImplementOwnTask(db,sec,actor,input.id,d)&&readAuthorized(db,sec,actor,'task.read',input.id,d),403,'Можно выполнить только своё назначенное мероприятие');
+    const row=one(db,'SELECT id,rev FROM action_item WHERE id=?',[input.id]);
+    must(row?.rev===input.expected_revision,409,'Запись изменилась; обновите данные');
+    const eventId=uuid();
+    try{applyEvent(db,{id:eventId,entity_type:'action_item',entity_id:input.id,operation:'update',expected_revision:row.rev,payload:{command:'implement',result:input.result.trim(),business_offset_minutes:0},occurred_at:at()})}catch{throw new PilotError(422,'Выполнение не прошло существующие проверки мероприятия')}
+    audit(db,actor,'task.implement_own',eventId);
+    return one(db,'SELECT id,state,rev FROM action_item WHERE id=?',[input.id]);
+   });
+  },
   // Offline administrative maintenance only. No HTTP route exports this file.
   async copyCheckpoint(target){
    ready();must(path.isAbsolute(target),400,'Абсолютный путь новой папки');
