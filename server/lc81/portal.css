@@ -11,3 +11,5 @@
 .lc81-library-preview .panel{max-width:860px;margin:0 auto}
 .lc81-library-preview form{margin:12px 0}
 .lc81-library-host .editor-host-note{overflow-wrap:anywhere;white-space:normal}
+
+.lc81-matrix-cell{min-width:36px;padding:7px;text-align:center;font-weight:600;border:1px solid var(--line);color:#242e40}.lc81-matrix-cell[data-level="1"]{background:#d9e2f3}.lc81-matrix-cell[data-level="2"]{background:#ffff00}.lc81-matrix-cell[data-level="3"]{background:#ffd966}.lc81-matrix-cell[data-level="4"]{background:#ff7c80}#content fieldset{border:1px solid var(--line);border-radius:4px;display:grid;gap:6px;padding:12px;max-height:320px;overflow:auto}#content fieldset label{display:flex;flex-direction:row;align-items:center;gap:6px}

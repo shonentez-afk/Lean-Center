@@ -32,7 +32,7 @@ export function saveMatrix(db,input,a){
  const resource=matrixResource(db,input.unit_id,roster,columns,a.day,input.base_on);
  must(a.allows('matrix.create',input.unit_id,resource),403,'Матрица выходит за область полномочий');
  const past=rows(db,'SELECT * FROM competency_matrix WHERE code=?',[input.code]);
- for(const row of past)authorizeMatrix(db,a,matrixFromRecord(row),'matrix.create');
+ for(const row of past){must(row.unit_id===input.unit_id,403,'Матрица недоступна');authorizeMatrix(db,a,matrixFromRecord(row),'matrix.create')}
  const previous=past.find(x=>x.state==='active');
  must(input.previous_id===(previous?.id??null)&&input.previous_rev===(previous?.rev??0),409,'Матрица изменена, обновите карточку');
  const payload={code:input.code,title:input.title.trim(),author_id:a.personId,unit_id:input.unit_id,shift_id:null,scale_id:input.scale_id,base_on:input.base_on,target_on:input.target_on,roster,columns,baseline:matrixBaseline(db,roster,columns,input.scale_id,input.base_on),previous_id:input.previous_id,previous_rev:input.previous_rev};

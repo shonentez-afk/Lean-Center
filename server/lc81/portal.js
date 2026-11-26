@@ -1,21 +1,22 @@
 // Protected workspace: reuse accepted navigation, registry controls, corporate
 // CSS and unsaved-form guard. Never load SQL.js or a snapshot in the browser.
+import {createTrainingUI} from '/training-ui.js';
 import {createLibraryUI} from '/library-ui.js';
 import {navGroups} from '/shared/navigation.js';
 import {registryFields} from '/shared/registry-fields.js';
 import {protectWorkForm,hasUnsavedForms} from '/shared/form-guard.js';
 import {cloudSaveState} from '/shared/cloud-save-state.js';
 const $=id=>document.getElementById(id),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n};
-let libraryUI=null;
+let libraryUI=null,trainingUI=null;
 let user=null,page='person.read_basic',busy=false,sequence=0,saving=false,checking=false,saveFailed=false,networkFailed=false;
-const actions={...{'person.read_basic':'Сотрудники','sop.read_effective':'Действующие СОП','training.read':'Обучение','task.read':'Мои задачи / мероприятия',"org.read":"Структура предприятия","operation.read":"Операции","sop.read_history":"Редакции СОП","sop.read_steps":"Шаги действующих СОП","frv.read":"ФРВ","training.enrollment.read":"Персональные программы","preparation.read":"Комплекты подготовки","credential.read":"Подготовка наставников","appointment.read":"Приказы о назначении","development.read":"Планы развития","audit.read":"Аудиты","supplement.read":"Доплаты","roi.read":"Экономический эффект","calendar.read":"Личный календарь"},'person.read_directory':'Сотрудники — справочник','equipment.read':'Оборудование','workplace.read':'Рабочие места','sop.constructor':'Конструктор СОП','sop.read_twi':'Планы инструктажа TWI','sop.read_linked_frv':'ФРВ по СОП'};
+const actions={...{'person.read_basic':'Сотрудники','sop.read_effective':'Действующие СОП','training.read':'Обучение','task.read':'Мои задачи / мероприятия',"org.read":"Структура предприятия","operation.read":"Операции","sop.read_history":"Редакции СОП","sop.read_steps":"Шаги действующих СОП","frv.read":"ФРВ","training.enrollment.read":"Персональные программы","preparation.read":"Комплекты подготовки","credential.read":"Подготовка наставников","appointment.read":"Приказы о назначении","development.read":"Планы развития","audit.read":"Аудиты","supplement.read":"Доплаты","roi.read":"Экономический эффект","calendar.read":"Личный календарь"},'person.read_directory':'Сотрудники — справочник','equipment.read':'Оборудование','workplace.read':'Рабочие места','sop.constructor':'Конструктор СОП','sop.read_twi':'Планы инструктажа TWI','sop.read_linked_frv':'ФРВ по СОП','matrix.read':'Матрицы компетенций'};
 const directoryActions={'person.read_directory':'person','org.read':'org_unit','equipment.read':'equipment','workplace.read':'workplace','operation.read':'operation'};
-const actionLabels={...actions,'task.implement_own':'Выполнение собственных задач','sop.read_photo':'Просмотр фотографий СОП','sop.create':'Создание СОП','sop.edit_draft':'Редактирование черновика СОП','sop.revise':'Создание редакции СОП','sop.passport':'Паспорт СОП','sop.from_frv':'Создание СОП из ФРВ','frv.create':'Создание ФРВ','frv.edit_draft':'Редактирование ФРВ','frv.finalize':'Завершение ФРВ','frv.read_summary':'Результаты фактических замеров ФРВ'};
+const actionLabels={...actions,'task.implement_own':'Выполнение собственных задач','sop.read_photo':'Просмотр фотографий СОП','sop.create':'Создание СОП','sop.edit_draft':'Редактирование черновика СОП','sop.revise':'Создание редакции СОП','sop.passport':'Паспорт СОП','sop.from_frv':'Создание СОП из ФРВ','frv.create':'Создание ФРВ','frv.edit_draft':'Редактирование ФРВ','frv.finalize':'Завершение ФРВ','frv.read_summary':'Результаты фактических замеров ФРВ','training.create':'Назначение обучения','training.approve_responsible':'Подтверждение плана ответственным','training.approve_head':'Подтверждение плана руководителем','training.reschedule':'Изменение срока обучения','training.cancel':'Отмена назначения','training.stage':'Факт инструктажа','training.verify':'Проверка знаний','training.practical':'Практическая оценка','training.qualify':'Подтверждение квалификации','training.admit':'Решение о допуске','training.detail':'Карточка обучения','training.read_sop':'СОП назначенного обучения','matrix.create':'Конструктор матриц','matrix.retire':'Закрытие матриц','matrix.detail':'Детальная матрица','person.read_card':'Карточка сотрудника'};
 for(const [action,type] of Object.entries(directoryActions)){
  const prefix=action==='person.read_directory'?'person':action.split('.')[0];
  for(const [op,label] of [['create','Создание'],['update','Изменение'],['archive','Архивирование']])actionLabels[prefix+'.'+op]=label+': '+actions[action];
 }
-const pageActions={person:['person.read_directory','person.read_basic'],home:[],calendar:['calendar.read'],actions:['task.read'],sop:['sop.read_effective','sop.read_steps','sop.read_history'],sop_constructor:['sop.constructor'],frv:['frv.read','sop.read_linked_frv'],twi_plans:['sop.read_twi'],twi:['training.read'],programs:['training.enrollment.read'],preparation:['preparation.read'],development:['development.read'],certification:['credential.read'],appointments:['appointment.read'],audit:['audit.read'],supplements:['supplement.read'],roi:['roi.read'],org_unit:['org.read'],workplace:['workplace.read'],operation:['operation.read'],equipment:['equipment.read'],storage:['admin']};
+const pageActions={person:['person.read_directory','person.read_basic'],home:[],calendar:['calendar.read'],actions:['task.read'],sop:['sop.read_effective','sop.read_steps','sop.read_history'],sop_constructor:['sop.constructor'],frv:['frv.read','sop.read_linked_frv'],twi_plans:['sop.read_twi'],twi:['training.read'],skills:['matrix.read'],programs:['training.enrollment.read'],preparation:['preparation.read'],development:['development.read'],certification:['credential.read'],appointments:['appointment.read'],audit:['audit.read'],supplements:['supplement.read'],roi:['roi.read'],org_unit:['org.read'],workplace:['workplace.read'],operation:['operation.read'],equipment:['equipment.read'],storage:['admin']};
 const dirty=()=>hasUnsavedForms($('content'))||libraryUI?.active()===true;
 const discard=()=>{if(libraryUI?.active()&&!libraryUI.close())return false;return !hasUnsavedForms($('content'))||confirm('Есть несохранённые изменения. Продолжить без сохранения?')};
 function refreshIndicator(){
@@ -123,6 +124,7 @@ function directoryPanel(info,items){
   wrap.replaceChildren(el('p','Показано '+visible.length+' из '+items.length,'muted'),visible.length?table(headers,visible.map(r=>{
    const cells=fields.map(([k,f])=>display(k,f,r));if(type==='person')cells.push(r.unit,r.position);
    const buttons=el('div',undefined,'row');
+   if(type==='person'&&r.can_card)buttons.append(button('Карточка',()=>trainingUI.card(editor,r.id)));
    if(r.can_update)buttons.append(button('Изменить',()=>open(r)));
    if(r.can_archive)buttons.append(button('Архив',async()=>{if(!discard()||!confirm('Архивировать запись? История сохранится.'))return;await api('directory/change',{type,operation:'archive',id:r.id,expected_revision:r.rev,fields:null});note('Запись архивирована на сервере');await render()},'danger'));
    cells.push('v'+r.rev,buttons.childElementCount?buttons:'Только чтение');return cells;
@@ -157,6 +159,7 @@ function resourcePanel(items){
  return content;
 }
 libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard});
+trainingUI=createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check});
 function buildNav(){
  const nav=$('nav');nav.replaceChildren();const available=new Set(Object.keys(actions).filter(id=>user.permissions.includes(id)&&!['sop.read_twi','sop.read_linked_frv','sop.constructor'].includes(id)));if(user.admin)available.add('admin');
  if(user.permissions.includes('sop.read_history')&&user.permissions.includes('sop.create'))available.add('sop.constructor');
@@ -194,6 +197,13 @@ async function render(){
    const data=await api('resources?action=sop.read_effective');if(serial===sequence)$('content').replaceChildren(libraryUI.linked(data.items,page));return;
   }
   const data=await api('resources?action='+encodeURIComponent(page));if(serial!==sequence)return;
+  if(page==='training.read'||page==='matrix.read'){
+   $('content').replaceChildren(page==='training.read'?trainingUI.training(data.items,user):trainingUI.matrices(data.items,user));return;
+  }
+  if(page==='person.read_basic'){
+   const host=el('div'),content=panel('Сотрудники',data.items.length?table(['Сотрудник','Действия'],data.items.map(r=>[r.display_name,r.can_card?button('Карточка',()=>trainingUI.card(host,r.id)):'Только чтение'])):el('p','Нет доступных записей'),host);
+   $('content').replaceChildren(content);return;
+  }
   if(page==='sop.read_history'||page==='frv.read'){
    const kind=page==='sop.read_history'?'sop':'frv',info=await api('library/info?kind='+kind);
    if(serial!==sequence)return;
