@@ -39,7 +39,8 @@ const workFormDirty=()=>hasUnsavedForms(root);
 const allowDiscardForm=()=>!workFormDirty()||window.confirm('В форме есть несохранённые изменения. Уйти без сохранения?');
 let SQL,ws,cache,folder,generation=0,busy=false,master=false,page='home',theme=false,status='Готово',error=false,chart=null,edit=null,query='',incoming=[],importState=null,historyPerson=null,archiveFilter='active',libraryDraft=null,editorSession=null,libraryFilter='all';
 const cloudBuild=window.LC_BUILD.cloudPilot===true;
-let cloud=null,cloudAccount=null,cloudTimer=null,cloudText='Вход не выполнен',cloudBad=false;
+let cloud=null,cloudAccount=null,cloudTimer=null,cloudText='Вход не выполнен',cloudBad=false,cloudFailures=0,cloudNextDelay=8000,cloudNoticeIds=[];
+const CLOUD_PENDING_NOTICE='Сохранено локально. Ожидается подтверждение сервером.';
 const cloudReadonly=()=>cloudBuild&&cloudAccount?.role!=='editor';
 const contentStore=new ContentStore(()=>cache,()=>folder,()=>cloud),readContent=ref=>contentStore.get(ref);
 const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
@@ -62,7 +63,7 @@ function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefine
 function add(parent,...children){parent.append(...children);return parent}
 function btn(label,fn,cls='',disabled=false){const n=el('button',label,cls);n.type='button';n.disabled=disabled||busy;n.addEventListener('click',fn);return n}
 function pane(title,...children){return add(el('section',undefined,'panel'),el('h2',title),...children)}
-function message(s,bad=false){status=s;error=bad;const n=document.getElementById('status');if(n){n.textContent=s;n.className='status'+(bad?' error':'')}}
+function message(s,bad=false){status=s;error=bad;cloudNoticeIds=cloudBuild&&s===CLOUD_PENDING_NOTICE&&!bad?ws.pending.map(e=>e.id):[];const n=document.getElementById('status');if(n){n.textContent=s;n.className='status'+(bad?' error':'')}}
 // Navigation snapshots stay in memory; the browser stores only an opaque history ID.
 let mobileMenu=false,navSerial=0,navCurrent=null,navParent=null,navSupported=true,restoringNav=false;
 const navSnapshots=new Map();
@@ -100,7 +101,7 @@ function navigate(p,{retainEmployee=false}={}){
 function goTraining(p,options={}){if(!navigate(p,{retainEmployee:!!employeeReturn}))return;setTrainingRoute(p,options);render()}
 function openImport(type){if(!navigate('import_xlsx'))return;importState={type,book:null,sheet:0,header:1,mapping:{},allowUpdates:false,plan:null,file:''};render()}
 function openHistory(id){if(!navigate('person_assignment',{retainEmployee:!!employeeReturn}))return;historyPerson=id;archiveFilter='all';render()}
-async function persist(){if(cache){try{if(cloudBuild)invariant(!cloudReadonly(),'Тестовая учётная запись: только чтение');generation=await local.saveWorkspace(cache,generation,ws.state());if(cloud){if(ws.pending.length)cloudState('Сохранено локально · ожидают подтверждения: '+ws.pending.length);queueCloudSync(350)}return true}catch(e){if(e.code==='WORKSPACE_GENERATION_CONFLICT')throw e;throw Object.assign(new Error('Локальная запись не выполнена',{cause:e}),{code:'WORKSPACE_WRITE_FAILED'})}}volatileChanges++;return false}
+async function persist(){if(cache){try{if(cloudBuild)invariant(!cloudReadonly(),'Тестовая учётная запись: только чтение');generation=await local.saveWorkspace(cache,generation,ws.state());if(cloud){if(ws.pending.length)cloudState('Сохранено локально · ожидают подтверждения: '+ws.pending.length);queueCloudSync(cloudFailures?cloudNextDelay:350)}return true}catch(e){if(e.code==='WORKSPACE_GENERATION_CONFLICT')throw e;throw Object.assign(new Error('Локальная запись не выполнена',{cause:e}),{code:'WORKSPACE_WRITE_FAILED'})}}volatileChanges++;return false}
 async function saveMemoryBackup(){if(busy)return;busy=true;try{download('lean-'+uuid()+'.leanbackup',await backupTransfer());message('Резервная копия сформирована. Проверьте скачанный файл перед выходом. Рабочая копия всё ещё только в памяти.')}catch(e){message('Не удалось сформировать копию: '+e.message,true)}finally{busy=false}}
 function replace(newWs){ws?.close();ws=newWs}
 function formControls(){return [...document.querySelectorAll('main input[name]:not([type=file]),main select[name],main textarea[name],main button.lc-directory-trigger[name]')]}
@@ -122,7 +123,7 @@ function restoreRejectedForm(s){
  const details=[...document.querySelectorAll('main details')];s.details.forEach((v,i)=>{const e=details[i];if(e&&(e.querySelector('summary')?.textContent||'')===v.label)e.open=v.open});
  requestAnimationFrame(()=>window.scrollTo(0,s.scroll||0));
 }
-async function run(fn,{save=true,retainForm=false}={}){if(busy)return;if(save&&cloudReadonly()){message('Тестовая учётная запись: только чтение',true);return}const prev=ws.state(),form=retainForm?captureRejectedForm():null,previousVolatile=volatileChanges;let failure=null;busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(!cache&&volatileChanges!==previousVolatile?'Изменения только в памяти. На диск не записаны — скачайте резервную копию.':cloudBuild&&ws.pending.length&&(save||canonical(ws.pending)!==canonical(prev.pending))?'Сохранено локально. Ожидается подтверждение сервером.':m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));failure=e.code==='WORKSPACE_WRITE_FAILED'?'Локальная запись не выполнена. Изменения не записаны; проверьте доступ и свободное место браузера, затем повторите сохранение.':e.message;if(form&&page===form.page){edit=form.edit;setTrainingRoute(page,form.route);if(form.edit!==null&&e.code==='WORKSPACE_GENERATION_CONFLICT'){registryConflict={type:page,id:form.edit.id||null};failure='Другая вкладка изменила рабочую копию. Черновик сохранён в форме; загрузите актуальные данные и сверьте изменения.'}}message(failure,true)}finally{busy=false;render();if(failure&&form){restoreRejectedForm(form);message(failure,true)}}}
+async function run(fn,{save=true,retainForm=false}={}){if(busy)return;if(save&&cloudReadonly()){message('Тестовая учётная запись: только чтение',true);return}const prev=ws.state(),form=retainForm?captureRejectedForm():null,previousVolatile=volatileChanges;let failure=null;busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(!cache&&volatileChanges!==previousVolatile?'Изменения только в памяти. На диск не записаны — скачайте резервную копию.':cloudBuild&&ws.pending.length&&(save||canonical(ws.pending)!==canonical(prev.pending))?CLOUD_PENDING_NOTICE:m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));failure=e.code==='WORKSPACE_WRITE_FAILED'?'Локальная запись не выполнена. Изменения не записаны; проверьте доступ и свободное место браузера, затем повторите сохранение.':e.message;if(form&&page===form.page){edit=form.edit;setTrainingRoute(page,form.route);if(form.edit!==null&&e.code==='WORKSPACE_GENERATION_CONFLICT'){registryConflict={type:page,id:form.edit.id||null};failure='Другая вкладка изменила рабочую копию. Черновик сохранён в форме; загрузите актуальные данные и сверьте изменения.'}}message(failure,true)}finally{busy=false;render();if(failure&&form){restoreRejectedForm(form);message(failure,true)}}}
 function download(name,body){const url=URL.createObjectURL(new Blob([canonical(body)],{type:'application/json'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function pick(accept,fn,max=150*1024*1024){const i=el('input');i.type='file';i.accept=accept;i.onchange=()=>{const f=i.files?.[0];if(f)run(async()=>{invariant(f.size<=max,'Файл слишком большой');return await fn(JSON.parse(await f.text()))})};i.click()}
 const empty=()=>!ws.pending.length&&!ws.dirty&&!meta(ws.base,'publication_id')&&Object.keys(definitions).every(t=>list(ws.base,t).length===0)&&!one(ws.base,'SELECT id FROM document LIMIT 1')&&!one(ws.base,'SELECT id FROM frv_study LIMIT 1');
@@ -815,7 +816,7 @@ function cloudState(text,bad=false){
 function cloudStateNode(){
  const n=el('span',cloudText,'lc-cloud-state'+(cloudBad?' bad':''));n.dataset.lcCloudState='1';n.setAttribute('role','status');return n
 }
-function queueCloudSync(delay=8000){
+function queueCloudSync(delay=cloudNextDelay){
  if(!cloud)return;clearTimeout(cloudTimer);
  cloudTimer=setTimeout(()=>{syncCloud().catch(()=>{}).finally(()=>{if(cloud)queueCloudSync()})},delay)
 }
@@ -842,7 +843,9 @@ async function pullCloud(){
 }
 async function cloudOutbox(){
  const old=await local.load(cache,'cloud-outbox');
- if(old&&old.database_id===meta(ws.base,'database_id')&&old.device_id===ws.device&&old.base_publication_id===meta(ws.base,'publication_id')&&canonical(old.events)===canonical(ws.pending))return old;
+ // Reuse the sealed package after an ambiguous failure, including when
+ // unrelated publications arrived or more local events were appended.
+ if(old&&old.database_id===meta(ws.base,'database_id')&&old.device_id===ws.device&&Array.isArray(old.events)&&old.events.length>0&&old.events.length<=ws.pending.length&&(!old.base_publication_id||one(ws.base,'SELECT id FROM publication WHERE id=?',[old.base_publication_id]))&&canonical(old.events)===canonical(ws.pending.slice(0,old.events.length)))return old;
  const pkg=await ws.package();await local.save(cache,'cloud-outbox',pkg);return pkg
 }
 async function syncCloud(manual=false){
@@ -867,9 +870,15 @@ async function syncCloud(manual=false){
    changed=(await pullCloud())||changed;
   }
   if(ws.conflicts.length){cloudState('Конфликт: изменения сохранены локально. Откройте «Настройки и обмен».',true);return}
-  if(ws.pending.length){cloudState('Ожидают подтверждения: '+ws.pending.length,true);return}
+  cloudFailures=0;cloudNextDelay=8000;
+  if(ws.pending.length){cloudNextDelay=750;cloudState('Ожидают подтверждения: '+ws.pending.length);return}
+  // Do not confirm an HTTP ACK alone or a discarded/conflicted event.
+  if(status===CLOUD_PENDING_NOTICE&&cloudNoticeIds.length){
+   const confirmed=cloudNoticeIds.every(id=>one(ws.base,'SELECT id FROM change_event WHERE id=?',[id]));
+   message(confirmed?'Подтверждено сервером. Все изменения сохранены.':'Локальная очередь пуста. Проверьте итоговые данные.');
+  }
   cloudState('Синхронизировано · '+cloudAccount.user+(cloudReadonly()?' · только чтение':''));
- }catch(e){cloudState('Облачный обмен не подтверждён: '+e.message+' · локальная очередь: '+ws.pending.length,true)}
+ }catch(e){cloudFailures=Math.min(cloudFailures+1,6);cloudNextDelay=Math.min(60000,Math.max(2000*2**(cloudFailures-1)+Math.floor(Math.random()*1000),e.retryAfterMs||0));cloudState('Облачный обмен не подтверждён: '+e.message+' · локальная очередь: '+ws.pending.length+' · повтор через '+Math.ceil(cloudNextDelay/1000)+' с',true)}
  finally{busy=false;root.inert=false;if(changed)render()}
 }
 function cloudStorage(main){
@@ -894,12 +903,14 @@ function cloudLogin(){
  const token=el('input');token.type='password';token.name='pilot_token';token.required=true;token.autocomplete='off';token.maxLength=64;token.minLength=64;
  const form=el('form'),notice=el('p','Только демонстрационные данные. Действующие корпоративные данные запрещены.','warn'),button=el('button','Войти','primary');button.type='submit';
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div',undefined,'brand-text'),el('div','Центр TWI','brand'),el('div','Обучение на рабочем месте','brand-sub')),el('span',undefined,'brand-company'));
- root.replaceChildren(add(el('section',undefined,'panel lc-cloud-login'),brand,el('h1','Облачный пилот LC7.4.2'),el('p','Введите токен тестовой учётной записи. Это не токен GitHub.','muted'),add(form,add(el('label',undefined,'field'),el('span','Тестовый токен'),token),button,notice)));
+ root.replaceChildren(add(el('section',undefined,'panel lc-cloud-login'),brand,el('h1','Облачный пилот '+LC_BUILD.cloudRelease+(LC_BUILD.sourceCommit?' · '+LC_BUILD.sourceCommit.slice(0,8):'')),el('p','Введите токен тестовой учётной записи. Это не токен GitHub.','muted'),add(form,add(el('label',undefined,'field'),el('span','Тестовый токен'),token),button,notice)));
  form.onsubmit=async e=>{
   e.preventDefault();if(button.disabled)return;button.disabled=true;notice.textContent='Проверка подключения…';let accountCache,next,remote,transport;
   try{
    transport=cloudPilotTransport(token.value.trim());token.value='';
    const account=await transport.session();
+   invariant(account.release===LC_BUILD.cloudRelease&&account.sourceCommit===LC_BUILD.sourceCommit,'Версии сервера и клиента различаются. Обновите страницу.');
+   cloudFailures=0;cloudNextDelay=8000;
    accountCache=await local.openCache('lean-center-cloud-v1-'+account.user);
    const saved=await local.load(accountCache,'workspace');
    remote=await transport.snapshot(SQL);
@@ -938,7 +949,7 @@ function render(){
  const brandCompany=el('span',undefined,'brand-company');brandCompany.setAttribute('role','img');brandCompany.setAttribute('aria-label','ТЕХНОНИКОЛЬ');
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),brandText,brandCompany);
  const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{if(!allowDiscardForm())return;edit=null;registryConflict=null;theme=!theme;try{localStorage.setItem('lean-center-theme',theme?'dark':'light')}catch{}render()}),btn('Хранение',()=>navigate('storage')));
- if(cloudBuild)metaPanel.append(el('span','Облачный пилот · '+cloudAccount.user+(cloudReadonly()?' · чтение':''),'version lc-cloud-mode'),btn('Выйти',cloudLogout));
+ if(cloudBuild)metaPanel.append(el('span',LC_BUILD.cloudRelease+' · '+LC_BUILD.sourceCommit.slice(0,8)+' · '+cloudAccount.user+(cloudReadonly()?' · чтение':''),'version lc-cloud-mode'),btn('Выйти',cloudLogout));
  if(editorSession&&editorSession.host.hidden&&!libraryDraft)metaPanel.append(btn('Вернуться в редактор',()=>showEditor(editorSession),'primary'));header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.id='lc53-sidebar';side.setAttribute('aria-label','Навигация');side.classList.toggle('lc53-menu-open',mobileMenu);const menu=btn(mobileMenu?'Закрыть меню':'Меню',()=>{mobileMenu=!mobileMenu;side.classList.toggle('lc53-menu-open',mobileMenu);menu.textContent=mobileMenu?'Закрыть меню':'Меню';menu.setAttribute('aria-expanded',String(mobileMenu))},'lc53-mobile-menu');menu.setAttribute('aria-controls',side.id);menu.setAttribute('aria-expanded',String(mobileMenu));header.append(menu);
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};

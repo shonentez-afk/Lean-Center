@@ -1,7 +1,7 @@
-name: LC7.4.4 Amvera AI CSP regression
+name: LC7.4.5 Amvera stability regression
 on:
   push:
-    branches: [feature/lc7.4-amvera, feature/lc7.4-amvera-secrets, feature/lc7.4-amvera-ai]
+    branches: [feature/lc7.4-amvera, feature/lc7.4-amvera-secrets, feature/lc7.4-amvera-ai, feature/lc7.4.5-amvera-stability]
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,6 +17,11 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
       - run: node --test tests/lc74-server.test.mjs
+      - name: Verify pinned source commit
+        run: |
+          pin=$(node -p "require('./tools/cloud-source.json').sourceCommit")
+          git fetch --depth=1 origin "$pin"
+          test "$(git diff --name-only "$pin" HEAD)" = tools/cloud-source.json
       - run: node tools/build_folder.mjs
       - name: Cloud build without Git metadata
         run: |
@@ -31,6 +36,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LC7.4.4-ai-test-evidence
+          name: LC7.4.5-stability-test-evidence
           path: artifacts
           if-no-files-found: warn

@@ -6,6 +6,8 @@ import {PilotError} from './lc74-store.mjs';
 import {MAX_PACKAGE} from '../src/core/db.js';
 import {MAX_CONTENT} from '../src/modules/library/domain.js';
 import {CENTER_PROXY} from '../src/modules/assistant/cloud.js';
+import {CLOUD_RELEASE,CLOUD_BUILD_VERSION} from '../src/core/cloud-release.js';
+import {cloudIdentity} from '../tools/cloud-identity.mjs';
 const digest=s=>createHash('sha256').update(s).digest();
 export function parsePilotUsers(raw){
  let users;
@@ -45,7 +47,7 @@ async function textBody(req,max){
 }
 function reply(res,status,body,type='application/json; charset=utf-8',csp="default-src 'none'; frame-ancestors 'none'; base-uri 'none'"){
  const b=Buffer.isBuffer(body)?body:Buffer.from(type.startsWith('application/json')?JSON.stringify(body):String(body));
- res.writeHead(status,{'Content-Type':type,'Content-Length':b.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':csp});res.end(b)
+ res.writeHead(status,{'Content-Type':type,'Content-Length':b.length,...(status===429?{'Retry-After':'2'}:{}),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':csp});res.end(b)
 }
 const landing='<!doctype html><html lang="ru"><meta charset="utf-8"><title>Центр TWI — LC7.4.0</title><h1>Центр TWI · серверный тестовый стенд</h1><p>Это экспериментальный API для синтетических данных, не рабочий интерфейс Центра TWI.</p><p>Доступность: <a href="/healthz">healthz</a>. Данные доступны только по токену.</p></html>';
 // Serve only checked public build assets. Never serve data or repository files.
@@ -53,10 +55,11 @@ function cloudCsp(aiEnabled){return "default-src 'self'; script-src 'self' 'unsa
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.webp':'image/webp','.svg':'image/svg+xml'};
 export async function pilotAssets(root){
  const m=JSON.parse(await fs.readFile(path.join(root,'app-manifest.json'),'utf8'));
- if(m.version!=='lc7.4.2-cloud-pilot')throw Error('Expected dedicated cloud build');
+ const identity=cloudIdentity();
+ if(m.version!==CLOUD_BUILD_VERSION||m.release!==CLOUD_RELEASE||m.sourceCommit!==identity.sourceCommit||m.sourceFingerprint!==identity.sourceFingerprint)throw Error('Expected verified dedicated cloud build');
  const files=new Map();
  for(const item of m.files){
-  if(item.path!=='index.html'&&!/^versions\/lc7\.4\.2-cloud-pilot\/[a-zA-Z0-9._/-]+$/.test(item.path))continue;
+  if(item.path!=='index.html'&&!(item.path.startsWith('versions/'+CLOUD_BUILD_VERSION+'/')&&/^[a-zA-Z0-9._/-]+$/.test(item.path)))continue;
   if(item.path.split('/').some(x=>x==='.'||x==='..'||!x))throw Error('Invalid asset path');
   const type=types[path.extname(item.path)];if(!type)continue;
   const file=path.resolve(root,item.path),bytes=await fs.readFile(file);
@@ -65,12 +68,13 @@ export async function pilotAssets(root){
  }
  if(!files.has('/index.html'))throw Error('Missing cloud index');
  files.set('/',files.get('/index.html'));
+ files.identity=Object.freeze({release:CLOUD_RELEASE,...identity});
  return files
 }
 export function createPilotServer({store,users,assets=null,aiEnabled=false}){
  // Explicit owner opt-in; no user-supplied proxy URL or broad host allowance.
  aiEnabled=aiEnabled===true;
- const assetCsp=cloudCsp(aiEnabled);
+ const assetCsp=cloudCsp(aiEnabled),identity=assets?.identity||{release:CLOUD_RELEASE,sourceCommit:null,sourceFingerprint:null};
  let active=0,writes=0;
  const server=http.createServer(async(req,res)=>{
   if(active>=24){reply(res,429,{error:'Сервер занят'});return}
@@ -78,11 +82,11 @@ export function createPilotServer({store,users,assets=null,aiEnabled=false}){
   const reserveWrite=()=>{if(writes>=2)throw new PilotError(429,'Очередь загрузки занята; повторите позже');writes++;reserved=true};
   try{
    const url=new URL(req.url,'http://localhost'),p=url.pathname;
-   if(req.method==='GET'&&p==='/healthz'){reply(res,store.healthy?200:503,{ok:store.healthy,pilot:assets?'LC7.4.2':'LC7.4.0',aiEnabled});return}
+   if(req.method==='GET'&&p==='/healthz'){reply(res,store.healthy?200:503,{ok:store.healthy,pilot:CLOUD_RELEASE,aiEnabled,...identity});return}
    if(req.method==='GET'&&assets?.has(p)){const a=assets.get(p);reply(res,200,await fs.readFile(a.file),a.type,assetCsp);return}
    if(req.method==='GET'&&p==='/'&&!assets){reply(res,200,landing,'text/html; charset=utf-8');return}
    const user=authenticate(req,users);
-   if(req.method==='GET'&&p==='/api/v1/session'){reply(res,200,{user:user.name,role:user.role,pilot:true,aiEnabled});return}
+   if(req.method==='GET'&&p==='/api/v1/session'){reply(res,200,{user:user.name,role:user.role,pilot:true,aiEnabled,...identity});return}
    if(req.method==='GET'&&p==='/api/v1/head'){reply(res,200,store.head());return}
    if(req.method==='GET'&&p==='/api/v1/snapshot'){
     const s=store.snapshot();reply(res,200,{manifest:s.manifest,sqlite_base64:Buffer.from(s.bytes).toString('base64')});return

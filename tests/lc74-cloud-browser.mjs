@@ -50,7 +50,7 @@ const sop={schemaVersion:2,document:{id:'SOP-demo',status:'Draft',number:'DEMO-S
 const raw=JSON.stringify({...sop,integrity:{algorithm:'SHA-256',sha256:createHash('sha256').update(JSON.stringify(sop)).digest('hex')}},null,2);
 try{
  assert.equal((await fetch(url+'/api/v1/snapshot')).status,401);
- assert.equal((await (await fetch(url+'/healthz')).json()).aiEnabled,true);
+ const health=await (await fetch(url+'/healthz')).json();assert.equal(health.aiEnabled,true);assert.equal(health.pilot,'LC7.4.5');assert.match(health.sourceCommit,/^[a-f0-9]{40}$/);assert.match(health.sourceFingerprint,/^[a-f0-9]{64}$/);
  assert.equal((await (await fetch(disabledUrl+'/healthz')).json()).aiEnabled,false);
  const disabledCtx=await browser.newContext();await disabledCtx.route(/^https?:/,r=>mockAiRoute(r,disabledUrl));
  const dp=await disabledCtx.newPage();await dp.goto(disabledUrl);
@@ -59,6 +59,7 @@ try{
  await login(dp,'a');await nav(dp,'Помощник центра');await dp.getByText('Внешний ИИ отключён в настройках испытательного сервера. Локальные рекомендации доступны.').waitFor();
  await disabledCtx.close();
  const a=await profile('a'),b=await profile('b'),v=await profile('viewer');
+ const uiIdentity=await a.p.evaluate(()=>({release:LC_BUILD.cloudRelease,sourceCommit:LC_BUILD.sourceCommit,sourceFingerprint:LC_BUILD.sourceFingerprint}));assert.deepEqual(uiIdentity,{release:health.release,sourceCommit:health.sourceCommit,sourceFingerprint:health.sourceFingerprint});
  assert.equal(mockCalls,0,'Login must not send AI requests');
  assert.deepEqual(await probe(a.p,CENTER_PROXY),{violation:false,rejected:false,data:{mock:true}});
  assert.deepEqual(await probe(a.p,'https://functions.yandexcloud.net/other-function'),{violation:true,rejected:true,data:null});
@@ -66,6 +67,14 @@ try{
  assert.equal(mockCalls,1);assert.equal(unexpectedExternal,0);
  await Promise.all([addPerson(a.p,'CLOUD-A'),addPerson(b.p,'CLOUD-B')]);
  await Promise.all([person(a.p,'CLOUD-B').waitFor({timeout:40000}),person(b.p,'CLOUD-A').waitFor({timeout:40000})]);
+ await synced(a.p);await a.p.getByText('Подтверждено сервером. Все изменения сохранены.',{exact:true}).waitFor();
+ // Actual XLSX import must clear the pending confirmation notice too.
+ await nav(a.p,'Импорт данных');await a.p.locator('[name=import_type]').selectOption('person');
+ const workbook=await a.p.evaluate(async()=>{const w=new ExcelJS.Workbook(),s=w.addWorksheet('Учебные');s.addRow(['employee_code','display_name']);s.addRow(['CLOUD-XLSX','Учебный импорт']);return Array.from(new Uint8Array(await w.xlsx.writeBuffer()))});
+ await a.p.locator('[name=import_file]').setInputFiles({name:'cloud-qa.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(workbook)});
+ await a.p.locator('[name=map_employee_code]').selectOption('1');await a.p.locator('[name=map_display_name]').selectOption('2');
+ await btn(a.p,'Предварительная проверка').click();await btn(a.p,'Импортировать 1 изменений').click();await synced(a.p);await a.p.getByText('Подтверждено сервером. Все изменения сохранены.',{exact:true}).waitFor();
+ assert.equal(await a.p.getByText('Сохранено локально. Ожидается подтверждение сервером.',{exact:true}).count(),0);
  await nav(v.p,'Сотрудники');await person(v.p,'CLOUD-A').waitFor({timeout:40000});await person(v.p,'CLOUD-B').waitFor({timeout:40000});
  await a.ctx.setOffline(true);await addPerson(a.p,'CLOUD-OFFLINE');await state(a.p,/не подтверждён/);
  assert.equal(await person(b.p,'CLOUD-OFFLINE').count(),0);
@@ -126,6 +135,6 @@ try{
  await nav(v.p,'Настройки и обмен');assert.equal(await v.p.getByRole('checkbox',{name:/Режим единственного издателя/}).count(),0);
  assert.deepEqual(errors,[]);
  await fs.mkdir('artifacts/lc74',{recursive:true});await v.p.screenshot({path:'artifacts/lc74/cloud-storage.png',fullPage:true});
- await fs.writeFile('artifacts/lc74/cloud-browser.json',JSON.stringify({profiles:3,concurrentCreates:true,offline:true,conflict:true,exactSource:true,editorRoundTrip:true,realXlsx:true,viewerReadOnly:true,logout:true,aiCsp:{defaultBlocked:true,explicitOptIn:true,mainAllowed:true,srcdocAllowed:true,otherFunctionBlocked:true,otherOriginBlocked:true,mockedRequests:mockCalls,unexpectedExternal}},null,2));
- console.log('LC7.4.2 real HTTP browser sync and editor PASS')
+ await fs.writeFile('artifacts/lc74/cloud-browser.json',JSON.stringify({profiles:3,concurrentCreates:true,offline:true,conflict:true,exactSource:true,editorRoundTrip:true,realXlsx:true,viewerReadOnly:true,logout:true,versionIdentity:uiIdentity,confirmedSaveNotice:true,xlsxConfirmation:true,aiCsp:{defaultBlocked:true,explicitOptIn:true,mainAllowed:true,srcdocAllowed:true,otherFunctionBlocked:true,otherOriginBlocked:true,mockedRequests:mockCalls,unexpectedExternal}},null,2));
+ console.log('LC7.4.5 real HTTP browser sync, version and editor PASS')
 }finally{await browser.close();await Promise.all([new Promise(resolve=>server.close(resolve)),new Promise(resolve=>disabledServer.close(resolve))]);await store.close();await fs.rm(dir,{recursive:true,force:true})}

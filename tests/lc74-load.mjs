@@ -16,7 +16,7 @@ const {SQL}=await pilotSql(),dir=await fs.mkdtemp(path.join(os.tmpdir(),'lc74-lo
 const tokens=Array.from({length:4},()=>randomBytes(32).toString('hex'));
 const userConfig='HEX1'+Buffer.from(JSON.stringify(Object.fromEntries(tokens.map((token,i)=>['u'+i,{token,role:'editor'}]))),'utf8').toString('hex');
 const sock=net.createServer();await new Promise(resolve=>sock.listen(0,'127.0.0.1',resolve));const port=sock.address().port;await new Promise(resolve=>sock.close(resolve));
-const base='http://127.0.0.1:'+port;let child,timer,peakRSS=0,exitPromise,logTail='',retries=0;
+const base='http://127.0.0.1:'+port;let child,timer,peakRSS=0,exitPromise,logTail='',retries=0,networkRetries=0;
 const durations=[];
 async function start(){
  child=spawn(process.execPath,['--max-old-space-size=192','server/main.mjs'],{env:{...process.env,PORT:String(port),LC_PILOT_DEMO:'1',LC_PILOT_AI:'1',LC_PILOT_DATA_DIR:dir,LC_PILOT_USERS:userConfig},stdio:['ignore','pipe','pipe']});
@@ -47,9 +47,8 @@ async function workspace(i){
 async function send(i,pkg){
  const body=canonical(pkg),begin=performance.now();
  for(let n=0;n<30;n++){
-  const r=await req(i,'/api/v1/packages',{method:'POST',headers:{'Content-Type':'application/json'},body});
-  const data=await r.json();
-  if(r.status===429){retries++;await sleep(150+n*40+i*20);continue}
+  let r,data;try{r=await req(i,'/api/v1/packages',{method:'POST',headers:{'Content-Type':'application/json'},body});data=await r.json()}catch(e){networkRetries++;if(child?.exitCode!==null)throw e;await sleep(Math.min(3000,250*2**Math.min(n,4))+i*50);continue}
+  if([429,502,503,504].includes(r.status)){retries++;await sleep(Math.max(Number(r.headers.get('retry-after')||0)*1000,Math.min(3000,250*2**Math.min(n,4)))+i*50);continue}
   assert.equal(r.status,200,JSON.stringify(data));durations.push(performance.now()-begin);return data
  }
  throw Error('Too many queue retries')
@@ -75,7 +74,7 @@ try{
  await stop();await start();
  const after=await (await req(1,'/api/v1/head')).json();assert.deepEqual(after,head);
  const sorted=durations.sort((a,b)=>a-b),pct=p=>Math.round(sorted[Math.min(sorted.length-1,Math.ceil(sorted.length*p)-1)]);
- const evidence={clients:4,employees:1000,updates:20,successfulPackages:24,duplicateRetry:true,backpressureRetries:retries,restartSameSnapshot:true,snapshotBytes:head.size,serverPeakRSSBytes:peakRSS,p50Ms:pct(.5),p95Ms:pct(.95),maxMs:pct(1),node:process.version,limitations:'Linux CI, not Amvera; no 0.25 vCPU or container memory quota simulation'};
+ const evidence={clients:4,employees:1000,updates:20,successfulPackages:24,duplicateRetry:true,backpressureRetries:retries,networkRetries,restartSameSnapshot:true,snapshotBytes:head.size,serverPeakRSSBytes:peakRSS,p50Ms:pct(.5),p95Ms:pct(.95),maxMs:pct(1),node:process.version,limitations:'Linux CI, not Amvera; no 0.25 vCPU or container memory quota simulation'};
  assert(peakRSS>0,'Expected Linux RSS measurement');
  await fs.mkdir('artifacts/lc74',{recursive:true});await fs.writeFile('artifacts/lc74/load.json',JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence));
 }finally{try{await stop()}finally{await fs.rm(dir,{recursive:true,force:true})}}
