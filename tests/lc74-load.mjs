@@ -14,7 +14,7 @@ import {pilotSql} from '../server/lc74-store.mjs';
 import {Workspace,readSnapshot,one,canonical,meta} from '../src/core/db.js';
 const {SQL}=await pilotSql(),dir=await fs.mkdtemp(path.join(os.tmpdir(),'lc74-load-'));
 const tokens=Array.from({length:4},()=>randomBytes(32).toString('hex'));
-const userConfig=JSON.stringify(Object.fromEntries(tokens.map((token,i)=>['u'+i,{token,role:'editor'}])));
+const userConfig='HEX1'+Buffer.from(JSON.stringify(Object.fromEntries(tokens.map((token,i)=>['u'+i,{token,role:'editor'}]))),'utf8').toString('hex');
 const sock=net.createServer();await new Promise(resolve=>sock.listen(0,'127.0.0.1',resolve));const port=sock.address().port;await new Promise(resolve=>sock.close(resolve));
 const base='http://127.0.0.1:'+port;let child,timer,peakRSS=0,exitPromise,logTail='',retries=0;
 const durations=[];

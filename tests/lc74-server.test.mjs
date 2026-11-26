@@ -11,6 +11,16 @@ import {inspectSource} from '../src/modules/library/domain.js';
 const {SQL}=await pilotSql();
 const tokens=Object.fromEntries(['a','b','v'].map(x=>[x,randomBytes(32).toString('hex')]));
 const users=parsePilotUsers(JSON.stringify(Object.fromEntries(Object.entries(tokens).map(([name,token])=>[name,{token,role:name==='v'?'viewer':'editor'}]))));
+const encodeUsers=v=>'HEX1'+Buffer.from(JSON.stringify(v),'utf8').toString('hex');
+test('Amvera alphanumeric secret preserves authentication, roles and legacy JSON; invalid encoding fails closed',()=>{
+ const records=Object.fromEntries(Object.entries(tokens).map(([name,token])=>[name,{token,role:name==='v'?'viewer':'editor'}]));
+ const encoded=encodeUsers(records);
+ assert.match(encoded,/^HEX1[0-9a-f]+$/);
+ assert.deepEqual(parsePilotUsers(encoded),parsePilotUsers(JSON.stringify(records)));
+ for(const bad of ['HEX1','HEX1f','HEX1gg','HEX1ff','HEX1'+'aa'.repeat(16385),encodeUsers(null),encodeUsers([]),encodeUsers({}),encodeUsers({a:{role:'admin',token:tokens.a}}),encodeUsers({a:{role:'editor',token:'abc'}}),encodeUsers({a:records.a,b:records.a}),encodeUsers({'bad name':records.a})]){
+  assert.throws(()=>parsePilotUsers(bad),/LC_PILOT_USERS/)
+ }
+});
 const person=(code,name=code)=>({employee_code:code,display_name:name});
 async function withPilot(t,fn){
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'lc74-'));let store,server,base;

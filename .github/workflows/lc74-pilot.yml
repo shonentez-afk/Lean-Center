@@ -1,7 +1,7 @@
-name: LC7.4.2 cloud pilot regression
+name: LC7.4.2 Amvera secret compatibility regression
 on:
   push:
-    branches: [feature/lc7.4-amvera]
+    branches: [feature/lc7.4-amvera, feature/lc7.4-amvera-secrets]
   workflow_dispatch:
 permissions:
   contents: read
@@ -31,6 +31,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LC7.4.2-test-evidence
+          name: LC7.4.2-secrets-test-evidence
           path: artifacts
           if-no-files-found: warn

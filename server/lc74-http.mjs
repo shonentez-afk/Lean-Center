@@ -8,7 +8,19 @@ import {MAX_CONTENT} from '../src/modules/library/domain.js';
 const digest=s=>createHash('sha256').update(s).digest();
 export function parsePilotUsers(raw){
  let users;
- try{users=JSON.parse(raw||'null')}catch{throw Error('LC_PILOT_USERS: требуется JSON')}
+ // Amvera rejects quotation marks in secret values. Accept a strictly
+ // validated, alphanumeric HEX1 encoding of the same UTF-8 JSON.
+ // This is transport encoding, not encryption; the value remains a secret.
+ try{
+  let json=raw||'null';
+  if(typeof json!=='string')throw Error('format');
+  if(json.startsWith('HEX1')){
+   const encoded=json.slice(4);
+   if(encoded.length>32768||! /^(?:[0-9a-fA-F]{2})+$/.test(encoded))throw Error('format');
+   json=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.from(encoded,'hex'));
+  }
+  users=JSON.parse(json)
+ }catch{throw Error('LC_PILOT_USERS: требуется JSON или HEX1 + hex UTF-8 JSON')}
  if(!users||typeof users!=='object'||Array.isArray(users)||Object.keys(users).length<1||Object.keys(users).length>20)throw Error('LC_PILOT_USERS: требуется 1–20 тестовых учётных записей');
  const keys=new Set();
  return Object.entries(users).map(([name,v])=>{

@@ -8,7 +8,7 @@ import {openPilot} from '../server/lc74-store.mjs';
 import {createPilotServer,parsePilotUsers,pilotAssets} from '../server/lc74-http.mjs';
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'lc74-cloud-'));
 const tokens=Object.fromEntries(['a','b','viewer'].map(x=>[x,randomBytes(32).toString('hex')]));
-const users=parsePilotUsers(JSON.stringify(Object.fromEntries(Object.entries(tokens).map(([n,token])=>[n,{token,role:n==='viewer'?'viewer':'editor'}]))));
+const users=parsePilotUsers('HEX1'+Buffer.from(JSON.stringify(Object.fromEntries(Object.entries(tokens).map(([n,token])=>[n,{token,role:n==='viewer'?'viewer':'editor'}]))),'utf8').toString('hex'));
 const store=await openPilot({dataDir:dir}),assets=await pilotAssets(path.resolve('dist/LeanCenterCloud')),server=createPilotServer({store,users,assets});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const url='http://127.0.0.1:'+server.address().port,browser=await chromium.launch({headless:true}),errors=[];
