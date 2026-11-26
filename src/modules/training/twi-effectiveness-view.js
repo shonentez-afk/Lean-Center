@@ -1,5 +1,6 @@
 // LC6.2 view: source drill-downs, existing navigation, local ExcelJS.
 import {rows,one,invariant,uuid} from '../../core/db.js';
+import {economicEventPayload} from '../../core/business-clock.js';
 import {twiOverview,twiComparison,trainingFacts,twiDetailRows} from './twi-effectiveness.js';
 import {twiBasis,twiBasisCurrent,twiEffectsFor,effectRows,effectStatus} from '../effect/domain.js';
 const fmt=x=>x==null?'—':Number(x).toLocaleString('ru-RU',{maximumFractionDigits:2});
@@ -66,7 +67,7 @@ export function twiAnalyticsView(c,h,route){
     if(!v.comparable){result.append(msg('Нет полного сопоставимого покрытия обеих групп. Экономический расчёт недоступен.','warn'));return}
     result.append(msg('Разница среднего времени: '+fmt(v.deltaMinutes)+' мин на назначение / программу. Для денежной оценки нужны ставка, годовой объём, доля реализации и подтверждение.'));
     const available=effectRows(db).filter(r=>r.state==='active'&&r.action_id&&r.method==='time'&&r.unit_id===v.unit_id),target=select('lc62_effect',available.map(r=>[r.id,r.title]),route.effectId||'','Выберите карточку ROI'),actor=person('lc62_basis_actor','Кто зарегистрировал сравнение'),basis=note('lc62_basis_note','','Почему группы сопоставимы и как связаны с мероприятием');
-    result.append(f('Карточка эффекта по мероприятию',target),actor.element,f('Основание сопоставимости и связи с мероприятием',basis),action('Зафиксировать сравнение TWI в ROI',()=>{const r=available.find(x=>x.id===target.value);if(!r){result.append(msg('Выберите карточку ROI с методом времени.','warn'));return}run(async()=>{invariant(JSON.stringify(input())===JSON.stringify(p),'Параметры изменились; повторите сравнение');const b=twiComparison(db,p,day);await ws.applyContentEvents([{id:uuid(),entity_type:'economic_effect',entity_id:r.id,operation:'update',expected_revision:r.rev,payload:{command:'twi_basis',scope:p,comparison:b,actor_id:actor.value,note:basis.value},occurred_at:new Date().toISOString()}]);go('roi',{id:r.id});return 'Сравнение TWI сохранено'},{retainForm:true})}),btn('Создать карточку эффекта',()=>go('roi',{mode:'new'})));
+    result.append(f('Карточка эффекта по мероприятию',target),actor.element,f('Основание сопоставимости и связи с мероприятием',basis),action('Зафиксировать сравнение TWI в ROI',()=>{const r=available.find(x=>x.id===target.value);if(!r){result.append(msg('Выберите карточку ROI с методом времени.','warn'));return}run(async()=>{invariant(JSON.stringify(input())===JSON.stringify(p),'Параметры изменились; повторите сравнение');const b=twiComparison(db,p,day),instant=new Date();await ws.applyContentEvents([{id:uuid(),entity_type:'economic_effect',entity_id:r.id,operation:'update',expected_revision:r.rev,payload:economicEventPayload('economic_effect',{command:'twi_basis',scope:p,comparison:b,actor_id:actor.value,note:basis.value},instant),occurred_at:instant.toISOString()}]);go('roi',{id:r.id});return 'Сравнение TWI сохранено'},{retainForm:true})}),btn('Создать карточку эффекта',()=>go('roi',{mode:'new'})));
    }catch(e){result.append(msg(e.message,'warn'))}
   }),result)
  }

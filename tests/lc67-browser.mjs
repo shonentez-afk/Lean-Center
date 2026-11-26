@@ -58,7 +58,8 @@ try{
  // The core fixture has canonical training and practical/qualification evidence, but no preparation outcomes.
  // Register every result through the preparation card, then close all three documents.
  if(['all','commission'].includes(scenario)){await restore(preparedFile);await nav('Подготовка сотрудников');await button('Открыть').click();await page.getByRole('heading',{name:'Программа подготовки · Ученик Тестовый',exact:true}).waitFor();
- for(const d of [date,'2026-01-21']){await openDetails('Зарегистрировать / уточнить смену');await input('prep_fact_shift_date',d);await select('prep_fact_shift_id',prepared.shift);await input('prep_fact_shift_minutes',480);await input('prep_fact_shift_note','QA смена');await saved('Сохранить факт смены')}
+ await openDetails('Зарегистрировать / уточнить смену');await input('prep_fact_shift_date',date);await select('prep_fact_shift_id',prepared.shift);await select('prep_fact_shift_result','incomplete');await input('prep_fact_shift_minutes',10);await input('prep_fact_shift_note','QA неполная смена');await saved('Сохранить факт смены');
+ for(const d of [date,'2026-01-21']){await openDetails('Зарегистрировать / уточнить смену');await input('prep_fact_shift_date',d);await select('prep_fact_shift_id',prepared.shift);await select('prep_fact_shift_result','completed');await input('prep_fact_shift_minutes',480);await input('prep_fact_shift_note','QA смена');await saved('Сохранить факт смены')}
  await page.getByText(/Завершено смен: 2 \/ минимум 2/).waitFor();
  for(const [kind,label] of [['safety','Зарегистрировать протокол ОТ'],['internship','Зарегистрировать итог стажировки']]){
   const d=page.locator('main details').filter({has:page.locator('[name="prep_'+kind+'_date"]')});assert.equal(await d.count(),1);if(!await d.evaluate(x=>x.open))await d.locator('summary').click();await input('prep_'+kind+'_date','2026-01-21');await input('prep_'+kind+'_reference','QA протокол '+kind);await input('prep_'+kind+'_feedback','QA обратная связь');await saved(label)
@@ -69,6 +70,8 @@ try{
  for(const i of [1,2,0]){
   await button('Открыть документ').nth(i).click();await openDetails('Итог программы');await choose('Ответственный за итог','LC4-003');await select('enroll_conclusion','basic');await input('enroll_feedback','QA итог');await saved('Завершить программу');await button('Открыть три документа').click()
  }
- await page.getByText(/Комплект завершён/).first().waitFor();await page.screenshot({path:'artifacts/lc67/preparation-completed.png',fullPage:true});console.log('LC6.7 preparation browser PASS: shifts, OT, internship, question issue, commission, three document closures')}
+ await page.getByText(/Комплект завершён/).first().waitFor();
+ for(const id of [2,4]){const download=page.waitForEvent('download');await button('Приложение '+id+' XLSX').click();const out=path.join(tmp,'filled-'+id+'.xlsx');await (await download).saveAs(out);const text=await page.evaluate(async bytes=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(bytes));const s=w.getWorksheet('Результаты и основания');return s.getRows(1,s.rowCount).map(r=>r.getCell(4).text).join('\n')},Array.from(await fs.readFile(out)));assert.match(text,/Завершена/);assert.match(text,/Не завершена/);assert.doesNotMatch(text,/\b(completed|incomplete)\b/)}
+ await page.screenshot({path:'artifacts/lc67/preparation-completed.png',fullPage:true});console.log('LC6.7 preparation browser PASS: shifts, OT, internship, question issue, commission, three document closures')}
  assert.deepEqual(errors,[])
 }catch(e){console.error('LC6.7 browser failure',e,await page?.locator('#status').textContent().catch(()=>''));await fs.mkdir('artifacts/lc67',{recursive:true});await page?.screenshot({path:'artifacts/lc67/failure-'+scenario+'.png',fullPage:true}).catch(()=>{});throw e}finally{await browser.close();await fs.rm(tmp,{recursive:true,force:true})}

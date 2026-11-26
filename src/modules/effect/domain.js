@@ -1,5 +1,6 @@
 import {twiComparison} from '../training/twi-effectiveness.js';
 import {calculateEffect} from './math.js';
+import {economicEventDay,economicCommand} from '../../core/business-clock.js';
 export {calculateEffect} from './math.js';
 // LC6: calculations, event guards, current evidence and period facts.
 import {invariant,one,rows,canonical} from '../../core/db.js';
@@ -10,7 +11,7 @@ export const isLC6Event=e=>['economic_effect','economic_fact'].includes(e.entity
 const exact=(p,keys)=>invariant(p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).length===keys.length&&keys.every(k=>Object.hasOwn(p,k)),'Некорректные поля LC6');
 const text=(x,max=2000)=>typeof x==='string'&&x.trim().length>0&&x.length<=max;
 const bounded=(x,min,max)=>typeof x==='number'&&Number.isFinite(x)&&x>=min&&x<=max;
-const day=e=>e.occurred_at.slice(0,10);
+const day=e=>economicEventDay(e);
 const date=x=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x))&&new Date(x).toISOString().slice(0,10)===x;
 const person=(db,id)=>invariant(one(db,'SELECT id FROM person WHERE id=? AND archived=0',[id]),'Выберите действующего сотрудника');
 const due=(e,d)=>invariant(date(d)&&d>=day(e),'Укажите контрольный срок не раньше даты записи');
@@ -86,7 +87,7 @@ export function periodTargets(db,r,asOf,actions=actionRows(db)){
   const reviews=events.filter(e=>e.p?.command==='period_review'&&e.p.target_id===t.id),review=reviews.at(-1)||null;
   const currentReview=complete&&review?.p.signature===signature&&review?.p.actual_minor===actual;
   const delta=complete?actual-p.target_minor:null,shortfall=delta!==null&&delta<0;
-  return {id:t.id,record:r,from:p.from,to:p.to,target:p.target_minor,basis:p.basis,actor_id:p.actor_id,created_at:t.occurred_at,late:t.occurred_at.slice(0,10)>p.from,cancel,closed,complete,actual,delta,signature,factCount:available.length,review,currentReview:!!currentReview,shortfall,status:cancel?'Отменена':r.state!=='active'?'Карточка отменена':!closed?'Период открыт':!complete?'Неполное покрытие фактами':shortfall&&!currentReview?'Требуется разбор отклонения':shortfall?'Отклонение разобрано':'Цель достигнута'}
+  return {id:t.id,record:r,from:p.from,to:p.to,target:p.target_minor,basis:p.basis,actor_id:p.actor_id,created_at:t.occurred_at,late:day(t)>p.from,cancel,closed,complete,actual,delta,signature,factCount:available.length,review,currentReview:!!currentReview,shortfall,status:cancel?'Отменена':r.state!=='active'?'Карточка отменена':!closed?'Период открыт':!complete?'Неполное покрытие фактами':shortfall&&!currentReview?'Требуется разбор отклонения':shortfall?'Отклонение разобрано':'Цель достигнута'}
  })
 }
 export function periodTargetsFor(db,effects,asOf,actions=actionRows(db)){
@@ -94,7 +95,7 @@ export function periodTargetsFor(db,effects,asOf,actions=actionRows(db)){
 }
 export const targetNeedsAttention=t=>t.record.state==='active'&&!t.cancel&&(!t.closed||!t.complete||t.shortfall&&!t.currentReview);
 function applyPeriodCommand(db,e,r){
- const p=e.payload,ts=periodTargets(db,r,day(e)),t=ts.find(x=>x.id===p.target_id);
+ const p=economicCommand(e.payload),ts=periodTargets(db,r,day(e)),t=ts.find(x=>x.id===p.target_id);
  if(p.command==='period_target'){
   exact(p,['command','from','to','target_minor','basis','actor_id']);
   person(db,p.actor_id);invariant(date(p.from)&&date(p.to)&&p.from<=p.to&&p.to>=day(e),'Укажите период цели, который ещё не завершён');
@@ -116,7 +117,8 @@ function applyPeriodCommand(db,e,r){
  db.run('UPDATE economic_effect SET rev=rev+1 WHERE id=?',[r.id])
 }
 export function applyEconomicEvent(db,e,old){
- const p=e.payload,id=e.entity_id,t=e.entity_type;
+ day(e); // validate the persisted offset, even for commands without date guards
+ const p=economicCommand(e.payload),id=e.entity_id,t=e.entity_type;
  if(t==='economic_effect'){
   if(!old){
    exact(p,['command','study_id','action_id','owner_id','unit_id','currency','method','title','plan','plan_basis','review_due']);

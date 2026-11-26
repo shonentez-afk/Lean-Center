@@ -178,3 +178,16 @@ test('TWI 03 annual audit coverage is based on certified instructor and distinct
  assert.equal(get('2026','2026-01-20').duplicates.length,1);
  const third=(await f.stage(id,jiStages('classic')[2].code,{held_at:'2026-01-23T08:00'})).entity_id;await f.save('audit_session',{...p,assignment_rev:f.getAssignment(id).rev,session_id:third,observed_on:'2026-01-23'});assert.equal(get().audits.length,2);assert.equal(get().remaining,1);
  f.advanceTo('2027-01-02');await f.save('audit_session',{...p,assignment_rev:f.getAssignment(id).rev,observed_on:'2027-01-02'});assert.equal(get('2027','2027-01-02').audits.length,0);assert.equal(get('2026','2027-01-02').audits.length,2);assert.equal(get('2026','2027-01-02').status,'Не выполнено за год');assert.equal(rows(db,"SELECT id FROM audit_session WHERE state='final'").length,6)}finally{f.w.close()}});
+
+test('LC6.7.2 latest full corporate audit orders equal dates by recorded time, not UUID; partial and void excluded',async()=>{
+ const {AUDIT_V03}=await import('../src/modules/training/standard-v03.js'),{auditRegistry}=await import('../src/modules/training/audit-analytics.js');
+ const f=await fixture();try{const db=f.w.working,role=f.w.edit('business_role',null,{code:'INTERNAL_TRAINER',name:'Внутренний тренер'});f.w.edit('role_assignment',null,{person_id:f.actor,role_id:role,valid_from:'2020-01-01',valid_to:null});
+ const id=await f.addAssignment();await f.approve(id);const session=(await f.stage(id,'prepare')).entity_id,method=(await f.save('checklist_version',AUDIT_V03)).entity_id,qs=rows(db,'SELECT id FROM checklist_criterion WHERE version_id=? ORDER BY position',[method]);
+ assert.equal(qs.length,17);
+ const save=async(n,h,prefix,partial=false)=>{const eid=prefix+'0000000-0000-4000-8000-00000000000'+h;await f.w.applyContentEvents([{id:uuid(),entity_type:'audit_session',entity_id:eid,operation:'create',expected_revision:0,occurred_at:date+'T'+String(h+10).padStart(2,'0')+':00:00.000Z',payload:{assignment_id:id,assignment_rev:f.getAssignment(id).rev,method_id:method,auditor_id:f.actor,session_id:session,observed_on:date,responses:qs.map((q,i)=>({criterion_id:q.id,value:partial&&i===16?'not_observed':i<n?1:0,note:partial&&i===16?'QA не наблюдалось':''})),feedback:'QA'}}],f.readContent);return eid};
+ const latest=()=>auditRegistry(db).filter(a=>a.mentor_id===f.mentor&&a.method_code==='TWI_L1_APP13'&&a.state==='final'&&a.observed===17&&a.expected===17)[0];
+ await save(14,1,'0');assert.equal(latest().passed,14);const lower=await save(13,2,'f');assert.equal(latest().id,lower);assert.equal(latest().passed,13);
+ const higher=await save(14,3,'0');assert.equal(latest().id,higher);await save(16,4,'f',true);assert.equal(latest().id,higher);
+ f.advanceTo('2026-01-21');await f.save('audit_session',{command:'void',reason:'QA отменено'},higher);assert.equal(latest().id,lower);assert.equal(latest().passed,13)
+ }finally{f.w.close()}
+});

@@ -1,4 +1,5 @@
 import {twiOverview} from './modules/training/twi-effectiveness.js';
+import {businessDay} from './core/business-clock.js';
 import {twiPerformancePane} from './modules/training/twi-effectiveness-view.js';
 import {twiEffectsFor} from './modules/effect/domain.js';
 import {effectOverview,effectForSource} from './modules/effect/domain.js';
@@ -29,6 +30,7 @@ import {configureMigrations,recordPayload,createDb,openDb,Workspace,definitions,
 import * as local from './storage/local.js';
 import * as net from './storage/network.js';
 const root=document.getElementById('app');
+let registryConflict=null;
 let SQL,ws,cache,folder,generation=0,busy=false,master=false,page='home',theme=false,status='Готово',error=false,chart=null,edit=null,query='',incoming=[],importState=null,historyPerson=null,archiveFilter='active',libraryDraft=null,editorSession=null,libraryFilter='all';
 const contentStore=new ContentStore(()=>cache,()=>folder),readContent=ref=>contentStore.get(ref);
 const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
@@ -80,6 +82,7 @@ function restoreNavigation(id,parent){
 function navigationBack(){if(busy||navParent===null)return;if(navSupported){history.back();return}restoreNavigation(navParent,navSnapshots.get(navParent)?.parent??null)}
 window.addEventListener('popstate',e=>{if(e.state?.lcNav&&navSnapshots.has(e.state.lcNav)){if(!restoreNavigation(e.state.lcNav,e.state.parent??null)&&navSupported)history.forward()}});
 function navigate(p,{retainEmployee=false}={}){
+ registryConflict=null;
  if(busy)return;
  if(editorSession&&!editorSession.host.hidden)hideEditor(editorSession);
  rememberNavigation();
@@ -93,7 +96,7 @@ function replace(newWs){ws?.close();ws=newWs}
 function formControls(){return [...document.querySelectorAll('main input[name]:not([type=file]),main select[name],main textarea[name],main button.lc-directory-trigger[name]')]}
 function captureRejectedForm(){
  const fields=formControls(),details=[...document.querySelectorAll('main details')];
- return {page,route:getTrainingRoute(),scroll:window.scrollY,fields:fields.map(e=>({name:e.name,tag:e.tagName,type:e.type,person:typeof e.lcRestorePerson==='function',value:e.dataset.personId??e.value,checked:e.checked})),details:details.map(e=>({label:e.querySelector('summary')?.textContent||'',open:e.open}))}
+ return {page,edit:edit===null?null:structuredClone(edit),route:getTrainingRoute(),scroll:window.scrollY,fields:fields.map(e=>({name:e.name,tag:e.tagName,type:e.type,person:typeof e.lcRestorePerson==='function',value:e.dataset.personId??e.value,checked:e.checked})),details:details.map(e=>({label:e.querySelector('summary')?.textContent||'',open:e.open}))}
 }
 function restoreRejectedForm(s){
  if(!s||s.page!==page)return;
@@ -108,13 +111,13 @@ function restoreRejectedForm(s){
  const details=[...document.querySelectorAll('main details')];s.details.forEach((v,i)=>{const e=details[i];if(e&&(e.querySelector('summary')?.textContent||'')===v.label)e.open=v.open});
  requestAnimationFrame(()=>window.scrollTo(0,s.scroll||0));
 }
-async function run(fn,{save=true,retainForm=false}={}){if(busy)return;const prev=ws.state(),form=retainForm?captureRejectedForm():null;let failure=null;busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));failure=e.message;if(form&&page===form.page)setTrainingRoute(page,form.route);message(e.message,true)}finally{busy=false;render();if(failure&&form){restoreRejectedForm(form);message(failure,true)}}}
+async function run(fn,{save=true,retainForm=false}={}){if(busy)return;const prev=ws.state(),form=retainForm?captureRejectedForm():null;let failure=null;busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);message('Выполняется…');try{const m=await fn();if(save)await persist();message(m||'Готово')}catch(e){console.error(e);replace(new Workspace(SQL,openDb(SQL,prev.base),prev));failure=e.message;if(form&&page===form.page){edit=form.edit;setTrainingRoute(page,form.route);if(form.edit!==null&&e.code==='WORKSPACE_GENERATION_CONFLICT'){registryConflict={type:page,id:form.edit.id||null};failure='Другая вкладка изменила рабочую копию. Черновик сохранён в форме; загрузите актуальные данные и сверьте изменения.'}}message(e.message,true)}finally{busy=false;render();if(failure&&form){restoreRejectedForm(form);message(failure,true)}}}
 function download(name,body){const url=URL.createObjectURL(new Blob([canonical(body)],{type:'application/json'}));const a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function pick(accept,fn,max=150*1024*1024){const i=el('input');i.type='file';i.accept=accept;i.onchange=()=>{const f=i.files?.[0];if(f)run(async()=>{invariant(f.size<=max,'Файл слишком большой');return await fn(JSON.parse(await f.text()))})};i.click()}
 const empty=()=>!ws.pending.length&&!ws.dirty&&!meta(ws.base,'publication_id')&&Object.keys(definitions).every(t=>list(ws.base,t).length===0)&&!one(ws.base,'SELECT id FROM document LIMIT 1')&&!one(ws.base,'SELECT id FROM frv_study LIMIT 1');
 function refName(type,id){if(!id)return '—';const v=one(ws.working,'SELECT * FROM '+type+' WHERE id=?',[id]);return v?.display_name||v?.name||id}
 function refOption(type,v){return (v.employee_code||v.code? (v.employee_code||v.code)+' — ':'')+(v.display_name||v.name||v.id)+(v.unit_id?' · '+refName('org_unit',v.unit_id):'')+(v.archived?' (архив)':'')}
-const today=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-')};
+const today=()=>businessDay();
 function activeRecord(d,v){return !v.archived&&(!d.history||(v.valid_from<=today()&&(!v.valid_to||v.valid_to>=today())))}
 function showVal(k,f,v){if(f.ref)return k==='shift_id'&&!v[k]&&v.shift_code?v.shift_code+' (LC1)':refName(f.ref,v[k]);if(k==='criticality')return ({normal:'Обычная',important:'Важная',critical:'Критическая'})[v[k]]||v[k];return v[k]??'—'}
 
@@ -200,10 +203,36 @@ function form(type,v){
   grid.append(add(el('label',undefined,'field'),el('span',x.label),input));
  }
  const submit=el('button','Сохранить','primary');submit.type='submit';submit.disabled=busy;
- f.onsubmit=e=>{e.preventDefault();const payload=Object.fromEntries(Object.entries(controls).map(([k,n])=>[k,n.value||null]));run(async()=>{ws.edit(type,v?.id||null,payload);edit=null;return 'Запись сохранена локально. Изменение ожидает публикации.'})};
+ const values=()=>Object.fromEntries(Object.entries(controls).map(([k,n])=>[k,n.value||null]));
+ f.onsubmit=e=>{e.preventDefault();const payload=values();run(async()=>{ws.edit(type,v?.id||null,payload);edit=null;return 'Запись сохранена локально. Изменение ожидает публикации.'},{retainForm:true})};
+ if(registryConflict?.type===type&&registryConflict.id===(v?.id||null)){
+  const draft=()=>({entity_type:type,entity_id:v?.id||null,base_revision:v?.rev||0,payload:values()});
+  const refresh=async()=>{
+   if(busy)return;const payload=values(),before=ws;
+   try{
+    invariant(cache,'Локальное хранилище недоступно');const saved=await local.load(cache,'workspace');
+    invariant(saved?.state,'Актуальная рабочая копия отсутствует');
+    const candidate=new Workspace(SQL,openDb(SQL,saved.state.base),saved.state);
+    try{
+     invariant(meta(candidate.base,'database_id')===meta(before.base,'database_id'),'В другой вкладке открыта другая база. Скачайте черновик и не переносите его автоматически.');
+     invariant(!candidate.conflicts.length,'В актуальной копии есть конфликты обмена. Скачайте черновик и разрешите их сначала.');
+     const latest=v?.id?one(candidate.working,'SELECT * FROM '+type+' WHERE id=?',[v.id]):null;
+     invariant(!v?.id||latest&&!latest.archived,'Запись удалена или архивирована. Скачайте черновик.');
+     invariant(!v?.id||!d.history||!latest.valid_to,'Назначение уже закрыто. Скачайте черновик; историю нельзя перезаписывать.');
+     const changed=Object.keys(controls).filter(k=>!v?.id||String(payload[k]??'')!==String(v[k]??''));
+     const overlapping=changed.filter(k=>v?.id&&String(latest[k]??'')!==String(v[k]??'')&&String(latest[k]??'')!==String(payload[k]??''));
+     const conflicts=overlapping.map(k=>d.fields[k].label+': актуально «'+String(latest[k]??'')+'», черновик «'+String(payload[k]??'')+'»');
+     replace(candidate);generation=saved.generation;registryConflict=null;edit=latest||v;render();
+     for(const field of formControls())if(changed.includes(field.name)&&(!field.options||[...field.options].some(o=>o.value===(payload[field.name]??''))))field.value=payload[field.name]??'';
+     message('Актуальная копия загружена. Изменения черновика восстановлены, запись НЕ сохранена. '+(conflicts.length?'Сверьте конфликтующие поля: '+conflicts.join('; ')+'. ':'')+'Проверьте форму и нажмите «Сохранить».',true)
+    }catch(e){if(ws!==candidate)candidate.close();throw e}
+   }catch(e){message(e.message,true)}
+  };
+  f.append(el('p','Конфликт вкладок: введённые значения сохранены. Скачайте черновик или загрузите актуальную копию для сверки. Ничего не перезаписывается автоматически.','warn'),add(el('div',undefined,'row'),btn('Скачать черновик',()=>download('LeanCenter-черновик-'+type+'.json',draft())),btn('Загрузить актуальную копию и сверить',refresh,'primary')))
+ }
  if(d.history&&v?.id)f.append(el('p','История неизменяема: можно только закрыть открытое назначение датой окончания. Для перевода создайте новое назначение после закрытия.','muted'));
  if(type==='rating_scale')f.append(el('p','После сохранения шкала неизменяема. Для новой методики создайте следующую версию. Уровни задаются пользователем; корпоративские пороги не предустановлены.','muted'));
- return add(f,grid,add(el('div',undefined,'row'),submit,btn('Отмена',()=>{edit=null;render()})))
+ return add(f,grid,add(el('div',undefined,'row'),submit,btn('Отмена',()=>{registryConflict=null;edit=null;render()})))
 }
 function orgTree(panel,items){
  const box=el('div',undefined,'org-tree'),children=new Map();

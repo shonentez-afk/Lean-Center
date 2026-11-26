@@ -1,4 +1,5 @@
 import {jiMethodLabel,validateJi2} from './ji-v03.js';
+import {economicEventPayload} from '../../core/business-clock.js';
 import {PROGRAM_DOCS,preparationRows,preparationState} from './standard-workflows.js';
 import {preparationControl,preparationStats,prepLabels,standardCalendar} from './standard-overview.js';
 import {finalBlankWorkbook,CERTIFICATE_TEXT} from './standard-final-prints.js';
@@ -76,7 +77,7 @@ export function trainingScreen(main,page,c){
   function refresh(){button.textContent=(id?n('person',id):'Выбрать сотрудника')+' ▾';button.dataset.personId=id||''}button.lcRestorePerson=v=>{if(v===id)return;id=v;refresh();onChange(id)};
   refresh();return {get value(){return id},element:add(el('div',undefined,'field'),el('span',label),button),button,set(v){id=v;refresh()}}
  }
- function event(type,payload,old=null){return {id:uuid(),entity_type:type,entity_id:old?.id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload,occurred_at:new Date().toISOString()}}
+ function event(type,payload,old=null){const instant=new Date();return {id:uuid(),entity_type:type,entity_id:old?.id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload:economicEventPayload(type,payload,instant),occurred_at:instant.toISOString()}}
  async function write(type,payload,old=null){const e=event(type,payload,old);await ws.applyContentEvents([e],readContent);return e.entity_id}
  function save(label,type,payload,old=null,done=()=>{},disabled=false){
   return action(label,()=>run(async()=>{const id=await write(type,typeof payload==='function'?payload():payload,old);done(id);return 'Запись сохранена. Ожидает публикации базы.'},{retainForm:['training_enrollment','action_item','economic_effect','economic_fact','twi_preparation','twi_knowledge_bank','twi_supplement'].includes(type)}),'primary',disabled)

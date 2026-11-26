@@ -8,7 +8,7 @@ export const PREPARATION_FACT_TYPES=Object.freeze({twi_preparation_fact:'Фак�
 export const isLC65Event=e=>e.entity_type==='twi_preparation_fact'||(e.entity_type==='training_assignment'&&e.payload?.method_version==='JI-2');
 export const THEORY_BLOCKS=['technology','quality','equipment','lean'];
 export const COMMISSION_ROLES={manager:'Непосредственный руководитель',mentor:'Наставник',trainer:'Внутренний тренер',agent:'Агент перемен',hr:'Сотрудник отдела персонала'};
-export const RESULT_LABELS={pass:'Пройдено',fail:'Не пройдено',not_meet:'Не соответствует',basic:'Соответствует базовому уровню ЗУН',exceeds:'Превосходит базовый уровень ЗУН'};
+export const RESULT_LABELS={completed:'Завершена',incomplete:'Не завершена',pass:'Пройдено',fail:'Не пройдено',not_meet:'Не соответствует',basic:'Соответствует базовому уровню ЗУН',exceeds:'Превосходит базовый уровень ЗУН'};
 const parse=s=>JSON.parse(s);
 const dateOf=d=>String(d||'').slice(0,10);
 const required=(s,n=4000)=>typeof s==='string'&&s.trim().length>0&&s.length<=n;

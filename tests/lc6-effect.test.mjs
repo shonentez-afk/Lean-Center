@@ -169,3 +169,18 @@ test('LC6.7.1 repeat-practice details use the same predicate as the KPI',async()
  await f.assess(id);x=get();assert.equal(x.stats.repeat,1);assert.deepEqual(twiDetailRows(x.cohort,'repeat').map(a=>a.id),[id]);assert.equal(x.stats.recovered,1)
  }finally{f.w.close()}
 });
+
+test('LC6.7.2 ROI local midnight, stored offset and deterministic replay; old events remain UTC',async()=>{
+ const {businessDay,economicEventDay}=await import('../src/core/business-clock.js');
+ const before=new Date('2026-10-31T16:59:00Z'),after=new Date('2026-10-31T17:30:00Z'),utcAfter=new Date('2026-11-01T00:01:00Z');
+ assert.equal(businessDay(before,420),'2026-10-31');assert.equal(businessDay(after,420),'2026-11-01');assert.equal(businessDay(utcAfter,420),'2026-11-01');assert.equal(economicEventDay({occurred_at:after.toISOString(),payload:{}}),'2026-10-31');assert.throws(()=>economicEventDay({occurred_at:after.toISOString(),payload:{business_offset_minutes:999}}),/Некорректное время/);
+ const f=await fixture();let reopened;try{const db=f.w.working,a=await task(f);await verifyTask(f,a);const id=(await f.save('economic_effect',plan(f,null,a))).entity_id,r=()=>one(db,'SELECT * FROM economic_effect WHERE id=?',[id]);await f.save('economic_effect',{command:'measure',inputs:directPlan,measurement:null,source:null,actions:effectEvidence(db,r()),reviewer_id:f.actor,evidence:'QA проверка'},id);
+ const event=async(type,p,when,entity=null)=>{const old=entity?one(db,'SELECT * FROM '+type+' WHERE id=?',[entity]):null;const e={id:uuid(),entity_type:type,entity_id:entity||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload:{...p,business_offset_minutes:420},occurred_at:when.toISOString()};await f.w.applyContentEvents([e],f.readContent);return e};
+ const goal={command:'period_target',from:'2026-10-31',to:'2026-10-31',target_minor:100,basis:'QA',actor_id:f.mentor};
+ await assert.rejects(event('economic_effect',goal,after,id),/ещё не завершён/);
+ const target=(await event('economic_effect',{...goal,from:'2026-10-31',to:'2026-11-01'},after,id)).id;assert.equal(periodTargets(db,r(),'2026-11-01').find(t=>t.id===target).late,true);
+ const input={command:'create',effect_id:id,actual_event_id:r().actual_event_id,registered_by:f.mentor,evidence:'QA документ',gross_minor:100,recurring_minor:0,investment_minor:0,period_from:'2026-11-01',period_to:'2026-11-01'};
+ await assert.rejects(event('economic_fact',input,before),/завершённый период/);const fact=(await event('economic_fact',input,after)).entity_id;await event('economic_fact',{command:'confirm',verifier_id:f.actor,note:'QA'},utcAfter,fact);
+ assert.equal(effectOverview(db,{day:'2026-11-01',from:'2026-11-01'}).currencies[0].net,100);reopened=await restore(SQL,await backup(f.w),f.readContent);assert.equal(effectOverview(reopened.working,{day:'2026-11-01',from:'2026-11-01'}).currencies[0].net,100);assert.equal(periodTargets(reopened.working,one(reopened.working,'SELECT * FROM economic_effect WHERE id=?',[id]),'2026-11-01')[0].late,true)
+ }finally{reopened?.close();f.w.close()}
+});
