@@ -139,6 +139,7 @@ export function analyzeContext(db,day,ctx){
  }else if(ctx.kind==='analytics'){
   if(ctx.report){out.title=ctx.report.title;out.scope=ctx.report.scope;out.facts=ctx.report.facts;out.notices.push(...ctx.report.notices);notice('Локальный срез отображённого отчёта. Числовые факты не отправляются в облако.');check('ctx_metric_review',out.facts.length,'Проверьте определения и основания выбранного отчёта.',[]);return out}
   if(ctx.page==='home'){out.available=false;notice('Нет корректного отображённого среза. Уточните фильтры дашборда.');return out}
+  if(ctx.page==='analytics'&&r.assessmentType&&r.assessmentType!=='audit'&&!ctx.report){out.available=false;notice('Нет подтверждённого отображённого среза этого отчёта. Уточните фильтры и наличие фактов.');return out}
   const from=r.from||'',to=r.to||day;if(from&&!validDate(from)||!validDate(to)||from&&from>to){notice('Некорректный период анализа.');return out}
   const scope={day,from,to,unitId:r.unitId||'',personId:r.personId||''};
   out.scope='Период '+(from||'с начала данных')+' — '+to+'; '+(scope.unitId?text(db,'org_unit',scope.unitId):'все подразделения')+'; '+(scope.personId?text(db,'person',scope.personId):'все сотрудники');

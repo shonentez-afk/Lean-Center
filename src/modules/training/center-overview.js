@@ -81,35 +81,38 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
  count('Экономика','Цели эффекта требуют внимания',economic.targetAttention.length,'Текущие открытые, неполные или требующие разбора цели.','roi',{...f,filter:'targets'}),
  count('Экономика','Неразобранные отклонения',economic.allTargets.filter(t=>t.shortfall&&!t.currentReview).length,'Текущие цели с полным фактом ниже плана без актуального разбора.','roi',{...f,filter:'deviations'})
  ];
- const scope={day,from,to,unitId,personId};
+ const slice={day,from,to,unitId,personId};
  const row=(x,page,options,extra={})=>({key:x.id,unitId:x.unit_id||'',personId:'',date:'',label:x.title||'',included:true,page,options,...extra});
  if(withEvidence){
   const prepRecord=(x,included=true)=>row(x,'preparation',{id:x.id},{unitId:x.unitId,personId:x.personId,date:x.start,state:x.status,included,label:x.name});
-  const assignment=(x,included=true)=>row(x,'twi',{id:x.id},{personId:x.trainee_id,date:x.assigned_on,state:x.state,included});
-  const ar=x=>row(x,'audit',{auditId:x.id},{personId:x.mentor_id,date:x.observed_at,method:x.version_id,state:x.state});
-  const pr=(x,included=true)=>row(x,'practical',{assessmentId:x.id},{personId:x.person_id,date:x.date,method:x.method_id,state:x.conclusion,included});
+  const assignment=(x,included=true)=>row(x,'twi',{id:x.id},{personId:x.trainee_id,operationId:x.operation_id,date:x.assigned_on,state:x.state,included,label:x.title||'Назначение обучения'});
+  const ar=x=>row(x,'audit',{auditId:x.id},{personId:x.mentor_id,operationId:x.operation_id,date:x.observed_at,method:x.version_id,state:x.state,label:x.sop_title||'Аудит L1'});
+  const pr=(x,included=true)=>row(x,'practical',{assessmentId:x.id},{personId:x.person_id,operationId:x.operation_id,date:x.date,method:x.method_id,state:x.conclusion,included});
   const sr=x=>row(x,'self_eval',{id:x.id},{personId:x.person_id,date:x.date,method:x.method_id});
   const act=(x,included=true)=>row(x,'actions',{id:x.id},{unitId:personUnit(db,x.owner_id,day),personId:x.owner_id,date:x.implemented_at||x.due_on,state:x.status,included});
-  const monetary=x=>row(x,'roi',{id:x.effect.id},{unitId:x.effect.unit_id,personId:x.effect.owner_id,date:x.period_to,currency:x.effect.currency,state:x.state,label:x.effect.title||'',wide:true});
+  const monetary=x=>row(x,'roi',{id:x.effect.id,factId:x.id},{unitId:x.effect.unit_id,personId:x.effect.owner_id,date:x.period_to,currency:x.effect.currency,state:x.state,label:x.effect.title||''});
   const card=x=>row(x,'roi',{id:x.id},{personId:x.owner_id,date:x.review_due,currency:x.currency,state:x.state});
-  const target=x=>row(x,'roi',{id:x.record.id},{unitId:x.record.unit_id,personId:x.record.owner_id,date:x.to,currency:x.record.currency,state:x.status,label:x.record.title||'',wide:true});
+  const target=x=>row(x,'roi',{id:x.record.id,targetId:x.id},{unitId:x.record.unit_id,personId:x.record.owner_id,date:x.to,currency:x.record.currency,state:x.status,label:x.record.title||''});
   const evidence=[
    prepRows.map(x=>prepRecord(x)),prepRows.map(x=>prepRecord(x,x.status==='complete')),currentPrepRows.filter(x=>x.overdue).map(x=>prepRecord(x)),currentPrepRows.filter(x=>x.status==='review').map(x=>prepRecord(x)),
    planned.map(x=>assignment(x)),planned.map(x=>assignment(x,x.state==='completed')),
    dedup(twi.cohort,x=>x.trainee_id).map(x=>row({id:x.trainee_id},'person',{personId:x.trainee_id},{personId:x.trainee_id,label:'Уникальный обучаемый'})),
    twi.cohort.filter(x=>x.first).map(x=>assignment(x,x.first.conclusion!=='not_meet')),twi.cohort.filter(x=>x.grant).map(x=>assignment(x)),twi.cohort.filter(x=>x.current).map(x=>assignment(x)),a.filter(x=>['planned','in_progress'].includes(x.state)&&x.due_on<day).map(x=>assignment(x)),
-   audit.map(ar),self.map(sr),schedules.filter(x=>['audit','practical','self_eval'].includes(scheduleKind(x))).map(x=>row(x,'calendar',{month:x.due_on.slice(0,7),personId:x.owner_id,scheduleType:scheduleKind(x)},{unitId:personUnit(db,x.owner_id,scheduleScopeDate(db,x,day)),personId:x.owner_id,date:x.due_on,state:scheduleKind(x),label:'План '+scheduleKind(x),wide:true})),
+   audit.map(ar),self.map(sr),schedules.filter(x=>['audit','practical','self_eval'].includes(scheduleKind(x))).map(x=>row(x,'calendar',{id:x.id},{unitId:personUnit(db,x.owner_id,scheduleScopeDate(db,x,day)),personId:x.owner_id,date:x.due_on,state:scheduleKind(x),label:'План '+scheduleKind(x)})),
    practice.map(x=>pr(x)),practice.map(x=>pr(x,x.conclusion==='not_meet')),
-   cells.map(c=>row({id:c.person.id+':'+c.skill.id},'person',{personId:c.person.id},{unitId:c.person.unit_id,personId:c.person.id,skillId:c.skill.id,professionId:c.person.profession_id,label:c.skill.name,method:c.goal.scale_id,state:c.gap?'Разрыв':'Покрыто',included:!c.gap,wide:true,requirementId:c.goal.id,assessmentId:c.fact?.session_id||null})),
-   sop.map(x=>row(x,'sop_review',{kind:'sop_evaluation',id:x.id},{personId:x.actor_id,date:x.date,method:x.method_id})),
-   weighted.map(x=>row(x,'sop_review',{kind:'weighted_sop',id:x.id},{personId:x.actor_id,date:x.date,method:x.methodKey})),
-   docs.filter(x=>x.review_due&&x.review_due<day).map(x=>row(x,'sop',{documentId:x.document_id,revisionId:x.id},{personId:x.author_id,date:x.review_due})),
-   frv.map(x=>row(x,'frv',{studyId:x.id},{personId:x.author_id,date:x.observed_at,state:x.state})),
+   cells.map(c=>row({id:c.person.id+':'+c.skill.id},'person',{personId:c.person.id},{unitId:c.person.unit_id,personId:c.person.id,skillId:c.skill.id,professionId:c.person.profession_id,operationId:c.skill.operation_id,label:c.skill.name,method:c.goal.scale_id,state:c.gap?'Разрыв':'Покрыто',included:!c.gap,wide:true,requirementId:c.goal.id,assessmentId:c.fact?.session_id||null})),
+   sop.map(x=>row(x,'sop_review',{kind:'sop_evaluation',id:x.id},{personId:x.actor_id,operationId:x.operation_id,date:x.date,method:x.method_id})),
+   weighted.map(x=>row(x,'sop_review',{kind:'weighted_sop',id:x.id},{personId:x.actor_id,operationId:x.operation_id,date:x.date,method:x.methodKey})),
+   docs.filter(x=>x.review_due&&x.review_due<day).map(x=>row(x,'sop',{documentId:x.document_id,revisionId:x.id},{personId:x.author_id,operationId:x.operation_id,date:x.review_due})),
+   frv.map(x=>row(x,'frv',{studyId:x.id},{personId:x.author_id,operationId:x.operation_id,date:x.observed_at,state:x.state})),
    pending.map(x=>act(x)),pending.filter(x=>x.due_on&&x.due_on<day).map(x=>act(x)),implemented.map(x=>act(x,x.status==='verified')),
    economic.pendingRows.map(card),economic.overdueRows.map(card),economic.facts.filter(x=>x.eligible).map(monetary),economic.draftRows.map(monetary),economic.targetAttention.map(target),economic.allTargets.filter(x=>x.shortfall&&!x.currentReview).map(target)
   ];
   for(let i=0;i<metrics.length;i++){const m=metrics[i],rs=evidence[i];if(!rs||rs.filter(x=>x.included).length!==m.value||(m.denominator!==null&&rs.length!==m.denominator))throw Error('Metric evidence mismatch: '+METRIC_DEFINITIONS[i].id);m.evidence=rs}
  }
- for(let i=0;i<metrics.length;i++){const m=metrics[i],d=METRIC_DEFINITIONS[i];Object.assign(m,d,{scope,availability:m.denominator===0?'no_denominator':'available',comparisonEligible:false,source:'center-overview.js::centerProjection'});m.dimensions=m.id==='twi_people'?['personId']:['unitId','personId','method','skillId','professionId','state','currency'].filter(k=>m.evidence?.some(r=>r[k]))}
- return {metrics,scope,currencies:economic.currencies,cohortMonths:twi.months,auditGroups:twi.auditGroups,coverage:twi.coverage,prep,actionVerification:pending.filter(x=>x.status==='implemented').length};
+ for(let i=0;i<metrics.length;i++){const m=metrics[i],d=METRIC_DEFINITIONS[i];Object.assign(m,d,{scope:slice,availability:m.denominator===0?'no_denominator':'available',comparisonEligible:false,source:'center-overview.js::centerProjection'});m.dimensions=m.id==='twi_people'?['personId']:['unitId','personId','method','skillId','professionId','operationId','state','currency'].filter(k=>m.evidence?.some(r=>r[k]))}
+ // Use the same source records as the metric counts, including the monthly trends.
+ const monthly=(items,date)=>{const out=new Map();for(const x of items){const id=date(x).slice(0,7),g=out.get(id)||{id,count:0};g.count++;out.set(id,g)}return [...out.values()].sort((a,b)=>a.id.localeCompare(b.id))};
+ const cohortMonths=monthly(planned,x=>x.assigned_on).map(x=>({id:x.id,assignments:x.count,completed:completed.filter(a=>a.assigned_on.slice(0,7)===x.id).length}));
+ return {metrics,scope:slice,currencies:economic.currencies,cohortMonths,auditMonths:monthly(audit,x=>x.observed_at),auditGroups:twi.auditGroups,coverage:twi.coverage,prep,currentPrep,actionVerification:pending.filter(x=>x.status==='implemented').length};
 }

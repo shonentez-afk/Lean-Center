@@ -17,7 +17,7 @@ try{
  await p.clock.setFixedTime(new Date('2026-01-22T12:00:00Z'));await p.goto(pathToFileURL(path.resolve('dist/LeanCenter/index.html')).href);await heading('Дашборд');
  await p.locator('.lc73-kpis .tile').first().waitFor();assert.equal(await p.locator('.lc73-kpis .tile').count(),6);assert.match(await p.locator('.lc73-kpis .tile').first().textContent(),/нет знаменателя/);
  await nav('Настройки и обмен');const fc=p.waitForEvent('filechooser');await btn('Восстановить копию').click();await (await fc).setFiles(file);await p.getByText('Копия восстановлена; проверьте ID базы',{exact:true}).waitFor();
- await nav('Дашборд');const card=p.locator('.lc73-kpis .tile').filter({hasText:'Компетенции'});assert.match(await card.textContent(),/0 \/ 1/);await card.click();
+ await nav('Дашборд');await p.locator('[name=lc73_home_filter_unit]').selectOption(f.unit);await p.getByText(/Риски выбранного подразделения/).waitFor();await p.locator('[name=lc73_home_filter_unit]').selectOption('');const card=p.locator('.lc73-kpis .tile').filter({hasText:'Компетенции'});assert.match(await card.textContent(),/0 \/ 1/);await card.click();
  await heading('Дерево метрик');await p.getByRole('heading',{name:'Декомпозиция показателя',exact:true}).waitFor();
  const rows=p.getByText('Подтверждающие строки · 1',{exact:true}).first();await rows.click();await p.getByRole('button',{name:'Связанная карточка',exact:true}).first().waitFor();
  await p.locator('[name=lc73_metrics_filter_mode]').selectOption('passport');await p.getByRole('heading',{name:'Паспорт метрики',exact:true}).waitFor();await p.getByRole('cell',{name:'skill_coverage',exact:true}).waitFor();

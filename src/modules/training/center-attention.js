@@ -1,9 +1,9 @@
 import {one,rows} from '../../core/db.js';
 import {standardControls} from './standard-overview.js';
 import {centerAuditIndicators} from './audit-analytics.js';
-import {assessmentIndicators} from './assessment-review.js';
-import {comparisonIndicators,retrainingQueue} from './center-overview.js';
-import {scheduleKind,schedulePending} from './center-planning.js';
+import {assessmentIndicators,assessmentRegistry} from './assessment-review.js';
+import {comparisonIndicators,retrainingQueue,personUnit,centerProjection} from './center-overview.js';
+import {scheduleKind,schedulePending,scheduleScopeDate} from './center-planning.js';
 import {effectOverview} from '../effect/domain.js';
 
 export const ATTENTION_GROUPS=Object.freeze({all:'Все направления',docs:'СОП и стандарты',training:'Обучение и компетенции',audit:'Наставники и аудиты',actions:'Задачи и мероприятия',preparation:'Подготовка сотрудников',roi:'Экономический эффект'});
@@ -58,3 +58,36 @@ export function recommendedChecks(snapshot,group='all'){
  const order={urgent:0,review:1,plan:2};
  return snapshot.items.filter(x=>x.count>0&&(group==='all'||x.group===group)).sort((a,b)=>order[a.priority]-order[b.priority])
 }
+
+ // Exact unit scope. Bank of questions is enterprise/profession-wide and remains explicitly global.
+ export function scopedAttention(db,day,unitId,global=centerAttention(db,day),projection=null){
+  if(!unitId)return global;
+  const p=projection||centerProjection(db,{day,from:day.slice(0,7)+'-01',to:day,unitId},{withEvidence:true});
+  const ms=new Map(p.metrics.map(m=>[m.id,m])),r=(key,page,options,date='',label='')=>({key,page,options,date,label,included:true});
+  const unitPerson=id=>personUnit(db,id,day)===unitId;
+  const assignment=x=>r(x.id,'twi',{id:x.id},x.assigned_on,'Назначение обучения');
+  const revision=x=>r(x.id,'sop',{documentId:x.document_id,revisionId:x.id},x.review_due,'Редакция СОП');
+  const plans=rows(db,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(db,x)&&personUnit(db,x.owner_id,scheduleScopeDate(db,x,day))===unitId);
+  const plan=k=>plans.filter(x=>scheduleKind(x)===k).map(x=>r(x.id,'calendar',{id:x.id},x.due_on,'План оценки'));
+  const metric=id=>ms.get(id).evidence;
+  const queueLink=x=>x.type==='revision'?r(x.id,'twi',{id:x.id},x.due,'Редакция обучения'):x.type==='practical'?r(x.id,'practical',{assessmentId:x.id},x.due,'Практическая оценка'):x.type==='audit'?r(x.id,'audit',{auditId:x.id},x.due,'Аудит L1'):r(x.personId+':'+(x.skillId||x.id),'person',{personId:x.personId},x.due,x.question||'Потребность в развитии');
+  const exact={
+   sop_overdue:metric('sop_review'),
+   sop_passport:rows(db,"SELECT r.id,r.document_id,r.review_due FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.state='draft' AND d.archived=0 AND (r.print_format IS NULL OR r.workplace_id IS NULL) AND o.unit_id=?",[unitId]).map(revision),
+   training_overdue:metric('training_overdue'),
+   training_revision:rows(db,"SELECT a.id,a.assigned_on FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=a.operation_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1) AND o.unit_id=?",[unitId]).map(assignment),
+   annual_l1:global.standard.annual.filter(x=>x.remaining&&unitPerson(x.personId)).map(x=>r(x.personId,'audit',{mode:'annual',year:day.slice(0,4),personId:x.personId},'',x.name)),
+   action_overdue:metric('actions_overdue'),action_verify:metric('actions_open').filter(x=>x.state==='implemented'),
+   retraining_need:retrainingQueue(db,day).filter(x=>x.unitId===unitId&&x.status==='needs').map(queueLink),
+   audit_planned:plan('audit'),
+   practical_need:assessmentRegistry(db,'practical').filter(x=>global.ass.needsIds.has(x.id)&&x.unit_id===unitId).map(x=>r(x.id,'practical',{assessmentId:x.id},x.date,'Практическая оценка')),
+   practical_planned:plan('practical'),self_planned:plan('self_eval'),
+   mentor_discussion:comparisonIndicators(db,day).personIds.filter(unitPerson).map(id=>r(id,'analytics',{assessmentType:'comparison',personId:id,discussionOnly:true},'','Самооценка и наблюдения')),
+   roi_pending:metric('effect_pending'),roi_overdue:metric('effect_overdue'),roi_drafts:metric('effect_drafts'),roi_targets:metric('effect_targets'),roi_deviations:metric('effect_deviations'),
+   prep_overdue:metric('prep_overdue'),prep_review:metric('prep_review'),
+   prep_finish:global.standard.items.filter(x=>x.unitId===unitId&&x.status==='finish').map(x=>r(x.id,'preparation',{id:x.id},x.due,x.name)),
+   supplements_draft:global.standard.supplements.filter(x=>x.state==='draft'&&unitPerson(x.person_id)).map(x=>r(x.id,'supplements',{id:x.id},x.month,'Ходатайство о доплате'))
+  };
+  const items=global.items.map(x=>Object.hasOwn(exact,x.id)?{...x,count:exact[x.id].length,records:exact[x.id],scope:'unit'}:{...x,scope:'global'});
+  return {...global,items,unitId};
+ }

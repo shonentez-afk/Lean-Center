@@ -163,7 +163,7 @@ function openAttention(item){
  goTraining(item.page,item.options)
 }
 let homeScope={};
-function home(main){dashboard(main,{db:ws.working,day:today(),el,add,btn,pane,theme,go:goTraining,goDocument,openAttention,publication:meta(ws.base,'publication_id'),initial:homeScope,onScope:s=>homeScope=s})}
+function home(main){dashboard(main,{db:ws.working,day:today(),el,add,btn,pane,theme,go:goTraining,goDocument,openAttention,openTarget:openAssistantTarget,publication:meta(ws.base,'publication_id'),initial:homeScope,onScope:s=>homeScope=s})}
 function directoryOverview(main){ main.append(sectionHeading('Справочники предприятия','Активные записи'));
  const g=el('div',undefined,'kpi-grid');
  const counts=Object.fromEntries(Object.keys(definitions).map(k=>[k,list(ws.working,k).filter(x=>activeRecord(definitions[k],x)).length]));
