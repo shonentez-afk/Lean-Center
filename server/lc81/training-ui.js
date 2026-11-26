@@ -125,7 +125,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    const details=el('details');details.append(el('summary',s.title+' · '+s.items.length));
    const labels={code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',people:'Сотрудников',skills:'Навыков'};
    const keys=Object.keys(labels).filter(k=>s.items.some(r=>Object.hasOwn(r,k))),sub=el('div');
-   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'?button('Открыть матрицу',()=>matrix(sub,r.id)):'']);
+   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):'']);
    details.append(table([...keys.map(k=>labels[k]),'Действия'],rows),sub);n.append(details);
   }
   if(!d.sections.length)n.append(el('p','Нет связанных записей, доступных вашей учётной записи.'));

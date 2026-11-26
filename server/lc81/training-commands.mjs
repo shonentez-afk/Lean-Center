@@ -67,7 +67,7 @@ export function resolveTrainingCreate(db,input,access){
  const auth=one(db,'SELECT * FROM mentor_authorization WHERE id=? AND operation_id=?',[input.authorization_id,input.operation_id]);
  must(auth&&allowedPerson(db,access,auth.person_id),403,'Инструктор недоступен');
  const resource=trainingResource(db,input.operation_id,[input.trainee_id,auth.person_id],access.day,input.assigned_on);
- must(access.allows('training.create',input.operation_id,resource),403,'Назначение выходит за область полномочий');
+ must(access.allows('training.create',input.operation_id,resource)&&access.allows('training.read',input.operation_id,resource),403,'Назначение выходит за область полномочий');
  const r=sourceRevision(db,input.revision_id);
  must(r.operation_id===input.operation_id,422,'СОП относится к другой операции');
  return {source:r.source,payload:{trainee_id:input.trainee_id,mentor_id:auth.person_id,supervisor_id:null,authorization_id:auth.id,revision_id:r.id,source:r.source,skill_id:input.skill_id,scale_id:input.scale_id,target_level:input.target_level,assigned_by:access.personId,assigned_on:input.assigned_on,due_on:input.due_on,reason:input.reason,variant:input.variant,method_version:'JI-2',method_config:input.method_config,shift_id:null,enrollment_id:null,program_task_id:null,plan_reviewed:true}};
@@ -153,11 +153,12 @@ export function trainingDetail(db,access,id){
  const verification=['safety','theory'].map(kind=>{const v=latestVerification(db,a.id,kind);return {kind,result:v?.result??null,day:v?.evaluated_on??null}});
  const practical=latestAssessment(db,a.id,'practical'),q=latestAssessment(db,a.id,'qualification'),item=q&&one(db,'SELECT level,observation_state,valid_until FROM assessment_item WHERE session_id=?',[q.id]);
  const method=practicalMethods(db).find(m=>m.state==='active');
+ const admission=admissionStatus(db,a.trainee_id,a.operation_id,access.day);
  const methods=cap.practical&&method?[{id:method.id,criteria:practicalCriteria(db,method.id).map(x=>({id:x.id,question:x.question,section:x.section_code}))}]:[];
  const witnesses=cap.stage?directoryPeople(db,access.day).filter(p=>allowedPerson(db,access,p.id)&&allowed(db,access,a,'training.stage',[p.id])).map(p=>({id:p.id,name:p.display_name})):[];
  return {id:a.id,rev:a.rev,state:a.state,trainee:label(db,a.trainee_id),mentor:label(db,a.mentor_id),assigned_on:a.assigned_on,due_on:a.due_on,operation:one(db,'SELECT name FROM operation WHERE id=?',[a.operation_id])?.name,method_variant:a.method_variant,method_version:a.method_version,approved:approved(a),pending_approvals:decisions,stages:pr.stages.map(s=>({code:s.code,label:s.label,done:pr.done.has(s.code)})),next:pr.next?.code??null,completed:pr.completed,complete:pr.complete,
  facts:pr.facts.map(f=>({stage_code:f.stage_code,held_at:f.held_at,duration_minutes:f.duration_minutes,result:f.result,notes:f.notes})),
- verification,practical:practical?{id:practical.id,conclusion:practical.conclusion}:null,qualification:item||null,admission:admissionStatus(db,a.trainee_id,a.operation_id,access.day).status,cap,methods,witnesses,conclusions,levels:rows(db,'SELECT value,label FROM rating_level WHERE scale_id=? ORDER BY value',[a.scale_id]),day:access.day};
+ verification,practical:practical?{id:practical.id,conclusion:practical.conclusion}:null,qualification:item||null,admission:!admission.record||admission.record.assignment_id===a.id?admission.status:'По этому назначению нет текущего решения',cap,methods,witnesses,conclusions,levels:rows(db,'SELECT value,label FROM rating_level WHERE scale_id=? ORDER BY value',[a.scale_id]),day:access.day};
 }
 export function trainingSop(db,access,id){
  const a=visible(db,access,id);

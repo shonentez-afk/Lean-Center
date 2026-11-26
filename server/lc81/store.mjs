@@ -95,7 +95,7 @@ function cardAllowed(db,a,id,d){
 function projectView(db,a,action,data,d){
  if(action==='person.read_basic'||action==='person.read_directory'){
   const view=directoryView(db,a,action,data,d);
-  return {...view,can_card:cardAllowed(db,a,data.id,d)};
+  return cardAllowed(db,a,data.id,d)?{...view,can_card:true}:view;
  }
  if(action==='training.read'){
   const access=trainingAccess(db,a,d),resource=trainingAssignmentResource(db,data.id,d);

@@ -24,6 +24,7 @@ async function synthetic(t){
  const adminRole=w.edit('business_role',null,{code:'EXISTING-ADMIN',name:'Администратор'}),managerRole=w.edit('business_role',null,{code:'EXISTING-MANAGER',name:'Управляющий центром TWI'});
  const managerAssignment=w.edit('role_assignment',null,{person_id:f.actor,role_id:managerRole,valid_from:'2020-01-01',valid_to:null});
  const workerRole=one(w.working,"SELECT id FROM business_role WHERE code='TRAINEE'").id,workerAssignment=one(w.working,'SELECT id FROM role_assignment WHERE person_id=? AND role_id=?',[f.trainee,workerRole]).id;
+ const matrixScale=w.edit('rating_scale',null,{name:'Производственная компетенция (1–4)',version_no:'1',levels:'1: Обучен\n2: Выполняет работу самостоятельно\n3: Выполняет работу мастерски\n4: Инструктор-наставник'});
  const assignment=await f.addAssignment();
  const task=async owner=>(await f.save('action_item',{response_id:null,title:'Учебное мероприятие',owner_id:owner,subject_id:null,due_on:'2027-01-31',kind:'corrective',priority:'normal'})).entity_id;
  const ownTask=await task(f.trainee),otherTask=await task(personB);
@@ -33,7 +34,7 @@ async function synthetic(t){
  const source=path.join(root,'legacy-copy'),target=path.join(root,'secure-copy');
  await copyPilotCheckpoint({SQL,snapshot,readSource:f.readContent,target:source});
  const sourceHash=sha(await fs.readFile(path.join(source,PILOT_STATE)));
- return {root,source,target,sourceHash,snapshot,site,unitB,personB,adminRole,managerRole,managerAssignment,workerRole,workerAssignment,assignment,ownTask,otherTask,revision,f};
+ return {root,source,target,sourceHash,snapshot,site,unitB,personB,adminRole,managerRole,managerAssignment,workerRole,workerAssignment,assignment,ownTask,otherTask,revision,matrixScale,f};
 }
 test('migration keeps all existing v17 records and referenced sources, reuses role IDs and copies authenticated state',async t=>{
  const x=await synthetic(t),pass=password();
@@ -59,7 +60,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
  }finally{legacy.close();secured.close()}
  for(const [hash,src] of x.f.sources){assert.equal(await fs.readFile(path.join(x.target,'documents',hash+'.json'),'utf8'),src.text)}
  let store=await openSecureQA({dataDir:x.target});
- let manager,worker,workerPass=password(),savedDraft,savedRequest,fromFrv;
+ let manager,worker,workerPass=password(),savedDraft,savedRequest,fromFrv,newTraining,finalMatrix;
  try{
   const admin=store.authenticate('admin',pass);assert(admin?.admin);
   const d=store.adminData(admin.id);assert.deepEqual(d.protectedRoles,[x.adminRole,x.managerRole]);assert.equal(d.site,x.site);
@@ -152,7 +153,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await assert.rejects(store.openLibrary(otherEditor.id,1,saveContext),/Операция недоступна/);
   await assert.rejects(store.saveLibrary(otherEditor.id,1,req(createContext,0,'Чужой СОП','LC81-DENIED',null,draftSource.text)),/Операция недоступна/);
   worker=await store.createAccount(admin.id,{person_id:x.f.trainee,login:'worker@example.invalid',password:workerPass,generate:false});
-  const rights=['person.read_basic','task.read','task.implement_own','training.read'];
+  const rights=['person.read_basic','task.read','task.implement_own','training.read','training.detail','training.read_sop','person.read_card'];
   await store.setPolicy(admin.id,{role_id:x.workerRole,revision:0,permissions:rights});
   await store.grant(admin.id,{account_id:worker.id,assignment_id:x.workerAssignment,scope:{kind:'self'},valid_to:null});
   const user=store.authenticate('worker@example.invalid',workerPass);assert.equal(user.id,worker.id);
@@ -170,6 +171,66 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(done.state,'implemented');assert.equal(store.readResource(worker.id,'task.read',x.ownTask).can_implement,false);
   await assert.rejects(store.implementOwnTask(worker.id,user.credential_revision,{id:x.ownTask,expected_revision:tasks[0].rev,result:'Повтор'}),/изменилась|проверки/);
   const log=store.adminData(admin.id).audit.find(r=>r.action==='task.implement_own');assert.equal(log.actor_account_id,worker.id);
+  // New secure training follows the real JI-2 progression, with actual
+  // session identities. Training facts and matrix scores use one domain.
+  const today=new Date().toISOString().slice(0,10),due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+  const aData=store.adminData(admin.id),instructorRole=aData.roles.find(r=>r.code==='INSTRUCTOR').id;
+  const instructorAssignment=aData.assignments.find(r=>r.person_id===x.f.mentor&&r.role_id===instructorRole).id;
+  const instructor=await store.createAccount(admin.id,{person_id:x.f.mentor,login:'secure-instructor',password:password(),generate:false});
+  await store.setPolicy(admin.id,{role_id:instructorRole,revision:0,permissions:['training.read','training.detail','training.stage','training.read_sop']});
+  await store.grant(admin.id,{account_id:instructor.id,assignment_id:instructorAssignment,scope:{kind:'assigned'},valid_to:null});
+  const headRole=(await store.createReference(admin.id,'business_role',{code:'QA-HEAD-LC81',name:'Руководитель обучения QA'})).id;
+  const headAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.f.other,role_id:headRole,valid_from:'2020-01-01',valid_to:null})).id;
+  const head=await store.createAccount(admin.id,{person_id:x.f.other,login:'secure-head',password:password(),generate:false});
+  await store.setPolicy(admin.id,{role_id:headRole,revision:0,permissions:['training.read','training.detail','training.approve_head']});
+  const headGrant=await store.grant(admin.id,{account_id:head.id,assignment_id:headAssignment,scope:{kind:'unit_tree',unit_id:x.f.unit},valid_to:null});
+  const create={operation_id:x.f.operation,trainee_id:x.f.trainee,authorization_id:x.f.auth,revision_id:x.revision.revision,skill_id:x.f.skill,scale_id:x.matrixScale,target_level:2,assigned_on:today,due_on:due,reason:'Учебная программа LC81',variant:'classic',method_config:{followups:2,segments:[],realShow:null,realTry:null,hazardous:false},plan_reviewed:true};
+  const options=store.trainingOptions(manager.id,1,x.f.operation);assert(options.people.some(x=>x.id===create.trainee_id));assert(options.mentors.some(x=>x.id===create.authorization_id));
+  await assert.rejects(store.createTraining(otherEditor.id,1,create),/недоступны|полномочий/);
+  await assert.rejects(store.createTraining(manager.id,1,{...create,assigned_by:x.f.mentor}),/Заполните/);
+  newTraining=await store.createTraining(manager.id,1,create);
+  const cmd=(actor,command,fields,rev=store.trainingDetail(manager.id,1,newTraining.id).rev)=>store.changeTraining(actor,1,{id:newTraining.id,expected_revision:rev,command,fields});
+  const own=store.trainingDetail(worker.id,1,newTraining.id);assert.equal(own.approved,false);assert.equal(own.cap.admit,false);
+  assert.equal(store.trainingSop(worker.id,1,newTraining.id).steps.length,1);
+  assert.throws(()=>store.trainingDetail(otherEditor.id,1,newTraining.id),/недоступно/);
+  const first=await cmd(manager.id,'approve_responsible',{note:'Подтверждение ответственного'});
+  assert(first.approval_pending);
+  await assert.rejects(cmd(manager.id,'approve_head',{note:'Не второй сотрудник'}),/разными/);
+  await assert.rejects(cmd(worker.id,'approve_head',{note:'Самосогласование'}),/собственное/);
+  // Revoked approval rights must not be accepted as a second vote.
+  await store.revoke(admin.id,headGrant.id);
+  await assert.rejects(cmd(head.id,'approve_head',{note:'Отозванный доступ'}),/недоступно|полномочий/);
+  await store.grant(admin.id,{account_id:head.id,assignment_id:headAssignment,scope:{kind:'unit_tree',unit_id:x.f.unit},valid_to:null});
+  const second=await cmd(head.id,'approve_head',{note:'Подтверждение руководителя'});
+  assert.equal(second.approval_pending,false);assert(store.trainingDetail(manager.id,1,newTraining.id).approved);
+  const firstStage=store.trainingDetail(manager.id,1,newTraining.id).stages[0].code;
+  const fact=stage_code=>({stage_code,held_at:today+'T08:00',duration_minutes:10,result:'completed',notes:'Учебный факт',witness_id:null,mentor_ack:true,trainee_ack:true});
+  await assert.rejects(cmd(manager.id,'stage',fact(firstStage)),/назначенный инструктор/);
+  await assert.rejects(cmd(instructor.id,'stage',fact('try1')),/предыдущий этап/);
+  for(const stage of store.trainingDetail(manager.id,1,newTraining.id).stages)await cmd(instructor.id,'stage',fact(stage.code));
+  const doneTraining=store.trainingDetail(manager.id,1,newTraining.id);assert(doneTraining.complete);assert.equal(doneTraining.state,'completed');
+  for(const kind of ['safety','theory'])await cmd(manager.id,'verify',{kind,evaluated_on:today,result:'pass',evidence:'Учебная проверка',feedback:'Результат подтверждён'});
+  const method=store.trainingDetail(manager.id,1,newTraining.id).methods[0];
+  await cmd(manager.id,'practical',{assessed_on:today,method_id:method.id,responses:method.criteria.map(q=>({criterion_id:q.id,value:1,note:''})),conclusion:'basic',feedback:'Практика подтверждена'});
+  const practical=store.trainingDetail(manager.id,1,newTraining.id).practical;
+  await cmd(manager.id,'qualify',{assessed_on:today,practical_id:practical.id,observation_state:'rated',level:2,valid_until:null,evidence:'Учебное решение',feedback:'Уровень подтверждён'});
+  await cmd(manager.id,'admit',{decided_on:today,valid_until:null,decision:'granted',evidence:'Учебное основание допуска',feedback:'Допуск зарегистрирован'});
+  const qualified=store.trainingDetail(manager.id,1,newTraining.id);assert.equal(qualified.qualification.level,2);assert.equal(qualified.admission,'Допуск зарегистрирован');
+  // Matrix constructor uses the actual assessment; the second employee is
+  // deliberately unassessed, so their cell must be null, never zero.
+  const matrixRequest={code:'QA-LC81-MATRIX',title:'Учебная матрица',unit_id:x.f.unit,scale_id:x.matrixScale,base_on:today,target_on:due,person_ids:[x.f.trainee,x.f.other],columns:[{skill_id:x.f.skill,document_id:x.f.doc.entity_id}],previous_id:null,previous_rev:0};
+  const createdMatrix=await store.saveMatrix(manager.id,1,matrixRequest);
+  const matrix=store.matrixDetail(manager.id,1,createdMatrix.id);assert.equal(matrix.cells[0][0].base,2);assert.equal(matrix.cells[0][0].actual,2);assert.equal(matrix.cells[1][0].actual,null);
+  assert.throws(()=>store.matrixDetail(worker.id,1,createdMatrix.id),/недоступна/);
+  await assert.rejects(store.saveMatrix(manager.id,1,{...matrixRequest,person_ids:[x.personB],code:'QA-DENIED-MATRIX'}),/недоступны/);
+  finalMatrix=await store.saveMatrix(manager.id,1,{...matrixRequest,previous_id:createdMatrix.id,previous_rev:createdMatrix.rev,title:'Учебная матрица v2'});
+  assert.equal(finalMatrix.version_no,2);assert.equal(store.matrixDetail(manager.id,1,createdMatrix.id).state,'retired');
+  const card=store.personCard(manager.id,1,x.f.trainee);
+  assert(card.sections.find(s=>s.action==='training.read').items.some(r=>r.id===newTraining.id));
+  assert(card.sections.find(s=>s.action==='matrix.read').items.some(r=>r.id===finalMatrix.id));
+  const ownCard=store.personCard(worker.id,1,x.f.trainee);assert(!ownCard.sections.some(s=>s.action==='matrix.read'));
+  assert.throws(()=>store.personCard(worker.id,1,x.personB),/недоступна/);
+
  }finally{await store.close()}
  const backup=path.join(x.root,'backup'),restored=path.join(x.root,'restored');
  await copySecureCheckpoint(x.target,backup);await copySecureCheckpoint(backup,restored);
@@ -181,6 +242,8 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(store.readResource(worker.id,'task.read',x.ownTask).state,'implemented');
   assert.equal(store.readResource(worker.id,'task.read',x.otherTask),null);
   assert.equal((await store.saveLibrary(manager.id,1,savedRequest)).id,savedDraft.id,'receipt survives restore');
+  assert.equal(store.trainingDetail(manager.id,1,newTraining.id).qualification.level,2);
+  assert.equal(store.matrixDetail(manager.id,1,finalMatrix.id).cells[0][0].actual,2);
   const imported=await store.openLibrary(manager.id,1,{kind:'sop',command:'save',operation_id:x.f.operation,id:fromFrv.id,revision_id:fromFrv.revision_id,origin_id:null,origin_revision:null});
   assert.equal(JSON.parse(imported.text).constructor.steps[0].frvSource.observedTimeSec,12);
  }finally{await store.close()}

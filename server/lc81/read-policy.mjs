@@ -264,7 +264,7 @@ export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
 }
 
 export function canUseTrainingResource(db,security,accountId,action,id,day,resource){
- const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail'];
+ const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read'];
  return !!resource&&allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,action,resource);
 }
 export function bootstrapTrainingScope(db,site,resource){

@@ -30,7 +30,7 @@ export function saveMatrix(db,input,a){
  const columns=input.columns.map(c=>info.columns.find(x=>x.skill_id===c.skill_id&&x.document_id===c.document_id)).map(c=>c&&({skill_id:c.skill_id,document_id:c.document_id,title:c.title}));
  must(roster.every(Boolean)&&columns.every(Boolean)&&info.scales.some(x=>x.id===input.scale_id),403,'Состав или шкала недоступны');
  const resource=matrixResource(db,input.unit_id,roster,columns,a.day,input.base_on);
- must(a.allows('matrix.create',input.unit_id,resource),403,'Матрица выходит за область полномочий');
+ must(a.allows('matrix.create',input.unit_id,resource)&&a.allows('matrix.read',input.unit_id,resource),403,'Матрица выходит за область полномочий');
  const past=rows(db,'SELECT * FROM competency_matrix WHERE code=?',[input.code]);
  for(const row of past){must(row.unit_id===input.unit_id,403,'Матрица недоступна');authorizeMatrix(db,a,matrixFromRecord(row),'matrix.create')}
  const previous=past.find(x=>x.state==='active');
