@@ -18,7 +18,7 @@ try{
  page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
  const nav=async name=>{const target=page.locator('.sidebar .nav').filter({has:page.getByText(name,{exact:true})});if(!(await target.isVisible()))await target.locator('xpath=ancestor::details[1]/summary').click();await target.click()};
  const choose=async(label,query)=>{await page.getByRole('button',{name:'Выбрать: '+label,exact:true}).click();await page.getByRole('searchbox',{name:'Поиск сотрудника'}).fill(query);await page.locator('.lc-picker-popup .lc-person-option').click()};
- const saved=async label=>{await page.getByRole('button',{name:label,exact:true}).click();await page.getByText('Запись сохранена. Ожидает публикации базы.',{exact:true}).waitFor();assert.equal(await page.locator('#status').getAttribute('class'),'status')};
+ const saved=async label=>{await page.getByRole('button',{name:label,exact:true}).click();try{await page.getByText('Запись сохранена. Ожидает публикации базы.',{exact:true}).waitFor()}catch(e){console.error('QA save failed',label,await page.locator('#status').textContent());throw e}assert.equal(await page.locator('#status').getAttribute('class'),'status')};
  const input=async(name,value)=>page.locator('[name="'+name+'"]').fill(String(value));
  await page.goto(pathToFileURL(path.resolve('dist/LeanCenter/index.html')).href);await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();
  await nav('Настройки и обмен');const restore=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Восстановить копию',exact:true}).click();await (await restore).setFiles(file);await page.getByText('Копия восстановлена; проверьте ID базы',{exact:true}).waitFor();

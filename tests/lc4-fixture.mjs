@@ -7,7 +7,7 @@ import {inspectSource,refsForDb,refsForEvents,unionRefs} from '../src/modules/li
 import {makeTransfer} from '../src/modules/library/content.js';
 import {sopTwiSignature,twiFields} from '../src/modules/library/linked-materials.js';
 const read=p=>fs.readFileSync(p,'utf8');
-export const schema=read('db/schema_v1.sql'),migrations=['002_lc1','003_lc2','004_lc3','005_lc3_requirements','006_stage43_checklist','007_lc4_training','008_lc4_corporate_forms','009_lc42_methods','010_lc43_matrix','011_lc5_audit','012_lc51_assessments','013_lc52_integration','014_lc6_effect'].map(x=>read('db/migrations/'+x+'.sql'));
+export const schema=read('db/schema_v1.sql'),migrations=['002_lc1','003_lc2','004_lc3','005_lc3_requirements','006_stage43_checklist','007_lc4_training','008_lc4_corporate_forms','009_lc42_methods','010_lc43_matrix','011_lc5_audit','012_lc51_assessments','013_lc52_integration','014_lc6_effect','015_lc63_twi_standard'].map(x=>read('db/migrations/'+x+'.sql'));
 configureMigrations(...migrations.slice(1));
 export const SQL=await initSqlJs();
 export const date='2026-01-20';

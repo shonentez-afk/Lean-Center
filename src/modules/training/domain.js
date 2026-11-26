@@ -7,6 +7,7 @@ import {validDate} from '../library/sop-review.js';
 import {verifyMobileContext,recordMobileMapping,mobileObservationExists} from './mobile-audit.js';
 import {isRC1Import,applyRC1Event} from './rc1-import.js';
 import {LC5_TYPES,applyLC5Event} from './audit-domain.js';
+import {SELF_LEVELS} from './builtin-forms.js';
 export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,
  competency_matrix:'Матрица компетенций',audit_session:'Аудит инструктора',mentor_self_evaluation:'Самооценка наставника',mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
  training_program:'Программа обучения',training_enrollment:'Персональная программа',training_task_result:'Результат задания программы',
@@ -16,8 +17,9 @@ export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,
 });
 export const isLC41Event=e=>e.entity_type==='mentor_order'||(e.entity_type==='training_enrollment'&&Object.hasOwn(e.payload||{},'internship_start'));
 export const PRACTICAL_CODE='PRACTICAL_APP8';
-export const AUDIT_CODE='TWI_L1_RC1',SELF_CODE='TWI_SELF_APP12';
-const extraFormats=['lean-practical-checklist-v2','lean-audit-checklist-v1','lean-self-checklist-v1'];
+export const AUDIT_CODE='TWI_L1_RC1',AUDIT_STANDARD_CODE='TWI_L1_APP13',SELF_CODE='TWI_SELF_APP12';
+export const isLC63Event=e=>e.entity_type==='checklist_version'&&['lean-audit-checklist-v2','lean-self-checklist-v2'].includes(e.payload?.format);
+const extraFormats=['lean-practical-checklist-v2','lean-audit-checklist-v1','lean-self-checklist-v1','lean-audit-checklist-v2','lean-self-checklist-v2'];
 export const isLC43Event=e=>e.entity_type==='competency_matrix';
 export const isLC42Event=e=>['audit_session','mentor_self_evaluation'].includes(e.entity_type)||(e.entity_type==='checklist_version'&&[...extraFormats,'lean-sop-checklist-v2'].includes(e.payload?.format));
 export const isTrainingEvent=e=>Object.hasOwn(TRAINING_TYPES,e.entity_type)||(e.entity_type==='checklist_version'&&['lean-practical-checklist-v1',...extraFormats].includes(e.payload?.format));
@@ -93,7 +95,11 @@ export function authorizationValid(db,id,day){
  return !!(o&&c&&o.person_id===a.person_id&&c.person_id===a.person_id&&o.credential_id===c.id&&roleMatches(db,a.person_id,day,roleForCredential(c.role))&&one(db,'SELECT id FROM operation WHERE id=? AND archived=0',[a.operation_id]))
 }
 export function activeAuthorizations(db,operationId,day){return rows(db,'SELECT * FROM mentor_authorization WHERE operation_id=? ORDER BY valid_from DESC,id',[operationId]).filter(x=>authorizationValid(db,x.id,day))}
-export function trainingMethods(db,code){return rows(db,'SELECT v.* FROM checklist_version v JOIN checklist c ON c.id=v.checklist_id WHERE c.code=? ORDER BY v.version_no DESC',[code])}
+export function trainingMethods(db,code){return rows(db,'SELECT v.*,c.code method_code FROM checklist_version v JOIN checklist c ON c.id=v.checklist_id WHERE c.code=? ORDER BY v.version_no DESC',[code])}
+export function auditMethods(db){return [...trainingMethods(db,AUDIT_CODE),...trainingMethods(db,AUDIT_STANDARD_CODE)]}
+export const selfLevels=p=>p?.format==='lean-self-checklist-v2'?p.levels:SELF_LEVELS;
+export function selfLevelsForMethod(db,id){const m=one(db,'SELECT methodology_json FROM checklist_version WHERE id=?',[id]);return selfLevels(m?JSON.parse(m.methodology_json):null)}
+export function methodLabel(m){return (m.method_code===AUDIT_STANDARD_CODE?'Прил. 13 · ':m.method_code===AUDIT_CODE?'RC1 · ':'')+'v'+m.version_no+' · '+(m.state==='active'?'Действует':'История')}
 export function practicalMethods(db){return trainingMethods(db,PRACTICAL_CODE)}
 export function practicalCriteria(db,id){return rows(db,'SELECT * FROM checklist_criterion WHERE version_id=? ORDER BY position',[id])}
 export function practicalResult(responses,total=11){const rated=responses.filter(x=>x.value===0||x.value===1),yes=rated.filter(x=>x.value===1).length;return {rated:rated.length,yes,total,fraction:total>0&&responses.length===total&&rated.length===total?yes/total:null}}
@@ -107,8 +113,10 @@ export function verifyTrainingSource(e,source,raw){
  invariant(t.exists&&!t.outdated&&e.payload.plan_reviewed===true,'Сформируйте и проверьте актуальный план TWI в редакции СОП')
 }
 export function validateMentorMethod(p,format){
- exact(p,['format','title','source_sha256','criteria']);
- invariant(['lean-audit-checklist-v1','lean-self-checklist-v1'].includes(format)&&p.format===format&&required(p.title,200)&&sha(p.source_sha256)&&Array.isArray(p.criteria)&&p.criteria.length>0&&p.criteria.length<=100,'Некорректная методика наставника');
+ exact(p,['format','title','source_sha256','criteria',...(format==='lean-self-checklist-v2'?['levels']:[])]);
+ if(format==='lean-self-checklist-v2')invariant(p.levels&&Object.keys(p.levels).join(',')==='0,1,2,3'&&Object.values(p.levels).every(x=>required(x,200))&&p.criteria?.length===16,'Для приложения 14 нужны 16 критериев и шкала 0–3');
+ if(format==='lean-audit-checklist-v2')invariant(p.criteria?.length===17,'Для приложения 13 нужны 17 критериев');
+ invariant(['lean-audit-checklist-v1','lean-self-checklist-v1','lean-audit-checklist-v2','lean-self-checklist-v2'].includes(format)&&p.format===format&&required(p.title,200)&&sha(p.source_sha256)&&Array.isArray(p.criteria)&&p.criteria.length>0&&p.criteria.length<=100,'Некорректная методика наставника');
  p.criteria.forEach((x,i)=>{exact(x,['code','section','question',...(Object.hasOwn(x,'recommendation')?['recommendation']:[])]);invariant(x.code===i+1&&required(x.section,100)&&required(x.question,2500)&&(!Object.hasOwn(x,'recommendation')||text(x.recommendation,2500)),'Некорректный критерий '+(i+1))});return p
 }
 function createOnly(e,old){invariant(e.operation==='create'&&!old,'Историческая запись неизменяема; создайте новое событие')}
@@ -160,9 +168,9 @@ export function applyTrainingEvent(db,e,old){
  if(isRC1Import(e))return applyRC1Event(db,e,old);
  if(Object.hasOwn(LC5_TYPES,t))return applyLC5Event(db,e,old);
  if(t==='checklist_version'){
-  createOnly(e,old);const mentor=p.format==='lean-audit-checklist-v1'||p.format==='lean-self-checklist-v1';if(mentor)validateMentorMethod(p,p.format);else validatePracticalMethod(p);const code=p.format==='lean-audit-checklist-v1'?AUDIT_CODE:p.format==='lean-self-checklist-v1'?SELF_CODE:PRACTICAL_CODE,methods=trainingMethods(db,code);
+  createOnly(e,old);const mentor=['lean-audit-checklist-v1','lean-self-checklist-v1','lean-audit-checklist-v2','lean-self-checklist-v2'].includes(p.format);if(mentor)validateMentorMethod(p,p.format);else validatePracticalMethod(p);const code=p.format==='lean-audit-checklist-v1'?AUDIT_CODE:p.format==='lean-audit-checklist-v2'?AUDIT_STANDARD_CODE:['lean-self-checklist-v1','lean-self-checklist-v2'].includes(p.format)?SELF_CODE:PRACTICAL_CODE,methods=trainingMethods(db,code);
   invariant(!methods.some(m=>canonical(JSON.parse(m.methodology_json))===canonical(p)),'Такая методика уже зарегистрирована');
-  let c=one(db,'SELECT * FROM checklist WHERE code=?',[code]);if(!c){c={id:e.id};store(db,'checklist',{id:c.id,code,name:code===AUDIT_CODE?'Аудит 1-го уровня':code===SELF_CODE?'Самооценка наставника':'Практическая оценка'})}
+  let c=one(db,'SELECT * FROM checklist WHERE code=?',[code]);if(!c){c={id:e.id};store(db,'checklist',{id:c.id,code,name:code===AUDIT_CODE?'Аудит 1-го уровня · RC1':code===AUDIT_STANDARD_CODE?'Аудит 1-го уровня · приложение 13':code===SELF_CODE?'Самооценка наставника':'Практическая оценка'})}
   store(db,t,{id,checklist_id:c.id,version_no:(methods[0]?.version_no||0)+1,state:'draft',methodology_json:canonical(p),rev:1});
   p.criteria.forEach(q=>store(db,'checklist_criterion',{id:id+':'+q.code,version_id:id,code:String(q.code),section_code:q.section,position:q.code,question:q.question}));
   db.run("UPDATE checklist_version SET state='retired',rev=rev+1 WHERE checklist_id=? AND state='active'",[c.id]);db.run("UPDATE checklist_version SET state='active' WHERE id=?",[id]);return
@@ -215,8 +223,8 @@ export function applyTrainingEvent(db,e,old){
   createOnly(e,old);exact(p,['person_id','method_id','evaluated_on','place','responses','feedback']);noFuture(p.evaluated_on,e);
   const who=person(db,p.person_id);hasRole(db,p.person_id,p.evaluated_on,['mentor','instructor','internal_trainer']);
   invariant(trainingMethods(db,SELF_CODE).some(x=>x.id===p.method_id&&x.state==='active')&&required(p.place)&&text(p.feedback),'Выберите действующую методику самооценки и место');
-  const criteria=practicalCriteria(db,p.method_id);invariant(Array.isArray(p.responses)&&criteria.length>0&&p.responses.length===criteria.length,'Оцените все критерии самооценки');
-  p.responses.forEach((x,i)=>{exact(x,['criterion_id','value','note']);invariant(x.criterion_id===criteria[i].id&&integer(x.value,1,5)&&text(x.note),'Самооценка: уровень 1–5, незаполненное не равно нулю')});
+  const criteria=practicalCriteria(db,p.method_id),levels=selfLevelsForMethod(db,p.method_id);invariant(Array.isArray(p.responses)&&criteria.length>0&&p.responses.length===criteria.length,'Оцените все критерии самооценки');
+  p.responses.forEach((x,i)=>{exact(x,['criterion_id','value','note']);invariant(x.criterion_id===criteria[i].id&&Number.isInteger(x.value)&&Object.hasOwn(levels,String(x.value))&&text(x.note),'Самооценка: уровень '+Object.keys(levels)[0]+'–'+Object.keys(levels).at(-1)+', незаполненное не равно нулю')});
   store(db,t,{id,person_id:p.person_id,method_id:p.method_id,evaluated_on:p.evaluated_on,place:p.place,person_name:who.display_name,responses_json:canonical(p.responses),feedback:p.feedback,recorded_at:e.occurred_at,rev:1});return
  }
  if(t==='audit_session'){
@@ -226,7 +234,7 @@ export function applyTrainingEvent(db,e,old){
   hasRole(db,p.auditor_id,p.observed_on,['internal_trainer']);invariant(p.auditor_id!==a.mentor_id&&p.auditor_id!==a.trainee_id,'Внутренний тренер должен отличаться от инструктора и обучаемого');
   const fact=one(db,'SELECT * FROM training_session WHERE id=? AND assignment_id=? AND stage_code IS NOT NULL',[p.session_id,a.id]);
   invariant(a.state!=='cancelled'&&a.approval_json&&fact&&fact.held_at.slice(0,10)<=p.observed_on&&p.observed_on>=a.assigned_on&&required(p.feedback),'Выберите факт этого инструктажа, дату наблюдения и обратную связь');
-  if(mobile)verifyMobileContext(db,p,a);else invariant(trainingMethods(db,AUDIT_CODE).some(x=>x.id===p.method_id&&x.state==='active'),'Выберите действующую методику аудита L1');
+  if(mobile)verifyMobileContext(db,p,a);else invariant(auditMethods(db).some(x=>x.id===p.method_id&&x.state==='active'),'Выберите действующую методику аудита L1');
   if(mobile||native)invariant(!mobileObservationExists(db,p,fact.id),'Такое наблюдение этого факта уже зарегистрировано; выберите другой фактический инструктаж или аннулируйте ошибочную запись');
   const criteria=practicalCriteria(db,p.method_id);invariant(Array.isArray(p.responses)&&criteria.length>0&&p.responses.length===criteria.length,'Заполните все критерии аудита');
   p.responses.forEach((x,i)=>{exact(x,['criterion_id','value','note']);invariant(x.criterion_id===criteria[i].id&&(x.value===0||x.value===1||(['not_observed','not_applicable'].includes(x.value)&&required(x.note,2000)))&&text(x.note),'Некорректный ответ аудита: для ненаблюдавшегося / неприменимого пункта укажите основание')});

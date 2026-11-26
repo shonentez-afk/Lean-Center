@@ -1,67 +1,6 @@
-import {STANDARD_FORMS} from './standard-v03.js';
+import {STANDARD_FORMS,PRACTICAL_V03} from './standard-v03.js';
 // Source forms, without example employee identities, marks or payments.
-export const BUILTIN_PRACTICAL={
-  "format": "lean-practical-checklist-v1",
-  "title": "Приложение 8. Чек-лист оценки выполнения операций Стажером",
-  "source_sha256": "2555971f502c79958de74500b4dccc3622066b32e9687c6d1b15757834b88a00",
-  "criteria": [
-    {
-      "code": 1,
-      "section": "Шаг 1. Подготовка места и обучаемого",
-      "question": "Стажер подготовил рабочее место"
-    },
-    {
-      "code": 2,
-      "section": "Шаг 1. Подготовка места и обучаемого",
-      "question": "Стажер подготовил инструмент"
-    },
-    {
-      "code": 3,
-      "section": "Шаг 2. Выполнение операции",
-      "question": "Стажер выполнил работу правильно?"
-    },
-    {
-      "code": 4,
-      "section": "Шаг 2. Выполнение операции",
-      "question": "Стажер правильно выполнил работу и объяснил основные этапы?"
-    },
-    {
-      "code": 5,
-      "section": "Шаг 2. Выполнение операции",
-      "question": "Стажер правильно выполнил работу, объяснил этапы и ключевые моменты?"
-    },
-    {
-      "code": 6,
-      "section": "Шаг 2. Выполнение операции",
-      "question": "Стажер правильно выполнил работу, объяснил этапы, КМ и причины?"
-    },
-    {
-      "code": 7,
-      "section": "Шаг 2. Выполнение операции",
-      "question": "Стажер использовал СОП?"
-    },
-    {
-      "code": 8,
-      "section": "Шаг 2. Выполнение операции",
-      "question": "Стажер использовал СИЗ согласно СОП?"
-    },
-    {
-      "code": 9,
-      "section": "Шаг 2. Выполнение операции",
-      "question": "Стажер использовал инструмент согласно СОП?"
-    },
-    {
-      "code": 10,
-      "section": "Шаг 2. Выполнение операции",
-      "question": "Стажер выполнил работу безопасно?"
-    },
-    {
-      "code": 11,
-      "section": "Шаг 2. Выполнение операции",
-      "question": "В целом стажер провел работу четко, спокойно и она была завершена?"
-    }
-  ]
-};
+export const BUILTIN_PRACTICAL=PRACTICAL_V03;
 export const BUILTIN_SOP={
   "format": "lean-sop-checklist-v1",
   "title": "Приложение 4. Чек-лист оценки СОП",
