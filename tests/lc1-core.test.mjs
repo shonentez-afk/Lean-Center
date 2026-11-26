@@ -45,3 +45,46 @@ test('LC5.4.1 pending suffix is exposed and restored after resolving a conflict'
 test('LC5.4.1 resending an unchanged queue reuses the original verified network package',async()=>{
  const folder=new FolderHandle(),w=newWs();try{w.edit('person',null,person('A'));const first=await w.package(),again=await w.package();assert.notEqual(first.id,again.id);assert.equal((await net.sendPackage(folder,first)).duplicate,false);assert.deepEqual(await net.sendPackage(folder,again),{duplicate:true,id:first.id});assert.equal((await net.listPackages(folder)).length,1);w.edit('person',null,person('B'));const extended=await w.package();assert.equal((await net.sendPackage(folder,extended)).duplicate,false);assert.equal((await net.listPackages(folder)).length,2);assert.equal(w.pending.length,2)}finally{w.close()}
 });
+
+
+// LC73B-NET-01: close failure after creation of a zero-byte manifest.
+test('LC73B-NET-01 interrupted publication does not block last committed snapshot or retry',async()=>{
+ const folder=new FolderHandle(),master=newWs();let operator;
+ try{
+  master.edit('person',null,person('A'));await master.acceptOwn();const a=await prepareSnapshot(master);
+  await net.publishSnapshot(folder,SQL,a);master.replaceBase((await net.latestSnapshot(folder,SQL)).db);
+  operator=new Workspace(SQL,(await net.latestSnapshot(folder,SQL)).db);
+  master.edit('person',null,person('B'));await master.acceptOwn();
+  const b=await prepareSnapshot(master),d=await folder.getDirectoryHandle('Database'),badName='publication-'+b.manifest.id+'.json',get=d.getFileHandle.bind(d);
+  d.getFileHandle=async(name,options)=>{const f=await get(name,options);if(name===badName&&options?.create){const create=f.createWritable.bind(f);f.createWritable=async()=>{const w=await create();return {...w,close:async()=>{throw Error('QA close failed')}}}}return f};
+  await assert.rejects(net.publishSnapshot(folder,SQL,b),/Публикация не подтверждена.*QA close failed/);d.getFileHandle=get;
+  assert.equal((await get(badName)).data.length,0);assert.equal((await get('snapshot-'+b.manifest.id+'.sqlite')).data.length,b.bytes.length);assert.equal(master.dirty,true);
+  let warnings=[];const options={onIncomplete:names=>{warnings=names}};
+  const last=await net.latestSnapshot(folder,SQL,null,options);assert.equal(last.manifest.id,a.manifest.id);assert.deepEqual(warnings,[badName]);operator.replaceBase(last.db);
+  const fresh=await net.latestSnapshot(folder,SQL,null,options);try{assert.deepEqual(list(fresh.db,'person').map(x=>x.employee_code),['A'])}finally{fresh.db.close()}
+  const c=await prepareSnapshot(master);assert.equal(c.manifest.parent_id,a.manifest.id);assert.notEqual(c.manifest.id,b.manifest.id);await net.publishSnapshot(folder,SQL,c,undefined,options);
+  assert.deepEqual(warnings,[badName]);assert.equal((await get(badName)).data.length,0);assert.deepEqual((await get('snapshot-'+b.manifest.id+'.sqlite')).data,b.bytes);
+  const latest=await net.latestSnapshot(folder,SQL,null,options);assert.equal(latest.manifest.id,c.manifest.id);operator.replaceBase(latest.db);assert.deepEqual(list(operator.working,'person').map(x=>x.employee_code).sort(),['A','B']);
+  // Empty means zero bytes, not whitespace, invalid UTF-8, a truncated JSON,
+  // or structurally invalid but parseable data.
+  const marker=await get(badName);for(const invalid of [' ','{','{}','null']){marker.data=new TextEncoder().encode(invalid);await assert.rejects(net.latestSnapshot(folder,SQL),/Повреждён непустой манифест|Имя манифеста/)}
+  marker.data=Uint8Array.of(255);await assert.rejects(net.latestSnapshot(folder,SQL),/Повреждён непустой манифест/);marker.data=new Uint8Array();
+  const headFile=await get('snapshot-'+c.manifest.id+'.sqlite');headFile.data[100]^=1;await assert.rejects(net.latestSnapshot(folder,SQL),/Повреждён снимок/);headFile.data[100]^=1;
+  const oldManifest=await get('publication-'+a.manifest.id+'.json'),oldBytes=oldManifest.data;
+  const tampered={...a.manifest,created_at:'2000-01-01T00:00:00Z'};oldManifest.data=new TextEncoder().encode(canonical(tampered));await assert.rejects(net.latestSnapshot(folder,SQL),/контрольная сумма манифеста/);
+  oldManifest.data=new Uint8Array();await assert.rejects(net.latestSnapshot(folder,SQL),/Разорвана цепочка публикаций/);oldManifest.data=oldBytes;
+  // A known client may not downgrade to A if its previously committed C marker is lost.
+  const headMarker=await get('publication-'+c.manifest.id+'.json'),headBytes=headMarker.data;headMarker.data=new Uint8Array();
+  const fallback=await net.latestSnapshot(folder,SQL);assert.equal(fallback.manifest.id,a.manifest.id);assert.throws(()=>operator.replaceBase(fallback.db),/Снимок устарел/);assert.equal(meta(operator.base,'publication_id'),c.manifest.id);headMarker.data=headBytes;
+  const fork=await prepareSnapshot(master);await net.writeNew(d,'snapshot-'+fork.manifest.id+'.sqlite',fork.bytes);await net.writeNew(d,'publication-'+fork.manifest.id+'.json',canonical(fork.manifest));await assert.rejects(net.latestSnapshot(folder,SQL),/параллельные/);
+ }finally{operator?.close();master.close()}
+});
+test('LC73B-NET-01 first interrupted publication never becomes a base; missing snapshot fails closed',async()=>{
+ const folder=new FolderHandle(),master=newWs();try{
+  const first=await prepareSnapshot(master),d=await folder.getDirectoryHandle('Database',{create:true}),name='publication-'+first.manifest.id+'.json';
+  await d.getFileHandle(name,{create:true});await assert.rejects(net.latestSnapshot(folder,SQL),/Пустой манифест без файла снимка/);
+  await net.writeNew(d,'snapshot-'+first.manifest.id+'.sqlite',first.bytes);
+  let warnings;assert.equal(await net.latestSnapshot(folder,SQL,null,{onIncomplete:n=>warnings=n}),null);assert.deepEqual(warnings,[name]);
+  const next=await prepareSnapshot(master);await net.publishSnapshot(folder,SQL,next);const s=await net.latestSnapshot(folder,SQL);try{assert.equal(s.manifest.id,next.manifest.id)}finally{s.db.close()}
+ }finally{master.close()}
+});

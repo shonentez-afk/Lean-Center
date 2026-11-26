@@ -1,5 +1,5 @@
 import {refsForEvents,refsForDb,validateRef,checkContent} from '../modules/library/domain.js';
-import {invariant,uuid,sha256,canonical,readSnapshot,checkPackage,MAX_DB,MAX_PACKAGE} from '../core/db.js';
+import {invariant,uuid,sha256,canonical,readSnapshot,checkSnapshotManifest,checkPackage,isId,MAX_DB,MAX_PACKAGE} from '../core/db.js';
 const textBytes=s=>new TextEncoder().encode(s);
 export async function chooseFolder(){invariant(window.showDirectoryPicker,'Выбор папки запрещён браузером. Используйте ручной импорт и экспорт.');return window.showDirectoryPicker({id:'lean-center-network',mode:'readwrite'})}
 export async function permission(h,request=false){if(!h)return false;let p=await h.queryPermission({mode:'readwrite'});if(p!=='granted'&&request)p=await h.requestPermission({mode:'readwrite'});return p==='granted'}
@@ -25,7 +25,55 @@ export async function sendPackage(h,p,read){
  await writeNew(d,'change-'+p.id+'.leanpkg',canonical(p));return {duplicate:false,id:p.id}
 }
 export async function listPackages(h){invariant(await permission(h,false),'Нет доступа к папке');let d;try{d=await sub(h,'Exchange')}catch(e){if(e.name==='NotFoundError')return [];throw e}const result=[];for await(const [name,entry] of d.entries()){if(entry.kind!=='file'||!/^change-[0-9a-f-]+\.leanpkg$/i.test(name))continue;try{const p=JSON.parse(new TextDecoder().decode(await readFile(d,name,MAX_PACKAGE)));invariant(name==='change-'+p.id+'.leanpkg','Имя пакета не совпадает с ID');result.push({name,p})}catch(e){result.push({name,error:e.message})}}return result.sort((a,b)=>(a.p?.created_at||'').localeCompare(b.p?.created_at||''))}
-export async function latestSnapshot(h,SQL,databaseId=null){invariant(await permission(h,false),'Нет доступа к папке');let d;try{d=await sub(h,'Database')}catch(e){if(e.name==='NotFoundError')return null;throw e}const manifests=[];for await(const [name,entry] of d.entries()){if(entry.kind!=='file'||!/^publication-[0-9a-f-]+\.json$/i.test(name))continue;const m=JSON.parse(new TextDecoder().decode(await readFile(d,name,65536)));invariant(name==='publication-'+m.id+'.json','Имя манифеста не совпадает');if(!databaseId||m.database_id===databaseId)manifests.push(m)}
- if(!manifests.length)return null;invariant(new Set(manifests.map(m=>m.database_id)).size===1,'В папке несколько баз. Используйте отдельную папку для каждой.');const ids=new Set(manifests.map(m=>m.id)),parents=new Set(manifests.map(m=>m.parent_id));const heads=manifests.filter(m=>!parents.has(m.id));invariant(heads.length===1,'Обнаружены параллельные публикации; требуется разбор');const head=heads[0];const seen=new Set();let node=head;while(node){invariant(!seen.has(node.id),'Цикл публикаций');seen.add(node.id);node=node.parent_id?manifests.find(m=>m.id===node.parent_id):null}invariant(seen.size===ids.size,'Разорвана цепочка публикаций');const bytes=await readFile(d,'snapshot-'+head.id+'.sqlite');const db=await readSnapshot(SQL,head,bytes);return {manifest:head,db,bytes}}
-export async function publishSnapshot(h,SQL,snapshot,read){invariant(await permission(h,true),'Нет доступа к папке');const current=await latestSnapshot(h,SQL);try{invariant(!current?snapshot.manifest.parent_id===null:current.manifest.database_id===snapshot.manifest.database_id&&current.manifest.id===snapshot.manifest.parent_id,'Сетевая база обновилась или это другая база. Сначала загрузите её.')}finally{current?.db.close()}const checked=await readSnapshot(SQL,snapshot.manifest,snapshot.bytes);try{for(const ref of refsForDb(checked))await ensureContent(h,ref,read)}finally{checked.close()}const d=await sub(h,'Database',true);await writeNew(d,'snapshot-'+snapshot.manifest.id+'.sqlite',snapshot.bytes);await writeNew(d,'publication-'+snapshot.manifest.id+'.json',canonical(snapshot.manifest));const verified=await latestSnapshot(h,SQL,snapshot.manifest.database_id);try{invariant(verified?.manifest.id===snapshot.manifest.id,'Публикация не подтверждена')}finally{verified?.db.close()}}
+// The manifest is the commit marker. Only an exactly zero-byte marker with
+// its already-created snapshot is a candidate for incomplete publication.
+// Never delete/overwrite it or infer a committed snapshot from the orphan.
+export async function latestSnapshot(h,SQL,databaseId=null,{onIncomplete=()=>{}}={}){
+ invariant(await permission(h,false),'Нет доступа к папке');let d;
+ try{d=await sub(h,'Database')}catch(e){if(e.name==='NotFoundError'){onIncomplete([]);return null}throw e}
+ const manifests=[],incomplete=[];
+ for await(const [name,entry] of d.entries()){
+  if(entry.kind!=='file'||!/^publication-[0-9a-f-]+\.json$/i.test(name))continue;
+  const bytes=await readFile(d,name,65536);
+  if(bytes.length===0){
+   const id=name.slice('publication-'.length,-'.json'.length);
+   invariant(isId(id),'Некорректное имя пустого манифеста: '+name);
+   let snapshot;
+   try{snapshot=await (await d.getFileHandle('snapshot-'+id+'.sqlite')).getFile()}catch(e){if(e.name==='NotFoundError')throw Error('Пустой манифест без файла снимка: '+name);throw e}
+   invariant(snapshot.size>0&&snapshot.size<=MAX_DB,'Пустой манифест с некорректным файлом снимка: '+name);
+   incomplete.push(name);continue
+  }
+  let m;
+  try{m=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes))}catch(e){throw Error('Повреждён непустой манифест: '+name,{cause:e})}
+  invariant(m&&name==='publication-'+m.id+'.json','Имя манифеста не совпадает: '+name);
+  await checkSnapshotManifest(m);
+  if(!databaseId||m.database_id===databaseId)manifests.push(m)
+ }
+ incomplete.sort();onIncomplete([...incomplete]);
+ if(!manifests.length)return null;
+ invariant(new Set(manifests.map(m=>m.database_id)).size===1,'В папке несколько баз. Используйте отдельную папку для каждой.');
+ const byId=new Map(manifests.map(m=>[m.id,m])),parents=new Set(manifests.map(m=>m.parent_id));
+ // A committed child may never rely on an ignored empty or missing parent.
+ for(const m of manifests)invariant(m.parent_id===null||byId.has(m.parent_id),'Разорвана цепочка публикаций: отсутствует подтверждённый предок '+m.parent_id);
+ const heads=manifests.filter(m=>!parents.has(m.id));
+ invariant(heads.length===1,'Обнаружены параллельные публикации или цикл; требуется разбор');
+ const head=heads[0],seen=new Set();let node=head;
+ while(node){invariant(!seen.has(node.id),'Цикл публикаций');seen.add(node.id);node=node.parent_id?byId.get(node.parent_id):null}
+ invariant(seen.size===byId.size,'Разорвана цепочка публикаций');
+ const bytes=await readFile(d,'snapshot-'+head.id+'.sqlite'),db=await readSnapshot(SQL,head,bytes);
+ return {manifest:head,db,bytes}
+}
+export async function publishSnapshot(h,SQL,snapshot,read,options={}){
+ invariant(await permission(h,true),'Нет доступа к папке');
+ const current=await latestSnapshot(h,SQL,null,options);
+ try{invariant(!current?snapshot.manifest.parent_id===null:current.manifest.database_id===snapshot.manifest.database_id&&current.manifest.id===snapshot.manifest.parent_id,'Сетевая база обновилась или это другая база. Сначала загрузите её.')}finally{current?.db.close()}
+ const checked=await readSnapshot(SQL,snapshot.manifest,snapshot.bytes);
+ try{for(const ref of refsForDb(checked))await ensureContent(h,ref,read)}finally{checked.close()}
+ const d=await sub(h,'Database',true);
+ await writeNew(d,'snapshot-'+snapshot.manifest.id+'.sqlite',snapshot.bytes);
+ try{await writeNew(d,'publication-'+snapshot.manifest.id+'.json',canonical(snapshot.manifest))}
+ catch(e){throw Error('Публикация не подтверждена: '+e.message+'. Проверьте состояние сетевой папки; неопубликованные изменения сохранены локально.',{cause:e})}
+ const verified=await latestSnapshot(h,SQL,snapshot.manifest.database_id,options);
+ try{invariant(verified?.manifest.id===snapshot.manifest.id,'Публикация не подтверждена')}finally{verified?.db.close()}
+}
 export async function saveBackup(h,obj){invariant(await permission(h,true),'Нет доступа к папке');const d=await sub(h,'Backups',true);await writeNew(d,'backup-'+uuid()+'.leanbackup',canonical(obj))}

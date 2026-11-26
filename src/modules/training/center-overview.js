@@ -69,7 +69,7 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
  count('practice_count','Компетенции','Практические оценки',practice.length,'Подтверждённые практические оценки обучаемого в период.','practical',f),
  ratio('practice_negative','Компетенции','Заключения «Не соответствует»',practice.filter(x=>x.conclusion==='not_meet').length,practice.length,'Отдельное заключение оценщика, не процент чек-листа.','practical',{...f,filter:'not_meet'}),
  ratio('skill_coverage','Компетенции','Требования без разрыва',cells.filter(x=>!x.gap).length,cells.length,'Текущие требования по сотрудникам и навыкам, с той же шкалой и актуальной редакцией. Не означает допуск.','skills',{}),
- count('sop_evaluations','СОП','Корпоративские оценки',sop.length,'Сохранённые бинарные оценки в период; сотрудник — оценщик.','analytics',{...f,assessmentType:'sop',sopKind:'sop_evaluation'}),
+ count('sop_evaluations','СОП','Корпоративные оценки',sop.length,'Сохранённые бинарные оценки в период; сотрудник — оценщик.','analytics',{...f,assessmentType:'sop',sopKind:'sop_evaluation'}),
  count('sop_weighted','СОП','Снимки взвешенных чек-листов',weighted.length,'Исторические сохранения и правки, не количество уникальных документов.','analytics',{...f,assessmentType:'sop',sopKind:'weighted_sop'}),
  count('sop_review','СОП','Просрочен пересмотр',docs.filter(x=>x.review_due&&x.review_due<day).length,'Действующие редакции со сроком пересмотра до текущей даты; сотрудник — автор.','sop',{}),
  count('frv_final','ФРВ','Завершённые исследования',frv.length,'Финальные исследования в период, сотрудник — сохранённый автор. Не денежный эффект.','analytics',{...f,assessmentType:'frv'}),
