@@ -1,9 +1,11 @@
+import {economicReport,economicReportSheets,attainment} from '../src/modules/effect/reporting.js';
+import * as net from '../src/storage/network.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,SQL,schema,migrations,date} from './lc4-fixture.mjs';
-import {one,rows,uuid,openDb,bytesOf,meta,setMeta,Workspace,checkPackage,canonical,sha256,prepareSnapshot,readSnapshot} from '../src/core/db.js';
+import {one,rows,uuid,openDb,bytesOf,meta,setMeta,Workspace,checkPackage,canonical,sha256,prepareSnapshot,readSnapshot,backup,restore} from '../src/core/db.js';
 import {inspectSource} from '../src/modules/library/domain.js';
-import {calculateEffect,measurementOf,effectEvidence,effectCurrent,effectOverview,effectPending,effectFacts,factCurrent,factNet} from '../src/modules/effect/domain.js';
+import {calculateEffect,measurementOf,effectEvidence,effectCurrent,effectOverview,effectPending,effectFacts,factCurrent,factNet,periodTargets,targetNeedsAttention} from '../src/modules/effect/domain.js';
 import {employeeRelations} from '../src/modules/master-data/employee-records.js';
 const timePlan={deltaSeconds:30,cyclesPerYear:3600,hourRate:100,realization:50,investment:1000,annualCost:500};
 const directPlan={annualGross:1000,investment:200,annualCost:100};
@@ -60,4 +62,50 @@ test('LC6 direct action effect, currencies and voiding keep monetary facts separ
   assert.deepEqual(effectOverview(db,{day:date}).currencies.map(x=>[x.currency,x.net]),[['EUR',8500],['RUB',8500]]);
   await f.save('economic_fact',{command:'void',actor_id:f.actor,reason:'QA исправление документа'},ids[0]);assert.deepEqual(effectOverview(db,{day:date}).currencies.map(x=>x.currency),['EUR']);assert.equal(one(db,'SELECT void_reason FROM economic_fact WHERE id=?',[ids[0]]).void_reason,'QA исправление документа');assert.deepEqual(rows(db,'PRAGMA foreign_key_check'),[]);
  }finally{f.w.close()}
+});
+
+const missing=()=>Object.assign(new Error('missing'),{name:'NotFoundError'});
+class FileHandle{constructor(){this.kind='file';this.data=new Uint8Array()}async getFile(){return new Blob([this.data])}async createWritable(){let data;return {write:async d=>{data=typeof d==='string'?new TextEncoder().encode(d):new Uint8Array(d)},close:async()=>{this.data=data},abort:async()=>{}}}}
+class Folder{constructor(){this.kind='directory';this.files=new Map()}async queryPermission(){return 'granted'}async requestPermission(){return 'granted'}async getFileHandle(n,{create=false}={}){if(!this.files.has(n)){if(!create)throw missing();this.files.set(n,new FileHandle())}const f=this.files.get(n);assert.equal(f.kind,'file');return f}async getDirectoryHandle(n,{create=false}={}){if(!this.files.has(n)){if(!create)throw missing();this.files.set(n,new Folder())}const f=this.files.get(n);assert.equal(f.kind,'directory');return f}async *entries(){yield* this.files.entries()}}
+test('LC6.1 period coverage, signed deviations, recorded causes, stale review, consistent report and network publication',async()=>{
+ const f=await fixture();let master,reader,restored;
+ try{
+  const db=f.w.working,a=await task(f);await verifyTask(f,a);
+  const id=(await f.save('economic_effect',plan(f,null,a))).entity_id,r=()=>one(f.w.working,'SELECT * FROM economic_effect WHERE id=?',[id]);
+  const goal={command:'period_target',from:'2026-01-01',to:date,target_minor:40000,basis:'QA план периода',actor_id:f.mentor};
+  const target=(await f.save('economic_effect',goal,id)).id;
+  await assert.rejects(f.save('economic_effect',goal,id),/пересекается/);
+  const get=()=>periodTargets(f.w.working,r(),date).find(x=>x.id===target),scope={day:date,from:'2026-01-01',to:date};
+  assert(!get().complete);assert.equal(get().delta,null);assert(targetNeedsAttention(get()));assert.equal(economicReport(effectOverview(db,scope)).incomplete,1);
+  await f.save('economic_effect',{command:'measure',inputs:directPlan,measurement:null,source:null,actions:effectEvidence(db,r()),reviewer_id:f.actor,evidence:'QA проверка'},id);
+  const input={command:'create',effect_id:id,actual_event_id:r().actual_event_id,registered_by:f.mentor,evidence:'QA факт',gross_minor:20000,recurring_minor:0,investment_minor:0};
+  await assert.rejects(f.save('economic_fact',{...input,period_from:'2025-12-31',period_to:'2026-01-10'}),/границу цели/);
+  const oneId=(await f.save('economic_fact',{...input,period_from:'2026-01-01',period_to:'2026-01-10'})).entity_id;
+  await f.save('economic_fact',{command:'confirm',verifier_id:f.actor,note:'QA'},oneId);
+  assert.equal(get().actual,20000);assert.equal(get().delta,null);
+  const twoId=(await f.save('economic_fact',{...input,period_from:'2026-01-11',period_to:date,gross_minor:13000})).entity_id;
+  await f.save('economic_fact',{command:'confirm',verifier_id:f.actor,note:'QA'},twoId);
+  let t=get();assert(t.complete);assert.equal(t.delta,-7000);assert(t.shortfall);assert.equal(t.status,'Требуется разбор отклонения');
+  const review={command:'period_review',target_id:target,actor_id:f.actor,cause:'volume',note:'QA снизился объём',action_id:a,signature:t.signature,actual_minor:t.actual};
+  await assert.rejects(f.save('economic_effect',{...review,signature:'forged'},id),/полным актуальным/);
+  await f.save('economic_effect',review,id);assert(get().currentReview);assert(!targetNeedsAttention(get()));
+  const overview=effectOverview(db,scope),report=economicReport(overview),annual=economicReport(overview,{grain:'year'});
+  assert.equal(overview.currencies[0].net,33000);assert.equal(report.series[0].net,33000);assert.equal(report.series[0].cumulative,33000);assert.equal(report.series[0].planned,40000);assert.equal(report.series[0].actual,33000);assert.equal(report.ranks[0].rank,1);assert.equal(report.causes[0].shortfall,7000);assert.equal(report.causes[0].cause,'volume');assert.equal(annual.series[0].key,'2026');assert.equal(attainment(33000,40000),82.5);assert.equal(attainment(33000,0),null);
+  const sheets=economicReportSheets(report,overview,scope,(_kind,id)=>id);assert.equal(sheets.length,8);assert.equal(sheets.find(s=>s.name==='Валюты').rows[0][5],330);assert.equal(sheets.find(s=>s.name==='Динамика').rows[0][7],330);
+  // Real network adapter over an in-memory directory, plus portable source bytes.
+  const dir=new Folder();master=new Workspace(SQL,openDb(SQL,bytesOf(f.w.base)));const first=await prepareSnapshot(master);await net.publishSnapshot(dir,SQL,first);master.replaceBase((await net.latestSnapshot(dir,SQL)).db);
+  const pkg=await f.w.package();await net.sendPackage(dir,pkg,f.readContent);assert.equal((await net.sendPackage(dir,await f.w.package(),f.readContent)).duplicate,true);await master.accept(pkg,ref=>net.readContent(dir,ref));
+  const next=await prepareSnapshot(master);await net.publishSnapshot(dir,SQL,next,ref=>net.readContent(dir,ref));reader=new Workspace(SQL,(await net.latestSnapshot(dir,SQL)).db);
+  assert.equal(economicReport(effectOverview(reader.working,scope)).matched[0].actual,33000);assert.equal(periodTargets(reader.working,one(reader.working,'SELECT * FROM economic_effect WHERE id=?',[id]),date)[0].currentReview,true);
+  restored=await restore(SQL,await backup(reader),ref=>net.readContent(dir,ref));assert.equal(effectOverview(restored.working,scope).currencies[0].net,33000);assert.deepEqual(rows(restored.working,'PRAGMA foreign_key_check'),[]);
+  await f.save('economic_fact',{command:'void',actor_id:f.actor,reason:'QA отменён документ'},twoId);assert(!get().complete);assert(!get().currentReview);assert.equal(get().delta,null);assert.equal(economicReport(effectOverview(f.w.working,scope)).matched.length,0);
+  const replacement=(await f.save('economic_fact',{...input,period_from:'2026-01-11',period_to:date,gross_minor:10000})).entity_id;await f.save('economic_fact',{command:'confirm',verifier_id:f.actor,note:'QA исправлено'},replacement);
+  assert(get().shortfall);assert(!get().currentReview);assert.equal(get().delta,-10000);assert.equal(economicReport(effectOverview(f.w.working,scope)).causes[0].cause,'unreviewed');
+ }finally{restored?.close();reader?.close();master?.close();f.w.close()}
+});
+test('LC6.1 monthly and yearly aggregation keeps currencies, signed totals, ranks and target basis separate',()=>{
+ const a={id:'a',currency:'RUB',unit_id:'u1',state:'active'},b={id:'b',currency:'RUB',unit_id:'u2',state:'active'},e={id:'e',currency:'EUR',unit_id:'u1',state:'active'};
+ const f=(effect,to,gross)=>({effect,period_to:to,gross_minor:gross,recurring_minor:0,investment_minor:0,eligible:true});
+ const facts=[f(a,'2026-01-31',10000),f(a,'2026-02-28',-2000),f(b,'2026-02-28',9000),f(e,'2026-02-28',5000),{...f(a,'2026-03-31',99999),eligible:false}];
+ const x=economicReport({facts,targets:[]}),rub=x.series.filter(y=>y.currency==='RUB');assert.deepEqual(rub.map(y=>y.cumulative),[10000,17000]);assert.deepEqual(x.ranks.filter(y=>y.currency==='RUB').map(y=>[y.key,y.rank,y.net]),[['u2',1,9000],['u1',2,8000]]);assert.equal(x.series.find(y=>y.currency==='EUR').net,5000);assert.deepEqual(economicReport({facts,targets:[]},{grain:'year'}).series.map(y=>[y.currency,y.key,y.net]),[['EUR','2026',5000],['RUB','2026',17000]]);
 });
