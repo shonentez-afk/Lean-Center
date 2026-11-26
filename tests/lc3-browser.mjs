@@ -283,7 +283,18 @@ try{
  await frvEditor.locator('[data-fs=durationSec]').first().fill('13.5');assert.equal(await frvEditor.locator('#frvs-status').inputValue(),'Observed');
  await frvEditor.locator('[data-fs=durationSec]').first().fill('12.5');await frvEditor.locator('[data-fs=valueType]').first().selectOption('NVA_Waste');
  await frvEditor.locator('.frvs-more summary').first().click();await frvEditor.locator('[data-fs=lossCode]').first().selectOption('search_tool');await frvEditor.locator('[data-fs=causeCode]').first().fill('Инструмент вне места хранения');
- async function exportFrvJson(frame,selector,tag){const wait=page.waitForEvent('download');await frame.locator(selector).click();const file=path.join(tmp,tag+'.json');await (await wait).saveAs(file);return JSON.parse(await fs.readFile(file,'utf8'))}
+ async function exportFrvJson(frame,selector,tag){
+  const button=frame.locator(selector);
+  // Open the native backup menu through its real UI before waiting for a file.
+  if(selector==='#frvStudyDownloadBtn'){
+   const menu=button.locator('xpath=ancestor::details[1]');
+   if(!(await menu.evaluate(el=>el.open)))await menu.locator(':scope > summary').click();
+  }
+  await button.waitFor({state:'visible'});
+  const [download]=await Promise.all([page.waitForEvent('download'),button.click()]);
+  const file=path.join(tmp,tag+'.json');await download.saveAs(file);
+  return JSON.parse(await fs.readFile(file,'utf8'));
+ }
  const topJson=await exportFrvJson(frvEditor,'#lc-editor-download','frv-top');const nativeJson=await exportFrvJson(frvEditor,'#frvStudyDownloadBtn','frv-native');assert.deepEqual(nativeJson,topJson);assert.equal(topJson.study.leanCenterPeople[0].person_id,edited.constructor.leanCenterPeople[0].person_id);
  const xlsxWait=page.waitForEvent('download');await frvEditor.locator('#frvStudyExportXlsxBtn').click();const xlsxFile=path.join(tmp,'frv-causes.xlsx');await (await xlsxWait).saveAs(xlsxFile);
  const causes=await frvEditor.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const s=w.getWorksheet('Наблюдения');return [s.getCell('K5').value,s.getCell('K6').value,s.getCell('E6').value]},Array.from(await fs.readFile(xlsxFile)));assert.deepEqual(causes,['Причина потери','Инструмент вне места хранения',12.5]);
