@@ -7,7 +7,7 @@ import {centerAuditIndicators,pctText} from './modules/training/audit-analytics.
 import {employeeRelations,employeeSourceLinks} from './modules/master-data/employee-records.js';
 import {sopCriteriaFromDocx} from './modules/training/local-docx.js';
 import {BUILTIN_SOP,previewCriteria} from './modules/training/builtin-forms.js';
-import {TRAINING_PAGES,trainingScreen,resetTrainingRoute,setTrainingRoute} from './modules/training/screens.js';
+import {TRAINING_PAGES,trainingScreen,resetTrainingRoute,setTrainingRoute,getTrainingRoute} from './modules/training/screens.js';
 import {directoryPeople} from './modules/master-data/people-directory.js';
 import {openPeopleDropdown,closePeopleDropdown} from './ui/people-picker.js';
 import {weightedHistory,corporateEvaluations} from './modules/library/sop-assessment-review.js';
@@ -46,9 +46,37 @@ function add(parent,...children){parent.append(...children);return parent}
 function btn(label,fn,cls='',disabled=false){const n=el('button',label,cls);n.type='button';n.disabled=disabled||busy;n.addEventListener('click',fn);return n}
 function pane(title,...children){return add(el('section',undefined,'panel'),el('h2',title),...children)}
 function message(s,bad=false){status=s;error=bad;const n=document.getElementById('status');if(n){n.textContent=s;n.className='status'+(bad?' error':'')}}
+// Navigation snapshots stay in memory; the browser stores only an opaque history ID.
+let mobileMenu=false,navSerial=0,navCurrent=null,navParent=null,navSupported=true,restoringNav=false;
+const navSnapshots=new Map();
+try{theme=localStorage.getItem('lean-center-theme')==='dark'}catch{}
+function initNav(){if(navCurrent!==null)return;navCurrent=++navSerial;try{history.scrollRestoration='manual';history.replaceState({lcNav:navCurrent,parent:null},'')}catch{navSupported=false}}
+const filterName=n=>!!n&&(/_filter_|^lc5_analytics_|^lc51_analytics_|^lc52_(analytics|metrics|frv|sop|retrain|calendar_unit|action_unit)|^compare_|^lc5_calendar_(month|person|type)$/.test(n));
+function navSnapshot(){
+ const controls=[...document.querySelectorAll('main input[name],main select[name],main button.lc-directory-trigger[name]')].filter(e=>filterName(e.name)).map(e=>({name:e.name,value:e.dataset.personId??e.value,person:typeof e.lcRestorePerson==='function'}));
+ return {page,route:getTrainingRoute(),employeeSelected,employeeTab,employeeReturn,query,archiveFilter,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson,scroll:window.scrollY,controls};
+}
+function rememberNavigation(){
+ if(restoringNav||!ws)return;initNav();navSnapshots.set(navCurrent,navSnapshot());const previous=navCurrent;navCurrent=++navSerial;navParent=previous;try{if(navSupported)history.pushState({lcNav:navCurrent,parent:previous},'')}catch{navSupported=false}mobileMenu=false;
+}
+function restoreNavigation(id,parent){
+ const snap=navSnapshots.get(id);if(!snap||busy||editorSession&&!editorSession.host.hidden)return false;
+ navSnapshots.set(navCurrent,navSnapshot());navCurrent=id;navParent=parent;restoringNav=true;
+ try{
+  closePeopleDropdown();({page,employeeSelected,employeeTab,employeeReturn,query,archiveFilter,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson}=snap);employeeSources=null;edit=null;mobileMenu=false;setTrainingRoute(page,snap.route);render();
+  const find=name=>[...document.querySelectorAll('main [name]')].find(e=>e.name===name);
+  for(const v of snap.controls.filter(x=>x.person))find(v.name)?.lcRestorePerson?.(v.value);
+  const changed=[];for(const v of snap.controls.filter(x=>!x.person)){const e=find(v.name);if(e&&e.value!==v.value&&(!e.options||[...e.options].some(o=>o.value===v.value))){e.value=v.value;changed.push(e)}}
+  for(const e of changed)if(e.isConnected)e.dispatchEvent(new Event('change'));
+  requestAnimationFrame(()=>window.scrollTo(0,snap.scroll||0));return true
+ }finally{restoringNav=false}
+}
+function navigationBack(){if(busy||navParent===null)return;if(navSupported){history.back();return}restoreNavigation(navParent,null)}
+window.addEventListener('popstate',e=>{if(e.state?.lcNav&&navSnapshots.has(e.state.lcNav)){if(!restoreNavigation(e.state.lcNav,e.state.parent??null)&&navSupported)history.forward()}});
 function navigate(p,{retainEmployee=false}={}){
  if(busy)return;
  if(editorSession&&!editorSession.host.hidden)hideEditor(editorSession);
+ rememberNavigation();
  closePeopleDropdown();resetTrainingRoute();if(!retainEmployee){employeeSelected=null;employeeReturn=null;employeeTab='overview';employeeSources=null}page=p;edit=null;query='';historyPerson=null;archiveFilter='active';libraryFilter='all';librarySelected=null;libraryRevisionSelected=null;if(p==='sop_evaluation'){evaluationSelected=null;evaluationTab='weighted';evaluationSearch=''}render()
 }
 function goTraining(p,options={}){navigate(p,{retainEmployee:!!employeeReturn});setTrainingRoute(p,options);render()}
@@ -692,25 +720,25 @@ main.append(pane('Перенос и резервирование',add(el('div',u
 if(ws.conflicts.length){const p=pane('Конфликты локальных изменений',el('p','Сохраните резервную копию. Конфликтующие события не применены; исходные данные не перезаписаны.','bad'));for(const c of ws.conflicts){p.append(el('p',c.error,'bad'));const v=one(ws.working,'SELECT * FROM '+c.event.entity_type+' WHERE id=?',[c.event.entity_id]);p.append(el('pre','Локальное: '+JSON.stringify(c.event.payload,null,2)+'\nТекущее: '+JSON.stringify(v,null,2),'muted'))}p.append(add(el('div',undefined,'row'),btn('Оставить опубликованное значение',()=>{if(confirm('Отменить конфликтующее локальное событие? Сохраните резервную копию.'))run(async()=>{ws.resolveConflict('discard');return 'Конфликтующее событие отменено'})},'danger'),btn('Повторить своё изменение',()=>{if(confirm('Применить ваше значение поверх текущей ревизии? Сохраните резервную копию.'))run(async()=>{ws.resolveConflict('reapply');return 'Создано новое локальное событие; оно ожидает публикации'})},'',Object.hasOwn(DOMAIN_TYPES,ws.conflicts[0].event.entity_type))));main.append(p)}
 main.append(pane('Демонстрация',el('p','Только в пустой локальной базе. Не используйте демонстрационную папку как рабочую.','muted'),btn('Новая пустая база',()=>{if(confirm('Создать отдельную пустую базу вместо текущей? Сначала сохраните резервную копию.'))run(async()=>{replace(new Workspace(SQL,createDb(SQL,LC_BUILD.schema,LC_BUILD.migration)));folder=null;incoming=[];master=false;importState=null;libraryDraft=null;if(cache)await local.save(cache,'folder',null);return 'Новая пустая база создана'})},'danger'),btn('Заполнить демо-данными',()=>run(async()=>{invariant(empty(),'Демо допустимо только в пустой базе');const u=ws.edit('org_unit',null,{code:'DEMO',name:'Учебное предприятие',kind:'Предприятие',parent_id:null});const v=ws.edit('org_unit',null,{code:'DEMO-M',name:'Учебный участок',kind:'Участок',parent_id:u});const p=ws.edit('profession',null,{code:'DEMO-MECH',name:'Механик'});const a=ws.edit('person',null,{employee_code:'DEMO-001',display_name:'Учебный сотрудник 01'});const e=ws.edit('equipment',null,{unit_id:v,code:'DEMO-E',name:'Учебный стенд'});ws.edit('operation',null,{unit_id:v,equipment_id:e,code:'DEMO-O',name:'Проверка стенда',criticality:'normal'});ws.edit('person_assignment',null,{person_id:a,unit_id:v,profession_id:p,shift_code:'1',valid_from:'2026-11-25',valid_to:null});return 'Добавлены демонстрационные записи'}),'',!empty())))}
 function render(){
- chart?.dispose();chart=null;document.documentElement.classList.toggle('dark',theme);
+ initNav();chart?.dispose();chart=null;document.documentElement.classList.toggle('dark',theme);
  const header=el('header',undefined,'corp-header');
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div'),el('div','LEAN CENTER','brand'),el('div','Обучение на рабочем месте · TWI','brand-sub')));
- const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;render()}),btn('Хранение',()=>navigate('storage')));
+ const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{theme=!theme;try{localStorage.setItem('lean-center-theme',theme?'dark':'light')}catch{}render()}),btn('Хранение',()=>navigate('storage')));
  if(editorSession&&editorSession.host.hidden&&!libraryDraft)metaPanel.append(btn('Вернуться в редактор',()=>showEditor(editorSession),'primary'));header.append(brand,metaPanel);
- const side=el('aside',undefined,'sidebar');side.setAttribute('aria-label','Навигация');
+ const side=el('aside',undefined,'sidebar');side.id='lc53-sidebar';side.setAttribute('aria-label','Навигация');side.classList.toggle('lc53-menu-open',mobileMenu);const menu=btn(mobileMenu?'Закрыть меню':'Меню',()=>{mobileMenu=!mobileMenu;side.classList.toggle('lc53-menu-open',mobileMenu);menu.textContent=mobileMenu?'Закрыть меню':'Меню';menu.setAttribute('aria-expanded',String(mobileMenu))},'lc53-mobile-menu');menu.setAttribute('aria-controls',side.id);menu.setAttribute('aria-expanded',String(mobileMenu));header.append(menu);
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};
  for(const [name,keys] of navGroups){const d=el('details',undefined,'nav-section');d.open=!collapsedNav.has(name)||keys.includes(page);d.append(el('summary',name,'navgroup'));for(const k of keys)d.append(navButton(k));d.addEventListener('toggle',()=>{if(d.open)collapsedNav.delete(name);else collapsedNav.add(name)});side.append(d)}
  side.append(el('p','●  Запланированные разделы','nav-hint'));
  const main=el('main',undefined,'main');
  const section=navGroups.find(([,keys])=>keys.includes(page))?.[0]||'Рабочее пространство';
  const top=add(el('div',undefined,'top'),add(el('div'),el('div',section,'eyebrow'),el('h1',labels[page]),el('div','Локальная база · '+ws.pending.length+' ожидающих изменений','muted')),el('span',folder?'Сетевая папка выбрана':'Локальная рабочая копия','pill'));
- main.append(top);const stat=el('div',status,'status'+(error?' error':''));stat.id='status';stat.setAttribute('role','status');main.append(stat);
+ main.append(top);if(navParent!==null)main.append(add(el('div',undefined,'row lc53-nav-return'),btn('← Назад',navigationBack)));const stat=el('div',status,'status'+(error?' error':''));stat.id='status';stat.setAttribute('role','status');main.append(stat);
  if(!cache)main.append(el('p','IndexedDB недоступен. Изменения только в памяти — скачивайте резервную копию до закрытия.','bad'));
  if(ws.conflicts.length)main.append(el('p','Есть конфликты локальных изменений. Откройте «База и обмен».','bad'));
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
  if(employeeReturn&&page!=='person')main.append(add(el('div',undefined,'row employee-return'),btn('← К карточке сотрудника',()=>openEmployee(employeeReturn,{restore:true})),el('span',refName('person',employeeReturn),'muted')));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));main.inert=!!editorSession&&!editorSession.host.hidden;if(editorSession?.loaded)editorSession.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'theme',theme:theme?'dark':'light'},'*');
- if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,goResearch,readContent,pick,downloadBytes,notify:message,openEmployee});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
+ if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,goResearch,readContent,pick,downloadBytes,notify:message,openEmployee,rememberNavigation});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
  main.append(el('p',(LC_BUILD.version||'Lean Center')+' · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());

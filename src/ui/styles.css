@@ -191,3 +191,5 @@ body.editor-active{overflow:hidden}.editor-host{position:fixed;inset:0;z-index:2
 
 /* LC5.3: shared analysis and visible completion. */
 .lc53-analysis{margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:8px}.lc53-analysis h3{margin:8px 0}.lc53-analysis .lc53-result{font-size:22px;font-weight:700}.lc53-recommendations{padding-left:24px}.lc53-recommendations li{margin:8px 0}.lc53-recommendations small{display:block;color:var(--muted);margin:4px 0}.lc53-analysis .lc5-bar-row{grid-template-columns:minmax(100px,1fr) minmax(60px,1fr) minmax(70px,auto)}.lc53-missing{border-left:3px solid var(--tn-red);padding-left:8px}
+
+.lc53-mobile-menu{display:none!important}.lc53-nav-return{margin:0 0 8px}@media(max-width:760px){.lc53-mobile-menu{display:inline-flex!important;align-items:center;justify-content:center;min-height:36px}.sidebar:not(.lc53-menu-open){display:none}.sidebar.lc53-menu-open{display:flex;max-height:70vh;overflow:auto}.main{min-width:0}.lc53-analysis .lc5-bar-row{grid-template-columns:minmax(0,1fr) 45px 75px;font-size:12px}}
