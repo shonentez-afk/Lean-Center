@@ -1,5 +1,6 @@
 import {isLC6Event,applyEconomicEvent,verifyEconomicSource} from '../effect/domain.js';
 import {documentTitle} from './revision-title.js';
+import {MAX_SOP_KEY_MOMENTS} from './sop-limits.js';
 import {verifyMobileEvent} from '../training/mobile-audit.js';
 import {verifyRC1Event} from '../training/rc1-import.js';
 import {TRAINING_TYPES,isTrainingEvent,applyTrainingEvent,verifyTrainingSource} from '../training/domain.js';
@@ -52,8 +53,9 @@ export async function inspectSource(text,kind){
   const base={schemaVersion:p.schemaVersion,document:p.document,constructor:p.constructor,photoAssets:p.photoAssets};
   invariant(await sha256(JSON.stringify(base))===p.integrity.sha256,'Контрольная сумма переносимого СОП не совпадает');
   const s=p.constructor,d=p.document,seen=new Set();invariant(obj(s.meta)&&s.steps.length<=1000,'Некорректные шаги СОП');verifyPeople(s,'sop');
-  const steps=s.steps.map(st=>{
-   invariant(obj(st)&&Number.isSafeInteger(st.id)&&st.id>0&&!seen.has(st.id)&&string(st.action)&&Array.isArray(st.keyMoments)&&st.keyMoments.length<=5&&st.keyMoments.every(x=>string(x))&&string(st.reason)&&num(st.durationSeconds)&&typeof st.hasPhoto==='boolean','Некорректный шаг СОП');seen.add(st.id);
+  const steps=s.steps.map((st,i)=>{
+   invariant(!Array.isArray(st?.keyMoments)||st.keyMoments.length<=MAX_SOP_KEY_MOMENTS,'Шаг '+(i+1)+': допускается не более '+MAX_SOP_KEY_MOMENTS+' ключевых моментов');
+   invariant(obj(st)&&Number.isSafeInteger(st.id)&&st.id>0&&!seen.has(st.id)&&string(st.action)&&Array.isArray(st.keyMoments)&&st.keyMoments.every(x=>string(x))&&string(st.reason)&&num(st.durationSeconds)&&typeof st.hasPhoto==='boolean','Некорректный шаг СОП');seen.add(st.id);
    if(st.hasPhoto){const a=p.photoAssets[String(st.id)];invariant(obj(a)&&safeImage(a.original)&&(!a.rendered||safeImage(a.rendered)),'Отсутствует или неподдерживаемое фото шага '+st.id)}
    return {source_id:String(st.id),action:st.action,key_points:st.keyMoments,reason:st.reason,seconds:st.durationSeconds,photo:st.hasPhoto};
   });

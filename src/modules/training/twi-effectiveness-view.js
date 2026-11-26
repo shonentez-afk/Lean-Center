@@ -1,6 +1,6 @@
 // LC6.2 view: source drill-downs, existing navigation, local ExcelJS.
 import {rows,one,invariant,uuid} from '../../core/db.js';
-import {twiOverview,twiComparison,trainingFacts} from './twi-effectiveness.js';
+import {twiOverview,twiComparison,trainingFacts,twiDetailRows} from './twi-effectiveness.js';
 import {twiBasis,twiBasisCurrent,twiEffectsFor,effectRows,effectStatus} from '../effect/domain.js';
 const fmt=x=>x==null?'—':Number(x).toLocaleString('ru-RU',{maximumFractionDigits:2});
 const pct=(a,b)=>b?fmt(100*a/b)+'% ('+a+'/'+b+')':'—';
@@ -23,7 +23,7 @@ export function twiAnalyticsView(c,h,route){
  const statHeader=['Назначений','Людей','Завершено','Выдан допуск','Действует','Первая положительная','Медиана, дн.','Полное время, n','Среднее вводное время, ч'];
  function draw(){
   out.replaceChildren();let s=scope(),x;try{x=twiOverview(db,s)}catch(e){out.append(msg(e.message,'warn'));return}
-  const z=x.stats,details=route.detail||'all',cohort=x.cohort.filter(a=>details==='all'||details==='granted'&&a.grant||details==='first'&&a.first&&a.first.conclusion!=='not_meet'||details==='repeat'&&a.first?.conclusion==='not_meet'||details==='completed'&&a.state==='completed'||details==='current'&&a.current);
+  const z=x.stats,details=route.detail||'all',cohort=twiDetailRows(x.cohort,details);
   const buttons=[['Назначения',z.assignments,'all'],['Завершено',z.completed,'completed'],['Первый допуск зарегистрирован',z.granted,'granted'],['Действующий допуск',z.current,'current'],['Первая положительная практика',pct(z.firstPass,z.assessed),'first'],['Повторная практика после отрицательной',z.repeat,'repeat']];
   const tiles=el('div',undefined,'kpi-grid');for(const [label,value,key] of buttons){const b=btn('',()=>goScope(s,{detail:key}),'tile');b.append(el('span',label,'muted'),el('b',String(value)));tiles.append(b)}
   out.append(pane('Результативность подготовки TWI',msg('Назначения образуют когорту по дате начала, результаты до конца периода; завершение и актуальный допуск — текущие состояния. Первая положительная практика = базовый или выше, не допуск. Сумма по ролям не является уникальным числом сотрудников.'),tiles,msg('Уникальных обучаемых: '+z.people+' · Медиана до первого допуска: '+fmt(z.medianDays)+' дн. · Полные длительности до допуска: '+z.durationN+' · Повторно оценено: '+z.repeat+' · Положительный результат после отрицательной: '+z.recovered),btn('Все назначения когорты',()=>goScope(s,{detail:'all'}))),

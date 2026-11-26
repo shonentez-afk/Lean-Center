@@ -170,6 +170,9 @@ try{
  assert.equal(await editor.locator('[data-step-field=action]').first().inputValue(),'Проверить');
 
  await editor.locator('[data-step-field=action]').first().fill('Проверить повторно');
+ await editor.locator('#stepsContainer .step-card').first().locator('[data-add-km]').click();
+ await editor.locator('[data-km]').last().fill('Шестой КМ — сохранить без потери');
+ assert.equal(await editor.locator('[data-km]').count(),6);
  async function choosePerson(frame,label,query='QA-001'){await frame.getByRole('button',{name:'Выбрать: '+label,exact:true}).first().click();await frame.getByRole('searchbox',{name:'Поиск сотрудника'}).fill(query);await frame.locator('.lc-picker-popup .lc-person-option').click()}
  await choosePerson(editor,'Утверждающий');assert.equal(await editor.locator('#meta-approver-name').inputValue(),'Учебный оценщик');
  await choosePerson(editor,'Участник рабочей группы');assert.equal(await editor.locator('[data-resp]').first().inputValue(),'Учебный оценщик');
@@ -220,7 +223,7 @@ try{
  await editor.locator('#lc-editor-send').click();await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();await page.getByRole('button',{name:'Сохранить изменения черновика'}).click();await page.getByText('Черновик сохранён. Ожидает общей публикации базы.',{exact:true}).waitFor();
  await page.locator('#lc-editor-host').waitFor({state:'detached'});
  await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();await page.getByRole('heading',{name:'QA-SOP · Проверить учебный стенд'}).waitFor();
- const dl2=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать JSON',exact:true}).click();await (await dl2).saveAs(path.join(tmp,'edited.json'));const edited=JSON.parse(await fs.readFile(path.join(tmp,'edited.json'),'utf8'));assert.equal(edited.constructor.steps[0].action,'Проверить повторно');assert(edited.photoAssets['1'].original.startsWith('data:image/'));assert.equal(edited.constructor.leanCenterPeople.length,4);assert.equal(edited.constructor.leanCenterPeople[0].display_name,'Учебный оценщик');assert.match(edited.constructor.leanCenterPeople[0].person_id,/^[0-9a-f-]{36}$/);assert.equal(edited.constructor.twi.trainer,'Учебный оценщик');assert(edited.constructor.twi.prepare.purpose);assert.equal(Number(edited.constructor.steps[0].frv.m1),3);
+ const dl2=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать JSON',exact:true}).click();await (await dl2).saveAs(path.join(tmp,'edited.json'));const edited=JSON.parse(await fs.readFile(path.join(tmp,'edited.json'),'utf8'));assert.equal(edited.constructor.steps[0].action,'Проверить повторно');assert.equal(edited.constructor.steps[0].keyMoments.length,6);assert.equal(edited.constructor.steps[0].keyMoments[5],'Шестой КМ — сохранить без потери');assert(edited.photoAssets['1'].original.startsWith('data:image/'));assert.equal(edited.constructor.leanCenterPeople.length,4);assert.equal(edited.constructor.leanCenterPeople[0].display_name,'Учебный оценщик');assert.match(edited.constructor.leanCenterPeople[0].person_id,/^[0-9a-f-]{36}$/);assert.equal(edited.constructor.twi.trainer,'Учебный оценщик');assert(edited.constructor.twi.prepare.purpose);assert.equal(Number(edited.constructor.steps[0].frv.m1),3);
 
  // Linked FRV and TWI must be exposed from the same SOP version.
  await page.locator('.library-tabs').getByRole('button',{name:'ФРВ',exact:true}).click();await page.getByRole('button',{name:'Показать ФРВ по СОП',exact:true}).click();
@@ -234,6 +237,8 @@ try{
  await page.getByText('Статус: Сформирован · 15 из 15 полей. План связан с версией 1 и не является назначением обучения.',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Карточка СОП',exact:true}).click();
  await page.getByRole('button',{name:'Все версии СОП',exact:true}).waitFor();assert.equal(await page.locator('[data-revision-id]').count(),1);
+ // Reopen the saved six-KM revision after a full page reload.
+ await page.getByRole('button',{name:'Открыть редактор',exact:true}).click();const reopenedKm=await editorFrame();assert.equal(await reopenedKm.locator('[data-km]').count(),6);assert.equal(await reopenedKm.locator('[data-km]').last().inputValue(),'Шестой КМ — сохранить без потери');await page.getByRole('button',{name:'Закрыть редактор',exact:true}).click();await page.locator('#lc-editor-host').waitFor({state:'detached'});
  // The weighted checklist is immediately available in the assessment registry.
  await page.getByRole('button',{name:'Оценка СОП',exact:true}).first().click();
  await page.getByRole('heading',{name:'Реестр оценок СОП'}).waitFor();

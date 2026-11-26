@@ -1,5 +1,6 @@
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {MAX_SOP_KEY_MOMENTS} from '../src/modules/library/sop-limits.js';
 const BASE='baselines/sop-stage43/releases/stage43-sop-print-formats-20261125.html';
 export function buildEditor(bridge,editorCSS=''){
  const bytes=execFileSync('git',['show','HEAD:'+BASE],{maxBuffer:10*1024*1024});
@@ -23,9 +24,9 @@ export function buildEditor(bridge,editorCSS=''){
  replace("initDocumentManager();pingAI()","initDocumentManager();");
  // Preserve extended KM lists through Stage42 normalization/export, but use
  // one native add button and one handler for the full existing 60-KM limit.
- replace("s.keyMoments.map(String).slice(0,3)","s.keyMoments.map(String).slice(0,5)");
+ replace("s.keyMoments.map(String).slice(0,3)",`s.keyMoments.map(String).slice(0,${MAX_SOP_KEY_MOMENTS})`);
  if(html.split('s.keyMoments.length<3').length!==3)throw Error('KM editor anchors changed');
- html=html.replaceAll('s.keyMoments.length<3','s.keyMoments.length<60');
+ html=html.replaceAll('s.keyMoments.length<3','s.keyMoments.length<'+MAX_SOP_KEY_MOMENTS);
  replace("    const cards=document.querySelectorAll('#stepsContainer .step-card');\n    cards.forEach((card,i)=>{\n      const step=state.steps[i];\n      if(!step||step.keyMoments.length<3||step.keyMoments.length>=60)return;\n      const first=card.querySelector('[data-km=\"'+step.id+'\"]');\n      const area=first?.parentElement?.parentElement;\n      if(!area||area.querySelector('[data-stage42-add-more-km]'))return;\n      const btn=document.createElement('button');\n      btn.type='button';\n      btn.dataset.stage42AddMoreKm=String(step.id);\n      btn.className='text-xs text-red-700 mt-1 font-medium';\n      btn.textContent='＋ Добавить КМ';\n      btn.addEventListener('click',event=>{\n        event.preventDefault();\n        if(state.documentManager?.status==='Опубликован'||\n           state.documentManager?.status==='Архив')return;\n        if(step.keyMoments.length>=60)return;\n        step.keyMoments.push('');\n        stateChanged();\n        renderSteps();\n      });\n      area.appendChild(btn);\n    });\n",'    // Extended KM addition is handled by the native button.\n');
  replace("ws.getCell(5,7).value={formula:timeCellRefs.join('+')}","ws.getCell(5,7).value={formula:timeCellRefs.join('+'),result:exportData.totalTimeSeconds/86400}");
  // LC5.4: exact patches to the pinned runtime. Original Stage43 blob stays immutable.

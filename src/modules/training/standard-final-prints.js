@@ -37,10 +37,12 @@ export function preparationPrintWorkbook(ExcelJS,id,{fields={},tasks=[],results=
  }else{
   band(s,++r,'Протокол проверки знаний требований ОТ');merge(s,++r,1,last,outcome?outcome.result+' · '+outcome.date+' · '+outcome.reference+' · '+outcome.feedback:'Реквизиты протокола: ____________________   Результат: ____________________',{height:52});sign(s,++r,'Ответственный за проверку')
  }
- finish(s,r,header);const e=sheet(w,'Результаты и основания',[18,28,30,85]);row(e,1,['Дата','Этап','Ответственный','Результат / основание'],true);results.forEach((x,i)=>row(e,i+2,[x.date,x.label,x.actor,x.text]));return w
+ finish(s,r,header);if(results.length){const e=sheet(w,'Результаты и основания',[18,28,30,85]);row(e,1,['Дата','Этап','Ответственный','Результат / основание'],true);results.forEach((x,i)=>row(e,i+2,[x.date,x.label,x.actor,x.text]));finish(e,results.length+1,1)}return w
 }
 function entryBlank(ExcelJS){
- const w=new ExcelJS.Workbook(),s=sheet(w,'План ввода',[7,38,23,38,...Array(24).fill(9),13]);
+ const w=new ExcelJS.Workbook(),s=sheet(w,'План ввода',[7,28,18,32,...Array(24).fill(5.5),12]);
+ // Preserve all 24 shifts and formulas; print the blank grid on A3 landscape.
+ s.pageSetup.paperSize=8;s.pageSetup.fitToHeight=1;
  const r=head(s,'ПРИЛОЖЕНИЕ 1. План ввода в профессию',{'Предприятие / подразделение':'','Профессия':'','ФИО':'','Инструктор-наставник':'','Руководитель':'','Дата начала':''});
  row(s,r,['№ п/п','Должностные функции','Тип рабочей операции','Название СОП',...Array.from({length:24},(_,i)=>'Смена '+(i+1)),'Итого, ч'],true);row(s,r+1,['','','','Дата'],true);
  for(let i=0;i<12;i++){const rr=r+2+i;row(s,rr,[i+1]);s.getCell(rr,3).dataValidation={type:'list',allowBlank:true,formulae:['"Базовая,Основная,Уникальная"']};s.getCell(rr,29).value={formula:'IF(COUNT(E'+rr+':AB'+rr+')=0,"",SUM(E'+rr+':AB'+rr+'))',result:''}}
@@ -48,6 +50,8 @@ function entryBlank(ExcelJS){
 }
 function sopBlank(ExcelJS){
  const w=new ExcelJS.Workbook(),s=sheet(w,'СОП',[27,35,35,35,35]);
+ // One complete A3 landscape form: never isolate the reason row on page 2.
+ s.pageSetup.paperSize=8;s.pageSetup.fitToHeight=1;
  let r=head(s,'ПРИЛОЖЕНИЕ 5. СТАНДАРТНАЯ ОПЕРАЦИОННАЯ ПРОЦЕДУРА',{'Предприятие / подразделение':'','Рабочее место':'','Исполнитель / должность':'','Наименование операции':'','Номер СОП / версия / дата':'','Время СОП':'','Требования к безопасности':'','Инструмент, оснастка':'','Материал':'','QR':'','Ответственные':'','Утверждаю / согласовано':''});
  row(s,r++,['','Шаг 1','Шаг 2','Шаг 3','Шаг 4'],true);for(const [name,height] of [['Визуализация / фото / схема',90],['Действие — что делать',58],['Время, сек',23],['Ключевой момент — как делать',58],['Причина — почему именно так',58]]){row(s,r,[name]);s.getRow(r++).height=height}finish(s,r-1,r-6);return w
 }

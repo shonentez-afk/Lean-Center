@@ -160,3 +160,12 @@ test('LC6.2 TWI analytics view module loads', async () => {
  assert.equal(typeof view.twiAnalyticsView,'function');
  assert.equal(typeof view.twiPerformancePane,'function');
 });
+
+test('LC6.7.1 repeat-practice details use the same predicate as the KPI',async()=>{
+ const {twiDetailRows}=await import('../src/modules/training/twi-effectiveness.js');
+ const f=await fixture();try{const id=await f.addAssignment();await f.approve(id);for(const x of jiStages('classic').filter(x=>!['support','followup'].includes(x.phase)))await f.stage(id,x.code);
+ const db=f.w.working,scope={day:date,from:date,to:date,unitId:f.unit},get=()=>twiOverview(db,scope);
+ await f.assess(id,{conclusion:'not_meet'});let x=get();assert.equal(x.stats.repeat,0);assert.equal(twiDetailRows(x.cohort,'repeat').length,0);
+ await f.assess(id);x=get();assert.equal(x.stats.repeat,1);assert.deepEqual(twiDetailRows(x.cohort,'repeat').map(a=>a.id),[id]);assert.equal(x.stats.recovered,1)
+ }finally{f.w.close()}
+});

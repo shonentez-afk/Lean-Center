@@ -29,18 +29,27 @@ export function centerAuditIndicators(db,day){
 }
 
 // The norm concerns calendar years and certified instructors, not a monthly target.
-// Count one observed instruction per assignment/date; alternative forms and
-// multiple trainers on the same instruction are not extra completed audits.
+// Provisional conservative unit: one assignment per actual instruction day.
+// A later report or alternative methodology never creates another instruction fact.
+// The year and certificate validity are evaluated against the linked fact date.
 export function annualAuditCoverage(db,year,asOf){
  if(!/^\d{4}$/.test(String(year))||typeof asOf!=='string')return [];
  const from=String(year)+'-01-01',end=String(year)+'-12-31',to=end<asOf?end:asOf;
  if(to<from)return [];
  const certs=rows(db,`SELECT c.*,p.display_name FROM mentor_credential c JOIN person p ON p.id=c.person_id WHERE c.kind='certificate' AND c.role='instructor' AND c.issued_on<=? AND coalesce(c.valid_until,'9999-12-31')>=? AND (c.revoked_at IS NULL OR substr(c.revoked_at,1,10)>?) ORDER BY p.display_name,c.issued_on`,[to,from,from]);
  const valid=(c,date)=>c.issued_on<=date&&(!c.valid_until||c.valid_until>=date)&&(!c.revoked_at||c.revoked_at.slice(0,10)>date);
- const grouped=new Map();for(const c of certs){if(!grouped.has(c.person_id))grouped.set(c.person_id,{personId:c.person_id,name:c.display_name,certificates:[],audits:[],unlinked:[],seen:new Set()});grouped.get(c.person_id).certificates.push(c)}
- for(const a of auditRegistry(db)){const d=a.observed_at.slice(0,10),g=grouped.get(a.mentor_id);if(!g||a.state!=='final'||d<from||d>to||!g.certificates.some(c=>valid(c,d)))continue;
-  if(!a.assignment_id||!a.training_session_id||!a.observed){g.unlinked.push(a);continue}
-  const k=a.assignment_id+':'+d;if(g.seen.has(k))continue;g.seen.add(k);g.audits.push(a)
+ const grouped=new Map();for(const c of certs){if(!grouped.has(c.person_id))grouped.set(c.person_id,{personId:c.person_id,name:c.display_name,certificates:[],audits:[],unlinked:[],duplicates:[],seen:new Set()});grouped.get(c.person_id).certificates.push(c)}
+ const facts=new Map(rows(db,'SELECT id,assignment_id,held_at FROM training_session WHERE stage_code IS NOT NULL').map(x=>[x.id,x]));
+ for(const a of [...auditRegistry(db)].sort((a,b)=>a.observed_at.localeCompare(b.observed_at)||a.id.localeCompare(b.id))){
+  const report=a.observed_at.slice(0,10),g=grouped.get(a.mentor_id);if(!g||a.state!=='final'||report>asOf)continue;
+  const fact=facts.get(a.training_session_id),d=fact?.held_at?.slice(0,10);
+  if(!a.assignment_id||!fact||fact.assignment_id!==a.assignment_id||!a.observed||!d||d>report){
+   if(report>=from&&report<=to&&g.certificates.some(c=>valid(c,report)))g.unlinked.push(a);
+   continue
+  }
+  if(d<from||d>to||!g.certificates.some(c=>valid(c,d)))continue;
+  const entry={...a,fact_on:d},k=fact.assignment_id+':'+d;
+  if(g.seen.has(k)){g.duplicates.push(entry);continue}g.seen.add(k);g.audits.push(entry)
  }
  return [...grouped.values()].map(({seen,...g})=>{const remaining=Math.max(0,TWI_POLICY.auditsPerCalendarYear-g.audits.length);return {...g,year:String(year),remaining,required:TWI_POLICY.auditsPerCalendarYear,closed:end<asOf,status:remaining?(end<asOf?'Не выполнено за год':'Осталось до конца года'):'Норма выполнена'}})
 }

@@ -198,3 +198,11 @@ test('LC5.4.1 effective and historical SOP titles are revision snapshots, includ
  await passport(w,id,e.id);for(const cmd of ['submit','approve','effect'])await action(w,id,e.id,p,cmd);
  assert.equal(documentTitle(w.working,id),'QA новый черновик');assert.equal(currentStandard(w.working,d.id).title,'Проверка');assert.deepEqual(rows(w.working,'PRAGMA foreign_key_check'),[]);
  }finally{w.close()}});
+
+test('LC6.7.1 preserves 6 and 60 key moments through source validation, document storage and readback; 61 rejected explicitly',async()=>{
+ const w=fresh();try{const original=await sop(),raw=JSON.parse(original.text),{integrity,...body}=raw;
+ const make=async n=>{body.constructor.steps[0].keyMoments=Array.from({length:n},(_,i)=>'КМ '+(i+1));return JSON.stringify({...body,integrity:{algorithm:'SHA-256',sha256:await sha256(JSON.stringify(body))}})};
+ for(const n of [6,60]){const text=await make(n),s={text,...await inspectSource(text,'sop')};assert.equal(s.projection.steps[0].key_points.length,n);const d=event(w,'document',null,{command:'create',code:'QA-KM-'+n,title:'КМ',operation_id:null,...projection(s)});await w.applyContentEvents([d],readFrom(s));assert.deepEqual(JSON.parse(one(w.working,'SELECT key_points_json FROM document_step WHERE revision_id=?',[d.id]).key_points_json),body.constructor.steps[0].keyMoments);assert.equal(await checkContent(s.source,s.text),text)}
+ await assert.rejects(inspectSource(await make(61),'sop'),/Шаг 1: допускается не более 60 ключевых моментов/)
+ }finally{w.close()}
+});
