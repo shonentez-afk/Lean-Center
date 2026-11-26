@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
-import {openPilot,pilotSql,atomicReplace} from '../server/lc74-store.mjs';
+import {openPilot,pilotSql,atomicReplace,PILOT_STATE,PILOT_PREVIOUS,readPilotState,restorePilotCheckpoint} from '../server/lc74-store.mjs';
 import {parsePilotUsers,createPilotServer} from '../server/lc74-http.mjs';
 import {Workspace,readSnapshot,one,list,uuid,now,sha256,canonical} from '../src/core/db.js';
 import {inspectSource} from '../src/modules/library/domain.js';
@@ -73,11 +73,51 @@ test('exact detached SOP content required; upload verified, viewer can read only
 }));
 test('failure before durable publication never acknowledges or overwrites last valid snapshot',async t=>withPilot(t,async({stop,start,snapshot,send,request})=>{
  const initial=await snapshot();const old=initial.state();initial.close();
- await stop();await start({write:async(file,bytes)=>{if(file.endsWith('state.sqlite'))throw Error('injected disk failure');await atomicReplace(file,bytes)}});
+ await stop();await start({write:async(file,bytes)=>{if(file.endsWith(PILOT_STATE))throw Error('injected disk failure');await atomicReplace(file,bytes)}});
  const w=await snapshot();try{w.edit('person',null,person('FAIL'));const p=await w.package();assert.equal((await send('a',p)).status,503);assert.equal((await request(null,'/healthz')).status,503);await stop();await start();const b=await snapshot();try{assert.deepEqual(b.state().base,old.base);assert.equal(list(b.working,'person').length,0)}finally{b.close()}assert.equal((await send('a',p)).status,200)}finally{w.close()}
 }));
 test('invalid/default credentials and corrupt storage fail closed',async()=>{
  assert.throws(()=>parsePilotUsers(''));assert.throws(()=>parsePilotUsers('{"a":{"role":"editor","token":"abc"}}'));
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'lc74-corrupt-'));
- try{await fs.writeFile(path.join(dir,'state.sqlite'),'bad');await assert.rejects(openPilot({dataDir:dir}));assert.equal(await fs.readFile(path.join(dir,'state.sqlite'),'utf8'),'bad')}finally{await fs.rm(dir,{recursive:true,force:true})}
+ try{await fs.writeFile(path.join(dir,PILOT_STATE),'bad');await assert.rejects(openPilot({dataDir:dir}));assert.equal(await fs.readFile(path.join(dir,PILOT_STATE),'utf8'),'bad')}finally{await fs.rm(dir,{recursive:true,force:true})}
 });
+
+test('durable independent checksum detects modified otherwise valid SQLite; previous checkpoint retained',async t=>withPilot(t,async({dir,stop,snapshot,send})=>{
+ const w=await snapshot();const old=w.state();w.edit('person',null,person('PERSIST'));
+ assert.equal((await send('a',await w.package())).status,200);w.close();
+ await stop();
+ const previous=await readPilotState(SQL,path.join(dir,PILOT_PREVIOUS));
+ assert.deepEqual(previous.bytes,old.base);
+ const file=path.join(dir,PILOT_STATE),bytes=await fs.readFile(file);
+ const good=await readPilotState(SQL,file),db=await readSnapshot(SQL,good.manifest,good.bytes);
+ try{
+  // Produce a valid SQLite database with changed contents but keep old recorded hash.
+  db.run("UPDATE person SET display_name='Tampered' WHERE employee_code='PERSIST'");
+  const modified=Buffer.from(db.export());assert.equal(modified.length,good.bytes.length);
+  modified.copy(bytes,bytes.length-modified.length);await fs.writeFile(file,bytes)
+ }finally{db.close()}
+ await assert.rejects(openPilot({dataDir:dir}),/Повреждён снимок/);
+ assert.deepEqual(await fs.readFile(file),bytes);
+ assert.equal((await readPilotState(SQL,path.join(dir,PILOT_PREVIOUS))).manifest.id,previous.manifest.id);
+}));
+test('full checkpoint export and restore to a new directory, exact documents and no overwrite',async t=>withPilot(t,async({dir,snapshot,send,request,getStore})=>{
+ const w=await snapshot();
+ const s={schemaVersion:2,document:{id:'BACKUP-SOP',status:'Draft',number:'QA',version:1},constructor:{schemaVersion:4,meta:{operation:'Учебный бэкап'},steps:[{id:1,action:'Проверить',keyMoments:['КМ'],reason:'Причина',durationSeconds:1,hasPhoto:false}],twi:{enabled:false}},photoAssets:{}};
+ const text=JSON.stringify({...s,integrity:{algorithm:'SHA-256',sha256:await sha256(JSON.stringify(s))}});
+ const d=await inspectSource(text,'sop'),route='/api/v1/documents/'+d.source.sha256;
+ const e={id:uuid(),entity_id:uuid(),entity_type:'document',operation:'create',expected_revision:0,occurred_at:now(),payload:{command:'create',code:'BACKUP-SOP',title:'Учебный бэкап',operation_id:null,source:d.source,projection:d.projection}};
+ try{
+  await w.applyContentEvents([e],()=>text);
+  assert.equal((await request('a',route+'?kind=sop',{method:'PUT',body:text})).status,200);
+  assert.equal((await send('a',await w.package())).status,200);
+  const backupDir=path.join(dir,'export'),restoreDir=path.join(dir,'restore');
+  const before=getStore().head(),m=await getStore().exportCheckpoint(backupDir);assert.deepEqual(m,before);
+  await assert.rejects(getStore().exportCheckpoint(backupDir),/EEXIST/);
+  assert.deepEqual(await restorePilotCheckpoint(backupDir,restoreDir),before);
+  const restored=await openPilot({dataDir:restoreDir});try{assert.deepEqual(restored.head(),before);assert.equal(await restored.getSource(d.source.sha256),text)}finally{await restored.close()}
+  await assert.rejects(restorePilotCheckpoint(backupDir,restoreDir),/EEXIST/);
+  await fs.writeFile(path.join(backupDir,'documents',d.source.sha256+'.json'),text+' ');
+  const rejected=path.join(dir,'bad-restore');await assert.rejects(restorePilotCheckpoint(backupDir,rejected),/повреждён/);
+  await assert.rejects(fs.stat(rejected),/ENOENT/);assert.deepEqual(getStore().head(),before);
+ }finally{w.close()}
+}));

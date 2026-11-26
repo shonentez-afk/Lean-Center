@@ -1,11 +1,12 @@
 import {buildSync} from 'esbuild';
 import {Script} from 'node:vm';
 import {execFileSync} from 'node:child_process';
+import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import {MAX_SOP_KEY_MOMENTS} from '../src/modules/library/sop-limits.js';
 const BASE='baselines/sop-stage43/releases/stage43-sop-print-formats-20261125.html';
-export function buildEditor(bridge,editorCSS=''){
- const bytes=execFileSync('git',['show','HEAD:'+BASE],{maxBuffer:10*1024*1024});
+export function buildEditor(bridge,editorCSS='',{checkout=false}={}){
+ const bytes=checkout?fs.readFileSync(BASE):execFileSync('git',['show','HEAD:'+BASE],{maxBuffer:10*1024*1024});
  // Pin the exact accepted artifact (Git blob hash includes the blob header).
  const sha=createHash('sha1').update(Buffer.from('blob '+bytes.length+'\0')).update(bytes).digest('hex');
  if(sha!=='5e35036ce243fed74ea018ac8eaf5f6c4a3c3e45')throw Error('Stage43 baseline changed: '+sha);
@@ -79,9 +80,9 @@ export function buildEditor(bridge,editorCSS=''){
 }
 
 // Single product/atlas assembly path; same assembly sequence and build options.
-export function buildEmbeddedEditor(read){
+export function buildEmbeddedEditor(read,options={}){
  const picker=buildSync({entryPoints:['src/ui/people-picker.js'],bundle:true,platform:'browser',format:'iife',globalName:'LCPeoplePicker',target:'es2020',write:false,minify:false}).outputFiles[0].text;
  const linked=buildSync({entryPoints:['src/modules/library/linked-materials.js'],bundle:true,platform:'browser',format:'iife',globalName:'LCLinkedMaterials',target:'es2020',write:false,minify:false}).outputFiles[0].text;
  const bridge=picker+'\n'+linked+'\n'+read('src/modules/library/lean-bridge.js');new Script(bridge,{filename:'lean-bridge.js'});
- return buildEditor(bridge,read('src/ui/editor.css')+'\n'+read('src/ui/people-picker.css'))
+ return buildEditor(bridge,read('src/ui/editor.css')+'\n'+read('src/ui/people-picker.css'),options)
 }

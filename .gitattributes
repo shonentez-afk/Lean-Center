@@ -1,2 +1,5 @@
 # Keep exact user-supplied local branding bytes on all platforms.
 src/ui/brand/* -text
+
+# Pinned Stage43 bytes must survive cloud checkout without newline conversion.
+baselines/sop-stage43/releases/stage43-sop-print-formats-20261125.html -text

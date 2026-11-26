@@ -40,10 +40,10 @@ const cloudCsp="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsa
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.webp':'image/webp','.svg':'image/svg+xml'};
 export async function pilotAssets(root){
  const m=JSON.parse(await fs.readFile(path.join(root,'app-manifest.json'),'utf8'));
- if(m.version!=='lc7.4.1-cloud-pilot')throw Error('Expected dedicated cloud build');
+ if(m.version!=='lc7.4.2-cloud-pilot')throw Error('Expected dedicated cloud build');
  const files=new Map();
  for(const item of m.files){
-  if(item.path!=='index.html'&&!/^versions\/lc7\.4\.1-cloud-pilot\/[a-zA-Z0-9._/-]+$/.test(item.path))continue;
+  if(item.path!=='index.html'&&!/^versions\/lc7\.4\.2-cloud-pilot\/[a-zA-Z0-9._/-]+$/.test(item.path))continue;
   if(item.path.split('/').some(x=>x==='.'||x==='..'||!x))throw Error('Invalid asset path');
   const type=types[path.extname(item.path)];if(!type)continue;
   const file=path.resolve(root,item.path),bytes=await fs.readFile(file);
@@ -55,13 +55,14 @@ export async function pilotAssets(root){
  return files
 }
 export function createPilotServer({store,users,assets=null}){
- let active=0;
+ let active=0,writes=0;
  const server=http.createServer(async(req,res)=>{
   if(active>=24){reply(res,429,{error:'Сервер занят'});return}
-  active++;
+  active++;let reserved=false;
+  const reserveWrite=()=>{if(writes>=2)throw new PilotError(429,'Очередь загрузки занята; повторите позже');writes++;reserved=true};
   try{
    const url=new URL(req.url,'http://localhost'),p=url.pathname;
-   if(req.method==='GET'&&p==='/healthz'){reply(res,store.healthy?200:503,{ok:store.healthy,pilot:'LC7.4.0'});return}
+   if(req.method==='GET'&&p==='/healthz'){reply(res,store.healthy?200:503,{ok:store.healthy,pilot:assets?'LC7.4.2':'LC7.4.0'});return}
    if(req.method==='GET'&&assets?.has(p)){const a=assets.get(p);reply(res,200,await fs.readFile(a.file),a.type,cloudCsp);return}
    if(req.method==='GET'&&p==='/'&&!assets){reply(res,200,landing,'text/html; charset=utf-8');return}
    const user=authenticate(req,users);
@@ -75,21 +76,21 @@ export function createPilotServer({store,users,assets=null}){
    if(req.method==='POST'&&p==='/api/v1/packages'){
     if(user.role!=='editor')throw new PilotError(403,'Только редактор может сохранять изменения');
     if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||''))throw new PilotError(415,'Ожидается application/json');
-    const text=await textBody(req,MAX_PACKAGE);
+    reserveWrite();const text=await textBody(req,MAX_PACKAGE);
     let pkg;try{pkg=JSON.parse(text)}catch{throw new PilotError(400,'Неверный JSON пакета')}
     reply(res,200,await store.commit(pkg));return
    }
    if(req.method==='PUT'&&document){
     if(user.role!=='editor')throw new PilotError(403,'Только редактор может сохранять исходники');
     if(!['sop','frv'].includes(url.searchParams.get('kind')))throw new PilotError(400,'Неверный тип исходника');
-    const text=await textBody(req,MAX_CONTENT);
+    reserveWrite();const text=await textBody(req,MAX_CONTENT);
     reply(res,200,await store.putSource(document[1],url.searchParams.get('kind'),text));return
    }
    throw new PilotError(404,'Маршрут не найден')
   }catch(e){
    if(!res.headersSent&&!res.destroyed)reply(res,e instanceof PilotError?e.status:503,{error:e instanceof PilotError?e.message:'Ошибка хранилища; данные не подтверждены'});
    else if(!res.destroyed)res.destroy()
-  }finally{active--}
+  }finally{active--;if(reserved)writes--}
  });
  server.requestTimeout=30000;server.headersTimeout=10000;server.keepAliveTimeout=3000;server.maxConnections=32;
  return server

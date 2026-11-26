@@ -8,7 +8,7 @@ import {buildEmbeddedEditor} from './build_editor.mjs';
 const root=process.cwd();
 const read=p=>fs.readFileSync(path.join(root,p),'utf8').replace(/\r\n/g,'\n');
 const cloudPilot=process.argv.includes('--cloud');
-const version=cloudPilot?'lc7.4.1-cloud-pilot':'lc7.3b-standard-dev';
+const version=cloudPilot?'lc7.4.2-cloud-pilot':'lc7.3b-standard-dev';
 const output=path.join(root,'dist',cloudPilot?'LeanCenterCloud':'LeanCenter');
 const releasePath='versions/'+version;
 const files=new Map();
@@ -23,7 +23,7 @@ code('vendor/echarts.min.js',read('node_modules/echarts/dist/echarts.min.js'));
 code('vendor/exceljs.min.js',read('baselines/sop-stage43/src/vendor/exceljs.min.js'));
 put(releasePath+'/licenses/exceljs/LICENSE.txt',read('baselines/sop-stage43/src/vendor/ExcelJS_LICENSE.txt'));
 code('app/main.js',js);
-code('editor/Stage43-data.js','window.LC_EDITOR_HTML='+JSON.stringify(buildEmbeddedEditor(read))+';\n');
+code('editor/Stage43-data.js','window.LC_EDITOR_HTML='+JSON.stringify(buildEmbeddedEditor(read,{checkout:cloudPilot}))+';\n');
 put(releasePath+'/assets/styles.css',read('src/ui/styles.css')+'\n'+read('src/ui/people-picker.css')+(cloudPilot?'\n'+read('src/ui/cloud-pilot.css'):''));
 // Copy only the four local brand assets; preserve the supplied logo bytes.
 for(const name of ['twi-workplace.webp','tn-two-line-light.svg','tn-two-line-dark.svg','favicon.png'])put(releasePath+'/assets/'+name,fs.readFileSync(path.join(root,'src/ui/brand',name)));

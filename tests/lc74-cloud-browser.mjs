@@ -56,12 +56,44 @@ try{
  await btn(a.p,'Сохранить новый черновик').click();await a.p.getByRole('heading',{name:/CLOUD-SOP/}).waitFor();
  await nav(v.p,'Каталог СОП');await v.p.getByRole('row').filter({hasText:'CLOUD-SOP'}).getByRole('button',{name:'Открыть',exact:true}).click({timeout:40000});
  const dl=v.p.waitForEvent('download');await btn(v.p,'Скачать JSON').click();assert.equal(await fs.readFile(await (await dl).path(),'utf8'),raw);
+ // Open the actual pinned editor via HTTP, modify the source and export XLSX.
+ // The other account must not see an unconfirmed editor draft.
+ await synced(a.p);
+ await btn(a.p,'Открыть редактор').click();
+ const frame=a.p.locator('#lc-editor-frame');await frame.waitFor();
+ const editor=await (await frame.elementHandle()).contentFrame();assert(editor);
+ await editor.waitForFunction(()=>document.getElementById('lc-editor-status')?.textContent.includes('Рабочая копия готова'),{},{timeout:30000});
+ await a.p.getByText('Редактор готов',{exact:true}).waitFor();
+ assert.equal(await editor.locator('#meta-operation').inputValue(),'Учебная проверка');
+ assert.equal(await editor.evaluate(()=>state.steps[0].hasPhoto&&!!state.steps[0].imageData),true);
+ await editor.locator('[data-step-field=action]').first().fill('Проверить после облачного изменения');
+ await editor.locator('[data-step-field=action]').first().blur();
+ // Export through the real editor; inspect the produced XLSX with its ExcelJS.
+ const xlsx=a.p.waitForEvent('download',{timeout:85000});
+ await editor.locator('#generateBtn').click();
+ const xlsxBytes=await fs.readFile(await (await xlsx).path());
+ assert.equal(xlsxBytes.subarray(0,2).toString(),'PK');
+ const xlsxResult=await editor.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const sh=w.getWorksheet('СОП');return {names:w.worksheets.map(x=>x.name),images:sh.getImages().length,hasAction:sh.getSheetValues().flat(3).some(x=>typeof x==='string'&&x.includes('Проверить после облачного изменения'))}},Array.from(xlsxBytes));
+ assert(xlsxResult.names.includes('СОП'));assert(xlsxResult.images>=1);assert(xlsxResult.hasAction);
+ const original=v.p.waitForEvent('download');await btn(v.p,'Скачать JSON').click();assert.equal(await fs.readFile(await (await original).path(),'utf8'),raw);
+ await editor.locator('#lc-editor-send').click();
+ await a.p.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();
+ await btn(a.p,'Сохранить изменения черновика').click();
+ await a.p.locator('#lc-editor-host').waitFor({state:'detached'});await synced(a.p);
+ // The remote client gets the new revision of the draft, without losing the photograph.
+ await v.p.getByText('Проверить после облачного изменения',{exact:true}).waitFor({timeout:40000});
+ const updated=v.p.waitForEvent('download');await btn(v.p,'Скачать JSON').click();
+ const edited=JSON.parse(await fs.readFile(await (await updated).path(),'utf8'));
+ assert.equal(edited.constructor.steps[0].action,'Проверить после облачного изменения');assert(edited.photoAssets['1'].original.startsWith('data:image/'));
+ // Viewer can read but not launch or persist edits.
+ await nav(v.p,'Сотрудники');await btn(v.p,'Добавить').click();
+ assert.equal(await btn(v.p,'Сохранить').isDisabled(),true);
  await v.p.reload();await v.p.locator('input[name=pilot_token]').waitFor();
  assert.equal(await v.p.evaluate(t=>JSON.stringify({...localStorage,...sessionStorage}).includes(t),tokens.viewer),false);
  await login(v.p,'viewer');await nav(v.p,'Сотрудники');await person(v.p,'CLOUD-OFFLINE').waitFor();
  await nav(v.p,'Настройки и обмен');assert.equal(await v.p.getByRole('checkbox',{name:/Режим единственного издателя/}).count(),0);
  assert.deepEqual(errors,[]);
  await fs.mkdir('artifacts/lc74',{recursive:true});await v.p.screenshot({path:'artifacts/lc74/cloud-storage.png',fullPage:true});
- await fs.writeFile('artifacts/lc74/cloud-browser.json',JSON.stringify({profiles:3,concurrentCreates:true,offline:true,conflict:true,exactSource:true,logout:true},null,2));
- console.log('LC7.4.1 real HTTP browser sync PASS')
+ await fs.writeFile('artifacts/lc74/cloud-browser.json',JSON.stringify({profiles:3,concurrentCreates:true,offline:true,conflict:true,exactSource:true,editorRoundTrip:true,realXlsx:true,viewerReadOnly:true,logout:true},null,2));
+ console.log('LC7.4.2 real HTTP browser sync and editor PASS')
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));await store.close();await fs.rm(dir,{recursive:true,force:true})}

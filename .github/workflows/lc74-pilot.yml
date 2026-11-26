@@ -1,4 +1,4 @@
-name: LC7.4.1 cloud pilot regression
+name: LC7.4.2 cloud pilot regression
 on:
   push:
     branches: [feature/lc7.4-amvera]
@@ -18,7 +18,12 @@ jobs:
       - run: npm test
       - run: node --test tests/lc74-server.test.mjs
       - run: node tools/build_folder.mjs
-      - run: node tools/build_folder.mjs --cloud
+      - name: Cloud build without Git metadata
+        run: |
+          mv .git ../lc74-git-temp
+          trap 'mv ../lc74-git-temp .git' EXIT
+          node tools/build_folder.mjs --cloud
+      - run: node tests/lc74-load.mjs
       - run: python tools/package_folder.py
       - run: npx playwright install --with-deps chromium
       - run: node tests/lc74-cloud-browser.mjs
@@ -26,6 +31,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LC7.4.1-test-evidence
+          name: LC7.4.2-test-evidence
           path: artifacts
           if-no-files-found: warn

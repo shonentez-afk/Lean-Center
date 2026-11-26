@@ -10,7 +10,7 @@ async function main(){
  const assets=await pilotAssets(path.resolve('dist/LeanCenterCloud'));
  const store=await openPilot({dataDir}),server=createPilotServer({store,users,assets});
  server.on('error',async()=>{await store.close();process.exitCode=1;console.error('Pilot HTTP listen error')});
- server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('LC7.4.1 demo UI and API listening'));
+ server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('LC7.4.2 demo UI and API listening'));
  let stopping=false;
  const shutdown=()=>{if(stopping)return;stopping=true;server.close(async()=>{try{await store.close()}catch{process.exitCode=1}})};
  process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown)
