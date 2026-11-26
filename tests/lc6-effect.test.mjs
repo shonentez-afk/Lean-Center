@@ -153,3 +153,10 @@ test('LC6.2 comparable TWI program groups, verified ROI link, cross-card dedupli
   assert.equal(one(db,'SELECT state FROM economic_fact WHERE id=?',[fact]).state,'confirmed');
  }finally{restored?.close();f.w.close()}
 });
+
+// Keep the browser-facing module in the node regression graph: syntax/import errors must fail npm test.
+test('LC6.2 TWI analytics view module loads', async () => {
+ const view=await import('../src/modules/training/twi-effectiveness-view.js');
+ assert.equal(typeof view.twiAnalyticsView,'function');
+ assert.equal(typeof view.twiPerformancePane,'function');
+});
