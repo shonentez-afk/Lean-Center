@@ -8,7 +8,7 @@ permissions:
 jobs:
   foundation:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,10 +20,16 @@ jobs:
       - run: npm test
       - run: node --test tests/lc74-server.test.mjs tests/lc74-save-state.test.mjs
       - run: node tools/build_folder.mjs --cloud
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/lc81-browser.mjs
+      - run: node tests/lc74-cloud-browser.mjs
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: LC8.1-access-inventory
-          path: artifacts/lc81-access-inventory.json
+          path: |
+            artifacts/lc81-access-inventory.json
+            artifacts/lc81-manager.png
+            artifacts/lc81-admin.png
           if-no-files-found: warn

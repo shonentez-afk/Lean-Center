@@ -36,8 +36,8 @@ async function api(url,data){
 }
 function button(text,fn,cls=''){const n=el('button',text,cls);n.type='button';n.addEventListener('click',()=>run(fn));return n}
 async function run(fn){if(busy)return;busy=true;try{await fn()}catch(e){if(e.status===401)showLogin();note(e.message||'Ошибка',true)}finally{busy=false;refreshIndicator()}}
-function showLogin(){sequence++;user=null;saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
-function showUser(a){user=a;$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Выйти',async()=>{if(!discard())return;await api('logout',{});showLogin();note('Выход выполнен')}));refreshIndicator()}
+function showLogin(){sequence++;user=null;saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
+function showUser(a){user=a;$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Выйти',async()=>{if(!discard()||!$('issued').hidden&&!confirm('Выданный пароль ещё открыт. Завершить сеанс?'))return;await api('logout',{});showLogin();note('Выход выполнен')}));refreshIndicator()}
 function panel(title,...children){const n=el('section',undefined,'panel');n.append(el('h2',title),...children);return n}
 function table(headers,values){const wrap=el('div',undefined,'tablewrap lc81-rows');const t=el('table'),h=el('thead'),tr=el('tr');for(const v of headers)tr.append(el('th',v));h.append(tr);t.append(h);const b=el('tbody');for(const row of values){const r=el('tr');for(const v of row){const d=el('td');d.append(v instanceof Node?v:el('span',v??'—'));r.append(d)}b.append(r)}t.append(b);wrap.append(t);return wrap}
 function input(name,label,type='text',required=true){const n=el('input');n.name=name;n.type=type;n.required=required;if(type==='password')n.autocomplete='new-password';const l=el('label',label,'field');l.append(n);return l}
@@ -59,11 +59,14 @@ function adminPanel(d){
   addRef('Роль сотрудников','business_role',[input('code','Код'),input('name','Название')],f=>({code:value(f,'code'),name:value(f,'name')})),
   addRef('Назначение роли','role_assignment',[select('person_id','Сотрудник',options(d.people)),select('role_id','Роль',options(d.roles.filter(r=>r.id!==d.protectedRoles[0]))),input('valid_from','С','date')],f=>({person_id:value(f,'person_id'),role_id:value(f,'role_id'),valid_from:value(f,'valid_from'),valid_to:null}))
  );
- const userForm=form([select('person_id','Сотрудник',options(d.people.filter(p=>!d.accounts.some(a=>a.person_id===p.id)))),input('login','Рабочая почта или логин'),input('password','Пароль (12–128 байт)','password',false),check('generate','Сгенерировать пароль на сервере')],'Создать пользователя',async f=>{
+ const userForm=form([select('person_id','Сотрудник',options(d.people.filter(p=>!d.accounts.some(a=>a.person_id===p.id)))),input('login','Рабочая почта или логин'),input('password','Пароль (12–128 байт)','password',false),input('password_confirm','Повторите пароль','password',false),check('generate','Сгенерировать пароль на сервере')],'Создать пользователя',async f=>{
   const generate=f.elements.generate.checked,password=value(f,'password');
+  if(!generate&&password!==value(f,'password_confirm'))throw Error('Пароли не совпадают');
+  if(!$('issued').hidden)throw Error('Сначала сохраните и закройте ранее выданный пароль');
   const r=await api('admin/account',{person_id:value(f,'person_id'),login:value(f,'login'),password:generate?null:password,generate});
-  f.reset();f.lcResetForm?.();await renew('Пользователь создан. Назначьте подтверждённый доступ.');
-  if(r.issued_password){const n=el('div','Выданный пароль: '+r.issued_password);n.id='issued';n.append(button('Скрыть пароль',()=>n.remove()));$('content').prepend(n)}
+  f.reset();f.lcResetForm?.();
+  if(r.issued_password){const n=$('issued');n.hidden=false;n.replaceChildren(el('p','Выданный пароль для '+r.login+': '+r.issued_password),button('Пароль записан · скрыть',()=>{n.replaceChildren();n.hidden=true}));}
+  await renew('Пользователь создан. Назначьте подтверждённый доступ.');
  });
  const accountTable=table(['Логин','Сотрудник','Статус','Действие'],d.accounts.map(a=>[a.login,a.display_name,a.state==='active'?'Активен':'Заблокирован',a.admin?'Защищённый администратор':button(a.state==='active'?'Заблокировать':'Разблокировать',()=>post('state',{id:a.id,state:a.state==='active'?'blocked':'active'},'Состояние изменено'))]));
  const policyForms=d.roles.map(r=>{
@@ -189,7 +192,7 @@ async function render(){
 }
 $('menu').addEventListener('click',()=>{const open=$('nav').classList.toggle('lc53-menu-open');$('menu').setAttribute('aria-expanded',String(open))});
 $('content').addEventListener('input',refreshIndicator,true);$('content').addEventListener('change',refreshIndicator,true);
-window.addEventListener('offline',refreshIndicator);window.addEventListener('online',()=>{if(user&&!dirty()&&!busy&&!$('issued'))run(render);else refreshIndicator()});
-window.addEventListener('beforeunload',e=>{if(user&&(dirty()||saving)){e.preventDefault();e.returnValue=''}});
+window.addEventListener('offline',refreshIndicator);window.addEventListener('online',()=>{if(user&&!dirty()&&!busy&&$('issued').hidden)run(render);else refreshIndicator()});
+window.addEventListener('beforeunload',e=>{if(user&&(dirty()||saving||!$('issued').hidden)){e.preventDefault();e.returnValue=''}});
 $('login').addEventListener('submit',e=>{e.preventDefault();run(async()=>{const f=e.currentTarget;const b=await api('login',{login:value(f,'login'),password:value(f,'password')});f.reset();showUser(b.user);page=b.user.admin?'admin':b.user.permissions.includes('person.read_directory')?'person.read_directory':'person.read_basic';note('Вход выполнен');await render()})});
 run(async()=>{try{const b=await api('session');showUser(b.user);page=b.user.admin?'admin':b.user.permissions.includes('person.read_directory')?'person.read_directory':'person.read_basic';await render()}catch(e){if(e.status!==401)throw e;showLogin()}});
