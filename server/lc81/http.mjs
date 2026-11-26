@@ -10,6 +10,7 @@ const must=(ok,status,msg)=>{if(!ok)throw new PilotError(status,msg)};
 const publicFiles=new Map(await Promise.all([
  ['/', './portal.html','text/html; charset=utf-8'],
  ['/portal.js','./portal.js','text/javascript; charset=utf-8'],
+ ['/library-ui.js','./library-ui.js','text/javascript; charset=utf-8'],
  ['/portal.css','./portal.css','text/css; charset=utf-8'],
  ['/assets/styles.css','../../src/ui/styles.css','text/css; charset=utf-8'],
  ['/assets/cloud-pilot.css','../../src/ui/cloud-pilot.css','text/css; charset=utf-8'],

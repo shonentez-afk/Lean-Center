@@ -3,3 +3,11 @@
 [hidden]{display:none!important}.lc81-logged-out{grid-template-columns:minmax(0,1fr)}.lc81-logged-out .main{grid-column:1;grid-row:2}.lc81-notice{padding:9px 12px;border:1px solid var(--line);background:var(--surface-alt);color:var(--muted);border-left:3px solid var(--warn);border-radius:var(--radius);margin-bottom:12px}
 #login-panel{max-width:420px;margin:30px auto}#login-panel form{display:grid;gap:12px}#status{margin-bottom:12px}.lc81-form{display:grid;gap:10px}.lc81-form>button{justify-self:start}.lc81-checks{display:flex;flex-wrap:wrap;gap:12px}.lc81-checks label{display:flex;align-items:center;gap:5px;font-size:13px}.lc81-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(310px,100%),1fr));gap:12px}.lc81-grid>.panel{margin:0}.lc81-image{display:block;max-width:min(420px,100%);max-height:280px;width:auto;height:auto;object-fit:contain;border:1px solid var(--line);margin:8px 0}.lc81-editor{margin-top:12px}.lc81-policy{margin:8px 0}.lc81-policy>summary{cursor:pointer;font-weight:600}.lc81-rows{margin-top:8px}.lc81-rows td{white-space:normal;overflow-wrap:anywhere}.lc81-rows td:first-child{min-width:72px}#issued{padding:12px;border:1px solid var(--line);background:var(--success-bg);overflow-wrap:anywhere;white-space:pre-wrap}.lc81-login-name{max-width:240px;overflow-wrap:anywhere}.lc81-editor .field{min-width:0}.lc81-logged-out #menu{display:none!important}
 @media(max-width:760px){.lc81-logged-out .main{grid-row:2}.lc81-login-name{max-width:180px}.lc81-checks{gap:8px}.lc81-image{max-height:220px}#save-indicator{max-width:100%;overflow-wrap:anywhere}}
+
+/* The original editor-host layout and corporate chrome remain the baseline. */
+.lc81-library-host{display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.lc81-library-host iframe{flex:1;min-height:0;width:100%;border:0}
+.lc81-library-preview{overflow:auto;padding:20px;flex:1;min-height:0}
+.lc81-library-preview .panel{max-width:860px;margin:0 auto}
+.lc81-library-preview form{margin:12px 0}
+.lc81-library-host .editor-host-note{overflow-wrap:anywhere;white-space:normal}

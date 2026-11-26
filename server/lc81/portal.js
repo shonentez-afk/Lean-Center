@@ -1,21 +1,23 @@
 // Protected workspace: reuse accepted navigation, registry controls, corporate
 // CSS and unsaved-form guard. Never load SQL.js or a snapshot in the browser.
+import {createLibraryUI} from '/library-ui.js';
 import {navGroups} from '/shared/navigation.js';
 import {registryFields} from '/shared/registry-fields.js';
 import {protectWorkForm,hasUnsavedForms} from '/shared/form-guard.js';
 import {cloudSaveState} from '/shared/cloud-save-state.js';
 const $=id=>document.getElementById(id),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n};
+let libraryUI=null;
 let user=null,page='person.read_basic',busy=false,sequence=0,saving=false,checking=false,saveFailed=false,networkFailed=false;
-const actions={...{'person.read_basic':'Сотрудники','sop.read_effective':'Действующие СОП','training.read':'Обучение','task.read':'Мои задачи / мероприятия',"org.read":"Структура предприятия","operation.read":"Операции","sop.read_history":"Редакции СОП","sop.read_steps":"Шаги действующих СОП","frv.read":"ФРВ","training.enrollment.read":"Персональные программы","preparation.read":"Комплекты подготовки","credential.read":"Подготовка наставников","appointment.read":"Приказы о назначении","development.read":"Планы развития","audit.read":"Аудиты","supplement.read":"Доплаты","roi.read":"Экономический эффект","calendar.read":"Личный календарь"},'person.read_directory':'Сотрудники — справочник','equipment.read':'Оборудование','workplace.read':'Рабочие места'};
+const actions={...{'person.read_basic':'Сотрудники','sop.read_effective':'Действующие СОП','training.read':'Обучение','task.read':'Мои задачи / мероприятия',"org.read":"Структура предприятия","operation.read":"Операции","sop.read_history":"Редакции СОП","sop.read_steps":"Шаги действующих СОП","frv.read":"ФРВ","training.enrollment.read":"Персональные программы","preparation.read":"Комплекты подготовки","credential.read":"Подготовка наставников","appointment.read":"Приказы о назначении","development.read":"Планы развития","audit.read":"Аудиты","supplement.read":"Доплаты","roi.read":"Экономический эффект","calendar.read":"Личный календарь"},'person.read_directory':'Сотрудники — справочник','equipment.read':'Оборудование','workplace.read':'Рабочие места','sop.constructor':'Конструктор СОП','sop.read_twi':'Планы инструктажа TWI','sop.read_linked_frv':'ФРВ по СОП'};
 const directoryActions={'person.read_directory':'person','org.read':'org_unit','equipment.read':'equipment','workplace.read':'workplace','operation.read':'operation'};
-const actionLabels={...actions,'task.implement_own':'Выполнение собственных задач','sop.read_photo':'Просмотр фотографий СОП'};
+const actionLabels={...actions,'task.implement_own':'Выполнение собственных задач','sop.read_photo':'Просмотр фотографий СОП','sop.create':'Создание СОП','sop.edit_draft':'Редактирование черновика СОП','sop.revise':'Создание редакции СОП','sop.passport':'Паспорт СОП','sop.from_frv':'Создание СОП из ФРВ','frv.create':'Создание ФРВ','frv.edit_draft':'Редактирование ФРВ','frv.finalize':'Завершение ФРВ','frv.read_summary':'Результаты фактических замеров ФРВ'};
 for(const [action,type] of Object.entries(directoryActions)){
  const prefix=action==='person.read_directory'?'person':action.split('.')[0];
  for(const [op,label] of [['create','Создание'],['update','Изменение'],['archive','Архивирование']])actionLabels[prefix+'.'+op]=label+': '+actions[action];
 }
-const pageActions={person:['person.read_directory','person.read_basic'],home:[],calendar:['calendar.read'],actions:['task.read'],sop:['sop.read_effective','sop.read_steps','sop.read_history'],frv:['frv.read'],twi:['training.read'],programs:['training.enrollment.read'],preparation:['preparation.read'],development:['development.read'],certification:['credential.read'],appointments:['appointment.read'],audit:['audit.read'],supplements:['supplement.read'],roi:['roi.read'],org_unit:['org.read'],workplace:['workplace.read'],operation:['operation.read'],equipment:['equipment.read'],storage:['admin']};
-const dirty=()=>hasUnsavedForms($('content'));
-const discard=()=>!dirty()||confirm('Есть несохранённые изменения. Продолжить без сохранения?');
+const pageActions={person:['person.read_directory','person.read_basic'],home:[],calendar:['calendar.read'],actions:['task.read'],sop:['sop.read_effective','sop.read_steps','sop.read_history'],sop_constructor:['sop.constructor'],frv:['frv.read','sop.read_linked_frv'],twi_plans:['sop.read_twi'],twi:['training.read'],programs:['training.enrollment.read'],preparation:['preparation.read'],development:['development.read'],certification:['credential.read'],appointments:['appointment.read'],audit:['audit.read'],supplements:['supplement.read'],roi:['roi.read'],org_unit:['org.read'],workplace:['workplace.read'],operation:['operation.read'],equipment:['equipment.read'],storage:['admin']};
+const dirty=()=>hasUnsavedForms($('content'))||libraryUI?.active()===true;
+const discard=()=>{if(libraryUI?.active()&&!libraryUI.close())return false;return !hasUnsavedForms($('content'))||confirm('Есть несохранённые изменения. Продолжить без сохранения?')};
 function refreshIndicator(){
  if(!user)return;
  const value=cloudSaveState({dirty:dirty(),saving,checking,offline:navigator.onLine===false||networkFailed,saveFailed});
@@ -25,7 +27,7 @@ function refreshIndicator(){
 }
 const note=(text,bad=false)=>{const s=$('status');s.hidden=!text;s.textContent=text;s.className='status'+(bad?' error':'');refreshIndicator()};
 async function api(url,data){
- const options={cache:'no-store',credentials:'same-origin'},write=data!==undefined&&!['login','logout'].includes(url);
+ const options={cache:'no-store',credentials:'same-origin'},write=data!==undefined&&!['login','logout','library/open'].includes(url);
  if(data!==undefined)Object.assign(options,{method:'POST',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:JSON.stringify(data)});
  if(write){saving=true;saveFailed=false;refreshIndicator()}
  try{
@@ -36,7 +38,7 @@ async function api(url,data){
 }
 function button(text,fn,cls=''){const n=el('button',text,cls);n.type='button';n.addEventListener('click',()=>run(fn));return n}
 async function run(fn){if(busy)return;busy=true;try{await fn()}catch(e){if(e.status===401)showLogin();note(e.message||'Ошибка',true)}finally{busy=false;refreshIndicator()}}
-function showLogin(){sequence++;user=null;saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
+function showLogin(){sequence++;user=null;libraryUI?.clear();saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
 function showUser(a){user=a;$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Выйти',async()=>{if(!discard()||!$('issued').hidden&&!confirm('Выданный пароль ещё открыт. Завершить сеанс?'))return;await api('logout',{});showLogin();note('Выход выполнен')}));refreshIndicator()}
 function panel(title,...children){const n=el('section',undefined,'panel');n.append(el('h2',title),...children);return n}
 function table(headers,values){const wrap=el('div',undefined,'tablewrap lc81-rows');const t=el('table'),h=el('thead'),tr=el('tr');for(const v of headers)tr.append(el('th',v));h.append(tr);t.append(h);const b=el('tbody');for(const row of values){const r=el('tr');for(const v of row){const d=el('td');d.append(v instanceof Node?v:el('span',v??'—'));r.append(d)}b.append(r)}t.append(b);wrap.append(t);return wrap}
@@ -154,8 +156,11 @@ function resourcePanel(items){
  }
  return content;
 }
+libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard});
 function buildNav(){
- const nav=$('nav');nav.replaceChildren();const available=new Set(Object.keys(actions).filter(id=>user.permissions.includes(id)));if(user.admin)available.add('admin');
+ const nav=$('nav');nav.replaceChildren();const available=new Set(Object.keys(actions).filter(id=>user.permissions.includes(id)&&!['sop.read_twi','sop.read_linked_frv','sop.constructor'].includes(id)));if(user.admin)available.add('admin');
+ if(user.permissions.includes('sop.read_history')&&user.permissions.includes('sop.create'))available.add('sop.constructor');
+ for(const a of ['sop.read_twi','sop.read_linked_frv'])if(user.permissions.includes('sop.read_effective')&&user.permissions.includes(a))available.add(a);
  if(available.has('person.read_directory'))available.delete('person.read_basic');
  const selected=[];
  const groupFor=act=>navGroups.find(([,keys])=>keys.some(k=>(pageActions[k]||[]).includes(act)))?.[0]||'Рабочие разделы';
@@ -182,7 +187,18 @@ async function render(){
   buildNav();$('content').replaceChildren(); // do not retain stale authorized rows
   if(page==='admin'&&user.admin){const data=await api('admin');if(serial===sequence)$('content').replaceChildren(...adminPanel(data));return}
   if(!page){$('content').replaceChildren(panel('Личное рабочее пространство',el('p','Вам пока не назначены права на рабочие разделы. Обратитесь к администратору.')));return}
+  if(page==='sop.constructor'){
+   const info=await api('library/info?kind=sop');if(serial===sequence)$('content').replaceChildren(libraryUI.createPanel('sop',info));return;
+  }
+  if(['sop.read_twi','sop.read_linked_frv'].includes(page)){
+   const data=await api('resources?action=sop.read_effective');if(serial===sequence)$('content').replaceChildren(libraryUI.linked(data.items,page));return;
+  }
   const data=await api('resources?action='+encodeURIComponent(page));if(serial!==sequence)return;
+  if(page==='sop.read_history'||page==='frv.read'){
+   const kind=page==='sop.read_history'?'sop':'frv',info=await api('library/info?kind='+kind);
+   if(serial!==sequence)return;
+   $('content').replaceChildren(libraryUI.createPanel(kind,info),kind==='sop'?libraryUI.history(data.items):libraryUI.frv(data.items));return;
+  }
   if(directoryActions[page]){
    const info=await api('directory/info?type='+encodeURIComponent(directoryActions[page]));if(serial!==sequence)return;
    $('content').replaceChildren(directoryPanel(info,data.items));return;
