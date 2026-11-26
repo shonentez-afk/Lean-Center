@@ -1,4 +1,4 @@
-/* Adapter for the pinned Stage43 runtime; no changes to print/export/preview algorithms. */
+/* Adapter for the pinned Stage43 runtime; LC5.4 fixes the derived editor only. */
 (()=>{const context=window.LC_EDITOR_CONTEXT||{},session=context.session,kind=context.kind,host=window.parent!==window?window.parent:null;
  if(!/^[0-9a-f-]{36}$/i.test(session||'')||!['sop','frv'].includes(kind)||!host)return;
  const bar=document.createElement('div');bar.id='lc-editor-bar';bar.style.cssText='position:sticky;top:0;z-index:10000;background:#242e40;color:white;border-top:4px solid #e30613;padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font:14px Arial,sans-serif';
@@ -21,6 +21,80 @@
  window.addEventListener('resize',syncToastPosition);
  window.addEventListener('scroll',syncToastPosition,{passive:true});
  let loaded=false,busy=false,people=[],links=[];
+ // Modal isolation, including the outer host toolbar, without changing the original save/cancel logic.
+ const savedInert=new Map();let outerModal=false;
+ function syncModal(){
+  const modal=document.getElementById('illustrationEditorOverlay');
+  if(modal){for(const child of document.body.children){if(child===modal||child.contains(modal)||['SCRIPT','STYLE'].includes(child.tagName))continue;if(!savedInert.has(child))savedInert.set(child,child.inert);child.inert=true}}
+  else{for(const [child,previous] of savedInert)child.inert=previous;savedInert.clear()}
+  if(outerModal!==!!modal){outerModal=!!modal;tell('modal',{open:outerModal})}
+ }
+ new MutationObserver(syncModal).observe(document.body,{childList:true});
+ // A number is a valid whole-second input, or an explicit minutes:seconds string.
+ // Invalid text must not replace the last valid measurement, even after a redraw.
+ const invalidTime=new WeakMap();
+ window.lc54Duration=(v)=>{const s=String(v??'').trim();if(/^\d{1,6}$/.test(s)&&Number(s)<=599999)return Number(s);if(/^\d{1,4}:\d{2}$/.test(s)){const [m,n]=s.split(':').map(Number);if(n<60)return m*60+n}return null};
+ window.lc54MarkDuration=(step,input,parsed)=>{if(parsed===null)invalidTime.set(step,input.value);else invalidTime.delete(step)};
+ const syncInvalidTime=()=>{for(const input of document.querySelectorAll('[data-step-field=duration]')){const step=state.steps.find(x=>x.id===Number(input.dataset.id));if(step&&invalidTime.has(step)){input.value=invalidTime.get(step);input.setCustomValidity('Введите целые секунды или ММ:СС (секунды 00–59)');input.setAttribute('aria-invalid','true')}}};
+ const oldRenderSteps=renderSteps;renderSteps=function(...args){const result=oldRenderSteps.apply(this,args);syncInvalidTime();return result};
+ function validateTime(){const bad=state.steps.find(s=>invalidTime.has(s));if(!bad)return true;document.querySelector('[data-tab="editor"]')?.click();syncInvalidTime();const field=document.querySelector('[data-step-field=duration][data-id="'+bad.id+'"]');field?.focus();field?.reportValidity();say('Исправьте время шага: целые секунды или ММ:СС.');return false}
+ // The native XLSX/preview/save commands must not export the previous valid value as if the current input were valid.
+ const guarded=new Set(['generateBtn','docSaveDraftBtn','docExportJsonBtn','saveJsonBtn','previewBtn','generateTwiBtn','lc-generate-twi-ai','frvStudyMakeSokBtn']);
+ document.addEventListener('click',e=>{if(kind!=='sop')return;const btn=e.target.closest('button');if(btn&&guarded.has(btn.id)&&!validateTime()){e.preventDefault();e.stopImmediatePropagation()}},true);
+ // Recovery is a separate local working copy, never a catalog write.
+ const draftKey=kind==='frv'&&typeof context.draftKey==='string'?context.draftKey:null;
+ let lastDraftRaw=null,lastDraftPayload='',draftBlocked=false,draftAvailable=!!draftKey;
+ const recoveryStatus=document.createElement('span');recoveryStatus.id='lc-frv-recovery-status';recoveryStatus.setAttribute('role','status');
+ const clearRecovery=kind==='frv'?make('lc-frv-discard-recovery','Удалить локальный черновик'):null;
+ if(kind==='frv'){bar.append(recoveryStatus);clearRecovery.hidden=true}
+ const setRecovery=(message,canDiscard=false)=>{if(kind!=='frv')return;recoveryStatus.textContent=message;clearRecovery.hidden=!canDiscard};
+ function readRecovery(){if(!draftKey)return null;try{return localStorage.getItem(draftKey)}catch{draftAvailable=false;return null}}
+ const originalFrvExport=frvStudyExport;
+ frvStudyExport=function(...args){const pack=originalFrvExport.apply(this,args);if(kind==='frv')pack.study.leanCenterPeople=currentLinks();return pack};
+ function checkpoint(){
+  if(kind!=='frv'||!loaded||!draftKey||draftBlocked)return;
+  try{
+   const payload=JSON.stringify(frvStudyExport());if(payload===lastDraftPayload)return;
+   const current=localStorage.getItem(draftKey);
+   if(current!==lastDraftRaw){draftBlocked=true;setRecovery('Другой редактор изменил локальный черновик. Скачайте текущий JSON; чужая копия не перезаписана.',true);return}
+   const raw=JSON.stringify({version:1,writer:session,savedAt:new Date().toISOString(),payload});
+   localStorage.setItem(draftKey,raw);lastDraftRaw=raw;lastDraftPayload=payload;draftAvailable=true;setRecovery('Черновик ФРВ сохранён в браузере · в каталог не передан.',true);
+  }catch{draftAvailable=false;setRecovery('Локальный черновик не сохранён: память браузера недоступна или заполнена. Скачайте JSON.',!!lastDraftRaw)}
+ }
+ const oldQueue=frvStudyQueuePersist;
+ frvStudyQueuePersist=function(...args){try{return oldQueue.apply(this,args)}finally{checkpoint()}};
+ // Export uses the same identity-aware handler regardless of the chosen button.
+ const nativeDownload=document.getElementById('frvStudyDownloadBtn');if(kind==='frv'&&nativeDownload)nativeDownload.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();act(false)},true);
+ if(clearRecovery)clearRecovery.onclick=()=>{
+  if(!draftKey||!confirm('Удалить только локальный черновик ФРВ? Данные каталога не изменятся. Текущий открытый бланк останется.'))return;
+  try{const current=localStorage.getItem(draftKey);if(current!==lastDraftRaw){setRecovery('Черновик изменён в другой вкладке. Он не удалён. Скачайте JSON.',true);return}
+   localStorage.removeItem(draftKey);lastDraftRaw=null;lastDraftPayload=JSON.stringify(frvStudyExport());draftBlocked=false;setRecovery('Локальная копия удалена. Новые изменения будут сохранены.')}
+  catch{setRecovery('Не удалось удалить локальный черновик. Скачайте JSON.',true)}
+ };
+ window.addEventListener('pagehide',checkpoint);
+ // The catalog write calls this only after successful persistence of the exact sent content.
+ window.lc54ClearCommittedRecovery=(text)=>{if(!draftKey)return;try{const current=localStorage.getItem(draftKey);if(current!==lastDraftRaw||!current)return;const d=JSON.parse(current);if(d.writer===session&&d.payload===JSON.stringify(JSON.parse(text)))localStorage.removeItem(draftKey)}catch{}};
+ function readLocalDraft(){
+  if(!draftKey)return null;const raw=readRecovery();lastDraftRaw=raw;
+  if(!raw){setRecovery(draftAvailable?'Локальный черновик появится после изменения данных.':'Память браузера недоступна. Сохраняйте JSON.');return null}
+  try{const record=JSON.parse(raw);if(record.version!==1||typeof record.payload!=='string')throw Error('Неверный формат');
+   const pack=JSON.parse(record.payload);frv34RestoreExport(pack);
+   if(confirm('Найден локальный черновик ФРВ от '+record.savedAt+'. Восстановить его вместо исходной записи? Отмена сохранит прежнюю копию без перезаписи.')){setRecovery('Локальный черновик восстановлен · в каталог не передан.',true);return record.payload}
+   draftBlocked=true;setRecovery('Старый локальный черновик сохранён. Для новой автозаписи сначала удалите его явно.',true);return null
+  }catch{draftBlocked=true;setRecovery('Локальный черновик не читается. Он сохранён без изменений. Скачайте текущий JSON.',true);return null}
+ }
+ function afterLoad(){
+  if(kind!=='frv')return;
+  lastDraftPayload=JSON.stringify(frvStudyExport());
+  const info=document.getElementById('lc-frv-live-summary');if(!info){const s=document.createElement('p');s.id='lc-frv-live-summary';s.className='text-xs text-slate-600';document.getElementById('frvs-studyId')?.closest('details')?.prepend(s)}
+  refreshPassport();
+ }
+ function refreshPassport(){
+  if(kind!=='frv')return;const d=ensureFrvStudy(),total=d.cycles.reduce((n,c)=>n+frvStudyTotal(c),0),full=d.cycles.filter(frvStudyCycleComplete).length,e=document.getElementById('lc-frv-live-summary');
+  if(e)e.textContent='Замеры: '+total.toFixed(1)+' сек · полных циклов '+full+' / '+d.cycles.length+' · Состояние: '+(d.status||'Draft')+' (рабочая копия)';
+ }
+ const oldDashboard=renderFrvStudyDashboardOnly;renderFrvStudyDashboardOnly=function(...args){const result=oldDashboard.apply(this,args);refreshPassport();return result};
+
  const staticFields={
   'meta-approver-name':{slot:'approver',label:'Утверждающий',post:'meta-approver-post'},
   'frv-observers':{slot:'sop_observer',label:'Наблюдатель ФРВ',multiple:true},
@@ -51,14 +125,14 @@
  function setField(f,v){f.value=v;f.dispatchEvent(new Event('input',{bubbles:true}));f.dispatchEvent(new Event('change',{bubbles:true}))}
  function choosePerson(field,spec,p){
   if(!field.isConnected)return;links=currentLinks();
-  if(!p){if(spec.multiple)return;links=links.filter(x=>x.slot!==spec.slot);setField(field,'');const post=postField(spec);if(post)setField(post,'');say('Выбор сотрудника очищен.');return}
+  if(!p){if(spec.multiple)return;links=links.filter(x=>x.slot!==spec.slot);setField(field,'');const post=postField(spec);if(post)setField(post,'');checkpoint();say('Выбор сотрудника очищен.');return}
   if(spec.multiple){
    if(field.value.split(/\r?\n/).includes(p.display_name)){if(!links.some(x=>x.slot===spec.slot&&x.person_id===p.id)){say('Такое ФИО уже есть в списке. Уточните сотрудника вручную.');return}}
    else setField(field,[field.value.trim(),p.display_name].filter(Boolean).join('\n'));
   }else{links=links.filter(x=>x.slot!==spec.slot);setField(field,p.display_name)}
   const post=postField(spec);if(post)setField(post,p.position||'');
   if(!links.some(x=>x.slot===spec.slot&&x.person_id===p.id))links.push({slot:spec.slot,person_id:p.id,employee_code:p.employee_code,display_name:p.display_name,position:p.position||'',unit:p.unit||''});
-  say('Выбран сотрудник: '+p.display_name);
+  checkpoint();say('Выбран сотрудник: '+p.display_name);
  }
  function attachPickers(){
   for(const field of document.querySelectorAll('#meta-approver-name,#frv-observers,#twi-trainer,#twi-trainee,#frvs-operator,#frvs-observer,[data-resp],[data-agn]')){
@@ -98,13 +172,13 @@
   if(loaded||busy)return;
   busy=true;
   try{
-   people=Array.isArray(defaults?.people)?defaults.people:[];applyTheme(defaults?.theme);
+   people=Array.isArray(defaults?.people)?defaults.people:[];applyTheme(defaults?.theme);const recovered=readLocalDraft();if(recovered)text=recovered;
    if(text){const raw=JSON.parse(text);const stored=kind==='sop'?raw.constructor?.leanCenterPeople:raw.study?.leanCenterPeople;links=Array.isArray(stored)?stored:[]}
    if(typeof stage37DraftDecisionPending!=='undefined'&&stage37DraftDecisionPending){
     if(!confirm('В этом рабочем окне есть сохранённый черновик. Восстановить его вместо исходной версии из центра?'))throw Error('Найден защищённый черновик. Сначала восстановите его или скачайте исходный текст через баннер.');
     await applyDraft(JSON.parse(stage37InitialDraft.raw));stage37DraftDecisionPending=false;$('draftBanner')?.classList.add('hidden');saveDraft();
     if(kind==='frv'){document.querySelector('[data-tab="frvstudy"]')?.click();const passport=document.getElementById('frvs-studyId')?.closest('details');if(passport)passport.open=true}
-    attachPickers();loaded=true;send.disabled=false;download.disabled=false;say('Рабочая копия готова · черновик восстановлен.');tell('loaded');return
+    attachPickers();loaded=true;afterLoad();send.disabled=false;download.disabled=false;say('Рабочая копия готова · черновик восстановлен.');tell('loaded');return
    }
    if(text){
     const p=JSON.parse(text);
@@ -120,15 +194,15 @@
     if(defaults?.unit){state.meta.department=defaults.unit;setVal('meta-department',defaults.unit)}
    }else if(defaults?.operation){const d=ensureFrvStudy();d.operationId=defaults.operation;renderFrvStudy()}
    if(kind==='frv'){const tab=document.querySelector('[data-tab="frvstudy"]');tab?.click();const passport=document.getElementById('frvs-studyId')?.closest('details');if(passport)passport.open=true}else document.querySelector('[data-tab="'+targetTab+'"]')?.click();
-   attachPickers();loaded=true;send.disabled=false;download.disabled=false;say('Рабочая копия готова. Передача не публикует документ.');tell('loaded')
+   attachPickers();loaded=true;afterLoad();send.disabled=false;download.disabled=false;say('Рабочая копия готова. Передача не публикует документ.');tell('loaded')
   }catch(e){console.error('Lean Center editor load',e);say('Ошибка загрузки: '+e.message+' · закройте окно и сохраните исходный файл');tell('error',{message:e.message})}finally{busy=false}
  }
  async function exportText(){
-  if(kind==='sop'){htmlFieldToState();if(typeof htmlToTwi==='function')htmlToTwi();const dm=state.documentManager||{},snapshot=docSnapshot();if(snapshot.twi)snapshot.twi.enabled=twiHasGeneratedContent(snapshot.twi);snapshot.leanCenterPeople=currentLinks();const pack=await docBuildPortableJson({id:dm.currentId||null,status:'Черновик',number:state.meta.sopNumber||'Черновик',seqNo:dm.seqNo||null,deptCode:dm.deptCode||'',year:dm.year,version:dm.version,snapshot},{preferActive:true});return JSON.stringify(pack,null,2)}
-  frvStudySyncFields();await frvStudyFlush();const pack=frvStudyExport();pack.study.leanCenterPeople=currentLinks();return JSON.stringify(pack,null,2)
+  if(kind==='sop'){if(!validateTime())throw Error('Исправьте некорректное время шага');htmlFieldToState();if(typeof htmlToTwi==='function')htmlToTwi();const dm=state.documentManager||{},snapshot=docSnapshot();if(snapshot.twi)snapshot.twi.enabled=twiHasGeneratedContent(snapshot.twi);snapshot.leanCenterPeople=currentLinks();const pack=await docBuildPortableJson({id:dm.currentId||null,status:'Черновик',number:state.meta.sopNumber||'Черновик',seqNo:dm.seqNo||null,deptCode:dm.deptCode||'',year:dm.year,version:dm.version,snapshot},{preferActive:true});return JSON.stringify(pack,null,2)}
+  frvStudySyncFields();checkpoint();try{await frvStudyFlush()}catch(e){if(draftAvailable)console.warn('FRV temporary storage failed',e);else console.warn('FRV storage unavailable; exporting rescue copy',e)}return JSON.stringify(frvStudyExport(),null,2)
  }
  async function act(toCenter){
-  if(!loaded||busy)return;busy=true;send.disabled=true;download.disabled=true;
+  if(!loaded||busy||outerModal)return;busy=true;send.disabled=true;download.disabled=true;
   try{const text=await exportText();if(toCenter){tell('source',{kind,text});say('Передано. Подтвердите сохранение в библиотеке Lean Center.')}
    else{const u=URL.createObjectURL(new Blob([text],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='LeanCenter-'+kind+'-'+session+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);say('JSON сформирован. Проверьте загрузку файла.')}
   }catch(e){say('Не удалось передать: '+e.message)}finally{busy=false;send.disabled=false;download.disabled=false}

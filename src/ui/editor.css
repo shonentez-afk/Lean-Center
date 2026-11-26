@@ -42,3 +42,5 @@ body>.max-w-7xl{max-width:none!important;width:100%!important;margin:0!important
 
 /* LC5.4: modal overlays must cover the integrated sticky bar. */
 #illustrationEditorOverlay{z-index:11000!important}#illustrationEditorOverlay #illClose{position:relative;z-index:1}input[data-step-field=duration][aria-invalid=true]{border:2px solid #b91c1c!important;background:#fff1f2!important;color:#991b1b!important}
+
+#lc-frv-recovery-status{font:12px Arial,sans-serif;max-width:100%;overflow-wrap:anywhere}#lc-frv-discard-recovery[hidden]{display:none!important}

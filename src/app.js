@@ -581,14 +581,15 @@ function launchEditor(ctx){
   const session=uuid(),host=el('section',undefined,'editor-host'),bar=el('div',undefined,'editor-host-bar'),frame=el('iframe'),note=el('span','Загрузка конструктора…','editor-host-note');
   host.id='lc-editor-host';host.setAttribute('aria-label','Рабочая область редактора');host.setAttribute('role','region');
   frame.id='lc-editor-frame';frame.title=ctx.kind==='frv'?'Редактор ФРВ':ctx.editorTab==='twi'?'План инструктажа TWI':ctx.editorTab==='frv'?'ФРВ по СОП':'Конструктор СОП';
-  const s={session,host,frame,note,ctx,loading:false,loaded:false,timeout:null,close:null};
+  const draftKey=ctx.kind==='frv'?'lean-frv-recovery-v1:'+ctx.database+':'+(ctx.id||'new')+':'+ctx.expected:null;
+  const s={session,host,frame,note,ctx,draftKey,loading:false,loaded:false,timeout:null,close:null};
   const back=btn('К библиотеке',()=>{hideEditor(s);navigate(s.ctx.kind==='frv'?'frv':'sop')});
   const close=btn('Закрыть редактор',()=>{if(disposeEditor(s)){message('Редактор закрыт. База не изменена.');navigate(s.ctx.kind==='frv'?'frv':'sop')}});
   s.close=close;
   bar.append(el('strong',frame.title),note,back,close);host.append(bar,frame);
   editorSession=s;document.body.append(host);showEditor(s);
   s.timeout=setTimeout(()=>{if(!s.loaded){editorStatus(s,'Редактор не подтвердил загрузку. Закройте его и проверьте комплект файлов и ограничения браузера.',true);message('Редактор не подтвердил готовность. Данные не изменены.',true)}},30000);
-  frame.srcdoc=template.replace(marker,()=> 'window.LC_EDITOR_CONTEXT='+JSON.stringify({session,kind:ctx.kind,tab:ctx.editorTab||null})+';/* LC_EMBED_CONTEXT */');
+  frame.srcdoc=template.replace(marker,()=> 'window.LC_EDITOR_CONTEXT='+JSON.stringify({session,kind:ctx.kind,tab:ctx.editorTab||null,draftKey})+';/* LC_EMBED_CONTEXT */');
   message('Загрузка конструктора. Ожидание подтверждения готовности.');
  }catch(e){if(editorSession)disposeEditor(editorSession,true);message(e.message,true)}
 }
@@ -602,6 +603,7 @@ window.addEventListener('message',async e=>{
   catch(err){clearTimeout(s.timeout);reply(err.message);editorStatus(s,err.message,true);message(err.message,true)}finally{s.loading=false}
  }else if(m.type==='loaded'){
   clearTimeout(s.timeout);s.loaded=true;editorStatus(s,'Редактор готов');message('Редактор готов. Сохранение в библиотеку — после подтверждения.');
+ }else if(m.type==='modal'){s.host.querySelector('.editor-host-bar').inert=m.open===true;
  }else if(m.type==='source'){
   if(!s.loaded){reply('Редактор ещё не готов.');return}
   if(busy){reply('Центр занят. Повторите передачу или скачайте JSON.');return}
@@ -627,7 +629,7 @@ function libraryPreview(main,kind){
  form.onsubmit=e=>{e.preventDefault();run(async()=>{assertContext(c);const payload={command:c.command,title:title.value.trim(),operation_id:op.value||null,source:d.source,projection:p};if(kind==='sop'){if(c.command==='create')payload.code=code.value.trim();else payload.revision_id=c.command==='save'?c.revisionId:null}else payload.observed_at=observed.value;
    // The complete original content is durable before its reference is written.
    await contentStore.put(d.source,d.text);const ev=libraryEvent(c,payload);const events=[ev];if(d.origin){invariant(c.command==='create','Проект из ФРВ должен быть новым документом');events.push({id:uuid(),entity_type:'document',entity_id:ev.entity_id,operation:'update',expected_revision:1,payload:{command:'origin',revision_id:ev.id,...d.origin},occurred_at:new Date().toISOString()})}await ws.applyContentEvents(events,readContent);await persist();
-   libraryDraft=null;librarySelected=ev.entity_id;if(kind==='sop')libraryRevisionSelected=c.command==='save'?c.revisionId:ev.id;if(d.editor&&editorSession)disposeEditor(editorSession,true);
+   libraryDraft=null;librarySelected=ev.entity_id;if(kind==='sop')libraryRevisionSelected=c.command==='save'?c.revisionId:ev.id;if(d.editor&&editorSession){try{editorSession.frame.contentWindow.lc54ClearCommittedRecovery?.(d.text)}catch{}disposeEditor(editorSession,true);}
    return 'Черновик сохранён. Ожидает общей публикации базы.';
  },{save:false})};
  main.append(pane('Проверенный исходный файл',el('p',sourceSummary(d)),el('p','Исходный статус Stage43: '+(p.legacy_status||'не указан')+' · Номер: '+(p.number||'не указан')+' · '+Math.ceil(d.source.size/1024)+' КБ','muted'),el('p','Исходный статус не считается согласованием в Lean Center. Содержимое и фотографии сохраняются полностью; исходный JSON хранится отдельно по SHA-256.','muted'),add(form,grid,add(el('div',undefined,'row'),confirm,btn('Скачать исходный JSON',()=>downloadRaw('Stage43-'+kind+'.json',d.text)),btn('Отменить предпросмотр',()=>{if(window.confirm('Отменить неподтверждённый импорт? Исходный файл не изменится.')){libraryDraft=null;render()}})))));
