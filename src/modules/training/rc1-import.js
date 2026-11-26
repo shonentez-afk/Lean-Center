@@ -31,9 +31,40 @@ function recordShape(x){
  invariant(req(x.id,180)&&req(x.version,160)&&validDate(x.date)&&['active','annulled'].includes(x.status)&&Number.isSafeInteger(x.revision)&&x.revision>0&&req(x.names.mentor,500)&&req(x.names.auditor,500)&&str(x.names.trainee,500)&&Object.values(x.ids).every(v=>str(v,180))&&str(x.job,1000)&&str(x.feedback,10000)&&Array.isArray(x.responses)&&x.responses.length<=100,'Некорректный аудит RC1');
  const seen=new Set();for(const a of x.responses){exact(a,['key','value','note']);invariant(req(a.key,160)&&!seen.has(a.key)&&(a.value===null||typeof a.value==='number'&&Number.isFinite(a.value)&&a.value>=0&&a.value<=1)&&str(a.note,2000),'Некорректная историческая оценка');seen.add(a.key)}return x
 }
+const emptyArchive=()=>({actions:[],cycles:[],changes:[],mobileLog:[]});
+const sourceAnnulment=(raw,record,hash)=>{
+ if(record.status!=='annulled'||!Object.hasOwn(raw,'annulmentReason')&&!Object.hasOwn(raw,'annulledAt'))return null;
+ invariant(str(raw.annulmentReason??'',10000)&&str(raw.annulledAt??'',180),'Некорректная причина или время аннулирования RC1');
+ return {type:'lc53_annulment_source',auditId:record.id,revision:record.revision,sourceHash:hash,reason:raw.annulmentReason??'',annulledAt:raw.annulledAt??''}
+};
+const archiveRows=db=>rows(db,'SELECT * FROM rc1_archive ORDER BY recorded_at,id').map(x=>({id:x.id,records:JSON.parse(x.records_json)}));
+const unique=xs=>[...new Map(xs.map(x=>[canonical(x),x])).values()];
+function annulmentEvidence(record,hash,archives){
+ const matching=archives.flatMap(x=>x.records.changes||[]).filter(x=>x.auditId===record.id&&x.revision===record.revision);
+ const direct=unique(matching.filter(x=>x.type==='lc53_annulment_source'&&x.sourceHash===hash&&str(x.reason,10000)&&str(x.annulledAt,180)).map(x=>({reason:x.reason,time:x.annulledAt})));
+ const log=unique(matching.filter(x=>x.type==='annul'&&str(x.reason,10000)&&str(x.changedAt,180)).map(x=>({reason:x.reason,time:x.changedAt})));
+ if(direct.length>1||log.length>1||direct.length&&log.some(x=>x.reason!==direct[0].reason))return {status:'conflict',direct,log};
+ if(direct.length)return {status:'known',...direct[0],source:'Исходный аудит RC1',direct,log};
+ if(log.length)return {status:'known',...log[0],source:'Журнал RC1: точное совпадение ID и ревизии',direct,log};
+ return {status:'unknown',direct,log}
+}
+export function rc1Annulment(db,audit){
+ if(audit.state!=='void'||!audit.legacy_context_json)return null;
+ try{const record=recordShape(JSON.parse(audit.legacy_context_json)),mapping=rc1Mapping(db,'audit',record.id);return mapping?.target_id===audit.id?annulmentEvidence(record,mapping.source_hash,archiveRows(db)):null}catch{return {status:'unknown'}}
+}
+export async function rc1ArchiveEventData(records){archiveShape(records);return {records,hash:await sha256(canonical(records))}}
+async function splitArchive(db,archive,known){
+ const saved=new Set(known.flatMap(x=>Object.entries(x.records).flatMap(([k,rs])=>rs.map(r=>k+'|'+canonical(r))))),chunks=[],oversized=[];let current=emptyArchive(),size=128;
+ const flush=()=>{if(Object.values(current).some(x=>x.length)){chunks.push(current);current=emptyArchive();size=128}};
+ for(const [key,rs] of Object.entries(archive)){
+  if(!Array.isArray(rs))throw Error('Некорректный массив дополнительной истории: '+key);
+  for(const r of rs){invariant(object(r),'Некорректная строка дополнительной истории: '+key);const signature=key+'|'+canonical(r);if(saved.has(signature))continue;saved.add(signature);const bytes=new TextEncoder().encode(canonical(r)).length+4;if(bytes>1500000){oversized.push(String(r.id||r.auditId||key));continue}if(size+bytes>1500000||current[key].length>=5000)flush();current[key].push(r);size+=bytes}
+ }
+ flush();return {chunks:await Promise.all(chunks.map(rc1ArchiveEventData)),oversized}
+}
 function archiveShape(x){exact(x,['actions','cycles','changes','mobileLog']);invariant(Object.values(x).every(a=>Array.isArray(a)&&a.length<=5000&&a.every(object))&&new TextEncoder().encode(canonical(x)).length<=2*1024*1024,'Архив дополнительных записей превышает лимит 2 МБ или содержит неверные строки');return x}
 export async function rc1Plan(db,raw){
- invariant(object(raw)&&Array.isArray(raw.audits)&&raw.audits.length<=1000,'Ожидается база RC1 v2/v3 или мобильный пакет до 1000 аудитов');
+ invariant(object(raw)&&Array.isArray(raw.audits)&&raw.audits.length<=20000,'Ожидается база RC1 v2/v3 или мобильный пакет до 20 000 аудитов');
  const mobile=raw.type==='twi-audit-transfer'&&raw.schemaVersion===1;
  invariant(mobile||[2,3].includes(raw.schemaVersion),'Неподдерживаемый формат RC1');
  const methods=new Map(),rd=raw.referenceData||{},definitions=Array.isArray(rd.checklists)?rd.checklists:[];
@@ -42,10 +73,10 @@ export async function rc1Plan(db,raw){
  if(!methods.has('ji-l1-v1'))methods.set('ji-l1-v1',builtinRC1Method());
  for(const v of rows(db,"SELECT * FROM legacy_mapping WHERE source_system='TWI_RC1' AND source_entity='method'"))if(!methods.has(v.source_id)){const m=one(db,'SELECT legacy_context_json FROM checklist_version WHERE id=?',[v.target_id]);if(m?.legacy_context_json)methods.set(v.source_id,methodShape(JSON.parse(m.legacy_context_json)))}
  const versionPlans=new Map();for(const m of methods.values()){const hash=await sha256(canonical(m)),existing=rc1Mapping(db,'method',m.id);versionPlans.set(m.id,{method:m,hash,existing,conflict:!!existing&&existing.source_hash!==hash})}
- const seen=new Set(),items=[];
- for(const a of raw.audits){try{const record=normalizeAudit(a,rd.checklistVersion||'ji-l1-v1');invariant(!seen.has(record.id),'Повтор ID внутри файла');seen.add(record.id);const hash=await sha256(canonical(record)),existing=rc1Mapping(db,'audit',record.id),method=versionPlans.get(record.version);invariant(method&&!method.conflict,'Не найдена точная версия методики '+record.version+' или её содержание изменилось');invariant(record.responses.every(r=>method.method.keys.includes(r.key)),'В ответах есть критерии другой версии');items.push({record,hash,method,existing,status:existing?(existing.source_hash===hash?'duplicate':'conflict'):'ready'})}catch(e){items.push({record:null,status:'invalid',error:e.message})}}
- const archive={actions:raw.correctiveActions||[],cycles:raw.auditCycles||[],changes:raw.auditChangeLog||[],mobileLog:raw.mobileImportLog||[]};let archiveData=null,archiveError='';try{archiveShape(archive);if(Object.values(archive).some(a=>a.length)){const hash=await sha256(canonical(archive));archiveData={records:archive,hash,existing:one(db,'SELECT id FROM rc1_archive WHERE source_hash=?',[hash])}}}catch(e){archiveError=e.message}
- return {mobile,items,archiveData,archiveError,extra:{actions:Array.isArray(archive.actions)?archive.actions.length:0,cycles:Array.isArray(archive.cycles)?archive.cycles.length:0,changes:Array.isArray(archive.changes)?archive.changes.length:0}}
+ const seen=new Set(),items=[],known=archiveRows(db);
+ for(const a of raw.audits){try{const record=normalizeAudit(a,rd.checklistVersion||'ji-l1-v1');invariant(!seen.has(record.id),'Повтор ID внутри файла');seen.add(record.id);const hash=await sha256(canonical(record)),existing=rc1Mapping(db,'audit',record.id),method=versionPlans.get(record.version);invariant(method&&!method.conflict,'Не найдена точная версия методики '+record.version+' или её содержание изменилось');invariant(record.responses.every(r=>method.method.keys.includes(r.key)),'В ответах есть критерии другой версии');const annulment=sourceAnnulment(a,record,hash);let status=existing?(existing.source_hash===hash?'duplicate':'conflict'):'ready',error='';if(annulment&&existing&&status==='duplicate'){const prior=annulmentEvidence(record,hash,known);if(prior.status==='conflict'||prior.direct.length&&canonical(prior.direct[0])!==canonical({reason:annulment.reason,time:annulment.annulledAt})||!prior.direct.length&&prior.log.some(x=>x.reason!==annulment.reason)){status='conflict';error='Конфликт причины или времени аннулирования; исходная история не перезаписывается.'}else if(!prior.direct.length)status='metadata'}items.push({record,hash,method,existing,annulment,status,error})}catch(e){items.push({record:null,status:'invalid',error:e.message})}}
+ const archive={actions:raw.correctiveActions||[],cycles:raw.auditCycles||[],changes:raw.auditChangeLog||[],mobileLog:raw.mobileImportLog||[]};let archiveData=null,archiveError='',archiveChunks=[];try{if(Object.values(archive).some(a=>a.length)){try{archiveShape(archive);const hash=await sha256(canonical(archive));archiveData={records:archive,hash,existing:one(db,'SELECT id FROM rc1_archive WHERE source_hash=?',[hash])}}catch{}const split=await splitArchive(db,archive,known);archiveChunks=split.chunks;if(split.oversized.length)archiveError='Некоторые исходные строки превышают безопасный размер пакета и не импортированы: '+split.oversized.join(', ');}}catch(e){archiveError=e.message}
+ return {mobile,items,archiveData,archiveChunks,archiveError,fileBytes:new TextEncoder().encode(JSON.stringify(raw)).length,extra:{actions:Array.isArray(archive.actions)?archive.actions.length:0,cycles:Array.isArray(archive.cycles)?archive.cycles.length:0,changes:Array.isArray(archive.changes)?archive.changes.length:0}}
 }
 export function personMatch(people,name){const key=s=>String(s||'').trim().replace(/\s+/g,' ').toLocaleLowerCase('ru-RU'),matches=people.filter(p=>key(p.display_name)===key(name));return name&&matches.length===1?matches[0].id:''}
 export async function verifyRC1Event(e){if(!isRC1Import(e))return;const p=e.payload;invariant(await sha256(canonical(p.command==='archive_rc1'?archiveShape(p.records):p.command==='import_rc1_method'?methodShape(p.method):recordShape(p.record)))===p.source_sha256,'Контрольная сумма исходной записи RC1 не совпадает')}

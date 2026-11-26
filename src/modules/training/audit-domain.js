@@ -1,6 +1,7 @@
 // LC5: one audit, explicit decisions and independently verified corrective actions.
 import {rows,one,invariant,isId} from '../../core/db.js';
 import {sopCriterionSource,sopEvidence,sopEffect} from '../library/sop-assessment-review.js';
+import {rc1Annulment} from './rc1-import.js';
 import {matchedComparison} from './mentor-comparison.js';
 import {applyPlannedAssessment,scheduleKind,plannedAuditFacts} from './center-planning.js';
 import {validDate} from '../library/sop-review.js';
@@ -29,7 +30,7 @@ export function auditDetails(db,id){
  const a=one(db,'SELECT a.*,v.version_no,v.methodology_json,c.code method_code FROM audit_session a JOIN checklist_version v ON v.id=a.version_id JOIN checklist c ON c.id=v.checklist_id WHERE a.id=?',[id]);if(!a)return null;
  let method={};try{method=JSON.parse(a.methodology_json)}catch{}
  const questions=rows(db,'SELECT c.*,r.id response_id,r.response,r.legacy_score,r.note FROM checklist_criterion c LEFT JOIN audit_response r ON r.criterion_id=c.id AND r.audit_id=? WHERE c.version_id=? ORDER BY c.position',[id,a.version_id]).map(q=>({...q,recommendation:(Array.isArray(method.criteria)?method.criteria.find(x=>String(x.code)===q.code)?.recommendation:'')||''}));
- return {...a,questions,stats:scoreQuestions(questions)};
+ return {...a,questions,stats:scoreQuestions(questions),legacyAnnulment:rc1Annulment(db,a)};
 }
 export function scoreQuestions(qs){
  const counts={yes:0,no:0,not_observed:0,not_applicable:0,legacy:0,missing:0,critical:0};let legacySum=0;
