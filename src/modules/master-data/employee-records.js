@@ -2,7 +2,7 @@ import {REVISION_TITLE_SQL} from '../library/revision-title.js';
 // Employee dossier: read-only projections of existing authoritative records.
 import {auditDetails,actionRows,actionStatus,actionPeople} from '../training/audit-domain.js';
 import {weightedHistory} from '../library/sop-assessment-review.js';
-import {scheduleKind,scheduleLabels,schedulePeople} from '../training/center-planning.js';
+import {scheduleKind,scheduleLabels,schedulePeople,scheduleDisplayState} from '../training/center-planning.js';
 import {assessmentAnswers,assessmentScore} from '../training/assessment-review.js';
 import {rows,one} from '../../core/db.js';
 import {checkContent} from '../library/domain.js';
@@ -64,7 +64,7 @@ export function employeeRelations(db,id){
  for(const r of query('SELECT * FROM development_plan WHERE person_id=?1 ORDER BY start_on DESC'))groups.development.push(item(r,r.title,'План развития',r.start_on,r.state,link('development',{id:r.id}),'Срок: '+r.due_on));
  for(const a of actionRows(db).filter(x=>actionPeople(x).includes(id)))groups.development.push(item(a,a.title,[a.owner_id===id?'Исполнитель':'',a.subject_id===id?'К кому относится':'',a.mentor_id===id?'Инструктор источника':'',a.auditor_id===id?'ВТ источника':'',a.trainee_id===id?'Обучаемый источника':'',a.assessed_person_id===id?'Оцениваемый':'',a.assessment_evaluator_id===id?'Оценщик источника':'',a.self_person_id===id?'Автор самооценки':'',a.assessment_mentor_id===id?'Наставник источника':'',a.sop_evaluator_id===id||a.weighted_evaluator_id===id?'Оценщик СОП':''].filter(Boolean).join(' · '),a.due_on,actionStatus(db,a),link('actions',{id:a.id}),a.result_note||a.question||''));
  for(const r of query('SELECT * FROM action_verification WHERE verifier_id=?1 ORDER BY checked_at DESC'))groups.development.push(item(r,'Проверка мероприятия','Проверяющий',r.checked_at,r.outcome,link('actions',{id:r.action_id}),r.evidence_note));
- for(const r of rows(db,'SELECT * FROM schedule_event ORDER BY due_on').filter(s=>schedulePeople(db,s).includes(id)))groups.development.push(item(r,'Календарь · '+scheduleLabels[scheduleKind(r)],r.owner_id===id?'Ответственный':'Участник',r.due_on,r.state,link('calendar',{id:r.id})));
+ for(const r of rows(db,'SELECT * FROM schedule_event ORDER BY due_on').filter(s=>schedulePeople(db,s).includes(id)))groups.development.push(item(r,'Календарь · '+scheduleLabels[scheduleKind(r)],r.owner_id===id?'Ответственный':'Участник',r.due_on,scheduleDisplayState(db,r),link('calendar',{id:r.id})));
  for(const r of query('SELECT * FROM person_assignment WHERE person_id=?1 ORDER BY valid_from DESC'))groups.history.push(item(r,ref('org_unit',r.unit_id)+' · '+(r.position_id?ref('position',r.position_id):ref('profession',r.profession_id)),'Должность / подразделение',r.valid_from,r.valid_to?'closed':'registered',link('person_assignment',{personId:id}),'До: '+(r.valid_to||'—')+' · Смена: '+(r.shift_id?ref('work_shift',r.shift_id):r.shift_code||'—')));
  for(const r of query('SELECT * FROM role_assignment WHERE person_id=?1 ORDER BY valid_from DESC'))groups.history.push(item(r,ref('business_role',r.role_id),'Роль',r.valid_from,r.valid_to?'closed':'registered',link('role_assignment',{personId:id}),'До: '+(r.valid_to||'—')));
  return groups

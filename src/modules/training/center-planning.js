@@ -3,6 +3,15 @@ import {validDate} from '../library/sop-review.js';
 import {directoryPeople} from '../master-data/people-directory.js';
 export const scheduleKind=s=>s.kind==='audit'?'audit':s.kind==='assessment'&&s.source_type==='practical_assignment'?'practical':s.kind==='assessment'&&s.source_type==='self_person'?'self_eval':'other';
 export const scheduleLabels={audit:'Аудит L1',practical:'Практическая оценка',self_eval:'Самооценка',other:'Историческое событие'};
+export function scheduleDisplayState(db,s){
+ if(scheduleKind(s)==='audit'&&s.completed_audit_id&&one(db,'SELECT state FROM audit_session WHERE id=?',[s.completed_audit_id])?.state!=='final'){
+  if(s.state==='done')return 'needs_replan';
+  if(s.state==='cancelled')return 'replanned';
+ }
+ return s.state
+}
+export const schedulePending=(db,s)=>['planned','needs_replan'].includes(scheduleDisplayState(db,s));
+export const scheduleStateLabel=(db,s)=>({planned:'Запланировано',done:'Выполнено',cancelled:'Отменено',needs_replan:'Требует перепланирования',replanned:'Перепланировано'})[scheduleDisplayState(db,s)]||s.state;
 export function schedulePeople(db,s){
  const a=['audit','practical'].includes(scheduleKind(s))?one(db,'SELECT trainee_id,mentor_id,supervisor_id FROM training_assignment WHERE id=?',[s.source_id]):null;
  return [...new Set([s.owner_id,...(a?[a.trainee_id,a.mentor_id,a.supervisor_id]:[]),...(scheduleKind(s)==='self_eval'?[s.source_id]:[])].filter(Boolean))];

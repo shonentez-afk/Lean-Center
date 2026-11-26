@@ -4,7 +4,7 @@ import {rows,one,invariant,isId} from '../../core/db.js';
 import {sopCriterionSource,sopEvidence,sopEffect} from '../library/sop-assessment-review.js';
 import {rc1Annulment} from './rc1-import.js';
 import {matchedComparison} from './mentor-comparison.js';
-import {applyPlannedAssessment,scheduleKind,plannedAuditFacts} from './center-planning.js';
+import {applyPlannedAssessment,scheduleKind,plannedAuditFacts,scheduleDisplayState} from './center-planning.js';
 import {validDate} from '../library/sop-review.js';
 export const ACTION_KINDS={corrective:'Корректирующее мероприятие',instructor_training:'Переобучение инструктора TWI',trainee_training:'Повторное производственное обучение',development:'Индивидуальное развитие'};
 export const ACTION_STATES={open:'Открыто',in_progress:'В работе',implemented:'Ожидает проверки',verified:'Эффект подтверждён',ineffective:'Эффект не подтверждён',cancelled:'Отменено'};
@@ -127,6 +127,12 @@ export function applyLC5Event(db,e,old){
  if(t==='schedule_event'){
   if(p.command==='plan_assessment'||old&&['practical','self_eval'].includes(scheduleKind(old)))return applyPlannedAssessment(db,e,old,{validateDueDate,day,person,exact,insert,update});
   if(!old){exact(p,['assignment_id','owner_id','due_on']);person(db,p.owner_id);validateDueDate(e,p.due_on);invariant(e.operation==='create'&&one(db,"SELECT id FROM training_assignment WHERE id=? AND state<>'cancelled' AND source_sha256 IS NOT NULL",[p.assignment_id]),'Укажите назначение, ответственного и дату аудита');invariant(!one(db,"SELECT id FROM schedule_event WHERE kind='audit' AND source_id=? AND due_on=?",[p.assignment_id,p.due_on]),'Аудит этого назначения на выбранную дату уже запланирован');insert(db,t,{id,kind:'audit',owner_id:p.owner_id,source_id:p.assignment_id,due_on:p.due_on,state:'planned',source_type:'training_assignment',created_at:e.occurred_at,rev:1});return}
+  if(p.command==='replan'){
+   exact(p,['command','due_on']);invariant(e.operation==='update'&&old.kind==='audit'&&old.source_type==='training_assignment'&&scheduleDisplayState(db,old)==='needs_replan','Перепланировать можно аудит с аннулированным подтверждением');
+   validateDueDate(e,p.due_on);invariant(one(db,"SELECT id FROM training_assignment WHERE id=? AND state<>'cancelled' AND source_sha256 IS NOT NULL",[old.source_id]),'Назначение обучения больше недоступно');person(db,old.owner_id);
+   invariant(!one(db,"SELECT id FROM schedule_event WHERE kind='audit' AND source_id=? AND due_on=?",[old.source_id,p.due_on]),'Выберите другую дату: на эту дату уже существует план аудита');
+   update(db,t,id,{state:'cancelled'});insert(db,t,{id:e.id,kind:'audit',owner_id:old.owner_id,source_id:old.source_id,due_on:p.due_on,state:'planned',source_type:'training_assignment',created_at:e.occurred_at,rev:1});return
+  }
   invariant(e.operation==='update'&&old.state==='planned'&&old.kind==='audit'&&old.source_type==='training_assignment','Событие не доступно для изменения');
   if(p.command==='cancel'){exact(p,['command']);update(db,t,id,{state:'cancelled'});return}
   exact(p,['command','audit_id']);const a=plannedAuditFacts(db,old,day(e)).find(x=>x.id===p.audit_id);invariant(p.command==='complete'&&a,'Выберите ещё не использованный аудит того же назначения и ответственного, проведённый и зарегистрированный после планирования');update(db,t,id,{state:'done',completed_audit_id:a.id});return
