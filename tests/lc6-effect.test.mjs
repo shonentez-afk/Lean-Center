@@ -1,5 +1,3 @@
-import {economicReport,economicReportSheets,attainment} from '../src/modules/effect/reporting.js';
-import * as net from '../src/storage/network.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,SQL,schema,migrations,date} from './lc4-fixture.mjs';
@@ -7,6 +5,8 @@ import {one,rows,uuid,openDb,bytesOf,meta,setMeta,Workspace,checkPackage,canonic
 import {inspectSource} from '../src/modules/library/domain.js';
 import {calculateEffect,measurementOf,effectEvidence,effectCurrent,effectOverview,effectPending,effectFacts,factCurrent,factNet,periodTargets,targetNeedsAttention} from '../src/modules/effect/domain.js';
 import {employeeRelations} from '../src/modules/master-data/employee-records.js';
+import {economicReport,economicReportSheets,attainment} from '../src/modules/effect/reporting.js';
+import * as net from '../src/storage/network.js';
 const timePlan={deltaSeconds:30,cyclesPerYear:3600,hourRate:100,realization:50,investment:1000,annualCost:500};
 const directPlan={annualGross:1000,investment:200,annualCost:100};
 async function task(f,study=null){

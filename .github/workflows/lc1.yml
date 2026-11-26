@@ -1,4 +1,4 @@
-name: LC6.0 economic effect full regression
+name: LC6.1 economic effect and analytics full regression
 on:
   push:
     branches: [feature/lc6-economic-effect]
@@ -36,12 +36,12 @@ jobs:
       - run: npm run smoke
       - uses: actions/upload-artifact@v4
         with:
-          name: LeanCenter-LC6.0-dev-${{ runner.os }}
-          path: releases/LeanCenter-LC6.0-dev.zip
+          name: LeanCenter-LC6.1-dev-${{ runner.os }}
+          path: releases/LeanCenter-LC6.1-dev.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LC6.0-dev-screenshots-${{ runner.os }}
+          name: LC6.1-dev-screenshots-${{ runner.os }}
           path: artifacts
           if-no-files-found: warn
