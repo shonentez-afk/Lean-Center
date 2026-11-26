@@ -19,7 +19,7 @@ export function assertAnalyticsContracts(db,day,unitId='',personId=''){
   assert.deepEqual(numbers(proj),centerMetrics(db,s).map(m=>[m.id,m.value,m.denominator]));
   for(const m of proj.metrics){
    assert.deepEqual(evidenceTotals(m),{value:m.value,denominator:m.denominator},m.id);
-   for(const d of m.dimensions){const gs=splitEvidence(m,d);assert.equal(gs.reduce((n,g)=>n+g.value,0),m.value,m.id+' '+d);assert.equal(gs.reduce((n,g)=>n+g.records.length,0),m.evidence.length,m.id+' '+d);for(const g of gs)assert.deepEqual(ids(filterEvidence(m,{dimension:d,value:g.key})),ids(g.records),m.id+' '+d)}
+   for(const d of m.dimensions){const gs=splitEvidence(m,d);assert.equal(gs.reduce((n,g)=>n+g.value,0),m.value,m.id+' '+d);assert.equal(gs.reduce((n,g)=>n+g.records.length,0),m.evidence.length,m.id+' '+d);if(m.denominator!==null)assert.equal(gs.reduce((n,g)=>n+g.denominator,0),m.denominator,m.id+' denominator '+d);for(const g of gs){assert.deepEqual(ids(filterEvidence(m,{dimension:d,value:g.key})),ids(g.records),m.id+' '+d);assert.deepEqual(evidenceTotals(m,filterEvidence(m,{dimension:d,value:g.key})),{value:g.value,denominator:g.denominator},m.id+' group totals '+d)}}
   }
  }
  verifyProjection(p,scope);

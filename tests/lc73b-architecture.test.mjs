@@ -1,3 +1,4 @@
+import {assertAnalyticsContracts} from './lc73b-analytics-contract.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {analyzeSources,sqlReferences} from '../tools/lc73b/analyze.mjs';
@@ -73,4 +74,19 @@ test('LC7.3B civil calendar marker is generated only for new action verification
  assert.equal(economicEventPayload('action_item',{command:'verify'}).verification_date_basis,ACTION_VERIFY_DATE_BASIS);
  assert.deepEqual(economicEventPayload('action_item',{command:'cancel'}),{command:'cancel'});
  assert.equal(recordedBusinessDate('2026-11-01T02:30:00Z',-300).date,'2026-10-31');
+});
+
+test('LC7.3B SOP review calendar: due day is not overdue, next day is, exact metric and signal',async()=>{
+ const f=await fixture();try{
+  const db=f.w.working;
+  const value=(snapshot,id)=>snapshot.metrics.find(x=>x.id===id).value;
+  const signal=(snapshot,id)=>snapshot.signals.find(x=>x.id===id).count;
+  for(const [day,expected] of [['2027-01-20',0],['2027-01-21',1]]){
+   const snap=assertAnalyticsContracts(db,day);
+   assert.equal(value(snap,'sop_review'),expected);
+   assert.equal(signal(snap,'sop_overdue'),expected);
+   const metric=centerProjection(db,{day,from:day,to:day},{withEvidence:true}).metrics.find(x=>x.id==='sop_review');
+   assert.deepEqual(metric.evidence.map(x=>x.key),expected?[f.doc.id]:[]);
+  }
+ }finally{f.w.close()}
 });
