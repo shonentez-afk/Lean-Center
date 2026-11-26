@@ -62,7 +62,51 @@ function factValues(db,e,p,r,exclude=null){
  invariant([p.gross_minor,p.recurring_minor,p.investment_minor].every(Number.isSafeInteger)&&bounded(p.gross_minor,-1e12,1e12)&&bounded(p.recurring_minor,0,1e12)&&bounded(p.investment_minor,0,1e12),'Суммы в сотых долях денежной единицы; проверьте диапазон');
  person(db,p.registered_by);invariant(text(p.evidence),'Укажите первичные документы и основание денежного факта');
  invariant(!one(db,"SELECT id FROM economic_fact WHERE effect_id=? AND state<>'void' AND id<>? AND period_from<=? AND period_to>=? LIMIT 1",[r.id,exclude||'',p.period_to,p.period_from]),'Период пересекается с существующим фактом этой карточки');
+ // A recorded fact must not cross a defined target boundary: never allocate money by guesswork.
+ invariant(!periodTargets(db,r,day(e)).some(t=>!t.cancel&&t.from<=p.period_to&&t.to>=p.period_from&&(p.period_from<t.from||p.period_to>t.to)),'Денежный факт пересекает границу цели. Укажите отдельные подтверждённые периоды по первичным документам');
  return {actual_event_id:p.actual_event_id,period_from:p.period_from,period_to:p.period_to,gross_minor:p.gross_minor,recurring_minor:p.recurring_minor,investment_minor:p.investment_minor,registered_by:p.registered_by,evidence:p.evidence.trim()};
+}
+// Period targets and explanations are immutable journal events on the existing
+// card. No duplicate register, no schema bump, and no implicit monthly proration.
+export const DEVIATION_CAUSES=Object.freeze({volume:'Объём / загрузка',time:'Время операции',realization:'Реализация экономии',rate:'Стоимость / ставка',cost:'Дополнительные затраты',investment:'Инвестиции',delay:'Сроки внедрения',quality:'Качество / повторные потери',other:'Иная причина'});
+const nextDay=d=>new Date(Date.parse(d)+86400000).toISOString().slice(0,10);
+export function periodTargets(db,r,asOf,actions=actionRows(db)){
+ const events=rows(db,"SELECT id,occurred_at,expected_revision,payload_json FROM change_event WHERE entity_type='economic_effect' AND entity_id=? ORDER BY expected_revision,id",[r.id]).map(e=>({...e,p:JSON.parse(e.payload_json)})),targets=events.filter(e=>e.p?.command==='period_target'),facts=effectFacts(db,r.id);
+ return targets.map(t=>{
+  const p=t.p,cancel=events.find(e=>e.p?.command==='period_target_cancel'&&e.p.target_id===t.id);
+  const available=facts.filter(f=>f.period_from>=p.from&&f.period_to<=p.to&&f.period_to<=asOf&&f.state==='confirmed'&&factCurrent(db,r,f,actions));
+  let cursor=p.from;for(const f of available){if(f.period_from!==cursor)break;cursor=nextDay(f.period_to)}
+  const closed=p.to<=asOf,complete=closed&&cursor===nextDay(p.to)&&!cancel&&r.state==='active',actual=available.reduce((s,f)=>s+factNet(f),0),signature=available.map(f=>f.id+':'+f.rev).join('|');
+  const reviews=events.filter(e=>e.p?.command==='period_review'&&e.p.target_id===t.id),review=reviews.at(-1)||null;
+  const currentReview=complete&&review?.p.signature===signature&&review?.p.actual_minor===actual;
+  const delta=complete?actual-p.target_minor:null,shortfall=delta!==null&&delta<0;
+  return {id:t.id,record:r,from:p.from,to:p.to,target:p.target_minor,basis:p.basis,actor_id:p.actor_id,created_at:t.occurred_at,late:t.occurred_at.slice(0,10)>p.from,cancel,closed,complete,actual,delta,signature,factCount:available.length,review,currentReview:!!currentReview,shortfall,status:cancel?'Отменена':r.state!=='active'?'Карточка отменена':!closed?'Период открыт':!complete?'Неполное покрытие фактами':shortfall&&!currentReview?'Требуется разбор отклонения':shortfall?'Отклонение разобрано':'Цель достигнута'}
+ })
+}
+export function periodTargetsFor(db,effects,asOf,actions=actionRows(db)){
+ return effects.flatMap(r=>periodTargets(db,r,asOf,actions)).sort((a,b)=>a.to.localeCompare(b.to)||a.id.localeCompare(b.id))
+}
+function applyPeriodCommand(db,e,r){
+ const p=e.payload,ts=periodTargets(db,r,day(e)),t=ts.find(x=>x.id===p.target_id);
+ if(p.command==='period_target'){
+  exact(p,['command','from','to','target_minor','basis','actor_id']);
+  person(db,p.actor_id);invariant(date(p.from)&&date(p.to)&&p.from<=p.to&&p.to>=day(e),'Укажите период цели, который ещё не завершён');
+  invariant(Number.isSafeInteger(p.target_minor)&&bounded(p.target_minor,-1e12,1e12)&&text(p.basis),'Укажите чистую денежную цель и основание');
+  invariant(!ts.some(x=>!x.cancel&&x.from<=p.to&&x.to>=p.from),'Период пересекается с существующей целью');
+  invariant(!effectFacts(db,r.id).some(f=>f.state!=='void'&&f.period_from<=p.to&&f.period_to>=p.from),'Цель нельзя назначать задним числом после регистрации факта');
+ }else if(p.command==='period_target_cancel'){
+  exact(p,['command','target_id','actor_id','reason']);person(db,p.actor_id);
+  invariant(t&&!t.cancel&&!t.closed&&text(p.reason),'Отменить можно только открытую цель с указанием причины');
+  invariant(!effectFacts(db,r.id).some(f=>f.state!=='void'&&f.period_from<=t.to&&f.period_to>=t.from),'Для цели уже зарегистрированы денежные факты');
+ }else{
+  exact(p,['command','target_id','actor_id','cause','note','action_id','signature','actual_minor']);person(db,p.actor_id);
+  invariant(t&&!t.cancel&&t.complete&&t.shortfall&&p.signature===t.signature&&p.actual_minor===t.actual,'Для разбора требуется завершённая цель с полным актуальным фактом и отрицательным отклонением');
+  invariant(Object.hasOwn(DEVIATION_CAUSES,p.cause)&&text(p.note),'Укажите причину отклонения и решение');
+  if(p.action_id!==null)invariant(actionRows(db).some(a=>a.id===p.action_id&&a.state!=='cancelled'),'Выберите существующее мероприятие');
+ }
+ // Revision is advanced by this event; target/review data are projected from
+ // the same change_event ledger after atomic application.
+ db.run('UPDATE economic_effect SET rev=rev+1 WHERE id=?',[r.id])
 }
 export function applyEconomicEvent(db,e,old){
  const p=e.payload,id=e.entity_id,t=e.entity_type;
@@ -78,6 +122,7 @@ export function applyEconomicEvent(db,e,old){
    insert(db,t,{id,study_id:p.study_id,action_id:p.action_id,owner_id:p.owner_id,unit_id:p.unit_id,currency:p.currency,method:p.method,title:p.title.trim(),plan_json:canonical(p.plan),plan_basis:p.plan_basis.trim(),review_due:p.review_due,state:'active',created_at:e.occurred_at,rev:1});return
   }
   invariant(e.operation==='update'&&old.state==='active','Карточка недоступна для изменения');
+  if(['period_target','period_target_cancel','period_review'].includes(p.command)){applyPeriodCommand(db,e,old);return}
   if(p.command==='plan'){exact(p,['command','plan','plan_basis']);invariant(!old.actual_json,'Исходный план зафиксирован после проверки расчёта');calculateEffect(old.method,p.plan);invariant(text(p.plan_basis),'Укажите основание планового расчёта');update(db,t,id,{plan_json:canonical(p.plan),plan_basis:p.plan_basis.trim()});return}
   if(p.command==='reschedule'){exact(p,['command','review_due','reason']);due(e,p.review_due);invariant(text(p.reason),'Укажите основание нового срока');update(db,t,id,{review_due:p.review_due,reviewed_at:null});return}
   if(p.command==='cancel'){exact(p,['command','reason']);invariant(text(p.reason)&&!one(db,"SELECT id FROM economic_fact WHERE effect_id=? AND state<>'void'",[id]),'Укажите основание; сначала разрешите все денежные факты');update(db,t,id,{state:'cancelled'});return}

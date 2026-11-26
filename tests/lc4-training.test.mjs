@@ -6,8 +6,8 @@ import {one,rows,meta,bytesOf,openDb,Workspace,restore,backup,uuid,setMeta,prepa
 import {jiStages,progressFor,authorizationValid,admissionStatus,practicalResult,latestAssessment,matrixData,coverageData,enrollmentTasks,practicalMethods} from '../src/modules/training/domain.js';
 import {refsForDb,refsForEvents} from '../src/modules/library/domain.js';
 
-test('LC5 migration v9 through v10/v11/v12 to v13 retains identities and old data',()=>{
- const db=new SQL.Database();db.run(schema);for(const m of migrations.slice(0,-4))db.run(m);setMeta(db,'database_id',uuid());
+test('LC5 migration v9 through v10/v11/v12/v13 to v14 retains identities and old data',()=>{
+ const db=new SQL.Database();db.run(schema);for(const m of migrations.slice(0,8))db.run(m);setMeta(db,'database_id',uuid());
  const id=uuid();db.run('INSERT INTO person(id,employee_code,display_name) VALUES(?,?,?)',[id,'Q','Учебный']);
  const migrated=openDb(SQL,bytesOf(db));assert.equal(meta(db,'schema_version'),'9');assert.equal(meta(migrated,'schema_version'),'14');assert.equal(one(migrated,'SELECT id FROM person').id,id);assert.deepEqual(rows(migrated,'PRAGMA foreign_key_check'),[]);migrated.close();db.close()
 });
