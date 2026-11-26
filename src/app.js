@@ -54,7 +54,7 @@ function initNav(){if(navCurrent!==null)return;navCurrent=++navSerial;try{histor
 const filterName=n=>!!n&&(/_filter_|^lc5_analytics_|^lc51_analytics_|^lc52_(analytics|metrics|frv|sop|retrain|calendar_unit|action_unit)|^compare_|^lc5_calendar_(month|person|type)$/.test(n));
 function navSnapshot(){
  const controls=[...document.querySelectorAll('main input[name],main select[name],main button.lc-directory-trigger[name]')].filter(e=>filterName(e.name)).map(e=>({name:e.name,value:e.dataset.personId??e.value,person:typeof e.lcRestorePerson==='function'}));
- return {page,route:getTrainingRoute(),employeeSelected,employeeTab,employeeReturn,query,archiveFilter,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson,scroll:window.scrollY,controls};
+ return {parent:navParent,page,route:getTrainingRoute(),employeeSelected,employeeTab,employeeReturn,query,archiveFilter,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson,scroll:window.scrollY,controls};
 }
 function rememberNavigation(){
  if(restoringNav||!ws)return;initNav();navSnapshots.set(navCurrent,navSnapshot());const previous=navCurrent;navCurrent=++navSerial;navParent=previous;try{if(navSupported)history.pushState({lcNav:navCurrent,parent:previous},'')}catch{navSupported=false}mobileMenu=false;
@@ -71,7 +71,7 @@ function restoreNavigation(id,parent){
   requestAnimationFrame(()=>window.scrollTo(0,snap.scroll||0));return true
  }finally{restoringNav=false}
 }
-function navigationBack(){if(busy||navParent===null)return;if(navSupported){history.back();return}restoreNavigation(navParent,null)}
+function navigationBack(){if(busy||navParent===null)return;if(navSupported){history.back();return}restoreNavigation(navParent,navSnapshots.get(navParent)?.parent??null)}
 window.addEventListener('popstate',e=>{if(e.state?.lcNav&&navSnapshots.has(e.state.lcNav)){if(!restoreNavigation(e.state.lcNav,e.state.parent??null)&&navSupported)history.forward()}});
 function navigate(p,{retainEmployee=false}={}){
  if(busy)return;
