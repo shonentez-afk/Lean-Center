@@ -1,0 +1,36 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {pathToFileURL} from 'node:url';
+import {fixture} from './lc4-fixture.mjs';
+const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'LC6 эффект ')),f=await fixture(),title='QA экономический результат';
+const task=(await f.save('action_item',{response_id:null,title,owner_id:f.mentor,subject_id:null,due_on:'2026-12-01',kind:'corrective',priority:'normal'})).entity_id;
+await f.save('action_item',{command:'implement',result:'QA результат'},task);
+await f.save('action_item',{command:'verify',verifier_id:f.actor,audit_id:null,outcome:'effective',evidence:'QA независимая проверка'},task);
+const file=path.join(tmp,'effect.leanbackup');await fs.writeFile(file,JSON.stringify(await f.backupBundle()));f.w.close();
+const browser=await chromium.launch({headless:true});
+try{
+ const ctx=await browser.newContext({offline:true,acceptDownloads:true,viewport:{width:1366,height:850}}),page=await ctx.newPage(),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+ const nav=async name=>{const target=page.locator('.sidebar .nav').filter({has:page.getByText(name,{exact:true})});if(!(await target.isVisible()))await target.locator('xpath=ancestor::details[1]/summary').click();await target.click()};
+ const choose=async(label,query)=>{await page.getByRole('button',{name:'Выбрать: '+label,exact:true}).click();await page.getByRole('searchbox',{name:'Поиск сотрудника'}).fill(query);await page.locator('.lc-picker-popup .lc-person-option').click()};
+ const saved=async label=>{await page.getByRole('button',{name:label,exact:true}).click();await page.getByText('Запись сохранена. Ожидает публикации базы.',{exact:true}).waitFor();assert.equal(await page.locator('#status').getAttribute('class'),'status')};
+ const input=async(name,value)=>page.locator('[name="'+name+'"]').fill(String(value));
+ await page.goto(pathToFileURL(path.resolve('dist/LeanCenter/index.html')).href);await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();
+ await nav('Настройки и обмен');const restore=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Восстановить копию',exact:true}).click();await (await restore).setFiles(file);await page.getByText('Копия восстановлена; проверьте ID базы',{exact:true}).waitFor();
+ await nav('ROI-модель');await page.getByRole('heading',{name:'ROI-модель мероприятий',exact:true}).waitFor();await page.getByRole('button',{name:'Создать карточку эффекта'}).click();
+ await page.locator('select[name=lc6_source_type]').selectOption('action');await page.locator('select[name=lc6_action]').selectOption(task);await page.locator('select[name=lc6_method]').selectOption('direct');
+ await input('lc6_plan_basis','QA план');await input('lc6_plan_annualGross',1000);await input('lc6_plan_investment',200);await input('lc6_plan_annualCost',100);await saved('Сохранить план эффекта');
+ await page.getByRole('heading',{name:'1. Плановый эффект',exact:true}).waitFor();await page.getByRole('cell',{name:'350%',exact:true}).waitFor();
+ await nav('Календарь');await page.locator('select[name=lc5_calendar_type]').selectOption('effect');await page.getByRole('row').filter({hasText:title}).getByRole('button',{name:'Открыть',exact:true}).click();
+ await page.getByRole('button',{name:'Проверить основания и открыть модель',exact:true}).click();await choose('Проверяющий расчёта','LC4-003');await input('lc6_measure_evidence','QA проверенные документы');await input('lc6_actual_annualGross',1200);await page.getByRole('button',{name:'Зафиксировать проверенный расчёт'}).click();await page.getByText('Проверенный расчёт сохранён. Ожидает публикации базы.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Зарегистрировать денежный факт'}).click();await input('lc6_fact_gross',400);await input('lc6_fact_recurring',50);await input('lc6_fact_investment',20);await input('lc6_fact_evidence','QA акт №1');await saved('Создать черновик денежного факта');
+ await choose('Проверяющий денежного факта','LC4-003');await input('lc6_finance_note','QA проверено');await saved('Подтвердить денежный факт');
+ await page.getByRole('row').filter({hasText:'Подтверждён'}).getByRole('cell',{name:'330 RUB',exact:true}).waitFor();
+ await fs.mkdir('artifacts/lc6',{recursive:true});await page.screenshot({path:'artifacts/lc6/effect-detail.png',fullPage:true});
+ await nav('Дашборд');const tile=page.locator('.tile').filter({hasText:'Чистый факт · RUB'});await tile.waitFor();assert.match(await tile.textContent(),/330/);await tile.click();await page.getByRole('heading',{name:'Подтверждённый денежный эффект за выбранный период',exact:true}).waitFor();assert.equal(await page.locator('select[name=lc6_filter]').inputValue(),'confirmed');
+ await nav('Аналитика центра');await page.getByRole('button',{name:'Экономическая эффективность',exact:true}).click();await page.getByRole('row').filter({hasText:'RUB'}).getByRole('cell',{name:'330',exact:true}).waitFor();await page.screenshot({path:'artifacts/lc6/effect-analytics.png',fullPage:true});
+ await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.locator('.tile').filter({hasText:'Чистый факт · RUB'}).waitFor();assert.deepEqual(errors,[]);console.log('LC6 browser PASS: plan, calendar, checked model, fact confirmation, dashboard, analytics and reload');await ctx.close();
+}finally{await browser.close();await fs.rm(tmp,{recursive:true,force:true})}
