@@ -7,14 +7,17 @@ import {fileURLToPath} from 'node:url';
 import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-store.mjs';
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
-import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation} from './read-policy.mjs';
-import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS} from './access-contract.mjs';
+import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource} from './read-policy.mjs';
+import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
+import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop} from './training-commands.mjs';
+import {matrixInfo,saveMatrix,retireMatrix,matrixDetail} from './matrix-commands.mjs';
+import {personCard} from './person-card.mjs';
 import {requestDigest,getReceipt,addReceipt} from './library-receipts.mjs';
 import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,inspectLibraryText,saveLibrary,passportLibrary,finalizeLibrary,detailDescriptor,projectLibraryDetail,libraryReadAction} from './library-commands.mjs';
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
-import {refsForDb,checkContent,MAX_CONTENT} from '../../src/modules/library/domain.js';
+import {refsForDb,checkContent,MAX_CONTENT,verifyDomainEvents} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
 const SITE='8c810000-0000-4000-8000-000000000003';
 const MAGIC=Buffer.from('LC81QA1\n'),MAX=24*1024*1024;
@@ -79,7 +82,29 @@ function photoAllowed(db,a,id,d){return !!readFor(db,a,'sop.read_steps',id,d)&&(
 function libraryAccess(db,a,d){
  return {read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchor,id)=>(LIBRARY_COMMANDS.includes(action)||DETAIL_ACTIONS.includes(action))&&(a.bootstrap===1?action!=='frv.finalize'&&!!readManagerProjection(db,config(db).site,anchor,id,d):canUseLibrary(db,security(db,a.id),a.id,action,anchor,id,d)),readScope:(kind,id)=>a.bootstrap===1?!!readManagerProjection(db,config(db).site,'operation.read',id,d):canReadLibraryAtOperation(db,security(db,a.id),a.id,kind,id,d),permissions:permissionsFor(db,a)};
 }
+function trainingAccess(db,a,d){
+ return {accountId:a.id,personId:a.person_id,credentialRevision:a.credential_revision,day:d,at:at(),permissions:permissionsFor(db,a),
+ read:(action,id)=>readFor(db,a,action,id,d),
+ allows:(action,id,resource)=>a.bootstrap===1?DETAIL_ACTIONS.includes(action)&&bootstrapTrainingScope(db,config(db).site,resource):canUseTrainingResource(db,security(db,a.id),a.id,action,id,d,resource),
+ audit:(action,target)=>audit(db,a.id,action,target),
+ actorAccess:(id,revision)=>{const other=account(db,id);return other&&other.credential_revision===revision?trainingAccess(db,other,d):null}};
+}
+function cardAllowed(db,a,id,d){
+ return a.bootstrap===1?!!readManagerProjection(db,config(db).site,'person.read_basic',id,d):canReadPersonCard(db,security(db,a.id),a.id,id,d);
+}
 function projectView(db,a,action,data,d){
+ if(action==='person.read_basic'||action==='person.read_directory'){
+  const view=directoryView(db,a,action,data,d);
+  return {...view,can_card:cardAllowed(db,a,data.id,d)};
+ }
+ if(action==='training.read'){
+  const access=trainingAccess(db,a,d),resource=trainingAssignmentResource(db,data.id,d);
+  return {...data,trainee_name:one(db,'SELECT display_name FROM person WHERE id=?',[data.trainee_id])?.display_name||'',operation_name:one(db,'SELECT name FROM operation WHERE id=?',[data.operation_id])?.name||'',can_detail:access.allows('training.detail',data.id,resource),can_sop:access.allows('training.read_sop',data.id,resource)};
+ }
+ if(action==='matrix.read'){
+  const m=one(db,'SELECT * FROM competency_matrix WHERE id=?',[data.id]),r=matrixResource(db,m.unit_id,JSON.parse(m.roster_json),JSON.parse(m.columns_json),d,m.base_on);
+  return {...data,can_detail:trainingAccess(db,a,d).allows('matrix.detail',data.id,r)};
+ }
  if(action==='sop.read_history'){
   const v=libraryAccess(db,a,d),id=data.revision_id,active=!data.document_archived;
   return {...data,can_edit:active&&data.state==='draft'&&v.allows('sop.edit_draft',action,id),can_revise:active&&['effective','superseded','withdrawn'].includes(data.state)&&!one(db,"SELECT id FROM document_revision WHERE document_id=? AND state IN ('draft','review','approved')",[data.document_id])&&v.allows('sop.revise',action,id),can_passport:active&&data.state==='draft'&&v.allows('sop.passport',action,id)};
@@ -344,6 +369,25 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const table=RESOURCE_TABLES[action];
    const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day()):readAuthorized(db,s,actor,action,id,day())).filter(Boolean).map(v=>projectView(db,a,action,v.data,day()));
   })},
+  trainingOptions(actor,revision,operationId=null){return read(db=>trainingOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),operationId))},
+  async createTraining(actor,revision,input){
+   const resolved=read(db=>resolveTrainingCreate(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())));
+   try{await verifyDomainEvents([{id:uuid(),entity_type:'training_assignment',entity_id:uuid(),operation:'create',expected_revision:0,payload:resolved.payload,occurred_at:at()}],ref=>readFile(ref))}
+   catch(e){throw new PilotError(422,'Проверьте исходный СОП, актуальный план TWI и методику: '+String(e.message||'ошибка').split('\n')[0].slice(0,200))}
+   return mutate(db=>{
+    const access=trainingAccess(db,checkedAccount(db,actor,revision),day()),next=resolveTrainingCreate(db,input,access);
+    must(next.source.sha256===resolved.source.sha256&&JSON.stringify(next.payload)===JSON.stringify(resolved.payload),409,'Назначение изменилось при проверке');
+    return createTraining(db,next,access);
+   });
+  },
+  changeTraining(actor,revision,input){return mutate(db=>changeTraining(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  trainingDetail(actor,revision,id){return read(db=>trainingDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  trainingSop(actor,revision,id){return read(db=>trainingSop(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  matrixInfo(actor,revision,unit=null,baseOn=null){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return matrixInfo(db,a,unit,baseOn??a.day)})},
+  saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  matrixDetail(actor,revision,id){return read(db=>matrixDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  personCard(actor,revision,id){return read(db=>{const a=checkedAccount(db,actor,revision),d=day();return personCard(db,trainingAccess(db,a,d),id,i=>cardAllowed(db,a,i,d))})},
   libraryInfo(actor,kind){
    return read(db=>{
     const a=account(db,actor);must(a&&['sop','frv'].includes(kind),404,'Раздел недоступен');

@@ -97,6 +97,19 @@ export function createSecureQAServer({store,origin}){
     reply(res,200,html,'text/html; charset=utf-8',{'X-Frame-Options':'SAMEORIGIN','Content-Security-Policy':"sandbox allow-scripts allow-modals; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src data: blob:; object-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'; child-src 'none'"});
     return;
    }
+   if(req.method==='GET'&&p==='/api/lc81/training/options'){reply(res,200,store.trainingOptions(a.id,a.credential_revision,url.searchParams.get('operation_id')));return}
+   if(req.method==='GET'&&p==='/api/lc81/training/detail'){reply(res,200,store.trainingDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='GET'&&p==='/api/lc81/training/sop'){reply(res,200,store.trainingSop(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/training/create'){
+    must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
+    try{reply(res,200,await store.createTraining(a.id,a.credential_revision,await body(req)));return}finally{libraryBusy--}
+   }
+   if(req.method==='POST'&&p==='/api/lc81/training/change'){reply(res,200,await store.changeTraining(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/matrix/info'){reply(res,200,store.matrixInfo(a.id,a.credential_revision,url.searchParams.get('unit_id'),url.searchParams.get('base_on')));return}
+   if(req.method==='GET'&&p==='/api/lc81/matrix/detail'){reply(res,200,store.matrixDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/matrix/save'){reply(res,200,await store.saveMatrix(a.id,a.credential_revision,await body(req,2*1024*1024)));return}
+   if(req.method==='POST'&&p==='/api/lc81/matrix/retire'){reply(res,200,await store.retireMatrix(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/person/card'){reply(res,200,store.personCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/detail'){
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
