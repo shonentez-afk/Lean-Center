@@ -49,12 +49,13 @@ export function effectOverview(db,{day,from='',to=day,unitId='',personId=''}){
  const actions=actionRows(db),effects=effectRows(db).filter(r=>(!unitId||r.unit_id===unitId)&&(!personId||r.owner_id===personId)),facts=[],currencies=new Map();
  let pending=0,overdue=0,stale=0,drafts=0;
  for(const r of effects){const current=effectCurrent(db,r,actions);if(effectPending(db,r,actions)){pending++;if(r.review_due<day)overdue++}if(r.state==='active'&&r.actual_json&&!current)stale++;
-  for(const f of effectFacts(db,r.id)){if(f.state==='draft'&&r.state==='active')drafts++;if(f.state!=='confirmed'||f.period_from<from||f.period_to>to)continue;
+  for(const f of effectFacts(db,r.id)){if(f.state==='draft'&&r.state==='active')drafts++;if(f.state!=='confirmed'||f.period_from<from||f.period_to>to||f.period_to>day)continue;
    const eligible=factCurrent(db,r,f,actions);facts.push({...f,effect:r,eligible});if(!eligible)continue;
    const v=currencies.get(r.currency)||{currency:r.currency,count:0,gross:0,recurring:0,investment:0,net:0};v.count++;v.gross+=f.gross_minor;v.recurring+=f.recurring_minor;v.investment+=f.investment_minor;v.net+=factNet(f);currencies.set(r.currency,v);
   }
  }
- return {effects,pending,overdue,stale,drafts,facts,currencies:[...currencies.values()].sort((a,b)=>a.currency.localeCompare(b.currency))};
+ const allTargets=periodTargetsFor(db,effects,day,actions),targets=allTargets.filter(t=>t.from>=from&&t.to<=to),targetAttention=allTargets.filter(targetNeedsAttention),shortfalls=targets.filter(t=>t.shortfall&&!t.currentReview);
+ return {effects,pending,overdue,stale,drafts,facts,targets,allTargets,targetAttention,shortfalls,currencies:[...currencies.values()].sort((a,b)=>a.currency.localeCompare(b.currency))};
 }
 function factValues(db,e,p,r,exclude=null){
  invariant(r.state==='active'&&effectCurrent(db,r)&&r.actual_event_id===p.actual_event_id,'Нужен действующий проверенный расчёт');
@@ -86,6 +87,7 @@ export function periodTargets(db,r,asOf,actions=actionRows(db)){
 export function periodTargetsFor(db,effects,asOf,actions=actionRows(db)){
  return effects.flatMap(r=>periodTargets(db,r,asOf,actions)).sort((a,b)=>a.to.localeCompare(b.to)||a.id.localeCompare(b.id))
 }
+export const targetNeedsAttention=t=>t.record.state==='active'&&!t.cancel&&(!t.closed||!t.complete||t.shortfall&&!t.currentReview);
 function applyPeriodCommand(db,e,r){
  const p=e.payload,ts=periodTargets(db,r,day(e)),t=ts.find(x=>x.id===p.target_id);
  if(p.command==='period_target'){
