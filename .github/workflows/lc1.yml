@@ -2,13 +2,13 @@ name: LC7.3B product regression
 on:
   push:
     branches: [feature/lc6-economic-effect, feature/lc6.3-twi-standard-v03, feature/lc7-ai-pilot, feature/lc7.3b-architecture-audit]
-    paths: ['src/**','db/**','tests/**','tools/build_lc1.mjs','tools/build_folder.mjs','tools/build_editor.mjs','tools/package_folder.py','docs/DEPLOY_NETWORK_RU.md','package.json','.github/workflows/lc1.yml']
+    paths: ['src/**','db/**','tests/**','tools/build_lc1.mjs','tools/build_folder.mjs','tools/build_editor.mjs','tools/package_folder.py','tools/lc73b/**','docs/DEPLOY_NETWORK_RU.md','package.json','.github/workflows/lc1.yml']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   group: lc1-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/feature/lc7.3b-architecture-audit' }}
 jobs:
   verify:
     strategy:
@@ -31,6 +31,7 @@ jobs:
           LC_ANALYTICS_COVERAGE_DIR: artifacts/lc73b-coverage
       - run: node tools/lc73b/analytics-coverage.mjs
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: LC7.3B-Analytics-Coverage-${{ runner.os }}
           path: artifacts/lc73b-coverage

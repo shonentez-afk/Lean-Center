@@ -1,3 +1,5 @@
+import {buildSync} from 'esbuild';
+import {Script} from 'node:vm';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {MAX_SOP_KEY_MOMENTS} from '../src/modules/library/sop-limits.js';
@@ -74,4 +76,12 @@ export function buildEditor(bridge,editorCSS=''){
  replace('</head>','<style id="lc-editor-style">'+editorCSS+'</style>\n</head>');
  replace('</body>','<script>\n'+bridge.replace(/<\/script/gi,'<\\/script')+'\n</script>\n</body>');
  return html
+}
+
+// Single product/atlas assembly path; same assembly sequence and build options.
+export function buildEmbeddedEditor(read){
+ const picker=buildSync({entryPoints:['src/ui/people-picker.js'],bundle:true,platform:'browser',format:'iife',globalName:'LCPeoplePicker',target:'es2020',write:false,minify:false}).outputFiles[0].text;
+ const linked=buildSync({entryPoints:['src/modules/library/linked-materials.js'],bundle:true,platform:'browser',format:'iife',globalName:'LCLinkedMaterials',target:'es2020',write:false,minify:false}).outputFiles[0].text;
+ const bridge=picker+'\n'+linked+'\n'+read('src/modules/library/lean-bridge.js');new Script(bridge,{filename:'lean-bridge.js'});
+ return buildEditor(bridge,read('src/ui/editor.css')+'\n'+read('src/ui/people-picker.css'))
 }

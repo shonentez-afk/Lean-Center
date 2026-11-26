@@ -1,3 +1,5 @@
+import {buildEmbeddedEditor} from '../build_editor.mjs';
+import {DERIVED_FILE,DERIVED_VIEW,extractDerivedRuntime,derivedSourceViewer} from './derived-runtime.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -29,6 +31,8 @@ const offset=runtime[0].index+runtime[0][0].indexOf('>')+1,line=releaseHtml.slic
 sources[release]='\n'.repeat(line-1)+runtime[0][1];scriptFiles.push(release);
 const releaseSha=git('rev-parse','HEAD:'+release).trim();
 if(releaseSha!=='5e35036ce243fed74ea018ac8eaf5f6c4a3c3e45')throw Error('Stage43 source changed');
+const derived=extractDerivedRuntime(buildEmbeddedEditor(p=>read(p).replace(/\r\n/g,'\n')));
+sources[DERIVED_FILE]=derived.source;scriptFiles.push(DERIVED_FILE);
 
 const ddl=['db/schema_v1.sql',...tracked.filter(p=>/^db\/migrations\/.*\.sql$/.test(p)).sort()];
 const migrations=ddl.slice(1).map(read);configureMigrations(...migrations.slice(1));
@@ -42,6 +46,11 @@ db.close();
 const graph=analyzeSources(sources,tables,{scriptFiles});
 const srcErrors=graph.errors.filter(x=>!x.file.startsWith(baseline)||x.file===release);if(srcErrors.length)throw Error('Source parse errors: '+JSON.stringify(srcErrors));
 const inventory=tracked.filter(p=>/^(src\/|db\/|tests\/|tools\/|\.github\/workflows\/)/.test(p)||scriptFiles.includes(p)||['package.json','package-lock.json',baseline+'src/app/stage43-parts.json',baseline+'releases/stage43-sop-print-formats-20261125.html',baseline+'proxy/index.py'].includes(p)).map(p=>({path:p,bytes:fs.statSync(p).size,sha256:hash(p),coverage:p===release?'AST executable runtime; vendor excluded':sourcePaths.includes(p)?graph.errors.some(e=>e.file===p)?'parse-error':'AST':ddl.includes(p)?'DDL / migrated schema':'inventory only'}));
+inventory.push({path:DERIVED_FILE,bytes:Buffer.byteLength(derived.source),sha256:derived.sha256,coverage:'AST generated classic scripts; offline source, not tracked Git file'});
+const nodeById=new Map(graph.nodes.map(x=>[x.id,x]));
+const segmentAt=line=>derived.segments.find(x=>line>=x.from&&line<=x.to)?.name;
+const derivedCrossCalls=graph.edges.filter(e=>e.file===DERIVED_FILE&&['call','construct'].includes(e.kind)&&nodeById.get(e.to)?.file===DERIVED_FILE&&segmentAt(e.line)&&segmentAt(nodeById.get(e.to).line)&&segmentAt(e.line)!==segmentAt(nodeById.get(e.to).line)).length;
+if(!derivedCrossCalls)throw Error('No lexical calls across generated editor script segments');
 const knownNodes=new Set(graph.nodes.map(x=>x.id));
 function anchor(x){const s=read(x.file),at=s.indexOf(x.anchor);if(at<0)throw Error('Stale review anchor '+x.file+' :: '+x.anchor);const line=s.slice(0,at).split('\n').length;return {...x,line,excerpt:s.slice(at,at+180).replace(/\s+/g,' ')}}
 const scenarios=SCENARIOS.map(s=>({...s,steps:s.steps.map(anchor),tests:s.tests.map(p=>{if(!tracked.includes(p))throw Error('Missing test '+p);return p})}));
@@ -59,9 +68,11 @@ function scc(){
 }
 for(const e of graph.edges)if(!knownNodes.has(e.from)||!knownNodes.has(e.to))throw Error('Dangling edge '+JSON.stringify(e));
 if(scc().length)throw Error('Architecture import cycle regression: '+JSON.stringify(scc()));
-const stats={primaryFiles:primary.length,stageFiles:stageFiles.length,stageRuntimeParsed:!graph.errors.some(x=>x.file===release),parsed:graph.files.length-graph.errors.length,parseErrors:graph.errors.length,functions:graph.nodes.filter(x=>['function','method'].includes(x.kind)).length,classes:graph.nodes.filter(x=>x.kind==='class').length,tables:tables.length,foreignKeys:graph.edges.filter(x=>x.kind==='foreign-key').length,imports:graph.edges.filter(x=>x.kind==='import').length,calls:graph.edges.filter(x=>['call','construct'].includes(x.kind)).length,unresolved:graph.unresolved.length,handoffs:handoffs.length,callbacks:graph.edges.filter(x=>x.kind==='callback-registration').length,sqlSites:graph.sqlSites.length,sqlEdges:graph.edges.filter(x=>x.kind.startsWith('sql-')).length,cycles:scc().length};
-const model={format:2,stageRuntime:{file:release,line,sha:releaseSha,scope:'pinned original HTML runtime, before Lean Center buildEditor patches'},title:'Lean Center · LC7.3B архитектурный атлас',sha,base,schemaVersion,stats,inventory,scenarios,review,handoffs,cycles:scc(),...graph};
+const stats={primaryFiles:primary.length,stageFiles:stageFiles.length,stageRuntimeParsed:!graph.errors.some(x=>x.file===release),derivedRuntimeParsed:!graph.errors.some(x=>x.file===DERIVED_FILE),derivedCrossCalls,parsed:graph.files.length-graph.errors.length,parseErrors:graph.errors.length,functions:graph.nodes.filter(x=>['function','method'].includes(x.kind)).length,classes:graph.nodes.filter(x=>x.kind==='class').length,tables:tables.length,foreignKeys:graph.edges.filter(x=>x.kind==='foreign-key').length,imports:graph.edges.filter(x=>x.kind==='import').length,calls:graph.edges.filter(x=>['call','construct'].includes(x.kind)).length,unresolved:graph.unresolved.length,handoffs:handoffs.length,callbacks:graph.edges.filter(x=>x.kind==='callback-registration').length,sqlSites:graph.sqlSites.length,sqlEdges:graph.edges.filter(x=>x.kind.startsWith('sql-')).length,cycles:scc().length};
+const generatedSources={[DERIVED_FILE]:{viewer:DERIVED_VIEW,sha256:derived.sha256,htmlSha256:derived.htmlSha256,segments:derived.segments}};
+const model={format:2,generatedSources,stageRuntime:{file:release,line,sha:releaseSha,scope:'pinned original HTML runtime, before Lean Center buildEditor patches'},title:'Lean Center · LC7.3B архитектурный атлас',sha,base,schemaVersion,stats,inventory,scenarios,review,handoffs,cycles:scc(),...graph};
 const out=process.env.LC_ATLAS_OUT||'artifacts/lc73b';fs.mkdirSync(out,{recursive:true});
+fs.mkdirSync(path.join(out,'generated'),{recursive:true});fs.writeFileSync(path.join(out,DERIVED_FILE),derived.source);fs.writeFileSync(path.join(out,DERIVED_VIEW),derivedSourceViewer(derived.source));
 const json=JSON.stringify(model);fs.writeFileSync(path.join(out,'atlas.json'),json);
 const template=read('tools/lc73b/atlas.html'),client=read('tools/lc73b/atlas-client.js');
 new Script(client,{filename:'atlas-client.js'});
@@ -71,5 +82,5 @@ const csv=(xs)=>'\ufeff'+xs.map(line=>line.map(x=>'"'+String(x??'').replaceAll('
 fs.writeFileSync(path.join(out,'review.csv'),csv([['ID','Серьёзность','Статус','Название','Наблюдение','Проверка','Источники'],...review.map(x=>[x.id,x.severity,x.state,x.title,x.finding,x.verification,x.proof.map(q=>q.file+':'+q.line).join(' | ')])]));
 fs.writeFileSync(path.join(out,'unresolved-calls.csv'),csv([['Файл','Строка','Владелец','Выражение','Тип неопределённости','Фрагмент'],...graph.unresolved.map(x=>[x.file,x.line,x.owner,x.name,x.reason,x.excerpt])]));
 fs.writeFileSync(path.join(out,'source-inventory.csv'),csv([['Файл','Байт','SHA256','Покрытие'],...inventory.map(x=>[x.path,x.bytes,x.sha256,x.coverage])]));
-fs.writeFileSync(path.join(out,'summary.json'),JSON.stringify({sha,base,schemaVersion,stats,cycles:model.cycles,parseErrors:graph.errors},null,2)+'\n');
+fs.writeFileSync(path.join(out,'summary.json'),JSON.stringify({sha,base,schemaVersion,stats,generatedSources,cycles:model.cycles,parseErrors:graph.errors},null,2)+'\n');
 console.log(JSON.stringify({sha,schemaVersion,stats,cycles:model.cycles,parseErrors:graph.errors},null,2));

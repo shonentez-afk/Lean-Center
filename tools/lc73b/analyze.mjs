@@ -14,7 +14,7 @@ function find(s,name){for(;s;s=s.parent)if(s.bindings.has(name))return s.binding
 function put(s,name,value){if(name)s.bindings.set(name,value)}
 function varScope(s){while(s.parent&&s.kind!=='function'&&s.kind!=='module')s=s.parent;return s}
 const idFor=(file,n)=>file+'#'+n.start;
-const groupOf=p=>p.startsWith('baselines/')?(p.endsWith('.html')?'Stage43 · исполняемый runtime':'Stage43 · исходный baseline'):p.startsWith('tests/')?'Тесты':p.startsWith('tools/')?'Инструменты':p.startsWith('src/modules/')?p.split('/')[2]:p.startsWith('src/')?p.split('/')[1]:p.split('/')[0];
+const groupOf=p=>p.startsWith('generated/')?'Stage43 · сборный runtime':p.startsWith('baselines/')?(p.endsWith('.html')?'Stage43 · исполняемый runtime':'Stage43 · исходный baseline'):p.startsWith('tests/')?'Тесты':p.startsWith('tools/')?'Инструменты':p.startsWith('src/modules/')?p.split('/')[2]:p.startsWith('src/')?p.split('/')[1]:p.split('/')[0];
 function sourceRef(file,n,text){return {file,line:n.loc.start.line,endLine:n.loc.end.line,excerpt:text.slice(n.start,Math.min(n.end,n.start+240)).replace(/\s+/g,' ')}}
 function literal(n){if(n?.type==='Literal'&&typeof n.value==='string')return {text:n.value,partial:false};if(n?.type==='TemplateLiteral')return {text:n.quasis.map(q=>q.value.cooked??q.value.raw).join(' __DYNAMIC__ '),partial:n.expressions.length>0};return null}
 export function sqlReferences(sql,tableNames){
@@ -50,7 +50,7 @@ export function analyzeSources(sources,tables=[],{scriptFiles=[]}={}){
   const text=sources[file],fileNode=addNode({id:file,name:posix.basename(file),file,line:1,endLine:text.split('\n').length,kind:'file',group:groupOf(file),sha256:createHash('sha256').update(text).digest('hex'),bytes:Buffer.byteLength(text)});
   let ast;try{ast=parse(text,{ecmaVersion:'latest',sourceType:scripts.has(file)?'script':'module',locations:true,allowHashBang:true})}catch(e){errors.push({file,line:e.loc?.line||1,message:e.message});continue}
   // Baseline scripts are parsed in isolation: concatenated global binding resolution needs separate validation against the pinned release.
-  const root=scope(null,'module'),m={file,text,root,imports:[],exports:new Map(),calls:[],ast};modules.set(file,m);
+  const root=scope(null,'module'),m={file,text,root,imports:[],exports:new Map(),calls:[],writes:[],ast};modules.set(file,m);
   const ref=n=>sourceRef(file,n,text);
   function symbol(n,name,kind,owner){const id=idFor(file,n);addNode({id,name,kind,group:fileNode.group,...ref(n),owner});addEdge(owner,id,'contains',ref(n));return id}
   function visit(n,s,owner,parent=null,key='',cls=null,hint=null){
@@ -95,6 +95,8 @@ export function analyzeSources(sources,tables=[],{scriptFiles=[]}={}){
    if(n.type==='BlockStatement'||n.type==='SwitchStatement'||n.type==='ForStatement'||n.type==='ForInStatement'||n.type==='ForOfStatement'||n.type==='CatchClause'){
     s=scope(s);if(n.type==='CatchClause')for(const name of names(n.param))put(s,name,{kind:'parameter'});
    }
+   if(n.type==='AssignmentExpression'||n.type==='UpdateExpression')for(const name of names(n.type==='AssignmentExpression'?n.left:n.argument))m.writes.push({s,name});
+   if((n.type==='ForInStatement'||n.type==='ForOfStatement')&&n.left.type!=='VariableDeclaration')for(const name of names(n.left))m.writes.push({s,name});
    if(n.type==='CallExpression'||n.type==='NewExpression')m.calls.push({n,s,owner,cls});
    if(n.type==='AssignmentExpression'&&n.operator==='='&&n.left.type==='MemberExpression'&&!n.left.computed&&/^on[a-z]+$/.test(prop(n.left.property)))m.calls.push({n,s,owner,cls,eventProperty:true});
    if(n.type==='ImportExpression'){const a=literal(n.source);if(a&&!a.partial){const target=resolvePath(file,a.text);addEdge(owner,target||external(a.text),'dynamic-import-literal',ref(n))}else unresolved.push({owner,reason:'dynamic-import',...ref(n)})}
@@ -102,8 +104,11 @@ export function analyzeSources(sources,tables=[],{scriptFiles=[]}={}){
   }
   visit(ast,root,file);
  }
+ // A lexical symbol can be replaced by the Stage43 adapter or another callback.
+ // Do not infer flow order from a single declaration; mark writes conservatively.
+ for(const m of modules.values())for(const {s,name} of m.writes){const b=find(s,name);if(b)b.reassigned=true}
  function resolveBinding(b,visited=new Set()){
-  if(!b)return null;if(b.kind==='symbol')return b.id;
+  if(!b||b.reassigned)return null;if(b.kind==='symbol')return b.id;
   if(b.kind==='import'||b.kind==='reexport'){
    if(!b.target)return b.source&&!b.source.startsWith('.')?external(b.source+'::'+b.name):null;
    const key=b.target+'::'+b.name;if(visited.has(key))return null;visited.add(key);
@@ -120,7 +125,7 @@ export function analyzeSources(sources,tables=[],{scriptFiles=[]}={}){
    let c=n.callee;if(c?.type==='ChainExpression')c=c.expression;
    let target=null,reason='dynamic-callee',name=m.text.slice(c.start,Math.min(c.end,c.start+120));
    if(c.type==='Identifier'){
-    const b=find(s,c.name);target=resolveBinding(b);reason=b?'binding-not-callable-statically':'global-or-script-dynamic';
+    const b=find(s,c.name);target=resolveBinding(b);reason=b?.reassigned?'binding-reassigned':b?'binding-not-callable-statically':'global-or-script-dynamic';
     if(!b&&globals.has(c.name)&&!scripts.has(m.file))target=external(c.name,'runtime');
    }else if(c.type==='MemberExpression'&&!c.computed){
     const k=prop(c.property),b=c.object.type==='Identifier'?find(s,c.object.name):null;

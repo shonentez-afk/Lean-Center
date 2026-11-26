@@ -97,3 +97,8 @@ test('LC7.3B event clock writes offset only for new calendar commands',async()=>
  for(const [type,p] of [['schedule_event',{assignment_id:'QA'}],['schedule_event',{command:'plan_assessment'}],['schedule_event',{command:'replan'}],['training_enrollment',{command:'finish'}]])assert.deepEqual(economicEventPayload(type,p,instant),{...p,business_offset_minutes:offset});
  for(const [type,p] of [['schedule_event',{command:'complete'}],['schedule_event',{command:'cancel'}],['training_enrollment',{command:'cancel'}]])assert.deepEqual(economicEventPayload(type,p,instant),p)
 });
+
+test('LC7.3B reassigned lexical bindings are not asserted to be direct calls',()=>{
+ const file='src/patch.js',g=analyzeSources({[file]:"function native(){return 1} function use(){return native()} function patch(){native=()=>2} function other(){function native(){return 3}return native()}"}),u=g.nodes.find(x=>x.name==='use'),o=g.nodes.find(x=>x.name==='other');
+ assert(g.unresolved.some(x=>x.owner===u.id&&x.reason==='binding-reassigned'&&x.name==='native'));assert(!g.edges.some(x=>x.from===u.id&&x.kind==='call'));assert(g.edges.some(x=>x.from===o.id&&x.kind==='call'&&g.nodes.find(n=>n.id===x.to)?.name==='native'));
+});

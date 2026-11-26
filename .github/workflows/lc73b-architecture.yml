@@ -7,7 +7,7 @@ permissions:
   contents: read
 concurrency:
   group: lc73b-atlas-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   atlas:
     runs-on: ubuntu-24.04
