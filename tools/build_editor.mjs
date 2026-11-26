@@ -46,6 +46,11 @@ export function buildEditor(bridge,editorCSS=''){
  replace('Автосохранение действует в этом браузере. Для защиты от очистки браузера периодически сохраняйте XLSX и JSON на диск.','Рабочая копия ФРВ хранится отдельно от каталога, если память браузера доступна. После F5 снова откройте тот же ФРВ и восстановите копию. Проверяйте статус и сохраняйте JSON на диск.');
  replace("d.status=errors.length?'Observed':'Validated';","d.status=errors.length?'Observed':'Validated';setVal('frvs-status',d.status);");
  replace("d.validation=null;\n      saveDraftDebounced();frvStudyQueuePersist();renderFrvStudyDashboardOnly();","if(d.validation&&d.status==='Validated'){d.status='Observed';setVal('frvs-status',d.status)}d.validation=null;\n      saveDraftDebounced();frvStudyQueuePersist();renderFrvStudyDashboardOnly();");
+ // Native-template header artwork is explicitly marked and cannot be bound as a working step photo.
+ replace("if(index>=p.media.length||index< -1)return;","if(index>=p.media.length||index< -1||index>=0&&p.media[index].serviceImage)return;");
+ replace("p.media.map((m,i)=>'<option value=\"'+i+'\">'+stage42Esc(m.source)+","p.media.map((m,i)=>m.serviceImage?'':'<option value=\"'+i+'\">'+stage42Esc(m.source)+");
+ replace("m.auxiliary?'Служебный фон (дублирующий слой Excel)'","m.serviceImage?'Служебное изображение шапки (логотип / знак безопасности)':m.auxiliary?'Служебный фон (дублирующий слой Excel)'");
+ replace("'</small><button type=\"button\" data-stage42-pick-photo=\"'+i+'\">К выбранному шагу</button></div>';","'</small><button type=\"button\" '+(m.serviceImage?'disabled title=\"Служебное изображение шаблона\" ':'')+'data-stage42-pick-photo=\"'+i+'\">К выбранному шагу</button></div>';");
  replace('</head>','<style id="lc-editor-style">'+editorCSS+'</style>\n</head>');
  replace('</body>','<script>\n'+bridge.replace(/<\/script/gi,'<\\/script')+'\n</script>\n</body>');
  return html

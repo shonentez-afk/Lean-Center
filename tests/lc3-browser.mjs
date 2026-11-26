@@ -91,7 +91,7 @@ try{
  const times=emptyEditor.locator('[data-step-field=duration]');
  await times.nth(0).fill('12');await times.nth(1).fill('00:23');assert.deepEqual(await emptyEditor.evaluate(()=>state.steps.map(s=>s.durationSeconds)),[12,23]);
  await times.nth(0).fill('12:99');assert.equal(await times.nth(0).getAttribute('aria-invalid'),'true');assert.equal(await emptyEditor.evaluate(()=>state.steps[0].durationSeconds),12);
- await emptyEditor.locator('#lc-editor-send').click();await emptyEditor.getByText('Исправьте время шага: целые секунды или ММ:СС.',{exact:true}).waitFor();assert.equal(await page.getByRole('heading',{name:'Проверенный исходный файл'}).count(),0);
+ await emptyEditor.locator('#lc-editor-send').click();await emptyEditor.locator('#lc-editor-status').getByText(/Исправьте некорректное время шага/).waitFor();assert.equal(await page.getByRole('heading',{name:'Проверенный исходный файл'}).count(),0);
  await times.nth(0).fill('12');
  async function exportAndInspect(frame,orientation,expectedPhotos,tag){
   await frame.locator('#stage43EditorExportFormat [data-stage43-export-format="'+orientation+'"]').click();
@@ -106,7 +106,7 @@ try{
  await emptyEditor.locator('input[data-input]').first().setInputFiles({name:'synthetic-panel.png',mimeType:'image/png',buffer:Buffer.from(photoData,'base64')});
  await emptyEditor.waitForFunction(()=>state.steps[0].hasPhoto&&!!state.steps[0].imageData);
  await emptyEditor.locator('[data-edit-photo]').first().click();await emptyEditor.locator('#illClose').waitFor();
- for(const size of [{width:1440,height:970},{width:1024,height:768}]){await page.setViewportSize(size);await emptyEditor.waitForFunction(()=>{const b=document.getElementById('illClose'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))&&document.getElementById('lc-editor-bar').inert});assert(await page.locator('.editor-host-bar').evaluate(e=>e.inert))}
+ for(const size of [{width:1440,height:970},{width:1024,height:768}]){await page.setViewportSize(size);await emptyEditor.waitForFunction(()=>{const b=document.getElementById('illClose'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))&&document.getElementById('lc-editor-bar').inert});await page.waitForFunction(()=>document.querySelector('.editor-host-bar')?.inert)}
  await page.setViewportSize({width:1440,height:970});
  const canvas=emptyEditor.locator('#illCanvas');await canvas.scrollIntoViewIfNeeded();await emptyEditor.locator('[data-ill-mode=label]').click();await emptyEditor.locator('#illTextInput').fill('Проверить зелёный индикатор');
  const clickPoint=async(x,y)=>{await canvas.scrollIntoViewIfNeeded();const b=await canvas.boundingBox();await canvas.click({position:{x:b.width*x,y:b.height*y}})};
@@ -278,7 +278,7 @@ try{
  await frvEditor.locator('#frvs-operationId').fill('Исследование QA — уточнение');await choosePerson(frvEditor,'Наблюдатель');assert.equal(await frvEditor.locator('#frvs-observer').inputValue(),'Учебный оценщик');
  // LC5.4: input -> live cycle/dashboard/passport, identity-preserving exports, F5 recovery.
  await frvEditor.locator('[data-fs=durationSec]').first().fill('12.5');
- await frvEditor.locator('[data-lc-cycle-summary]').filter({hasText:'12.5 сек'}).waitFor();await frvEditor.locator('#lc-frv-live-summary').getByText(/12\.5 сек/).waitFor();
+ await frvEditor.locator('[data-lc-cycle-summary]').filter({hasText:'12.5 сек'}).waitFor();await frvEditor.waitForFunction(()=>document.getElementById('lc-frv-live-summary')?.textContent.includes('12.5 сек'));
  await frvEditor.locator('#frvStudyValidateBtn').click();assert.equal(await frvEditor.locator('#frvs-status').inputValue(),'Validated');
  await frvEditor.locator('[data-fs=durationSec]').first().fill('13.5');assert.equal(await frvEditor.locator('#frvs-status').inputValue(),'Observed');
  await frvEditor.locator('[data-fs=durationSec]').first().fill('12.5');await frvEditor.locator('[data-fs=valueType]').first().selectOption('NVA_Waste');
@@ -287,11 +287,11 @@ try{
  const topJson=await exportFrvJson(frvEditor,'#lc-editor-download','frv-top');const nativeJson=await exportFrvJson(frvEditor,'#frvStudyDownloadBtn','frv-native');assert.deepEqual(nativeJson,topJson);assert.equal(topJson.study.leanCenterPeople[0].person_id,edited.constructor.leanCenterPeople[0].person_id);
  const xlsxWait=page.waitForEvent('download');await frvEditor.locator('#frvStudyExportXlsxBtn').click();const xlsxFile=path.join(tmp,'frv-causes.xlsx');await (await xlsxWait).saveAs(xlsxFile);
  const causes=await frvEditor.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const s=w.getWorksheet('Наблюдения');return [s.getCell('K5').value,s.getCell('K6').value,s.getCell('E6').value]},Array.from(await fs.readFile(xlsxFile)));assert.deepEqual(causes,['Причина потери','Инструмент вне места хранения',12.5]);
- await frvEditor.locator('#lc-frv-recovery-status').getByText(/Черновик ФРВ сохранён/).waitFor();
+ await frvEditor.waitForFunction(()=>document.getElementById('lc-frv-recovery-status')?.textContent.includes('Черновик ФРВ сохранён'));
  const draftKey=await frvEditor.evaluate(()=>window.LC_EDITOR_CONTEXT.draftKey);
  await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'ФРВ',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();await page.getByRole('heading',{name:'Исследование QA',exact:true}).waitFor();await page.getByRole('button',{name:'Открыть редактор',exact:true}).click();frvEditor=await editorFrame();
  assert.equal(await frvEditor.locator('#frvs-operationId').inputValue(),'Исследование QA — уточнение');assert.equal(await frvEditor.locator('[data-fs=durationSec]').first().inputValue(),'12.5');assert.equal(await frvEditor.evaluate(()=>frvStudyExport().study.leanCenterPeople[0].person_id),topJson.study.leanCenterPeople[0].person_id);
- await frvEditor.locator('#lc-frv-recovery-status').getByText(/Черновик ФРВ сохранён/).waitFor();
+ await frvEditor.waitForFunction(()=>document.getElementById('lc-frv-recovery-status')?.textContent.includes('Черновик ФРВ сохранён'));
  await frvEditor.locator('#lc-editor-send').click();
  await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();
  await page.getByRole('button',{name:'Сохранить изменения черновика'}).click();
@@ -300,6 +300,11 @@ try{
  const fd=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать JSON',exact:true}).click();await (await fd).saveAs(path.join(tmp,'frv-edited.json'));
  const frvEdited=JSON.parse(await fs.readFile(path.join(tmp,'frv-edited.json'),'utf8'));assert.equal(frvEdited.study.operationId,'Исследование QA — уточнение');assert.equal(frvEdited.cycles[0].observations[0].durationSec,12.5);assert.equal(frvEdited.cycles[0].observations[0].causeCode,'Инструмент вне места хранения');assert.equal(await page.evaluate(k=>localStorage.getItem(k),draftKey),null);assert.equal(frvEdited.study.leanCenterPeople[0].slot,'observer');assert.equal(frvEdited.study.leanCenterPeople[0].person_id,edited.constructor.leanCenterPeople[0].person_id);await page.getByRole('heading',{name:'ФРВ по СОП',exact:true}).waitFor();
  await page.screenshot({path:'artifacts/lc3/frv-library.png',fullPage:true});
+ // A completely new unregistered research must also survive reload, separately from catalog.
+ await page.getByRole('button',{name:'Создать ФРВ',exact:true}).click();let fresh=await editorFrame();await fresh.locator('#frvs-operationId').fill('Не отправленный учебный черновик QA');await fresh.locator('[data-fs=actionRaw]').first().fill('Замер без публикации');await fresh.locator('[data-fs=durationSec]').first().fill('17.25');
+ await fresh.waitForFunction(()=>document.getElementById('lc-frv-recovery-status')?.textContent.includes('Черновик ФРВ сохранён'));
+ await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'ФРВ',exact:true}).first().click();await page.getByRole('button',{name:'Создать ФРВ',exact:true}).click();fresh=await editorFrame();assert.equal(await fresh.locator('#frvs-operationId').inputValue(),'Не отправленный учебный черновик QA');assert.equal(await fresh.locator('[data-fs=durationSec]').first().inputValue(),'17.25');await fresh.locator('#lc-frv-discard-recovery').click();await page.getByRole('button',{name:'Закрыть редактор',exact:true}).click();await page.locator('#lc-editor-host').waitFor({state:'detached'});assert.equal(await page.getByText('Не отправленный учебный черновик QA',{exact:true}).count(),0);
+
  await page.getByRole('button',{name:'Настройки и обмен',exact:true}).click();const bdl=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать резервную копию',exact:true}).click();const bp=path.join(tmp,'full.leanbackup');await (await bdl).saveAs(bp);const backup=JSON.parse(await fs.readFile(bp,'utf8'));assert.equal(backup.format,'lean-content-bundle-v1');assert.equal(backup.contents.length,4);
  await ctx.close();const c2=await browser.newContext({offline:true,acceptDownloads:true}),p2=await c2.newPage();p2.on('dialog',d=>d.accept());await p2.goto(entry);await p2.getByRole('button',{name:'Настройки и обмен',exact:true}).click();const bc=p2.waitForEvent('filechooser');await p2.getByRole('button',{name:'Восстановить копию',exact:true}).click();await (await bc).setFiles(bp);await p2.getByText('Копия восстановлена; проверьте ID базы',{exact:true}).waitFor();await p2.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await p2.getByRole('button',{name:'Открыть',exact:true}).click();await p2.getByRole('heading',{name:'QA-SOP · Проверить учебный стенд'}).waitFor();
  const rdl=p2.waitForEvent('download');await p2.getByRole('button',{name:'Скачать JSON',exact:true}).click();await (await rdl).saveAs(path.join(tmp,'restored.json'));assert.equal(JSON.parse(await fs.readFile(path.join(tmp,'restored.json'),'utf8')).constructor.steps[0].action,'Проверить повторно');assert.deepEqual(errors,[]);await c2.close();
