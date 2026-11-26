@@ -1,3 +1,4 @@
+import {preparationRows,preparationState,supplementRows,supplementStatus,bankRows} from '../training/standard-workflows.js';
 import {effectRows,effectFacts,effectStatus,factCurrent,periodTargets,twiEffectsFor,twiBasis} from '../effect/domain.js';
 import {REVISION_TITLE_SQL} from '../library/revision-title.js';
 // Employee dossier: read-only projections of existing authoritative records.
@@ -33,6 +34,9 @@ export function employeeRelations(db,id){
   let role=roles(r,id,['trainee_id','mentor_id','manager_id','finished_by']);if(!role)role='Ответственный за задание';
   groups.training.push(item(r,r.title+' · v'+r.version_no,role,r.start_on,r.state,link(r.kind==='internship'?'internship':'programs',{enrollmentId:r.id}),'Срок: '+r.due_on))
  }
+ for(const r of preparationRows(db,id))groups.training.push(item(r,'Единая программа подготовки',r.trainee_id===id?'Обучаемый':r.manager_id===id?'Руководитель':'Участник подготовки',r.documents[0]?.start_on,preparationState(r),link('preparation',{id:r.id}),r.documents.map(x=>x?.title).filter(Boolean).join(' · ')));
+ for(const r of supplementRows(db,id)){const q=supplementStatus(r.role,r.tasks);groups.mentoring.push(item(r,'Ходатайство · '+r.month,r.person_id===id?'Сотрудник':'Руководитель',r.month,({draft:'Черновик',approved:'Согласовано',declined:'Отклонено'})[r.state],link('supplements',{id:r.id}),q.count+' / '+q.minimum+' задач'))}
+ for(const r of bankRows(db).filter(x=>x.author_id===id))groups.training.push(item(r,'Банк вопросов · v'+r.version_no,'Составитель',r.reviewed_on,'Зарегистрировано',link('knowledge_bank',{id:r.id}))); 
  for(const r of query('SELECT * FROM training_program WHERE created_by=?1 ORDER BY created_at DESC'))groups.training.push(item(r,r.title+' · v'+r.version_no,'Разработал программу',r.created_at,r.state,link(r.kind==='internship'?'internship':'programs',{programId:r.id})));
  for(const r of query('SELECT s.*,a.trainee_id,a.sop_revision_id FROM training_session s JOIN training_assignment a ON a.id=s.assignment_id WHERE s.mentor_id=?1 OR s.witness_id=?1 OR a.trainee_id=?1 ORDER BY s.held_at DESC')){
   const step=parse(r.steps_json).label||r.stage_code||'Инструктаж';

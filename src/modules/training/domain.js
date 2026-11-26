@@ -8,7 +8,8 @@ import {verifyMobileContext,recordMobileMapping,mobileObservationExists} from '.
 import {isRC1Import,applyRC1Event} from './rc1-import.js';
 import {LC5_TYPES,applyLC5Event} from './audit-domain.js';
 import {SELF_LEVELS} from './builtin-forms.js';
-export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,
+import {STANDARD_TYPES,PROGRAM_DOCS,applyStandardEvent,sharedTrainingTask} from './standard-workflows.js';
+export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,...STANDARD_TYPES,
  competency_matrix:'Матрица компетенций',audit_session:'Аудит инструктора',mentor_self_evaluation:'Самооценка наставника',mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
  training_program:'Программа обучения',training_enrollment:'Персональная программа',training_task_result:'Результат задания программы',
  training_assignment:'Назначение обучения',training_session:'Факт инструктажа',training_verification:'Проверка знаний',
@@ -149,8 +150,8 @@ function admissionRecordStatus(db,a,day){
 export function admissionStatus(db,personId,operationId,day){return admissionRecordStatus(db,latest(db,'admission_decision','person_id=? AND operation_id=? AND decided_on<=?',[personId,operationId,day],'decided_on'),day)}
 export function enrollmentTasks(db,enrollment){
  return rows(db,'SELECT * FROM training_program_task WHERE program_id=? ORDER BY position',[enrollment.program_id]).map(task=>{
-  const a=latestTaskAssignment(db,enrollment.id,task.id),result=latest(db,'training_task_result','enrollment_id=? AND task_id=?',[enrollment.id,task.id],'held_on');
-  return {...task,assignment:a,result,done:task.sop_revision_id?a?.state==='completed':result?.result==='completed'}
+  const shared=sharedTrainingTask(db,enrollment.id,task.id),a=latestTaskAssignment(db,shared?.enrollmentId||enrollment.id,shared?.taskId||task.id),result=latest(db,'training_task_result','enrollment_id=? AND task_id=?',[enrollment.id,task.id],'held_on');
+  return {...task,assignment:a,result,shared,done:task.sop_revision_id?a?.state==='completed':result?.result==='completed'}
  })
 }
 function latestTaskAssignment(db,enrollmentId,taskId){return one(db,"SELECT * FROM training_assignment WHERE enrollment_id=? AND program_task_id=? AND state<>'cancelled' ORDER BY assigned_on DESC,id DESC LIMIT 1",[enrollmentId,taskId])}
@@ -167,6 +168,7 @@ export function applyTrainingEvent(db,e,old){
  const p=e.payload,id=e.entity_id,t=e.entity_type;
  if(isRC1Import(e))return applyRC1Event(db,e,old);
  if(Object.hasOwn(LC5_TYPES,t))return applyLC5Event(db,e,old);
+ if(Object.hasOwn(STANDARD_TYPES,t))return applyStandardEvent(db,e,old);
  if(t==='checklist_version'){
   createOnly(e,old);const mentor=['lean-audit-checklist-v1','lean-self-checklist-v1','lean-audit-checklist-v2','lean-self-checklist-v2'].includes(p.format);if(mentor)validateMentorMethod(p,p.format);else validatePracticalMethod(p);const code=p.format==='lean-audit-checklist-v1'?AUDIT_CODE:p.format==='lean-audit-checklist-v2'?AUDIT_STANDARD_CODE:['lean-self-checklist-v1','lean-self-checklist-v2'].includes(p.format)?SELF_CODE:PRACTICAL_CODE,methods=trainingMethods(db,code);
   invariant(!methods.some(m=>canonical(JSON.parse(m.methodology_json))===canonical(p)),'Такая методика уже зарегистрирована');
@@ -280,21 +282,22 @@ export function applyTrainingEvent(db,e,old){
  }
  if(t==='training_program'){
   if(old){changeOnly(e,old);exact(p,['command','reason']);invariant(p.command==='retire'&&required(p.reason)&&old.state==='active','Версия программы уже завершена');update(db,t,id,{state:'retired'});return}
-  createOnly(e,old);exact(p,['code','kind','title','profession_id','position_id','created_by','tasks']);
+  createOnly(e,old);const standard=Object.hasOwn(p,'standard_kind');exact(p,['code','kind','title','profession_id','position_id','created_by','tasks',...(standard?['standard_kind']:[])]);
+  if(standard)invariant(Object.hasOwn(PROGRAM_DOCS,p.standard_kind)&&PROGRAM_DOCS[p.standard_kind].kind===p.kind,'Выберите вид документа TWI 03');
   invariant(required(p.code,100)&&required(p.title)&&Object.hasOwn(programKinds,p.kind)&&Array.isArray(p.tasks)&&p.tasks.length>0&&p.tasks.length<=100,'Заполните программу и задания');
   optional(db,'profession',p.profession_id);optional(db,'position',p.position_id);person(db,p.created_by);
-  if(p.kind==='internship')invariant(Object.keys(parts).every(k=>p.tasks.some(x=>x.part===k)),'Программа стажировки должна содержать все четыре части');
+  if(p.standard_kind==='adaptation'||!standard&&p.kind==='internship')invariant(Object.keys(parts).every(k=>p.tasks.some(x=>x.part===k)),'План адаптации (или прежняя программа стажировки) должен содержать все четыре части');
   p.tasks.forEach(x=>{
    exact(x,['part','title','hours','day_offset','sop_revision_id','skill_id','scale_id','target_level']);
    invariant(Object.hasOwn(parts,x.part)&&required(x.title)&&typeof x.hours==='number'&&Number.isFinite(x.hours)&&x.hours>=0&&x.hours<=1000&&integer(x.day_offset,0,3660),'Некорректное задание программы');
-   if(x.sop_revision_id){const r=effective(db,x.sop_revision_id);exactAssignmentTarget(db,x,r)}
+   if(x.sop_revision_id){invariant(p.standard_kind!=='safety','В программе ОТ регистрируйте темы и протоколы, не дублируйте производственные инструктажи');const r=effective(db,x.sop_revision_id);exactAssignmentTarget(db,x,r)}
    else invariant(x.skill_id===null&&x.scale_id===null&&x.target_level===null,'Для задания с целевой компетенцией выберите СОП')
   });
   const previous=rows(db,'SELECT * FROM training_program').filter(x=>foldKey(x.code)===foldKey(p.code));
-  invariant(previous.every(x=>x.kind===p.kind),'Код уже принадлежит другому виду программы');
+  invariant(previous.every(x=>x.kind===p.kind&&(!standard||!x.standard_kind||x.standard_kind===p.standard_kind)),'Код уже принадлежит другому виду программы');
   const version=Math.max(0,...previous.map(x=>x.version_no))+1,code=previous[0]?.code||p.code.trim();
   for(const x of previous.filter(x=>x.state==='active'))update(db,t,x.id,{state:'retired'});
-  store(db,t,{id,code,version_no:version,kind:p.kind,title:p.title.trim(),profession_id:p.profession_id,position_id:p.position_id,created_by:p.created_by,created_at:e.occurred_at,state:'active',rev:1});
+  store(db,t,{id,code,version_no:version,kind:p.kind,...(standard?{standard_kind:p.standard_kind}:{}),title:p.title.trim(),profession_id:p.profession_id,position_id:p.position_id,created_by:p.created_by,created_at:e.occurred_at,state:'active',rev:1});
   p.tasks.forEach((x,i)=>store(db,'training_program_task',{id:id+':'+(i+1),program_id:id,position:i+1,...x}));return
  }
  if(t==='training_enrollment'){
@@ -305,7 +308,7 @@ export function applyTrainingEvent(db,e,old){
    const program=one(db,'SELECT * FROM training_program WHERE id=? AND state=?',[p.program_id,'active']);invariant(program&&period(p.start_on,p.due_on)&&p.due_on&&required(p.reason),'Выберите активную программу, сроки и причину');
    if(hasPeriods){
     for(const [a,b] of [[p.internship_start,p.internship_end],[p.entry_start,p.entry_end]])invariant(a===null&&b===null||date(a)&&date(b)&&a<=b&&a>=p.start_on&&b<=p.due_on,'Периоды стажировки и ввода должны быть указаны полностью и входить в общий срок');
-    if(program.kind==='internship')invariant(p.internship_start&&p.internship_end&&p.entry_start&&p.entry_end,'Укажите оба периода из формы стажировки');
+    if(program.kind==='internship'&&!program.standard_kind)invariant(p.internship_start&&p.internship_end&&p.entry_start&&p.entry_end,'Укажите оба периода из формы стажировки');
    }
    invariant(rows(db,'SELECT day_offset FROM training_program_task WHERE program_id=?',[program.id]).every(x=>plusDays(p.start_on,x.day_offset)<=p.due_on),'Срок персональной программы должен включать все задания');
    hasRole(db,p.trainee_id,p.start_on,['trainee']);hasRole(db,p.mentor_id,p.start_on,['mentor','instructor']);person(db,p.manager_id);invariant(p.trainee_id!==p.mentor_id,'Сотрудник не может обучать себя');
@@ -339,6 +342,7 @@ export function applyTrainingEvent(db,e,old){
    optional(db,'work_shift',p.shift_id);exactAssignmentTarget(db,p,r);
    if(p.enrollment_id!==null||p.program_task_id!==null){
     const n=one(db,'SELECT * FROM training_enrollment WHERE id=?',[p.enrollment_id]),task=one(db,'SELECT * FROM training_program_task WHERE id=?',[p.program_task_id]);
+    invariant(!sharedTrainingTask(db,p.enrollment_id,p.program_task_id),'Общая операция уже относится к программе стажировки; назначьте её там');
     invariant(n?.state==='active'&&n.trainee_id===p.trainee_id&&task?.program_id===n.program_id&&task.sop_revision_id===r.id&&task.skill_id===p.skill_id&&task.scale_id===p.scale_id&&task.target_level===p.target_level&&p.assigned_on>=n.start_on&&p.due_on<=n.due_on&&!latestTaskAssignment(db,n.id,task.id),'Назначение не соответствует заданию персональной программы')
    }
    invariant(!one(db,"SELECT id FROM training_assignment WHERE trainee_id=? AND sop_revision_id=? AND skill_id=? AND state IN('planned','in_progress')",[p.trainee_id,r.id,p.skill_id]),'У сотрудника уже есть открытое назначение по этому навыку и редакции');

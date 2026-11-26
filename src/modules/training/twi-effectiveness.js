@@ -1,6 +1,7 @@
 // LC6.2: TWI facts, not invented ratings or financial attribution.
 import {rows,one,invariant,canonical} from '../../core/db.js';
 import {matrixData,coverageData,admissionStatus,jiStages} from './domain.js';
+import {sharedTrainingTask} from './standard-workflows.js';
 import {auditRegistry} from './audit-analytics.js';
 import {actionRows,actionStatus} from './audit-domain.js';
 const dayOf=x=>String(x||'').slice(0,10);
@@ -71,12 +72,12 @@ export function twiComparison(db,p,day){
   const a=x.record;
   if(p.kind==='assignment'){const v=rowFor(db,a,day,to);return {id:x.id,person:x.person,complete:!!(v.completeTime&&v.grant&&!v.grant.revoked_at&&v.grant.decided_on<=to&&v.practices.some(q=>q.id===v.grant.practical_id)&&one(db,"SELECT id FROM assessment_session WHERE id=? AND state='confirmed'",[v.grant.qualification_id])&&!!v.first&&v.last?.conclusion!=='not_meet'),minutes:v.minutesToGrant,days:v.elapsed,assignmentIds:[x.id],grant:v.grant?.id||null,practice:v.last?.id||null,facts:v.sourceFacts}}
   const tasks=rows(db,'SELECT id FROM training_program_task WHERE program_id=? ORDER BY position,id',[source.id]),results=rows(db,'SELECT * FROM training_task_result WHERE enrollment_id=? AND held_on<=? ORDER BY held_on,recorded_at,id',[a.id,to]);
-  const linked=trainingFacts(db).filter(x=>x.enrollment_id===a.id&&x.state!=='cancelled'&&within(x.assigned_on,a.start_on,to));
+  const linked=trainingFacts(db).filter(x=>x.state!=='cancelled'&&within(x.assigned_on,a.start_on,to));
   const detailed=rows(db,'SELECT * FROM training_program_task WHERE program_id=? ORDER BY position,id',[source.id]),facts=[],assignmentIds=[];
   let done=detailed.length>0;
   for(const task of detailed){
    if(task.sop_revision_id){
-    const as=linked.filter(x=>x.program_task_id===task.id);const last=as.at(-1);
+    const shared=sharedTrainingTask(db,a.id,task.id),as=linked.filter(x=>x.enrollment_id===(shared?.enrollmentId||a.id)&&x.program_task_id===(shared?.taskId||task.id));const last=as.at(-1);
     if(!last||last.state!=='completed'||last.sop_revision_id!==task.sop_revision_id){done=false;continue}
     for(const x of as){assignmentIds.push(x.id);const fs=x.sessions.filter(y=>within(y.held_at,a.start_on,to));facts.push(...fs.map(y=>[y.id,y.duration_minutes,y.held_at,y.result]));if(!fs.length||fs.some(y=>!Number.isFinite(y.duration_minutes)))done=false}
     if(!jiStages(last.method_variant).every(s=>last.sessions.some(y=>dayOf(y.held_at)<=to&&y.stage_code===s.code&&y.result==='completed')))done=false;
