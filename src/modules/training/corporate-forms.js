@@ -113,7 +113,7 @@ export function practicalWorkbook(ExcelJS,method,assessments,{trainee='',title='
   criterionRows.push(row);cells(s,row++,[q.question,...assessments.map(x=>x.responses[i]?.value??null)])
  }
  assessments.forEach((a,i)=>{const col=i+2,refs=criterionRows.map(r=>s.getCell(r,col).address).join(','),values=a.responses.map(x=>x.value),sum=values.reduce((n,v)=>n+(v===1?1:0),0),valid=values.length===total&&values.every(v=>v===0||v===1);s.getCell(6,col).value={formula:'IF(COUNT('+refs+')='+total+',SUM('+refs+'),"")',result:valid?sum:''};s.getCell(5,col).value={formula:'IF(COUNT('+refs+')='+total+','+s.getCell(6,col).address+'/'+total+',"")',result:valid?sum/total:''};s.getCell(5,col).numFmt='0.0%'});
- cells(s,row++,['Над чем Инструктору работать? / обратная связь',...assessments.map(x=>x.feedback)]);cells(s,row++,['Заключение (отдельное решение)',...assessments.map(x=>x.conclusion)]);cells(s,row++,['Дата / оценщик',...assessments.map(x=>x.date+' · '+x.evaluator)]);
+ cells(s,row++,['Над чем Стажеру работать? / обратная связь',...assessments.map(x=>x.feedback)]);cells(s,row++,['Заключение (отдельное решение)',...assessments.map(x=>x.conclusion)]);cells(s,row++,['Дата / оценщик',...assessments.map(x=>x.date+' · '+x.evaluator)]);
  const notes=sheet(w,'Комментарии',[35,8,70,50]);cells(notes,1,['Операция','№','Критерий','Комментарий']);header(notes,1,4);let i=2;for(const a of assessments)for(let j=0;j<total;j++)cells(notes,i++,[a.operation,j+1,method.criteria[j].question,a.responses[j]?.note||'']);
  s.pageSetup.printArea='A1:'+s.getCell(row-1,last).address;s.views=[{state:'frozen',xSplit:1,ySplit:6}];return w
 }

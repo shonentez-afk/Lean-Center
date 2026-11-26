@@ -55,9 +55,9 @@ const before=(dates,d)=>dates.every(v=>v&&v<=d);
 const same=(a,b)=>canonical(a)===canonical(b);
 function currentStage(db,b,facts,kind){
  const fact=latest(facts,kind);
- if(!fact)return {fact:null,current:false,pass:false};
  const n=enrollment(db,kind==='safety'?b.safety_id:b.internship_id);
- const e=taskEvidence(db,n),shifts=kind==='internship'?preparationShiftFacts(facts):[],completed=shifts.filter(x=>x.data.result==='completed');
+ const e=taskEvidence(db,n);if(!fact)return {fact:null,current:false,pass:false,evidence:e};
+ const shifts=kind==='internship'?preparationShiftFacts(facts):[],completed=shifts.filter(x=>x.data.result==='completed');
  const snapshot={tasks:e.refs,...(kind==='internship'?{shifts:completed.map(x=>x.id)}:{})};
  const current=!!(e.ready&&(kind==='safety'||e.operations.length>0&&completed.length>=2)&&before(e.dates,fact.fact_on)&&completed.every(x=>x.fact_on<=fact.fact_on)&&validLevels(e,fact.fact_on)&&same(snapshot,fact.data.snapshot));
  const pass=current&&fact.data.result==='pass'&&e.positive;return {fact,current,pass,evidence:e}

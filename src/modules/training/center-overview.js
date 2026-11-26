@@ -1,3 +1,4 @@
+import {preparationControl,preparationStats} from './standard-overview.js';
 import {twiOverview} from './twi-effectiveness.js';
 import {effectOverview} from '../effect/domain.js';
 // Read-only queues and KPI definitions over authoritative records.
@@ -45,7 +46,12 @@ export function centerMetrics(db,{day,from='',to=day,unitId='',personId=''}){
  const count=(group,label,value,definition,page,options={})=>({group,label,value,denominator:null,definition,page,options});
  const ratio=(group,label,value,denominator,definition,page,options={})=>({group,label,value,denominator,definition,page,options});
  const f={from,to,personId,unitId},twi=twiOverview(db,{...f,day,role:'trainee'}),ts=twi.stats,economic=effectOverview(db,{day,from,to,unitId,personId});
+ const prep=preparationStats(preparationControl(db,day,{from,to,unitId,personId,role:'trainee'})),currentPrep=preparationStats(preparationControl(db,day,{unitId,personId,role:'trainee'})),prepRoute={assessmentType:'preparation',...f};
  return [
+ count('Подготовка','Начато комплектов',prep.total,'Когорта по началу адаптации, подразделение обучаемого на текущую дату.','analytics',prepRoute),
+ ratio('Подготовка','Завершено из начатых',prep.complete,prep.total,'Текущий статус комплектов выбранной когорты; три закрытых документа и актуальное положительное решение.','analytics',prepRoute),
+ count('Подготовка','Просрочено комплектов',currentPrep.overdue,'Текущие открытые комплекты с просроченным этапом или нехваткой запланированных смен.','preparation',{unitId,personId,filter:'overdue',role:'trainee'}),
+ count('Подготовка','Требуется повторная проверка',currentPrep.review,'Решение комиссии больше не подтверждается актуальными основаниями.','preparation',{unitId,personId,filter:'review',role:'trainee'}),
  count('Обучение','Назначено обучения',planned.length,'Назначения, созданные в период; без отменённых. Сотрудник — обучаемый.','twi',{}),
  ratio('Обучение','Завершено из назначенных',completed.length,planned.length,'Текущие состояния назначений, созданных в период; не исторический срез закрытий.','twi',{}),
  count('Эффективность TWI','Уникальные обучаемые',ts.people,'Уникальные люди среди назначений, начатых в периоде.','analytics',{...f,assessmentType:'twi_effect',role:'trainee'}),

@@ -4,6 +4,7 @@ import {fixture,date,makeSop,SQL,schema,migrations} from './lc4-fixture.mjs';
 import {one,rows,meta,uuid,setMeta,openDb,bytesOf,canonical,sha256,checkPackage} from '../src/core/db.js';
 import {ji2Stages,validateJi2,jiConfig} from '../src/modules/training/ji-v03.js';
 import {progressFor,enrollmentTasks} from '../src/modules/training/domain.js';
+import {preparationControl,preparationStats,standardCalendar} from '../src/modules/training/standard-overview.js';
 import {preparationProgress,THEORY_BLOCKS} from '../src/modules/training/preparation-results.js';
 import {PRACTICAL_V03} from '../src/modules/training/standard-v03.js';
 import {QUESTION_BANK_V03} from '../src/modules/training/question-bank-v03.js';
@@ -49,6 +50,7 @@ test('preparation §3.4: actual shifts, exact appendix 9, safety, advance questi
  const decision={members:{manager:f.actor,mentor:f.mentor,trainer,agent,hr},theory:THEORY_BLOCKS.map(block=>({block,result:'pass',note:'QA'})),conclusion:'basic',reference:'QA-Комиссия',feedback:'QA развитие'};
  await assert.rejects(fact('commission',f.actor,'2026-01-21',{...decision,members:{...decision.members,hr:agent}}),/пять участников/);
  await fact('commission',f.actor,'2026-01-21',decision);assert(p().positive);await finish(a);assert.equal(p().status,'Комплект завершён');assert.equal(one(db,'SELECT count(*) n FROM admission_decision').n,0);
+ const completed=preparationControl(db,'2026-01-21',{personId:f.trainee,role:'trainee'});assert.equal(completed.length,1);assert.equal(preparationStats(completed).complete,1);assert.equal(preparationStats(completed).shifts,2);assert.equal(preparationControl(db,'2026-01-21',{personId:hr}).length,1);assert.equal(preparationControl(db,'2026-01-21',{personId:hr,role:'trainee'}).length,0);const calendar=standardCalendar(db,'2026-01-21',{personId:f.trainee,kind:'preparation'});assert.equal(calendar.length,5);assert.equal(new Set(calendar.map(x=>x.key)).size,5);assert.equal(calendar.filter(x=>x.type==='Смена стажировки'&&x.state==='Завершена').length,2);assert.equal(calendar.find(x=>x.type==='Решение комиссии').date,'2026-01-21');
  // correcting a shift invalidates the old conclusion rather than duplicating a fact or rewriting results
- await fact('shift',f.mentor,'2026-01-21',{shift_id:f.shift,result:'incomplete',minutes:100,note:'QA уточнение'});assert.equal(p().shifts.length,2);assert.equal(p().positive,false);assert.equal(p().status,'Требует повторной проверки');
+ await fact('shift',f.mentor,'2026-01-21',{shift_id:f.shift,result:'incomplete',minutes:100,note:'QA уточнение'});assert.equal(p().shifts.length,2);assert.equal(p().positive,false);assert.equal(p().status,'Требует повторной проверки');const review=preparationControl(db,'2026-02-20',{filter:'review',unitId:f.unit});assert.equal(review.length,1);assert.equal(preparationStats(review).review,1);assert.equal(preparationStats(review).shifts,1);assert.equal(preparationStats(review).overdue,1);const revised=standardCalendar(db,'2026-02-20',{personId:f.trainee,kind:'preparation'});assert.equal(revised.filter(x=>x.type==='Смена стажировки').length,2);assert.equal(revised.find(x=>x.type==='Смена стажировки'&&x.date==='2026-01-21').state,'Не завершена');
  }finally{f.w.close()}});
