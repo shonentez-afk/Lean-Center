@@ -39,11 +39,11 @@
  const oldRenderSteps=renderSteps;renderSteps=function(...args){const result=oldRenderSteps.apply(this,args);syncInvalidTime();return result};
  function validateTime(){const bad=state.steps.find(s=>invalidTime.has(s));if(!bad)return true;document.querySelector('[data-tab="editor"]')?.click();syncInvalidTime();const field=document.querySelector('[data-step-field=duration][data-id="'+bad.id+'"]');field?.focus();field?.reportValidity();say('Исправьте время шага: целые секунды или ММ:СС.');return false}
  // The native XLSX/preview/save commands must not export the previous valid value as if the current input were valid.
- const guarded=new Set(['generateBtn','docSaveDraftBtn','docExportJsonBtn','saveJsonBtn','previewBtn','generateTwiBtn','lc-generate-twi-ai','frvStudyMakeSokBtn']);
+ const guarded=new Set(['generateBtn','docSaveDraftBtn','docExportJsonBtn','docDownloadJsonBtn','docDownloadXlsxBtn','saveJsonBtn','previewBtn','refreshPreviewBtn','generateSopBtn','generateTwiBtn','lc-generate-twi-ai','frvStudyMakeSokBtn']);
  document.addEventListener('click',e=>{if(kind!=='sop')return;const btn=e.target.closest('button');if(btn&&guarded.has(btn.id)&&!validateTime()){e.preventDefault();e.stopImmediatePropagation()}},true);
  // Recovery is a separate local working copy, never a catalog write.
  const draftKey=kind==='frv'&&typeof context.draftKey==='string'?context.draftKey:null;
- let lastDraftRaw=null,lastDraftPayload='',draftBlocked=false,draftAvailable=!!draftKey;
+ let lastDraftRaw=null,lastDraftPayload='',draftBlocked=false,draftAvailable=!!draftKey,restoredDraft=false;
  const recoveryStatus=document.createElement('span');recoveryStatus.id='lc-frv-recovery-status';recoveryStatus.setAttribute('role','status');
  const clearRecovery=kind==='frv'?make('lc-frv-discard-recovery','Удалить локальный черновик'):null;
  if(kind==='frv'){bar.append(recoveryStatus);clearRecovery.hidden=true}
@@ -62,7 +62,7 @@
   }catch{draftAvailable=false;setRecovery('Локальный черновик не сохранён: память браузера недоступна или заполнена. Скачайте JSON.',!!lastDraftRaw)}
  }
  const oldQueue=frvStudyQueuePersist;
- frvStudyQueuePersist=function(...args){try{return oldQueue.apply(this,args)}finally{checkpoint()}};
+ frvStudyQueuePersist=function(...args){try{return oldQueue.apply(this,args)}finally{checkpoint();refreshPassport()}};
  // Export uses the same identity-aware handler regardless of the chosen button.
  const nativeDownload=document.getElementById('frvStudyDownloadBtn');if(kind==='frv'&&nativeDownload)nativeDownload.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();act(false)},true);
  if(clearRecovery)clearRecovery.onclick=()=>{
@@ -73,25 +73,25 @@
  };
  window.addEventListener('pagehide',checkpoint);
  // The catalog write calls this only after successful persistence of the exact sent content.
- window.lc54ClearCommittedRecovery=(text)=>{if(!draftKey)return;try{const current=localStorage.getItem(draftKey);if(current!==lastDraftRaw||!current)return;const d=JSON.parse(current);if(d.writer===session&&d.payload===JSON.stringify(JSON.parse(text)))localStorage.removeItem(draftKey)}catch{}};
+ window.lc54ClearCommittedRecovery=(text)=>{if(!draftKey)return;try{const current=localStorage.getItem(draftKey);if(current!==lastDraftRaw||!current)return;const d=JSON.parse(current);if(d.writer===session&&d.payload===JSON.stringify(JSON.parse(text))){localStorage.removeItem(draftKey);draftBlocked=true;lastDraftRaw=null}}catch{}};
  function readLocalDraft(){
   if(!draftKey)return null;const raw=readRecovery();lastDraftRaw=raw;
   if(!raw){setRecovery(draftAvailable?'Локальный черновик появится после изменения данных.':'Память браузера недоступна. Сохраняйте JSON.');return null}
   try{const record=JSON.parse(raw);if(record.version!==1||typeof record.payload!=='string')throw Error('Неверный формат');
    const pack=JSON.parse(record.payload);frv34RestoreExport(pack);
-   if(confirm('Найден локальный черновик ФРВ от '+record.savedAt+'. Восстановить его вместо исходной записи? Отмена сохранит прежнюю копию без перезаписи.')){setRecovery('Локальный черновик восстановлен · в каталог не передан.',true);return record.payload}
+   if(confirm('Найден локальный черновик ФРВ от '+record.savedAt+'. Восстановить его вместо исходной записи? Отмена сохранит прежнюю копию без перезаписи.')){restoredDraft=true;setRecovery('Локальный черновик восстановлен · в каталог не передан.',true);return record.payload}
    draftBlocked=true;setRecovery('Старый локальный черновик сохранён. Для новой автозаписи сначала удалите его явно.',true);return null
   }catch{draftBlocked=true;setRecovery('Локальный черновик не читается. Он сохранён без изменений. Скачайте текущий JSON.',true);return null}
  }
  function afterLoad(){
   if(kind!=='frv')return;
-  lastDraftPayload=JSON.stringify(frvStudyExport());
+  lastDraftPayload=restoredDraft?'':JSON.stringify(frvStudyExport());if(restoredDraft)checkpoint();
   const info=document.getElementById('lc-frv-live-summary');if(!info){const s=document.createElement('p');s.id='lc-frv-live-summary';s.className='text-xs text-slate-600';document.getElementById('frvs-studyId')?.closest('details')?.prepend(s)}
   refreshPassport();
  }
  function refreshPassport(){
   if(kind!=='frv')return;const d=ensureFrvStudy(),total=d.cycles.reduce((n,c)=>n+frvStudyTotal(c),0),full=d.cycles.filter(frvStudyCycleComplete).length,e=document.getElementById('lc-frv-live-summary');
-  if(e)e.textContent='Замеры: '+total.toFixed(1)+' сек · полных циклов '+full+' / '+d.cycles.length+' · Состояние: '+(d.status||'Draft')+' (рабочая копия)';
+  const field=document.getElementById('frvs-status');if(field&&[...field.options].some(x=>x.value===d.status))field.value=d.status;const label=field?.selectedOptions[0]?.textContent||d.status||'Черновик';if(e)e.textContent='Замеры: '+total.toFixed(1)+' сек · полных циклов '+full+' / '+d.cycles.length+' · Состояние: '+label+' (рабочая копия)';const validation=document.getElementById('frvStudyValidation');if(validation&&!d.validation&&validation.textContent.trim())validation.textContent='Замеры изменены. Проведите проверку повторно.';
  }
  const oldDashboard=renderFrvStudyDashboardOnly;renderFrvStudyDashboardOnly=function(...args){const result=oldDashboard.apply(this,args);refreshPassport();return result};
 
@@ -199,7 +199,7 @@
  }
  async function exportText(){
   if(kind==='sop'){if(!validateTime())throw Error('Исправьте некорректное время шага');htmlFieldToState();if(typeof htmlToTwi==='function')htmlToTwi();const dm=state.documentManager||{},snapshot=docSnapshot();if(snapshot.twi)snapshot.twi.enabled=twiHasGeneratedContent(snapshot.twi);snapshot.leanCenterPeople=currentLinks();const pack=await docBuildPortableJson({id:dm.currentId||null,status:'Черновик',number:state.meta.sopNumber||'Черновик',seqNo:dm.seqNo||null,deptCode:dm.deptCode||'',year:dm.year,version:dm.version,snapshot},{preferActive:true});return JSON.stringify(pack,null,2)}
-  frvStudySyncFields();checkpoint();try{await frvStudyFlush()}catch(e){if(draftAvailable)console.warn('FRV temporary storage failed',e);else console.warn('FRV storage unavailable; exporting rescue copy',e)}return JSON.stringify(frvStudyExport(),null,2)
+  frvStudySyncFields();checkpoint();try{await frvStudyFlush()}catch(e){if(draftAvailable)console.warn('FRV temporary storage failed',e);else console.warn('FRV storage unavailable; exporting rescue copy',e)}checkpoint();return JSON.stringify(frvStudyExport(),null,2)
  }
  async function act(toCenter){
   if(!loaded||busy||outerModal)return;busy=true;send.disabled=true;download.disabled=true;

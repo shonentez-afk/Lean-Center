@@ -86,6 +86,37 @@ try{
  assert.equal(violations.length,2,'CSP must block unrelated host and proxy path');assert.deepEqual(unexpected,[]);
  await ctx.setOffline(true);
  await emptyEditor.locator('#meta-operation').fill('Черновик проверки нового редактора');
+ // LC5.4: exact real editor input and both Stage43 XLSX templates without photos.
+ await emptyEditor.evaluate(()=>{state.steps=Array.from({length:2},(_,i)=>{const s=createEmptyStep();s.action=i?'Проверить метку учебной панели':'Открыть учебный кожух';s.keyMoments=['Ключевой момент'];s.reason='Причина';return s});state.safetyIconIds=[ICON_LIB.find(x=>x.id==='M004')?.id||ICON_LIB[0].id];stateToHtml()});
+ const times=emptyEditor.locator('[data-step-field=duration]');
+ await times.nth(0).fill('12');await times.nth(1).fill('00:23');assert.deepEqual(await emptyEditor.evaluate(()=>state.steps.map(s=>s.durationSeconds)),[12,23]);
+ await times.nth(0).fill('12:99');assert.equal(await times.nth(0).getAttribute('aria-invalid'),'true');assert.equal(await emptyEditor.evaluate(()=>state.steps[0].durationSeconds),12);
+ await emptyEditor.locator('#lc-editor-send').click();await emptyEditor.getByText('Исправьте время шага: целые секунды или ММ:СС.',{exact:true}).waitFor();assert.equal(await page.getByRole('heading',{name:'Проверенный исходный файл'}).count(),0);
+ await times.nth(0).fill('12');
+ async function exportAndInspect(frame,orientation,expectedPhotos,tag){
+  await frame.locator('#stage43EditorExportFormat [data-stage43-export-format="'+orientation+'"]').click();
+  const wait=page.waitForEvent('download',{timeout:85000});await frame.locator('#generateBtn').click();const file=path.join(tmp,tag+'-'+orientation+'.xlsx');await (await wait).saveAs(file);
+  const info=await frame.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const sh=w.getWorksheet('СОП'),p=stage42ParseSelectedSheet(w,sh,'QA.xlsx');const output={photos:p.steps.map(s=>s.photoIndex>=0),seconds:p.steps.map(s=>s.durationSeconds),imageCount:sh.getImages().length,service:p.media.filter(m=>m.serviceImage).length};stage42ReleaseProposal(p);return output},Array.from(await fs.readFile(file)));
+  assert.deepEqual(info.photos,expectedPhotos,tag+' '+orientation+' photo assignment');assert.deepEqual(info.seconds,[12,23]);assert(info.imageCount>=2,'Workbook must include logo and safety pictogram');assert(info.service>=2);
+ }
+ for(const orientation of ['portrait','landscape'])await exportAndInspect(emptyEditor,orientation,[false,false],'no-photos');
+ // Synthetic photo; use the real photo load and annotation controls.
+ await emptyEditor.locator('[data-tab="editor"]').click();
+ const photoData=await emptyEditor.evaluate(()=>{const c=document.createElement('canvas');c.width=900;c.height=525;const g=c.getContext('2d');g.fillStyle='#cbd5e1';g.fillRect(0,0,900,525);g.fillStyle='#16a34a';g.fillRect(100,100,300,120);return c.toDataURL('image/png').split(',')[1]});
+ await emptyEditor.locator('input[data-input]').first().setInputFiles({name:'synthetic-panel.png',mimeType:'image/png',buffer:Buffer.from(photoData,'base64')});
+ await emptyEditor.waitForFunction(()=>state.steps[0].hasPhoto&&!!state.steps[0].imageData);
+ await emptyEditor.locator('[data-edit-photo]').first().click();await emptyEditor.locator('#illClose').waitFor();
+ for(const size of [{width:1440,height:970},{width:1024,height:768}]){await page.setViewportSize(size);await emptyEditor.waitForFunction(()=>{const b=document.getElementById('illClose'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))&&document.getElementById('lc-editor-bar').inert});assert(await page.locator('.editor-host-bar').evaluate(e=>e.inert))}
+ await page.setViewportSize({width:1440,height:970});
+ const canvas=emptyEditor.locator('#illCanvas');await canvas.scrollIntoViewIfNeeded();await emptyEditor.locator('[data-ill-mode=label]').click();await emptyEditor.locator('#illTextInput').fill('Проверить зелёный индикатор');
+ const clickPoint=async(x,y)=>{await canvas.scrollIntoViewIfNeeded();const b=await canvas.boundingBox();await canvas.click({position:{x:b.width*x,y:b.height*y}})};
+ await clickPoint(.10,.12);await emptyEditor.locator('[data-ill-mode=callout]').click();await emptyEditor.locator('#illTextInput').fill('Проверить кнопку');
+ await canvas.scrollIntoViewIfNeeded();const box=await canvas.boundingBox();await page.mouse.move(box.x+box.width*.65,box.y+box.height*.65);await page.mouse.down();await page.mouse.move(box.x+box.width*.72,box.y+box.height*.23,{steps:8});await page.mouse.up();
+ await emptyEditor.locator('#illSave').click();await emptyEditor.locator('#illustrationEditorOverlay').waitFor({state:'detached'});await page.waitForFunction(()=>!document.querySelector('.editor-host-bar').inert);
+ assert.deepEqual(await emptyEditor.evaluate(()=>state.steps[0].photoAnnotations.filter(x=>['label','callout'].includes(x.type)).map(x=>x.text)),['Проверить зелёный индикатор','Проверить кнопку']);
+ await page.setViewportSize(normalViewport);
+ for(const orientation of ['portrait','landscape'])await exportAndInspect(emptyEditor,orientation,[true,false],'with-photo');
+ await emptyEditor.locator('[data-tab="editor"]').click();
  await page.getByRole('button',{name:'К библиотеке',exact:true}).click();
  await page.getByRole('button',{name:'Вернуться в редактор',exact:true}).click();
  assert.equal(await emptyEditor.locator('#meta-operation').inputValue(),'Черновик проверки нового редактора');
@@ -236,7 +267,7 @@ try{
  await page.screenshot({path:'artifacts/lc3/sop-evaluation.png',fullPage:true});
  await page.getByRole('button',{name:'ФРВ',exact:true}).first().click();const frv=path.join(tmp,'frv.json');await fs.writeFile(frv,JSON.stringify({schemaVersion:'FRV-1.3',study:{studyId:'FRV-QA',operationId:'Исследование QA'},cycles:[{id:'c1',cycleNo:1,phase:'baseline',observations:[{id:'o1',actionRaw:'Действие',durationSec:10,valueType:'VA'}]}]}));
  const cf=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Импорт JSON Stage43'}).click();await (await cf).setFiles(frv);await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();await page.locator('input[name=library_observed]').fill('2026-11-20');await page.getByRole('button',{name:'Сохранить новый черновик'}).click();await page.getByRole('heading',{name:'Исследование QA',exact:true}).waitFor();
- await page.getByRole('button',{name:'Открыть редактор',exact:true}).click();const frvEditor=await editorFrame();await frvEditor.locator('#frvs-studyId').waitFor({state:'visible'});assert.equal(await frvEditor.locator('#frvs-studyId').inputValue(),'FRV-QA');
+ await page.getByRole('button',{name:'Открыть редактор',exact:true}).click();let frvEditor=await editorFrame();await frvEditor.locator('#frvs-studyId').waitFor({state:'visible'});assert.equal(await frvEditor.locator('#frvs-studyId').inputValue(),'FRV-QA');
  await ctx.setOffline(false);await frvEditor.locator('#aiTestBtn').click();
  await frvEditor.getByText('AI: доступен',{exact:true}).waitFor();
  await checkEditorNotifications(frvEditor,'Учебное уведомление ФРВ');
@@ -245,13 +276,29 @@ try{
  await page.screenshot({path:'artifacts/lc3/frv-ai-toolbar-notification.png',fullPage:true});
  await frvEditor.evaluate(()=>window.scrollTo(0,0));await ctx.setOffline(true);
  await frvEditor.locator('#frvs-operationId').fill('Исследование QA — уточнение');await choosePerson(frvEditor,'Наблюдатель');assert.equal(await frvEditor.locator('#frvs-observer').inputValue(),'Учебный оценщик');
+ // LC5.4: input -> live cycle/dashboard/passport, identity-preserving exports, F5 recovery.
+ await frvEditor.locator('[data-fs=durationSec]').first().fill('12.5');
+ await frvEditor.locator('[data-lc-cycle-summary]').filter({hasText:'12.5 сек'}).waitFor();await frvEditor.locator('#lc-frv-live-summary').getByText(/12\.5 сек/).waitFor();
+ await frvEditor.locator('#frvStudyValidateBtn').click();assert.equal(await frvEditor.locator('#frvs-status').inputValue(),'Validated');
+ await frvEditor.locator('[data-fs=durationSec]').first().fill('13.5');assert.equal(await frvEditor.locator('#frvs-status').inputValue(),'Observed');
+ await frvEditor.locator('[data-fs=durationSec]').first().fill('12.5');await frvEditor.locator('[data-fs=valueType]').first().selectOption('NVA_Waste');
+ await frvEditor.locator('.frvs-more summary').first().click();await frvEditor.locator('[data-fs=lossCode]').first().selectOption('search_tool');await frvEditor.locator('[data-fs=causeCode]').first().fill('Инструмент вне места хранения');
+ async function exportFrvJson(frame,selector,tag){const wait=page.waitForEvent('download');await frame.locator(selector).click();const file=path.join(tmp,tag+'.json');await (await wait).saveAs(file);return JSON.parse(await fs.readFile(file,'utf8'))}
+ const topJson=await exportFrvJson(frvEditor,'#lc-editor-download','frv-top');const nativeJson=await exportFrvJson(frvEditor,'#frvStudyDownloadBtn','frv-native');assert.deepEqual(nativeJson,topJson);assert.equal(topJson.study.leanCenterPeople[0].person_id,edited.constructor.leanCenterPeople[0].person_id);
+ const xlsxWait=page.waitForEvent('download');await frvEditor.locator('#frvStudyExportXlsxBtn').click();const xlsxFile=path.join(tmp,'frv-causes.xlsx');await (await xlsxWait).saveAs(xlsxFile);
+ const causes=await frvEditor.evaluate(async a=>{const w=new ExcelJS.Workbook();await w.xlsx.load(Uint8Array.from(a));const s=w.getWorksheet('Наблюдения');return [s.getCell('K5').value,s.getCell('K6').value,s.getCell('E6').value]},Array.from(await fs.readFile(xlsxFile)));assert.deepEqual(causes,['Причина потери','Инструмент вне места хранения',12.5]);
+ await frvEditor.locator('#lc-frv-recovery-status').getByText(/Черновик ФРВ сохранён/).waitFor();
+ const draftKey=await frvEditor.evaluate(()=>window.LC_EDITOR_CONTEXT.draftKey);
+ await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'ФРВ',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();await page.getByRole('heading',{name:'Исследование QA',exact:true}).waitFor();await page.getByRole('button',{name:'Открыть редактор',exact:true}).click();frvEditor=await editorFrame();
+ assert.equal(await frvEditor.locator('#frvs-operationId').inputValue(),'Исследование QA — уточнение');assert.equal(await frvEditor.locator('[data-fs=durationSec]').first().inputValue(),'12.5');assert.equal(await frvEditor.evaluate(()=>frvStudyExport().study.leanCenterPeople[0].person_id),topJson.study.leanCenterPeople[0].person_id);
+ await frvEditor.locator('#lc-frv-recovery-status').getByText(/Черновик ФРВ сохранён/).waitFor();
  await frvEditor.locator('#lc-editor-send').click();
  await page.getByRole('heading',{name:'Проверенный исходный файл'}).waitFor();
  await page.getByRole('button',{name:'Сохранить изменения черновика'}).click();
  await page.getByText('Черновик сохранён. Ожидает общей публикации базы.',{exact:true}).waitFor();
  await page.locator('#lc-editor-host').waitFor({state:'detached'});assert.equal(popups,0);
  const fd=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать JSON',exact:true}).click();await (await fd).saveAs(path.join(tmp,'frv-edited.json'));
- const frvEdited=JSON.parse(await fs.readFile(path.join(tmp,'frv-edited.json'),'utf8'));assert.equal(frvEdited.study.operationId,'Исследование QA — уточнение');assert.equal(frvEdited.cycles[0].observations[0].durationSec,10);assert.equal(frvEdited.study.leanCenterPeople[0].slot,'observer');assert.equal(frvEdited.study.leanCenterPeople[0].person_id,edited.constructor.leanCenterPeople[0].person_id);await page.getByRole('heading',{name:'ФРВ по СОП',exact:true}).waitFor();
+ const frvEdited=JSON.parse(await fs.readFile(path.join(tmp,'frv-edited.json'),'utf8'));assert.equal(frvEdited.study.operationId,'Исследование QA — уточнение');assert.equal(frvEdited.cycles[0].observations[0].durationSec,12.5);assert.equal(frvEdited.cycles[0].observations[0].causeCode,'Инструмент вне места хранения');assert.equal(await page.evaluate(k=>localStorage.getItem(k),draftKey),null);assert.equal(frvEdited.study.leanCenterPeople[0].slot,'observer');assert.equal(frvEdited.study.leanCenterPeople[0].person_id,edited.constructor.leanCenterPeople[0].person_id);await page.getByRole('heading',{name:'ФРВ по СОП',exact:true}).waitFor();
  await page.screenshot({path:'artifacts/lc3/frv-library.png',fullPage:true});
  await page.getByRole('button',{name:'Настройки и обмен',exact:true}).click();const bdl=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать резервную копию',exact:true}).click();const bp=path.join(tmp,'full.leanbackup');await (await bdl).saveAs(bp);const backup=JSON.parse(await fs.readFile(bp,'utf8'));assert.equal(backup.format,'lean-content-bundle-v1');assert.equal(backup.contents.length,4);
  await ctx.close();const c2=await browser.newContext({offline:true,acceptDownloads:true}),p2=await c2.newPage();p2.on('dialog',d=>d.accept());await p2.goto(entry);await p2.getByRole('button',{name:'Настройки и обмен',exact:true}).click();const bc=p2.waitForEvent('filechooser');await p2.getByRole('button',{name:'Восстановить копию',exact:true}).click();await (await bc).setFiles(bp);await p2.getByText('Копия восстановлена; проверьте ID базы',{exact:true}).waitFor();await p2.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await p2.getByRole('button',{name:'Открыть',exact:true}).click();await p2.getByRole('heading',{name:'QA-SOP · Проверить учебный стенд'}).waitFor();
