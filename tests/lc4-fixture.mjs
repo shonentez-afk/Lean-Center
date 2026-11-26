@@ -13,8 +13,8 @@ export const SQL=await initSqlJs();
 export const date='2026-01-20';
 export const practicalMethod={format:'lean-practical-checklist-v1',title:'Синтетическая методика QA',source_sha256:'a'.repeat(64),criteria:Array.from({length:11},(_,i)=>({code:i+1,section:i<2?'Учебный раздел A':'Учебный раздел B',question:'Синтетический критерий '+(i+1)}))};
 const img='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4jkAAAAASUVORK5CYII=';
-export async function makeSop(action='Учебная операция',outdated=false){
- const s={schemaVersion:4,meta:{operation:'Учебная операция',workplace:'Стенд',tools:'Учебный инструмент',safety:'Учебные условия'},steps:[{id:1,action,keyMoments:['Учебный КМ'],reason:'Учебное основание',durationSeconds:15,hasPhoto:true,photoAnnotations:[]}],twi:{enabled:true}};
+export async function makeSop(action='Учебная операция',outdated=false,keyMoments=['Учебный КМ']){
+ const s={schemaVersion:4,meta:{operation:'Учебная операция',workplace:'Стенд',tools:'Учебный инструмент',safety:'Учебные условия'},steps:[{id:1,action,keyMoments,reason:'Учебное основание',durationSeconds:15,hasPhoto:true,photoAnnotations:[]}],twi:{enabled:true}};
  for(const [section,key] of twiFields){s.twi[section]??={};s.twi[section][key]='Учебное поле '+section+' '+key}
  s.twi.sourceSignature=outdated?'sop1:obsolete':sopTwiSignature(s);
  const p={schemaVersion:2,document:{id:'QA-LC4',status:'Опубликован',number:'QA-LC4',version:1},constructor:s,photoAssets:{'1':{original:img,rendered:null,ext:'png',annotations:[]}}};

@@ -7,7 +7,7 @@ import {matrixData} from './domain.js';
 import {METRIC_DEFINITIONS,METRIC_CONTRACTS} from './metric-catalog.js';
 import {auditRegistry} from './audit-analytics.js';
 import {assessmentRegistry} from './assessment-review.js';
-import {actionRows,actionStatus,actionPeople} from './audit-domain.js';
+import {actionRows,actionStatus,actionPeople,actionCompletionDates,actionCompletionDate} from './audit-domain.js';
 import {compareMentor} from './mentor-comparison.js';
 import {scheduleKind,schedulePeople,schedulePending,scheduleScopeDate} from './center-planning.js';
 import {corporateEvaluations,weightedHistory} from '../library/sop-assessment-review.js';
@@ -40,7 +40,9 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
  const a=rows(db,`SELECT a.*,o.unit_id FROM training_assignment a LEFT JOIN operation o ON o.id=a.operation_id WHERE source_sha256 IS NOT NULL`).filter(x=>scope(x.unit_id,x.trainee_id));
  const planned=a.filter(x=>x.state!=='cancelled'&&inPeriod(x.assigned_on)),completed=planned.filter(x=>x.state==='completed');
  const audit=auditRegistry(db).filter(x=>x.state==='final'&&inPeriod(x.observed_at)&&scope(x.unit_id,x.mentor_id)),practice=assessmentRegistry(db,'practical').filter(x=>x.state==='confirmed'&&inPeriod(x.date)&&scope(x.unit_id,x.person_id)),self=assessmentRegistry(db,'self_eval').filter(x=>inPeriod(x.date)&&scope(x.unit_id,x.person_id));
- const actions=actionRows(db).map(x=>({...x,status:actionStatus(db,x)})).filter(x=>(!unitId||personUnit(db,x.owner_id,day)===unitId)&&(!personId||actionPeople(x).includes(personId))),pending=actions.filter(x=>open(x.status)),implemented=actions.filter(x=>x.implemented_at&&inPeriod(x.implemented_at)),verified=implemented.filter(x=>x.status==='verified');
+ const completionDates=actionCompletionDates(db),actions=actionRows(db).filter(x=>!personId||actionPeople(x).includes(personId)).map(x=>({...x,status:actionStatus(db,x),completion:actionCompletionDate(db,x,completionDates)}));
+ const pending=actions.filter(x=>open(x.status)&&(!unitId||personUnit(db,x.owner_id,day)===unitId));
+ const implemented=actions.filter(x=>x.completion.date&&inPeriod(x.completion.date)&&(!unitId||personUnit(db,x.owner_id,x.completion.date)===unitId)),verified=implemented.filter(x=>x.status==='verified');
  const sop=corporateEvaluations(db).filter(x=>inPeriod(x.date)&&scope(x.unit_id,x.actor_id)),weighted=weightedHistory(db).filter(x=>inPeriod(x.date)&&scope(x.unit_id,x.actor_id)),docs=rows(db,`SELECT r.*,d.operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.archived=0`).filter(x=>scope(x.unit_id,x.author_id));
  const frv=frvRegistry(db).filter(x=>x.state==='final'&&inPeriod(x.observed_at)&&scope(x.unit_id,x.author_id));
  const schedules=rows(db,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(db,x)&&(!unitId||personUnit(db,x.owner_id,scheduleScopeDate(db,x,day))===unitId)&&(!personId||schedulePeople(db,x).includes(personId)));
@@ -72,8 +74,8 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
  count('sop_review','СОП','Просрочен пересмотр',docs.filter(x=>x.review_due&&x.review_due<day).length,'Действующие редакции со сроком пересмотра до текущей даты; сотрудник — автор.','sop',{}),
  count('frv_final','ФРВ','Завершённые исследования',frv.length,'Финальные исследования в период, сотрудник — сохранённый автор. Не денежный эффект.','analytics',{...f,assessmentType:'frv'}),
  count('actions_open','Мероприятия','Открытые мероприятия',pending.length,'Текущие открытые/в работе/ожидают проверки/неэффективны. Подразделение исполнителя; сотрудник — участник.','actions',{personId,unitId}),
- count('actions_overdue','Мероприятия','Просроченные мероприятия',pending.filter(x=>x.due_on&&x.due_on<day).length,'Незакрытые мероприятия со сроком до текущей даты.','actions',{personId,unitId,filter:'overdue'}),
- ratio('actions_verified','Мероприятия','Подтверждён эффект',verified.length,implemented.length,'Из мероприятий с фактом выполнения в период; проверка эффективности учитывает повторные нарушения.','actions',{personId,unitId,filter:'verified'}),
+ count('actions_overdue','Мероприятия','Просроченные мероприятия',pending.filter(x=>x.due_on&&x.due_on<day).length,'Незакрытые мероприятия со сроком до текущей даты; текущее подразделение исполнителя.','actions',{personId,unitId,filter:'overdue'}),
+ ratio('actions_verified','Мероприятия','Подтверждён эффект',verified.length,implemented.length,'Из мероприятий с фактом выполнения в период по сохранённой деловой дате. Участок исполнителя на дату выполнения; актуальность проверки учитывает повторные нарушения. Старые записи без смещения: UTC.','actions',{personId,unitId,actionCohort:{from,to}}),
  count('effect_pending','Экономика','Карточки эффекта требуют проверки',economic.pending,'Открытые контрольные сроки или утратившие актуальность доказательства.','roi',{...f,filter:'pending'}),
  count('effect_overdue','Экономика','Просроченные проверки эффекта',economic.overdue,'Текущие незакрытые контрольные сроки до сегодняшней даты.','roi',{...f,filter:'overdue'}),
  count('effect_facts','Экономика','Подтверждённые денежные факты',economic.facts.filter(x=>x.eligible).length,'Факты полностью в выбранном периоде с действующими доказательствами; не годовые сценарии.','roi',{...f,filter:'confirmed'}),
@@ -89,7 +91,7 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
   const ar=x=>row(x,'audit',{auditId:x.id},{personId:x.mentor_id,operationId:x.operation_id,date:x.observed_at,method:x.version_id,state:x.state,label:x.sop_title||'Аудит L1'});
   const pr=(x,included=true)=>row(x,'practical',{assessmentId:x.id},{personId:x.person_id,operationId:x.operation_id,date:x.date,method:x.method_id,state:x.conclusion,included});
   const sr=x=>row(x,'self_eval',{id:x.id},{personId:x.person_id,date:x.date,method:x.method_id});
-  const act=(x,included=true)=>row(x,'actions',{id:x.id},{unitId:personUnit(db,x.owner_id,day),personId:x.owner_id,date:x.implemented_at||x.due_on,state:x.status,included});
+  const act=(x,included=true,historical=false)=>row(x,'actions',{id:x.id},{unitId:personUnit(db,x.owner_id,historical?x.completion.date:day),personId:x.owner_id,date:historical?x.completion.date:x.due_on,dueOn:x.due_on||'',implementedOn:x.completion.date,implementedAt:x.implemented_at||'',timeBasis:x.completion.timeBasis,unitBasis:historical?'На дату выполнения':'Текущий исполнитель',state:x.status,included});
   const monetary=x=>row(x,'roi',{id:x.effect.id,factId:x.id},{unitId:x.effect.unit_id,personId:x.effect.owner_id,date:x.period_to,currency:x.effect.currency,period:x.period_from+' — '+x.period_to,state:x.state,label:x.effect.title||''});
   const card=x=>row(x,'roi',{id:x.id},{personId:x.owner_id,date:x.review_due,currency:x.currency,state:x.state});
   const target=x=>row(x,'roi',{id:x.record.id,targetId:x.id},{unitId:x.record.unit_id,personId:x.record.owner_id,date:x.to,currency:x.record.currency,period:x.from+' — '+x.to,state:x.status,label:x.record.title||''});
@@ -105,7 +107,7 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
    weighted.map(x=>row(x,'sop_review',{kind:'weighted_sop',id:x.id},{personId:x.actor_id,operationId:x.operation_id,date:x.date,method:x.methodKey})),
    docs.filter(x=>x.review_due&&x.review_due<day).map(x=>row(x,'sop',{documentId:x.document_id,revisionId:x.id},{personId:x.author_id,operationId:x.operation_id,date:x.review_due})),
    frv.map(x=>row(x,'frv',{studyId:x.id},{personId:x.author_id,operationId:x.operation_id,date:x.observed_at,state:x.state})),
-   pending.map(x=>act(x)),pending.filter(x=>x.due_on&&x.due_on<day).map(x=>act(x)),implemented.map(x=>act(x,x.status==='verified')),
+   pending.map(x=>act(x)),pending.filter(x=>x.due_on&&x.due_on<day).map(x=>act(x)),implemented.map(x=>act(x,x.status==='verified',true)),
    economic.pendingRows.map(card),economic.overdueRows.map(card),economic.facts.filter(x=>x.eligible).map(monetary),economic.draftRows.map(monetary),economic.targetAttention.map(target),economic.allTargets.filter(x=>x.shortfall&&!x.currentReview).map(target)
   ];
   for(let i=0;i<metrics.length;i++){const m=metrics[i],rs=evidence[i];if(m.id!==METRIC_DEFINITIONS[i].id||!rs||rs.filter(x=>x.included).length!==m.value||(m.denominator!==null&&rs.length!==m.denominator))throw Error('Metric evidence mismatch: '+METRIC_DEFINITIONS[i].id);m.evidence=rs}

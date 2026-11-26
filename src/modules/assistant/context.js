@@ -2,7 +2,7 @@
 import {one,rows} from '../../core/db.js';
 import {matrixData,isCurrentStandard,progressFor,admissionStatus,authorizationValid,certificateValid,enrollmentTasks,latestAssessment} from '../training/domain.js';
 import {matrixFromRecord,matrixProjection} from '../training/matrix-view.js';
-import {actionRows,actionStatus,actionPeople,auditDetails,actionSource,ACTION_STATES} from '../training/audit-domain.js';
+import {actionRows,actionStatus,actionPeople,auditDetails,actionSource,actionCompletionDate,ACTION_STATES} from '../training/audit-domain.js';
 import {annualAuditCoverage,summarizeAudits} from '../training/audit-analytics.js';
 import {assessmentRegistry,assessmentAnswers,assessmentScore} from '../training/assessment-review.js';
 import {preparationControl,prepLabels} from '../training/standard-overview.js';
@@ -11,6 +11,7 @@ import {centerAttention,recommendedChecks} from '../training/center-attention.js
 import {employeeRelations} from '../master-data/employee-records.js';
 import {effectRows,effectPending,effectStatus,effectFacts,factCurrent,periodTargets,targetNeedsAttention,effectForSource} from '../effect/domain.js';
 import {frvRegistry} from '../library/frv-effect.js';
+import {hasSopKeyMomentsAndReason} from '../library/sop-step-quality.js';
 import {documentTitle} from '../library/revision-title.js';
 import {ASSISTANT_RULES} from './context-rules.js';
 
@@ -120,14 +121,14 @@ export function analyzeContext(db,day,ctx){
   if(d.archived||v.state!=='effective')check('ctx_sop_state',1,'',dest);
   if(!d.archived&&v.state==='effective'&&v.review_due&&v.review_due<day)check('sop_overdue',1,'',dest);
   if(!d.archived&&v.state==='draft'&&(!v.print_format||!v.workplace_id))check('sop_passport',1,'',dest);
-  if(!d.archived){const steps=p.projection?.steps||[];check('ctx_sop_steps',steps.filter(s=>Array.isArray(s.key_points)?!s.key_points.length||!String(s.reason||'').trim():false).length,'Только сохранённая проекция; полная проверка в конструкторе.',dest);if(!p.projection?.twi)check('ctx_sop_twi',1,'',dest)}
+  if(!d.archived){const steps=p.projection?.steps||[];check('ctx_sop_steps',steps.filter(s=>!hasSopKeyMomentsAndReason(s)).length,'Только сохранённая проекция; полная проверка в конструкторе.',dest);if(!p.projection?.twi)check('ctx_sop_twi',1,'',dest)}
  }else if(ctx.kind==='frv'){
   const x=frvRegistry(db).find(x=>x.id===id);if(!x)return missing();out.title=x.title;fact('Состояние',x.state);fact('Время наблюдений, с',x.seconds);fact('М1 и ожидание, с',x.loss);if(x.state==='archived'){notice('Архивное исследование: только история.');return out}
   const dest=[link('Открыть исследование','frv',{studyId:id})];if(x.state!=='final')check('ctx_frv_draft',1,'',dest);
   const loss=(x.projection?.measurements||[]).filter(o=>o.seconds>0&&['NVA_Waste','WAIT'].includes(o.category));
   check('ctx_frv_loss',loss.length,'Число наблюдений, не секунды или рубли.',[...dest,...(x.state==='final'?relatedDraft('frv_study',id,'Разбор наблюдавшихся потерь ФРВ',actions().filter(a=>a.study_id===id&&openAction(a.display))):[])]);
  }else if(ctx.kind==='action'){
-  const a=actions().find(x=>x.id===id);if(!a)return missing();out.title=a.title;fact('Состояние',ACTION_STATES[a.display]||'Неизвестное состояние');fact('Срок',a.due_on);fact('Ответственный',text(db,'person',a.owner_id));const dest=[link('Открыть мероприятие','actions',{id})];
+  const a=actions().find(x=>x.id===id);if(!a)return missing();out.title=a.title;fact('Состояние',ACTION_STATES[a.display]||'Неизвестное состояние');fact('Срок',a.due_on);if(a.implemented_at){const date=actionCompletionDate(db,a);fact('Дата выполнения',date.date);fact('Календарь выполнения',date.timeBasis);fact('Выполнено (UTC)',a.implemented_at)}fact('Ответственный',text(db,'person',a.owner_id));const dest=[link('Открыть мероприятие','actions',{id})];
   if(openAction(a.display)){if(a.due_on&&a.due_on<day)check('action_overdue',1,'',dest);if(a.display==='implemented')check('action_verify',1,'',dest);else check('ctx_action',1,'',dest)}
  }else if(ctx.kind==='development'){
   const p=byId(db,'development_plan',id);if(!p)return missing();out.title=p.title;const goals=rows(db,'SELECT * FROM development_goal WHERE plan_id=?',[id]),active=goals.filter(x=>x.state==='open');fact('Цели',goals.length);fact('Открытые',active.length);if(p.state==='active')check('ctx_goal',active.length,'',active.map(g=>link(g.title,'development',{id})).slice(0,1));

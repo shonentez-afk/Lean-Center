@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture,SQL,schema,migrations,date} from './lc4-fixture.mjs';
+import {fixture,makeSop,SQL,schema,migrations,date} from './lc4-fixture.mjs';
 import {rows,one,createDb} from '../src/core/db.js';
 import {analyzeContext,contextSelection,contextLinks,helperLabel,isCurrentTarget} from '../src/modules/assistant/context.js';
 import {cloudRequest,CENTER_MODEL,askCenterCloud} from '../src/modules/assistant/cloud.js';
@@ -65,5 +65,20 @@ test('LC7.3A assistant never silently substitutes a SOP revision; personal secti
   assert.equal(getSop(older).facts.find(x=>x.label==='Редакция').value,'1');assert.equal(getSop(latest).facts.find(x=>x.label==='Редакция').value,'2');assert.equal(getSop(older).facts.find(x=>x.label==='Статус').value,'Заменён');assert.equal(getSop(latest).facts.find(x=>x.label==='Статус').value,'Действует');assert.equal(getSop('missing').available,false);assert.equal(getSop(null).available,false);assert(getSop(null).scope.includes('редакция не выбрана'));assert(!getSop(null).facts.some(x=>x.label==='Редакция'));
   const task=(await f.save('action_item',action(f,'QA same card'))).entity_id,ctx=contextSelection('actions',{route:{id:task}}),a=analyzeContext(db,day,ctx);assert.equal(a.facts.find(x=>x.label==='Состояние').value,'Открыто');assert(contextLinks(a).some(x=>isCurrentTarget(ctx,x)));assert(!isCurrentTarget(ctx,{page:'actions',options:{id:'another'}}));
   for(const page of ['calendar','my_plan','journal']){const context=contextSelection(page,{route:{personId:f.trainee,month:'2026-01'}}),data=analyzeContext(db,day,context);assert.equal(helperLabel(context),'Обзор центра');assert(data.scope.includes('Весь центр'));assert(data.notices.some(x=>x.includes('не проверяет выбранный месяц')))}
+ }finally{f.w.close()}
+});
+
+test('QA-04 helper and real approval share trimmed key moments predicate',async()=>{
+ const f=await fixture();try{const db=f.w.working;
+  for(const [i,kms,ok] of [[0,[],false],[1,[' ','\t'],false],[2,[' ','Проверить фиксацию','\t'],true]]){
+   const s=await makeSop('QA КМ '+i,false,kms);f.sources.set(s.source.sha256,s);
+   const doc=await f.save('document',{command:'create',code:'QA-KM-'+i,title:'QA КМ '+i,operation_id:f.operation,source:s.source,projection:s.projection});
+   await f.save('document',{command:'passport',revision_id:doc.id,print_format:'portrait',changed_on:date},doc.entity_id);
+   await f.save('document',{command:'submit',revision_id:doc.id,actor_id:f.actor,note:''},doc.entity_id);
+   const data=()=>analyzeContext(db,day,contextSelection('sop',{documentId:doc.entity_id,revisionId:doc.id}));
+   assert.equal(get(data(),'ctx_sop_steps')?.count||0,ok?0:1);assert.equal(data().facts.find(x=>x.label==='Редакция').value,'1');
+   const approve=()=>f.save('document',{command:'approve',revision_id:doc.id,actor_id:f.actor,note:''},doc.entity_id);
+   if(ok)await approve();else{await assert.rejects(approve(),/ключевые моменты/);assert.equal(data().facts.find(x=>x.label==='Статус').value,'На согласовании');assert(contextLinks(data()).some(x=>x.options.revisionId===doc.id))}
+  }
  }finally{f.w.close()}
 });

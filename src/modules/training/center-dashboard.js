@@ -1,21 +1,24 @@
+import {dashboardPeriod,PERIOD_LABELS} from './dashboard-period.js';
 import {centerProjection,personUnit} from './center-overview.js';
 import {centerAttention,recommendedChecks,scopedAttention} from './center-attention.js';
 import {scheduleKind,scheduleLabels,schedulePending,scheduleScopeDate} from './center-planning.js';
 import {metricValue,metricScopeValid} from './metric-catalog.js';
 import {rows} from '../../core/db.js';
 import {localChart,reportSnapshot,clearReport} from '../../ui/center-report.js';
-export function dashboard(main,{db,day,el,add,btn,pane,theme,go,goDocument,openAttention,openTarget,publication,initial={},onScope=()=>{}}){
+export function dashboard(main,{db,day,getDay=()=>day,el,add,btn,pane,theme,go,goDocument,openAttention,openTarget,publication,initial={},onScope=()=>{}}){
  const input=(name,value)=>{const e=el('input');e.name=name;e.type='date';e.value=value;e.max=day;return e};
  const unit=el('select');unit.name='lc73_home_filter_unit';for(const [id,name] of [['','Всё предприятие'],...rows(db,'SELECT id,name FROM org_unit WHERE archived=0 ORDER BY name').map(x=>[x.id,x.name])]){const o=el('option',name);o.value=id;unit.append(o)}unit.value=initial.unitId||'';if(unit.selectedIndex<0)unit.value='';
- const from=input('lc73_home_filter_from',initial.from??day.slice(0,7)+'-01'),to=input('lc73_home_filter_to',initial.to||day);
+ const first=dashboardPeriod(day,initial);let periodMode=first.periodMode;const from=input('lc73_home_filter_from',first.from),to=input('lc73_home_filter_to',first.to);
  const field=(name,e)=>add(el('label',undefined,'field'),el('span',name),e);
  const out=el('div',undefined,'stack'),filters=add(el('div',undefined,'formgrid'),field('Подразделение (точное)',unit),field('С даты',from),field('По дату',to));
- const presets=add(el('div',undefined,'row'),...['Месяц','Квартал','Год'].map((label,i)=>btn(label,()=>{const m=Number(day.slice(5,7));from.value=i===0?day.slice(0,7)+'-01':i===1?day.slice(0,4)+'-'+String(1+3*Math.floor((m-1)/3)).padStart(2,'0')+'-01':day.slice(0,4)+'-01-01';to.value=day;draw()})));
- main.append(pane('Оперативный обзор',el('p','Локальная рабочая копия · дата риска '+day+' · публикация: '+(publication||'ещё нет'),'muted'),filters,presets),out);
- const attention=centerAttention(db,day);let chart=null;
+ const dateLabel=el('p',undefined,'muted'),modeLabel=el('p',undefined,'muted'),presets=add(el('div',undefined,'row'),...['month','quarter','year'].map((mode,i)=>btn(['Месяц','Квартал','Год'][i],()=>{periodMode=mode;const p=dashboardPeriod(day,{periodMode});from.value=p.from;to.value=p.to;draw()})));
+ main.append(pane('Оперативный обзор',dateLabel,filters,presets,modeLabel),out);
+ let attention=centerAttention(db,day),chart=null;
+ function updatePeriodLabel(){dateLabel.textContent='Локальная рабочая копия · дата риска '+day+' · публикация: '+(publication||'ещё нет');modeLabel.textContent='Период: '+PERIOD_LABELS[periodMode];for(let i=0;i<3;i++)presets.children[i].classList.toggle('primary',['month','quarter','year'][i]===periodMode)}
+ function refreshDate(){if(!main.isConnected)return;const next=getDay();if(next===day)return;day=next;from.max=to.max=day;if(periodMode!=='manual'){const p=dashboardPeriod(day,{periodMode});from.value=p.from;to.value=p.to}attention=centerAttention(db,day);draw()}
  function draw(){
-  if(chart&&!chart.isDisposed())chart.dispose();chart=null;out.replaceChildren();clearReport(out);
-  const scope={day,from:from.value,to:to.value,unitId:unit.value,personId:''};onScope(scope);
+  updatePeriodLabel();if(chart&&!chart.isDisposed())chart.dispose();chart=null;out.replaceChildren();clearReport(out);
+  const scope={day,from:from.value,to:to.value,unitId:unit.value,personId:''};onScope({...scope,periodMode});
   if(!metricScopeValid(scope)){out.append(el('p','Укажите корректный период не позже даты среза.','warn'));return}
   const p=centerProjection(db,scope,{withEvidence:true}),m=id=>p.metrics.find(x=>x.id===id),tile=(heading,value,description,id)=>{const b=btn('',()=>go('metrics',{...scope,metricId:id,mode:'evidence'}),'tile');b.append(el('span',heading,'muted'),el('b',value),el('small',description));return b};
   const skills=m('skill_coverage'),prep=m('prep_completed'),training=m('twi_first'),audits=m('audit_count'),acts=m('actions_overdue');
@@ -43,7 +46,8 @@ export function dashboard(main,{db,day,el,add,btn,pane,theme,go,goDocument,openA
   }
   horizon.onchange=due;due();out.append(pane('Ближайшие дела',field('Горизонт',horizon),next));
   out.append(add(el('div',undefined,'row'),btn('Аналитика центра',()=>go('analytics',{...scope,assessmentType:'overview'}),'primary'),btn('Дерево метрик',()=>go('metrics',scope)),btn('Помощник центра · рекомендации по данным',()=>go('ai'))));
-  reportSnapshot(out,'Дашборд · выбранный срез','Период '+scope.from+' — '+scope.to+'; '+unit.selectedOptions[0]?.textContent+'; текущая дата '+day,[...['skill_coverage','prep_completed','twi_first','audit_count','actions_overdue'].map(id=>[m(id).label,metricValue(m(id))]),['Подтверждённые денежные факты',m('effect_facts').value],...p.currencies.map(x=>['Подтверждённый чистый факт · '+x.currency,x.net/100])],[scope.unitId?'Контрольные сигналы подразделения; банк вопросов — общецентровой.':'Контрольные сигналы всего предприятия.','Финансовые суммы не передаются облаку.']);
+  reportSnapshot(out,'Дашборд · выбранный срез','Период '+scope.from+' — '+scope.to+' · '+PERIOD_LABELS[periodMode]+'; '+unit.selectedOptions[0]?.textContent+'; текущая дата '+day,[...['skill_coverage','prep_completed','twi_first','audit_count','actions_overdue'].map(id=>[m(id).label,metricValue(m(id))]),['Подтверждённые денежные факты',m('effect_facts').value],...p.currencies.map(x=>['Подтверждённый чистый факт · '+x.currency,x.net/100])],[scope.unitId?'Контрольные сигналы подразделения; банк вопросов — общецентровой.':'Контрольные сигналы всего предприятия.','Финансовые суммы не передаются облаку.']);
  }
- for(const e of [unit,from,to])e.onchange=draw;draw();
+ unit.onchange=draw;for(const e of [from,to])e.onchange=()=>{periodMode='manual';draw()};draw();
+ const timer=setInterval(refreshDate,30000);window.addEventListener('focus',refreshDate);document.addEventListener('visibilitychange',refreshDate);const observer=new MutationObserver(()=>{if(!main.isConnected){clearInterval(timer);window.removeEventListener('focus',refreshDate);document.removeEventListener('visibilitychange',refreshDate);observer.disconnect()}});observer.observe(document.getElementById('app')||document.body,{childList:true,subtree:true});
 }

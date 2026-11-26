@@ -232,3 +232,16 @@ body.editor-active{overflow:hidden}.editor-host{position:fixed;inset:0;z-index:2
  .main [data-lc-report] button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
  .lc72-context-head>div{min-width:0}.lc72-context-head button{max-width:45%;white-space:normal}
 }
+
+/* QA-05: confine wide analytical content to its own table; don't clip the page. */
+.lc73-responsive-report,.lc73-responsive-report .panel,.lc73-responsive-report .stack,.lc73-responsive-report .stack>*,
+.lc73-responsive-report .tablewrap,.lc73-responsive-report details,.lc73-responsive-report .formgrid,.lc73-responsive-report .field{min-width:0;max-width:100%;box-sizing:border-box}
+.lc73-responsive-report .stack{grid-template-columns:minmax(0,1fr)}
+.lc73-responsive-report .tablewrap{width:100%;overflow:auto}
+.lc73-responsive-report .tablewrap td button{white-space:normal;overflow-wrap:anywhere}
+.lc73-responsive-report summary,.lc73-responsive-report .field>span{overflow-wrap:anywhere}
+.lc73-responsive-report .row>*{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.lc73-responsive-report .kpi-grid .tile{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.lc73-responsive-report .lc73-report-chart{overflow:hidden}
+@media(max-width:768px){.lc73-responsive-report .formgrid>.field>select,.lc73-responsive-report .formgrid>.field>input{min-width:0;width:100%;max-width:100%;box-sizing:border-box}.lc73-responsive-report .lc6-chart-line{grid-template-columns:minmax(0,80px) minmax(0,1fr) minmax(0,72px)}.lc73-responsive-report .lc6-chart-line>*{min-width:0;overflow-wrap:anywhere}.lc73-responsive-report .panel{padding:12px}.lc73-responsive-report .panel>button{max-width:100%;white-space:normal;overflow-wrap:anywhere}}
+@media(max-width:420px){.lc73-responsive-report .kpi-grid{grid-template-columns:minmax(0,1fr)}.lc73-responsive-report .stack details .stack{padding-inline-start:4px}}

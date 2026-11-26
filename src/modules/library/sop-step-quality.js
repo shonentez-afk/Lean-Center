@@ -1,0 +1,1 @@
+export function hasSopKeyMomentsAndReason(step){return Array.isArray(step?.key_points)&&step.key_points.some(x=>typeof x==='string'&&x.trim().length>0)&&typeof step.reason==='string'&&step.reason.trim().length>0}

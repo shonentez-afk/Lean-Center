@@ -75,5 +75,5 @@ export function twiAnalyticsView(c,h,route){
   }),result)
  }
  for(const i of [from,to,unit,op,revision,program,role])i.onchange=draw;draw();
- return pane('Эффективность производственного обучения TWI',grid(f('С даты',from),f('По дату',to),f('Подразделение',unit),f('Операция',op),f('Редакция СОП',revision),f('Версия программы',program),who.element,f('Роль сотрудника',role)),out)
+ return add(el('div',undefined,'lc73-responsive-report'),pane('Эффективность производственного обучения TWI',grid(f('С даты',from),f('По дату',to),f('Подразделение',unit),f('Операция',op),f('Редакция СОП',revision),f('Версия программы',program),who.element,f('Роль сотрудника',role)),out))
 }

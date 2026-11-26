@@ -67,7 +67,7 @@ function initNav(){if(navCurrent!==null)return;navCurrent=++navSerial;try{histor
 const filterName=n=>!!n&&(/_filter_|^lc5_analytics_|^lc51_analytics_|^lc52_(analytics|metrics|frv|sop|retrain|calendar_unit|action_unit)|^compare_|^lc7_group$|^lc62_|^lc66_prep_|^lc6_analytics_|^lc61_grain$|^lc5_calendar_(month|person|type)$/.test(n));
 function navSnapshot(){
  const controls=[...document.querySelectorAll('main input[name],main select[name],main button.lc-directory-trigger[name]')].filter(e=>filterName(e.name)).map(e=>({name:e.name,value:e.dataset.personId??e.value,person:typeof e.lcRestorePerson==='function'}));
- return {parent:navParent,page,route:getTrainingRoute(),employeeSelected,employeeTab,employeeReturn,query,archiveFilter,registryPage,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson,scroll:window.scrollY,controls};
+ return {parent:navParent,page,route:getTrainingRoute(),employeeSelected,employeeTab,employeeReturn,query,archiveFilter,registryPage,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson,homeScope:page==='home'?{...homeScope}:null,scroll:window.scrollY,controls};
 }
 function rememberNavigation(){
  if(restoringNav||!ws)return;initNav();navSnapshots.set(navCurrent,navSnapshot());const previous=navCurrent;navCurrent=++navSerial;navParent=previous;try{if(navSupported)history.pushState({lcNav:navCurrent,parent:previous},'')}catch{navSupported=false}mobileMenu=false;
@@ -76,10 +76,10 @@ function restoreNavigation(id,parent){
  const snap=navSnapshots.get(id);if(!snap||busy||editorSession&&!editorSession.host.hidden||!allowDiscardForm())return false;
  navSnapshots.set(navCurrent,navSnapshot());navCurrent=id;navParent=parent;restoringNav=true;
  try{
-  closePeopleDropdown();({page,employeeSelected,employeeTab,employeeReturn,query,archiveFilter,registryPage,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson}=snap);registryPage??=0;employeeSources=null;registryConflict=null;edit=null;mobileMenu=false;setTrainingRoute(page,snap.route);render();
+  closePeopleDropdown();({page,employeeSelected,employeeTab,employeeReturn,query,archiveFilter,registryPage,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson}=snap);registryPage??=0;employeeSources=null;registryConflict=null;edit=null;mobileMenu=false;if(page==='home'&&snap.homeScope)homeScope={...snap.homeScope};setTrainingRoute(page,snap.route);render();
   const find=name=>[...document.querySelectorAll('main [name]')].find(e=>e.name===name);
   for(const v of snap.controls.filter(x=>x.person))find(v.name)?.lcRestorePerson?.(v.value);
-  const changed=[];for(const v of snap.controls.filter(x=>!x.person)){const e=find(v.name);if(e&&e.value!==v.value&&(!e.options||[...e.options].some(o=>o.value===v.value))){e.value=v.value;changed.push(e)}}
+  const changed=[];for(const v of snap.controls.filter(x=>!x.person)){if(page==='home'&&v.name.startsWith('lc73_home_filter_'))continue;const e=find(v.name);if(e&&e.value!==v.value&&(!e.options||[...e.options].some(o=>o.value===v.value))){e.value=v.value;changed.push(e)}}
   for(const e of changed)if(e.isConnected)e.dispatchEvent(new Event('change'));
   requestAnimationFrame(()=>window.scrollTo(0,snap.scroll||0));return true
  }finally{restoringNav=false}
@@ -162,8 +162,8 @@ function openAttention(item){
  if(item.page==='sop'){if(!navigate('sop'))return;libraryFilter=item.options.filter||'all';render();return}
  goTraining(item.page,item.options)
 }
-let homeScope={};
-function home(main){dashboard(main,{db:ws.working,day:today(),el,add,btn,pane,theme,go:goTraining,goDocument,openAttention,openTarget:openAssistantTarget,publication:meta(ws.base,'publication_id'),initial:homeScope,onScope:s=>homeScope=s})}
+let homeScope={};try{const p=JSON.parse(sessionStorage.getItem('lean-center-dashboard-period-v1')||'null');if(p&&typeof p==='object')homeScope={periodMode:p.periodMode,from:p.from,to:p.to}}catch{}
+function home(main){dashboard(main,{db:ws.working,day:today(),getDay:today,el,add,btn,pane,theme,go:goTraining,goDocument,openAttention,openTarget:openAssistantTarget,publication:meta(ws.base,'publication_id'),initial:homeScope,onScope:s=>{homeScope=s;try{sessionStorage.setItem('lean-center-dashboard-period-v1',JSON.stringify({periodMode:s.periodMode,from:s.from,to:s.to}))}catch{}}})}
 function directoryOverview(main){ main.append(sectionHeading('Справочники предприятия','Активные записи'));
  const g=el('div',undefined,'kpi-grid');
  const counts=Object.fromEntries(Object.keys(definitions).map(k=>[k,list(ws.working,k).filter(x=>activeRecord(definitions[k],x)).length]));
