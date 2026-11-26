@@ -58,6 +58,8 @@ try{
  await brandImage('.brand-mark','twi-workplace.webp',136);
  await brandImage('.brand-company','tn-two-line-light.svg',1000);
  await brandImage('link[rel=icon]','favicon.png',64);
+ const ico=await fs.readFile(path.join(dest,'LeanCenter.ico'));assert.equal(ico.readUInt16LE(2),1);assert.equal(ico.readUInt16LE(4),2);
+ for(const [i,size] of [32,64].entries()){const at=6+i*16;assert.equal(ico[at],size);assert.equal(ico[at+1],size);const start=ico.readUInt32LE(at+12),length=ico.readUInt32LE(at+8);assert.equal(ico.readUInt32BE(start+16),size);assert.equal(ico.readUInt32BE(start+20),size);assert(start+length<=ico.length)}
  await chartColor(page,'#242E40');
  await page.getByRole('button',{name:'Тёмная тема',exact:true}).click();assert.equal(await page.locator('html').evaluate(n=>n.classList.contains('dark')),true);await chartColor(page,'#A9BCD4');await brandImage('.brand-company','tn-two-line-dark.svg',1000);
  await page.getByRole('button',{name:'Светлая тема',exact:true}).click();await chartColor(page,'#242E40');await brandImage('.brand-company','tn-two-line-light.svg',1000);

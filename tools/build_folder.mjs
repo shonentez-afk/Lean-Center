@@ -30,6 +30,15 @@ for(const name of ['sql.js','echarts','zrender','tslib']){
  const dir=path.join(root,'node_modules',name);
  if(fs.existsSync(dir))for(const file of fs.readdirSync(dir).sort())if(/^(LICENSE|NOTICE|COPYING)/i.test(file)&&fs.statSync(path.join(dir,file)).isFile())put(releasePath+'/licenses/'+name+'/'+file,fs.readFileSync(path.join(dir,file)));
 }
+// Windows shortcut icon: two PNG-backed sizes; all bytes covered by deployment manifest.
+const icons=[{size:32,bytes:fs.readFileSync(path.join(root,'src/ui/brand/favicon-32.png'))},{size:64,bytes:fs.readFileSync(path.join(root,'src/ui/brand/favicon.png'))}];
+const icoHeader=Buffer.alloc(6+16*icons.length);icoHeader.writeUInt16LE(1,2);icoHeader.writeUInt16LE(icons.length,4);
+let icoOffset=icoHeader.length;
+for(let i=0;i<icons.length;i++){const {size,bytes}=icons[i],at=6+16*i;
+ if(!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||bytes.readUInt32BE(16)!==size||bytes.readUInt32BE(20)!==size)throw Error('Invalid shortcut icon raster '+size);
+ icoHeader[at]=size;icoHeader[at+1]=size;icoHeader.writeUInt16LE(1,at+4);icoHeader.writeUInt16LE(32,at+6);icoHeader.writeUInt32LE(bytes.length,at+8);icoHeader.writeUInt32LE(icoOffset,at+12);icoOffset+=bytes.length
+}
+put('LeanCenter.ico',Buffer.concat([icoHeader,...icons.map(x=>x.bytes)]));
 const entry=read('src/ui/folder.html').replaceAll('__LC_RELEASE__',releasePath);
 put('index.html',entry);
 put('README_DEPLOY_RU.txt',read('docs/DEPLOY_NETWORK_RU.md'));

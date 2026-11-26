@@ -13,7 +13,7 @@ assert len(expected) == len(manifest["files"])
 for name, item in expected.items():
     p = PurePosixPath(name)
     assert not p.is_absolute() and ".." not in p.parts
-    assert name in {"index.html", "README_DEPLOY_RU.txt"} or name.startswith("versions/" + manifest["version"] + "/")
+    assert name in {"index.html", "README_DEPLOY_RU.txt", "LeanCenter.ico"} or name.startswith("versions/" + manifest["version"] + "/")
     data = (ROOT / name).read_bytes()
     assert len(data) == item["size"] and hashlib.sha256(data).hexdigest() == item["sha256"], name
 names = sorted([*expected, "app-manifest.json"])
