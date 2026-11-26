@@ -188,3 +188,6 @@ body.editor-active{overflow:hidden}.editor-host{position:fixed;inset:0;z-index:2
 
 /* LC5.1: approved grade first, exceptions deliberately separate. */
 .assessment-grade{display:grid;gap:4px;min-width:140px}.assessment-exception{font-size:.82rem;padding:0!important;border:0!important;background:none!important}.assessment-exception>summary{cursor:pointer;opacity:.78;padding:3px 0}.assessment-exception>select{margin-top:4px;max-width:100%}
+
+/* LC5.3: shared analysis and visible completion. */
+.lc53-analysis{margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:8px}.lc53-analysis h3{margin:8px 0}.lc53-analysis .lc53-result{font-size:22px;font-weight:700}.lc53-recommendations{padding-left:24px}.lc53-recommendations li{margin:8px 0}.lc53-recommendations small{display:block;color:var(--muted);margin:4px 0}.lc53-analysis .lc5-bar-row{grid-template-columns:minmax(100px,1fr) minmax(60px,1fr) minmax(70px,auto)}.lc53-missing{border-left:3px solid var(--tn-red);padding-left:8px}
