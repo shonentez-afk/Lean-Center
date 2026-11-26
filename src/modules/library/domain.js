@@ -1,7 +1,8 @@
+import {applyStage43Checklist,verifyStage43Checklist} from './stage43-checklist.js';
 import {applySopMethod,applySopEvaluation,reviewDue,validDate} from './sop-review.js';
 // LC3: aggregate events + detached original Stage43 content.
 import {invariant,isId,one,rows,canonical,sha256,foldKey} from '../../core/db.js';
-export const DOMAIN_TYPES=Object.freeze({document:'Библиотека СОП',frv_study:'Исследования ФРВ',checklist_version:'Методика оценки СОП',sop_evaluation:'Оценка СОП'});
+export const DOMAIN_TYPES=Object.freeze({document:'Библиотека СОП',frv_study:'Исследования ФРВ',checklist_version:'Методика оценки СОП',sop_evaluation:'Оценка СОП',sop_stage43_checklist:'Чек-лист Stage43'});
 export const MAX_CONTENT=30*1024*1024;
 const MIME={sop:'application/vnd.lean.stage43.sop+json',frv:'application/vnd.lean.stage43.frv+json'};
 const encoder=new TextEncoder();
@@ -16,6 +17,26 @@ const num=x=>typeof x==='number'&&Number.isFinite(x)&&x>=0;
 const safeImage=x=>string(x,MAX_CONTENT)&&/^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/i.test(x);
 export function validateRef(ref){exact(ref,['sha256','size','kind']);invariant(digest(ref.sha256)&&Number.isSafeInteger(ref.size)&&ref.size>0&&ref.size<=MAX_CONTENT&&Object.hasOwn(MIME,ref.kind),'Некорректная ссылка на исходный файл');return ref}
 export async function checkContent(ref,text){validateRef(ref);invariant(typeof text==='string'&&text.length<=MAX_CONTENT,'Исходный файл отсутствует или слишком велик');const bytes=encoder.encode(text);invariant(bytes.length===ref.size&&await sha256(bytes)===ref.sha256,'Исходный файл повреждён: '+ref.sha256);return text}
+// Historical employee snapshots are part of the hashed source, not authorization.
+ // Legacy imports may have plain text without a directory link.
+function verifyPeople(source,kind){
+ const refs=source.leanCenterPeople;if(refs===undefined)return;
+ invariant(Array.isArray(refs)&&refs.length<=1000,'Некорректные ссылки на сотрудников');
+ const seen=new Set(),single=new Set();
+ for(const x of refs){
+  exact(x,['slot','person_id','employee_code','display_name','position','unit']);
+  invariant(isId(x.person_id)&&nonempty(x.display_name,500)&&nonempty(x.employee_code,200)&&string(x.position,500)&&string(x.unit,500)&&string(x.slot,100),'Некорректный снимок сотрудника');
+  const key=x.slot+':'+x.person_id;invariant(!seen.has(key),'Повтор ссылки сотрудника');seen.add(key);
+  if(x.slot!=='sop_observer'){invariant(!single.has(x.slot),'Два сотрудника в одном поле');single.add(x.slot)}
+  let name,post=null;
+  if(kind==='frv'){invariant(['operator','observer'].includes(x.slot),'Недопустимая роль сотрудника в ФРВ');name=source[x.slot]}
+  else if(x.slot==='approver'){name=source.meta.approverName;post=source.meta.approverPost||''}
+  else if(x.slot==='sop_observer'){invariant(String(source.frvMeta?.observers||'').split(/\r?\n/).includes(x.display_name),'Снимок наблюдателя не соответствует печатному полю');continue}
+  else if(['trainer','trainee'].includes(x.slot))name=source.twi?.[x.slot];
+  else{const m=/^(workgroup|agree):(\d+)$/.exec(x.slot);invariant(m,'Недопустимая роль сотрудника в СОП');if(m[1]==='workgroup')name=source.responsibles?.[Number(m[2])];else {const a=source.agreedList?.[Number(m[2])];name=a?.name;post=a?.post||''}}
+  invariant(name===x.display_name&&(post===null||post===x.position),'Снимок сотрудника не соответствует печатным полям');
+ }
+}
 export async function inspectSource(text,kind){
  invariant(Object.hasOwn(MIME,kind)&&typeof text==='string'&&text.length<=MAX_CONTENT,'Неверный тип или размер исходного файла');
  const bytes=encoder.encode(text);invariant(bytes.length>0&&bytes.length<=MAX_CONTENT,'Исходный JSON не должен превышать 30 МБ');
@@ -25,7 +46,7 @@ export async function inspectSource(text,kind){
   invariant(p.schemaVersion===2&&obj(p.document)&&Object.hasOwn(p,'constructor')&&obj(p.constructor)&&Array.isArray(p.constructor.steps)&&obj(p.photoAssets)&&p.integrity?.algorithm==='SHA-256'&&digest(p.integrity.sha256),'Ожидалась переносимая копия СОП Stage43 с SHA-256');
   const base={schemaVersion:p.schemaVersion,document:p.document,constructor:p.constructor,photoAssets:p.photoAssets};
   invariant(await sha256(JSON.stringify(base))===p.integrity.sha256,'Контрольная сумма переносимого СОП не совпадает');
-  const s=p.constructor,d=p.document,seen=new Set();invariant(obj(s.meta)&&s.steps.length<=1000,'Некорректные шаги СОП');
+  const s=p.constructor,d=p.document,seen=new Set();invariant(obj(s.meta)&&s.steps.length<=1000,'Некорректные шаги СОП');verifyPeople(s,'sop');
   const steps=s.steps.map(st=>{
    invariant(obj(st)&&Number.isSafeInteger(st.id)&&st.id>0&&!seen.has(st.id)&&string(st.action)&&Array.isArray(st.keyMoments)&&st.keyMoments.length<=5&&st.keyMoments.every(x=>string(x))&&string(st.reason)&&num(st.durationSeconds)&&typeof st.hasPhoto==='boolean','Некорректный шаг СОП');seen.add(st.id);
    if(st.hasPhoto){const a=p.photoAssets[String(st.id)];invariant(obj(a)&&safeImage(a.original)&&(!a.rendered||safeImage(a.rendered)),'Отсутствует или неподдерживаемое фото шага '+st.id)}
@@ -35,7 +56,7 @@ export async function inspectSource(text,kind){
   projection={title:String(s.meta.operation||'').slice(0,500),number:String(d.number||s.meta.sopNumber||'').slice(0,200),legacy_id:String(d.id||'').slice(0,200),legacy_version:String(d.version??'').slice(0,50),legacy_status:String(d.status||'').slice(0,80),photos:steps.filter(x=>x.photo).length,twi:!!s.twi?.enabled,steps};
  }else{
   invariant(['FRV-1.2','FRV-1.3'].includes(p.schemaVersion)&&obj(p.study)&&Array.isArray(p.cycles)&&p.cycles.length<=1000,'Ожидалась копия исследования ФРВ FRV-1.2/1.3');
-  const seen=new Set(),measurements=[];let complete=0,unmeasured=0,count=0;
+  verifyPeople(p.study,'frv');const seen=new Set(),measurements=[];let complete=0,unmeasured=0,count=0;
   for(const [i,c] of p.cycles.entries()){
    invariant(obj(c)&&Array.isArray(c.observations)&&c.observations.length<=1000,'Некорректный цикл ФРВ');let full=c.observations.length>0;
    const phase=['baseline','improved','unassigned'].includes(c.phase)?c.phase:'unassigned';
@@ -52,13 +73,24 @@ export async function inspectSource(text,kind){
  return {source:{sha256:await sha256(bytes),size:bytes.length,kind},projection}
 }
 export function refsForEvents(events){const out=new Map();for(const e of events||[])if(Object.hasOwn(DOMAIN_TYPES,e.entity_type)&&e.payload?.source){const r=validateRef(e.payload.source);out.set(r.sha256,r)}return [...out.values()]}
+// The original FRV snapshot remains independently readable after a study edit.
+export function frvOriginSnapshot(db,revisionId){
+ const x=one(db,`SELECT o.study_id,o.source_sha256,o.created_at,f.title,f.state,f.context_json,a.byte_size,a.mime
+ FROM sop_frv_origin o JOIN frv_study f ON f.id=o.study_id JOIN attachment a ON a.sha256=o.source_sha256
+ WHERE o.revision_id=?`,[revisionId]);
+ if(!x)return null;
+ invariant(x.mime===MIME.frv,'Некорректный тип исходных замеров');
+ const source=validateRef({sha256:x.source_sha256,size:x.byte_size,kind:'frv'});
+ return {study_id:x.study_id,title:x.title,state:x.state,created_at:x.created_at,source,current:JSON.parse(x.context_json).source.sha256===source.sha256}
+}
 export function refsForDb(db){return rows(db,'SELECT sha256,byte_size,mime FROM attachment WHERE mime IN (?,?) ORDER BY sha256',[MIME.sop,MIME.frv]).map(x=>validateRef({sha256:x.sha256,size:x.byte_size,kind:x.mime===MIME.sop?'sop':'frv'}))}
 export function unionRefs(...groups){const m=new Map();for(const refs of groups)for(const ref of refs){validateRef(ref);const old=m.get(ref.sha256);invariant(!old||canonical(old)===canonical(ref),'Несогласованные метаданные исходного файла');m.set(ref.sha256,ref)}return [...m.values()]}
 export async function verifyDomainEvents(events,readContent){
  const checked=new Map();
  for(const e of events||[]){if(!Object.hasOwn(DOMAIN_TYPES,e.entity_type)||!e.payload?.source)continue;
   const ref=validateRef(e.payload.source);invariant(typeof readContent==='function','Пакет содержит документы; требуется полный комплект исходных файлов');
-  let result=checked.get(ref.sha256);if(!result){const text=await checkContent(ref,await readContent(ref));result=await inspectSource(text,ref.kind);checked.set(ref.sha256,result)}
+  let result=checked.get(ref.sha256);if(!result){const text=await checkContent(ref,await readContent(ref));result=await inspectSource(text,ref.kind);result.raw=JSON.parse(text);checked.set(ref.sha256,result)}
+  if(e.entity_type==='sop_stage43_checklist'){invariant(ref.kind==='sop'&&canonical(result.source)===canonical(ref),'Неверный исходник чек-листа');verifyStage43Checklist(e.payload,result.raw.constructor);continue}
   invariant(canonical(result.source)===canonical(ref)&&canonical(result.projection)===canonical(e.payload.projection),'Проекция не совпадает с исходным файлом');
  }
 }
@@ -78,6 +110,7 @@ export function applyDomainEvent(db,e,old){
  const p=e.payload,id=e.entity_id;
  if(e.entity_type==='checklist_version')return applySopMethod(db,e,old);
  if(e.entity_type==='sop_evaluation')return applySopEvaluation(db,e,old);
+ if(e.entity_type==='sop_stage43_checklist')return applyStage43Checklist(db,e,old);
  if(e.entity_type==='document'){
   if(e.operation==='create'){
    exact(p,['command','code','title','operation_id','source','projection']);invariant(!old&&p.command==='create'&&nonempty(p.code,200)&&nonempty(p.title),'Неверный новый СОП');operation(db,p.operation_id);invariant(!rows(db,'SELECT code FROM document').some(x=>foldKey(x.code)===foldKey(p.code)),'Номер документа уже существует');

@@ -1,0 +1,41 @@
+
+/* Lean Center corporate editor layer; leave document preview styling intact. */
+:root{--lc-font:"Proxima Nova","Proxima Nova Rg",Arial,sans-serif;--lc-bg:#f4f5f6;--lc-surface:#fff;--lc-ink:#1d1d1b;--lc-muted:#5b626e;--lc-line:#dadddf;--lc-red:#e30613;--lc-navy:#242e40;--lc-focus:#006ab0}
+:root[data-lc-theme=dark]{--lc-bg:#171d27;--lc-surface:#232b39;--lc-ink:#f1f3f5;--lc-muted:#bdc6d3;--lc-line:#424e60;--lc-focus:#8ac9ff;color-scheme:dark}
+body{background:var(--lc-bg)!important;color:var(--lc-ink)!important;padding:12px!important}
+body:before,body>.max-w-7xl>header{display:none!important}
+body>.max-w-7xl{max-width:none!important;width:100%!important;margin:0!important}
+#lc-editor-bar,.tab-content:not(#tab-preview) :where(button,input,select,textarea,label,h1,h2,h3,p,div,span,td,th){font-family:var(--lc-font)!important}
+#lc-editor-bar{position:sticky!important;top:0!important;background:var(--lc-surface)!important;color:var(--lc-ink)!important;border:1px solid var(--lc-line)!important;border-radius:4px!important;padding:8px 12px!important;box-shadow:0 1px 2px #242e400b!important;margin-bottom:12px!important}
+#lc-editor-bar>strong{display:none}#lc-editor-status{color:var(--lc-muted);font-size:12px}
+#lc-editor-send,.tab-content:not(#tab-preview) :is(.btn-primary,.btn-success,.btn-review){background:var(--lc-red)!important;color:#fff!important;border:1px solid var(--lc-red)!important;border-radius:4px!important;box-shadow:none!important;transform:none!important}
+#lc-editor-download,.tab-content:not(#tab-preview) .btn-ghost,.lc-person-button,.lc-person-dialog button{border:1px solid var(--lc-line)!important;background:var(--lc-surface)!important;color:var(--lc-ink)!important;border-radius:4px!important;padding:6px 9px!important}
+[role=tablist]{width:100%!important;flex-wrap:wrap;background:var(--lc-surface)!important;border:1px solid var(--lc-line)!important;border-radius:4px!important;margin-bottom:12px!important}
+.tab-btn{border-radius:3px!important;box-shadow:none!important;color:var(--lc-muted)!important}.tab-btn.active{background:var(--lc-navy)!important;color:#fff!important}
+.tab-content:not(#tab-preview)>section,.tab-content:not(#tab-preview) .step-card{border:1px solid var(--lc-line)!important;border-radius:4px!important;box-shadow:0 1px 2px #242e400b!important;background:var(--lc-surface)!important;color:var(--lc-ink)!important}
+.tab-content:not(#tab-preview) :where(input,select,textarea):not([type=checkbox],[type=radio],[type=file]){border-color:var(--lc-line)!important;border-radius:4px!important;background:var(--lc-surface)!important;color:var(--lc-ink)!important}
+.tab-content:not(#tab-preview) :where(input,select,textarea):focus{outline:2px solid var(--lc-focus)!important;box-shadow:none!important}
+.tab-content:not(#tab-preview) :where(h2,h3,.text-slate-800,.text-slate-700){color:var(--lc-ink)!important}
+.tab-content:not(#tab-preview) :where(.text-slate-600,.text-slate-500,.text-slate-400){color:var(--lc-muted)!important}
+:root[data-lc-theme=dark] .tab-content:not(#tab-preview) :where(.bg-white,.bg-slate-50,.bg-slate-100,.metric-card){background:var(--lc-surface)!important;color:var(--lc-ink)!important}
+.lc-person-button{font-family:var(--lc-font)!important;font-size:11px!important;white-space:nowrap;margin:3px 2px;align-self:center}
+.lc-person-dialog{font:14px var(--lc-font);border:1px solid var(--lc-line);background:var(--lc-surface);color:var(--lc-ink);padding:18px;border-radius:6px;max-width:min(640px,96vw);width:640px;margin:auto}
+.lc-person-dialog::backdrop{background:#242e4077}.lc-person-dialog h2{font-size:16px;font-weight:700;margin:0 0 12px}.lc-person-dialog input{font:inherit;width:100%;padding:9px;border:1px solid var(--lc-line);border-radius:4px;margin-bottom:8px;background:var(--lc-surface);color:var(--lc-ink)}
+#lc-person-results{display:flex;flex-direction:column;gap:4px;max-height:42vh;overflow:auto;margin-bottom:10px}.lc-person-option{text-align:left;font:13px var(--lc-font)!important}.lc-person-option:hover{border-color:var(--lc-red)!important}
+
+/* LC3.4: always-visible AI controls and notifications below the sticky toolbar. */
+#lc-editor-bar{gap:8px!important}
+#lc-editor-bar #lc-editor-status{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}
+#lc-editor-ai{display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex:1 1 100%;min-width:0;padding-top:7px;border-top:1px solid var(--lc-line)}
+#lc-editor-ai #aiTestBtn{flex:none;display:inline-flex!important;align-items:center;min-height:32px;padding:6px 12px!important;white-space:nowrap;font-size:13px!important;font-weight:600;background:var(--lc-surface)!important;color:var(--lc-ink)!important;border:1px solid var(--lc-line)!important;border-radius:4px!important}
+#lc-editor-ai #aiTestBtn:focus-visible{outline:2px solid var(--lc-focus);outline-offset:2px}
+#lc-editor-ai #aiTestBtn:hover{border-color:var(--lc-red)!important}
+#lc-editor-ai #aiConnectivityBadge{flex:none;white-space:nowrap;font-size:12px!important}
+#lc-editor-ai #modelSelector{min-width:0;max-width:100%;padding:6px 8px;border:1px solid var(--lc-line);border-radius:4px;background:var(--lc-surface);color:var(--lc-ink);font-size:12px}
+#lc-editor-ai .lc-ai-notice{font-size:11px;color:var(--lc-muted)}
+#toastContainer{position:fixed!important;top:var(--lc-toast-top,120px)!important;right:12px!important;left:auto!important;bottom:auto!important;z-index:10001!important;display:flex!important;flex-direction:column-reverse!important;gap:8px;width:max-content;max-width:min(460px,calc(100vw - 24px));max-height:max(0px,calc(100vh - var(--lc-toast-top,120px) - 12px));overflow:hidden;pointer-events:none}
+#toastContainer .toast{flex-shrink:0;min-width:0;max-width:100%;overflow-wrap:anywhere;white-space:normal;font:13px/1.45 var(--lc-font)}
+#toastContainer .toast>span:last-child{min-width:0;overflow-wrap:anywhere}
+
+/* Role-selected names remain readable, and the dropdown is the editing action. */
+#twi-trainer[readonly],#twi-trainee[readonly]{cursor:default}
