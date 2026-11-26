@@ -5,7 +5,7 @@ from pathlib import Path, PurePosixPath
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 ROOT = Path("dist/LeanCenter")
-OUT = Path("releases/LeanCenter-LC5.0-dev.zip")
+OUT = Path("releases/LeanCenter-LC5.1-dev.zip")
 manifest = json.loads((ROOT / "app-manifest.json").read_text(encoding="utf-8"))
 assert manifest["entry"] == "index.html"
 expected = {item["path"]: item for item in manifest["files"]}

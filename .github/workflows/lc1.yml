@@ -1,7 +1,7 @@
-name: LC5 development full regression
+name: LC5.1 assessment integration full regression
 on:
   push:
-    branches: [feature/lc5-audit]
+    branches: [feature/lc5.1-assessments]
     paths: ['src/**','db/**','tests/**','tools/build_lc1.mjs','tools/build_folder.mjs','tools/build_editor.mjs','tools/package_folder.py','docs/DEPLOY_NETWORK_RU.md','package.json','.github/workflows/lc1.yml']
   workflow_dispatch:
 permissions:
@@ -36,12 +36,12 @@ jobs:
       - run: npm run smoke
       - uses: actions/upload-artifact@v4
         with:
-          name: LeanCenter-LC5.0-dev-${{ runner.os }}
-          path: releases/LeanCenter-LC5.0-dev.zip
+          name: LeanCenter-LC5.1-dev-${{ runner.os }}
+          path: releases/LeanCenter-LC5.1-dev.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LC5.0-dev-screenshots-${{ runner.os }}
+          name: LC5.1-dev-screenshots-${{ runner.os }}
           path: artifacts
           if-no-files-found: warn
