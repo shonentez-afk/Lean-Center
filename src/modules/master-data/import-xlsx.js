@@ -94,7 +94,16 @@ export function planImport(ws,type,source,{allowUpdates=false}={}){
    while(remaining.length){const i=remaining.findIndex(x=>x.error||!x.v.parent_id||known.has(foldKey(x.v.parent_id))||!remaining.some(y=>y.v&&foldKey(y.v.code)===foldKey(x.v.parent_id)));if(i<0){for(const x of remaining)ordered.push({...x,error:'Цикл или неразрешённая зависимость подразделений'});break}const [x]=remaining.splice(i,1);ordered.push(x);if(x.v?.code)known.add(foldKey(x.v.code))}
    parsed.splice(0,parsed.length,...ordered)
   }
-  for(const item of parsed){
+  // Transfers are a dependency, not the ordering of rows in the workbook.
+   // Existing assignments can only be closed, never rewritten. Validate those
+   // closures first, then new periods in chronological order. Keep original row
+   // numbers in the report and the same validated order in the atomic batch.
+   if(type==='person_assignment'){
+    const existing=new Set(rows(db,'SELECT p.employee_code,a.valid_from FROM person_assignment a JOIN person p ON p.id=a.person_id').map(x=>JSON.stringify([foldKey(x.employee_code),x.valid_from])));
+    const known=x=>x.v&&existing.has(JSON.stringify([foldKey(x.v.person_id),x.v.valid_from]))?1:0;
+    parsed.sort((a,b)=>known(b)-known(a)||String(a.v?.valid_from||'').localeCompare(String(b.v?.valid_from||''))||a.row-b.row);
+   }
+   for(const item of parsed){
    const result={row:item.row,status:'error',message:'',changes:[]};results.push(result);
    if(item.error){result.message=item.error;continue}
    try{

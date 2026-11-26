@@ -27,3 +27,26 @@ test('duplicate or invalid rows prevent every write; numeric codes and formula r
 test('hierarchy import accepts child-before-parent; detects cycles',()=>{const w=fresh();let p=planImport(w,'org_unit',[rec(2,{code:'C',name:'Child',kind:'Участок',parent_id:'P'}),rec(3,{code:'P',name:'Parent',kind:'Цех',parent_id:null})]);assert.equal(p.counts.create,2);commitImport(w,p);assert.equal(one(w.working,"SELECT p.code FROM org_unit c JOIN org_unit p ON p.id=c.parent_id WHERE c.code='C'").code,'P');p=planImport(w,'org_unit',[rec(2,{code:'A',name:'A',kind:'Цех',parent_id:'B'}),rec(3,{code:'B',name:'B',kind:'Цех',parent_id:'A'})]);assert.equal(p.counts.error,2)});
 test('lookup by scoped code and stale preview; invalid batch rolls back',()=>{const w=fresh(),u=w.edit('org_unit',null,unit('U'));w.edit('equipment',null,{unit_id:u,code:'EQ',name:'Стенд'});let p=planImport(w,'operation',[rec(2,{unit_id:'U',equipment_id:'EQ',code:'OP',name:'Операция',criticality:'Обычная'})]);assert.equal(p.counts.create,1);w.edit('person',null,person('X','X'));assert.throws(()=>commitImport(w,p),/изменилась/);p=planImport(w,'operation',[rec(2,{unit_id:'U',equipment_id:'EQ',code:'OP',name:'Операция',criticality:'Обычная'})]);const invalid={...p.events[0],id:uuid(),entity_id:uuid(),payload:{...p.events[0].payload,equipment_id:uuid(),code:'BAD'}};const count=w.pending.length;assert.throws(()=>w.applyBatch([...p.events,invalid]),/Ссылка/);assert.equal(w.pending.length,count);assert.equal(list(w.working,'operation').length,0);commitImport(w,p);assert.equal(list(w.working,'operation').length,1)});
 test('header aliases and malformed archive guard',()=>{assert.deepEqual(autoMap('person',[{col:1,name:'Табельный №'},{col:2,name:'ФИО'}]),{employee_code:1,display_name:2});assert.throws(()=>checkXlsxContainer(new Uint8Array(32)),/XLSX/)});
+
+test('LC5.4.1 transfer preview closes old assignment before creating new regardless of XLSX row order',()=>{
+ const w=fresh();try{
+  const u=w.edit('org_unit',null,unit('OLD')),v=w.edit('org_unit',null,unit('NEW')),personId=w.edit('person',null,person('0009','QA'));
+  const oldId=w.edit('person_assignment',null,{person_id:personId,unit_id:u,profession_id:null,position_id:null,shift_id:null,shift_code:null,valid_from:'2026-01-01',valid_to:null});
+  const old={person_id:'0009',unit_id:'OLD',valid_from:'2026-01-01',valid_to:'2026-06-30'},next={person_id:'0009',unit_id:'NEW',valid_from:'2026-07-01',valid_to:null};
+  for(const src of [[rec(2,next),rec(3,old)],[rec(2,old),rec(3,next)]]){
+   const p=planImport(w,'person_assignment',src,{allowUpdates:true});
+   assert.deepEqual(p.counts,{create:1,update:1,same:0,error:0});
+   assert.deepEqual(p.events.map(x=>x.operation),['update','create']);
+   assert.deepEqual(p.results.map(x=>x.row),[2,3]);
+   assert.equal(list(w.working,'person_assignment').length,1);
+  }
+  const bad=planImport(w,'person_assignment',[rec(2,next),rec(3,{...old,valid_to:'2026-07-01'})],{allowUpdates:true});
+  assert.equal(bad.counts.error,1);assert.equal(bad.events.length,0);
+  assert.equal(one(w.working,'SELECT valid_to FROM person_assignment WHERE id=?',[oldId]).valid_to,null);
+  const plan=planImport(w,'person_assignment',[rec(2,next),rec(3,old)],{allowUpdates:true});
+  assert.equal(commitImport(w,plan),2);
+  assert.equal(one(w.working,'SELECT valid_to FROM person_assignment WHERE id=?',[oldId]).valid_to,'2026-06-30');
+  assert.equal(one(w.working,"SELECT unit_id FROM person_assignment WHERE valid_from='2026-07-01'").unit_id,v);
+  assert.deepEqual(rows(w.working,'PRAGMA foreign_key_check'),[]);
+ }finally{w.close()}
+});

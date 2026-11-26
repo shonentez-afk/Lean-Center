@@ -18,6 +18,14 @@ try{
  assert.equal(await page.locator('select[name=map_employee_code]').inputValue(),'1');assert.equal(await page.locator('select[name=map_display_name]').inputValue(),'2');
  await page.getByRole('button',{name:'Предварительная проверка'}).click();await page.getByText('Предпросмотр готов. Запись в базу ещё не выполнена.',{exact:true}).waitFor();
  await page.getByText('Создать: 2',{exact:true}).waitFor();await fs.mkdir('artifacts/lc2',{recursive:true});await page.screenshot({path:'artifacts/lc2/import-preview.png',fullPage:true});
+ // Selecting a bad workbook must invalidate the previous, still valid preview.
+ await page.locator('input[name=import_file]').setInputFiles({name:'broken.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from('broken XLSX')});
+ await page.locator('#status.error').waitFor();assert.equal(await page.getByRole('button',{name:/Импортировать \d+ изменений/}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'Предварительная проверка'}).count(),0);
+ await page.getByRole('button',{name:'Сотрудники',exact:true}).click();assert.equal(await page.getByRole('cell',{name:'0007',exact:true}).count(),0);
+ await page.getByRole('button',{name:'Импорт данных',exact:true}).first().click();await page.locator('input[name=import_file]').setInputFiles(xlsx);
+ await page.getByText('Excel открыт. Настройте соответствие колонок.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Предварительная проверка'}).click();await page.getByText('Создать: 2',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Импортировать 2 изменений'}).click();await page.getByText('Импортировано изменений: 2',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Сотрудники',exact:true}).click();await page.getByRole('cell',{name:'0007',exact:true}).waitFor();
  await page.getByRole('cell',{name:'Учебный импорт',exact:true}).waitFor();await page.reload();await page.getByRole('heading',{name:'Дашборд',exact:true}).waitFor();await page.getByRole('button',{name:'Сотрудники',exact:true}).click();await page.getByRole('cell',{name:'0007',exact:true}).waitFor();
