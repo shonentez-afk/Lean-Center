@@ -1,13 +1,14 @@
 // Shared keyboard-accessible, local directory dropdown (center and embedded editor).
+import {matchesRoleKind} from '../modules/master-data/role-matching.js';
 const key=x=>String(x??'').normalize('NFKC').toLocaleLowerCase('ru-RU').replaceAll('ё','е').trim();
-export const ROLE_LABELS={instructor:'Инструктор',mentor:'Наставник',trainee:'Обучаемый',evaluator:'Оценщик'};
+export const ROLE_LABELS={instructor:'Инструктор',mentor:'Наставник',trainee:'Обучаемый',evaluator:'Оценщик',internal_trainer:'Внутренний тренер'};
 const tokens=x=>key(x).split(/[\s,;]+/u).filter(Boolean);
 export function matchesPerson(p,query){
  const words=tokens([p.display_name,p.employee_code,p.position,p.unit].join(' '));
  return tokens(query).every(q=>words.some(w=>w.startsWith(q)))
 }
 export function filterPeople(people,query='',allowed=null,role=''){
- return people.filter(p=>(!allowed||p.roles?.some(x=>allowed.includes(x.kind)))&&(!role||p.roles?.some(x=>x.kind===role))&&matchesPerson(p,query))
+ return people.filter(p=>(!allowed||p.roles?.some(x=>allowed.some(kind=>matchesRoleKind(x,kind))))&&(!role||p.roles?.some(x=>matchesRoleKind(x,role)))&&matchesPerson(p,query))
 }
 let active=null,serial=0;
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e};

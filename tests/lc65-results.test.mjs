@@ -56,3 +56,21 @@ test('preparation §3.4: actual shifts, exact appendix 9, safety, advance questi
  }finally{f.w.close()}});
 
 test('LC6.7 all five JI-2 variants persist facts, special demonstrator and hazardous safety gate',async()=>{const f=await fixture();try{for(const variant of ['classic','special','smed','hazardous','fractional']){const c=config({followups:2,...(variant==='smed'?{realShow:2,realTry:3}:variant==='fractional'?{segments:[{from:1,to:1}]}:variant==='hazardous'?{hazardous:true}:{})}),id=await f.addAssignment({variant,method_version:'JI-2',method_config:c});await f.approve(id);const stages=progressFor(f.w.working,f.getAssignment(id)).stages;let safety=false;for(const s of stages){let extra={};if(variant==='special'&&s.phase==='presentation'){await assert.rejects(f.stage(id,s.code,{witness_id:f.mentor}),/отдельного демонстратора/);extra.witness_id=f.other}if(variant==='hazardous'&&s.phase==='practice'&&!safety){await assert.rejects(f.stage(id,s.code),/проверки безопасности/);await f.verify(id,'safety');safety=true}await f.stage(id,s.code,extra)}assert.equal(f.getAssignment(id).state,'completed');const progress=progressFor(f.w.working,f.getAssignment(id));assert.equal(progress.completed,stages.length);assert.equal(progress.followup,2);assert.equal(progress.facts.length,stages.length);if(variant==='smed')assert.deepEqual(progress.facts.map(x=>JSON.parse(x.steps_json)).filter(x=>x.execution==='real').map(x=>x.stage),['show2','try3']);if(variant==='special')assert.equal(progress.facts.filter(x=>x.witness_id===f.other).length,3)}}finally{f.w.close()}});
+
+// Reproduce the commission failure using the actual directory and shared picker.
+test('LC6.7 internal trainer picker recognizes specific role; ordinary instructor is not a VT',async()=>{
+ const {directoryPeople}=await import('../src/modules/master-data/people-directory.js'),{filterPeople}=await import('../src/ui/people-picker.js'),{matchesRoleKind}=await import('../src/modules/master-data/role-matching.js');
+ const f=await fixture();try{
+  const vt=f.w.edit('business_role',null,{code:'INTERNAL_TRAINER',name:'Внутренний тренер'});
+  f.w.edit('role_assignment',null,{person_id:f.other,role_id:vt,valid_from:'2026-01-01',valid_to:'2026-01-31'});
+  const people=directoryPeople(f.w.working,date),eligible=filterPeople(people,'',['internal_trainer'],'internal_trainer');
+  assert.deepEqual(eligible.map(x=>x.id),[f.other]);
+  assert.equal(filterPeople(people,'LC4-004',['internal_trainer'],'internal_trainer')[0].id,f.other);
+  assert.equal(filterPeople(people,'LC4-002',['internal_trainer'],'internal_trainer').length,0);
+  assert(filterPeople(people,'',['instructor'],'instructor').some(x=>x.id===f.mentor));
+  assert(filterPeople(people,'',['instructor'],'instructor').some(x=>x.id===f.other));
+  assert.equal(filterPeople(directoryPeople(f.w.working,'2026-02-01'),'',['internal_trainer'],'internal_trainer').length,0);
+  assert(matchesRoleKind({kind:'instructor',code:'internal-trainer',name:'ВТ'},'internal_trainer'));
+  assert(!matchesRoleKind({kind:'instructor',code:'INSTRUCTOR',name:'Инструктор'},'internal_trainer'));
+ }finally{f.w.close()}
+});

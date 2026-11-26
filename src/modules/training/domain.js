@@ -1,7 +1,8 @@
 import {REVISION_TITLE_SQL,documentTitle} from '../library/revision-title.js';
 // LC4: explicit facts, reviewed qualifications and separately recorded admission.
 import {invariant,one,rows,canonical,isId,foldKey} from '../../core/db.js';
-import {directoryPeople,personKey} from '../master-data/people-directory.js';
+import {directoryPeople} from '../master-data/people-directory.js';
+import {matchesRoleKind} from '../master-data/role-matching.js';
 import {linkedTwi} from '../library/linked-materials.js';
 import {validDate} from '../library/sop-review.js';
 import {verifyMobileContext,recordMobileMapping,mobileObservationExists} from './mobile-audit.js';
@@ -70,10 +71,7 @@ const person=(db,id)=>active(db,'person',id);
 const optional=(db,table,id)=>id===null?null:active(db,table,id);
 const eventDay=e=>new Date(Date.parse(e.occurred_at)+14*3600000).toISOString().slice(0,10);
 function roleMatches(db,id,day,allowed){
- return directoryPeople(db,day).find(x=>x.id===id)?.roles.some(x=>{
-  const vt=[x.code,x.name].some(v=>['internal_trainer','internal trainer','внутренний тренер','вт'].includes(personKey(v).replaceAll('-','_')));
-  return allowed.includes(x.kind)||(allowed.includes('internal_trainer')&&vt)
- })
+ return directoryPeople(db,day).find(x=>x.id===id)?.roles.some(x=>allowed.some(kind=>matchesRoleKind(x,kind)))
 }
 function hasRole(db,id,day,allowed){person(db,id);invariant(roleMatches(db,id,day,allowed),'У сотрудника нет действующего назначения нужной роли')}
 function roleForCredential(role){return role==='internal_trainer'?['internal_trainer']:role==='mentor'?['mentor']:['instructor']}
