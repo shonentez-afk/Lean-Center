@@ -379,7 +379,7 @@ export function applyTrainingEvent(db,e,old){
   invariant(authorizationValid(db,a.authorization_id,day),'Право инструктора обучать операции недействительно на дату факта');
   invariant(p.mentor_ack===true&&p.trainee_ack===true,'Нужны отметки подтверждения обеих сторон (не электронная подпись)');
   const witness=optional(db,'person',p.witness_id);
-  if(a.method_variant==='special'&&stage.phase==='presentation')invariant(witness&&witness.id!==a.trainee_id,'Укажите демонстратора');
+  if(a.method_variant==='special'&&stage.phase==='presentation')invariant(witness&&witness.id!==a.trainee_id&&(a.method_version!=='JI-2'||witness.id!==a.mentor_id),'Укажите отдельного демонстратора со специальными навыками');
   if((a.method_variant==='hazardous'||jiConfig(a)?.hazardous)&&stage.phase==='practice'){const safety=latestVerification(db,a.id,'safety');invariant(safety?.result==='pass'&&safety.evaluated_on<=day,'Сначала зарегистрируйте подтверждение обязательной проверки безопасности')}
   store(db,t,{id,assignment_id:a.id,mentor_id:a.mentor_id,held_at:p.held_at,notes:p.notes,result:p.result,steps_json:canonical({version:a.method_version,variant:a.method_variant,stage:stage.code,label:stage.label,...(stage.execution?{execution:stage.execution}:{}),...(stage.segment?{segment:stage.segment}:{}),repeat:pr.done.has(stage.code)}),rev:1,stage_code:stage.code,duration_minutes:p.duration_minutes,witness_id:p.witness_id,witness_name:witness?.display_name||null,mentor_ack:1,trainee_ack:1,recorded_at:e.occurred_at});
   const done=progressFor(db,a);update(db,'training_assignment',a.id,{state:done.complete?'completed':'in_progress'});

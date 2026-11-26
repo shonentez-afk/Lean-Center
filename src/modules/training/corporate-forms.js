@@ -83,18 +83,18 @@ export function productionWorkbook(ExcelJS,records,{title='План произв
  let detailRow=2;for(const x of records)for(const fact of x.facts.length?x.facts:[null])cells(detail,detailRow++,[x.values[1],x.values[3],x.values[2],x.assignment.assigned_on,x.assignment.due_on,x.assignment.state,fact?JSON.parse(fact.steps_json).label:'',fact?.held_at||'',fact?.duration_minutes??null,fact?.notes||'',fact?.mentor_ack?'Да':'',fact?.trainee_ack?'Да':'']);
  return w
 }
-export function entryWorkbook(ExcelJS,program,enrollment,tasks,{organization='',scope='',trainee='',mentor='',manager='',revision=()=>'',responsible=()=>'',facts=[]}={}){
- const cal=calendarData(enrollment.start_on,tasks),w=new ExcelJS.Workbook(),dayCount=Math.max(1,cal.days.length),last=3+dayCount+1;
- const s=sheet(w,'План ввода',[7,45,40,...Array(dayCount).fill(13),16],8);
+export function entryWorkbook(ExcelJS,program,enrollment,tasks,{organization='',scope='',trainee='',mentor='',manager='',revision=()=>'',responsible=()=>'',facts=[],operationType=()=>''}={}){
+ const cal=calendarData(enrollment.start_on,tasks),w=new ExcelJS.Workbook(),dayCount=Math.max(1,cal.days.length),last=4+dayCount+1;
+ const s=sheet(w,'План ввода',[7,45,25,40,...Array(dayCount).fill(13),16],8);
  merge(s,1,1,last,'План ввода в профессию · '+program.title,true);merge(s,2,1,last,organization+' · '+scope);merge(s,3,1,last,'ФИО: '+trainee+' · Инструктор-наставник: '+mentor+' · Руководитель: '+manager);
  merge(s,4,1,last,'Период: '+enrollment.start_on+' — '+enrollment.due_on+' · Версия программы '+program.version_no);
  if(enrollment.internship_start)merge(s,5,1,last,'Стажировка: '+enrollment.internship_start+' — '+enrollment.internship_end+' · Ввод: '+enrollment.entry_start+' — '+enrollment.entry_end);
  const dates=cal.days.length?cal.days:[{offset:0,date:enrollment.start_on,hours:0}];
- cells(s,6,['№','Должностные функции','Название СОП',...dates.map(d=>d.offset+1), 'Итого часов']);header(s,6,last);
- cells(s,7,['','','Дата',...dates.map(d=>dt(d.date)), '']);for(let j=4;j<last;j++)s.getCell(7,j).numFmt='dd.mm.yyyy';
- tasks.forEach((t,i)=>{const row=i+8,values=[i+1,t.title,t.sop_revision_id?revision(t.sop_revision_id):'',...dates.map(d=>d.offset===t.day_offset?t.hours:null)];cells(s,row,[...values,0]);s.getCell(row,last).value={formula:'SUM('+s.getCell(row,4).address+':'+s.getCell(row,last-1).address+')',result:t.hours};s.getCell(row,last).numFmt='0.##'});
- const total=tasks.length+8;cells(s,total,['','Итого часов','',...dates.map(d=>d.hours),cal.total]);for(let col=4;col<=last;col++){const result=col===last?cal.total:dates[col-4].hours;s.getCell(total,col).value=tasks.length?{formula:'SUM('+s.getCell(8,col).address+':'+s.getCell(total-1,col).address+')',result}:0}header(s,total,last);
- s.pageSetup.printTitlesRow='6:7';s.views=[{state:'frozen',xSplit:3,ySplit:7}];
+ cells(s,6,['№','Должностные функции','Тип рабочей операции','Название СОП',...dates.map(d=>d.offset+1), 'Итого часов']);header(s,6,last);
+ cells(s,7,['','','','Дата',...dates.map(d=>dt(d.date)), '']);for(let j=5;j<last;j++)s.getCell(7,j).numFmt='dd.mm.yyyy';
+ tasks.forEach((t,i)=>{const row=i+8,values=[i+1,t.title,operationType(t),t.sop_revision_id?revision(t.sop_revision_id):'',...dates.map(d=>d.offset===t.day_offset?t.hours:null)];cells(s,row,[...values,0]);s.getCell(row,last).value={formula:'SUM('+s.getCell(row,5).address+':'+s.getCell(row,last-1).address+')',result:t.hours};s.getCell(row,last).numFmt='0.##'});
+ const total=tasks.length+8;cells(s,total,['','Итого часов','','',...dates.map(d=>d.hours),cal.total]);for(let col=5;col<=last;col++){const result=col===last?cal.total:dates[col-5].hours;s.getCell(total,col).value=tasks.length?{formula:'SUM('+s.getCell(8,col).address+':'+s.getCell(total-1,col).address+')',result}:0}header(s,total,last);
+ s.pageSetup.printTitlesRow='6:7';s.views=[{state:'frozen',xSplit:4,ySplit:7}];
  const detail=sheet(w,'Задания и результаты',[22,47,38,16,15,25,22,43,20,20]);cells(detail,1,['Часть программы','Задание','СОП','Срок','Часы','Ответственный (факт)','Результат','Основание / обратная связь','Подпись ответственного','Подпись обучаемого']);header(detail,1,10);
  tasks.forEach((t,i)=>cells(detail,i+2,[t.part,t.title,t.sop_revision_id?revision(t.sop_revision_id):'',plusDays(enrollment.start_on,t.day_offset),t.hours,responsible(t),t.done?'Выполнено':'Не завершено',t.result?.evidence||'','','']));
  const factSheet=sheet(w,'Календарь план и факт',[15,45,15,45,15]);cells(factSheet,1,['Дата','Плановые задания','План, ч','Фактические задания','Факт, ч']);header(factSheet,1,5);

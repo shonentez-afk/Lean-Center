@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node tools/build_folder.mjs && python tools/package_folder.py",
     "test": "node --test tests/lc1-core.test.mjs tests/lc1-analytics.test.mjs tests/lc2-master.test.mjs tests/lc3-library.test.mjs tests/lc4-training.test.mjs tests/lc5-audit.test.mjs tests/lc6-effect.test.mjs tests/lc64-standard.test.mjs tests/lc65-results.test.mjs",
-    "smoke": "node tests/lc1-folder-browser.mjs && node tests/lc2-browser.mjs && node tests/lc3-browser.mjs && node tests/lc4-browser.mjs && node tests/lc53-mobile-browser.mjs && node tests/lc6-browser.mjs && node tests/lc64-browser.mjs"
+    "smoke": "node tests/lc1-folder-browser.mjs && node tests/lc2-browser.mjs && node tests/lc3-browser.mjs && node tests/lc4-browser.mjs && node tests/lc53-mobile-browser.mjs && node tests/lc6-browser.mjs && node tests/lc64-browser.mjs && node tests/lc67-browser.mjs"
   },
   "dependencies": {
     "sql.js": "1.13.0",
