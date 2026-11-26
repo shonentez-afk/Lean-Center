@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "49966639c10acf96db4ee0f44b85aea036f1f7dc",
+  "sourceCommit": "24ff88262671e50589d14a23c216576815a27705",
   "files": [
     {
       "path": "amvera.yml",
@@ -119,7 +119,7 @@
     },
     {
       "path": "src/app.js",
-      "sha": "ec15af23df296cbe9807d6a99479cf5af380f864"
+      "sha": "bde7c6d374c0884b71c931b3832e0a769d49e888"
     },
     {
       "path": "src/core/business-clock.js",
@@ -127,7 +127,7 @@
     },
     {
       "path": "src/core/cloud-release.js",
-      "sha": "63af9c39cdce04032b23ee7154d4a66d222dfc89"
+      "sha": "d5f007caa960ff5978c0ad8e1f19c8e15d4d9cbb"
     },
     {
       "path": "src/core/db.js",
@@ -427,7 +427,11 @@
     },
     {
       "path": "src/ui/cloud-pilot.css",
-      "sha": "6e4146184b62a2088cdeb8b355ac0d8dc6abd257"
+      "sha": "25f6caa647239cfbadeab1eb05201c84f9f07e6a"
+    },
+    {
+      "path": "src/ui/cloud-save-state.js",
+      "sha": "bd5073f59005b257705edd94b9bbe5b4dbf9ae9f"
     },
     {
       "path": "src/ui/editor.css",
