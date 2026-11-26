@@ -173,6 +173,7 @@ function employeeCard(main,id){
   employeeTab=key;for(const b of nav.children)b.classList.toggle('selected',b.dataset.tab===key);
   body.replaceChildren();
   if(key==='overview'){
+   body.append(pane('Рабочие записи сотрудника',add(el('div',undefined,'row'),btn('Мой план',()=>employeeDestination(id,{page:'my_plan',options:{personId:id}})),btn('Календарь',()=>employeeDestination(id,{page:'calendar',options:{personId:id,month:''}})),btn('Мероприятия',()=>employeeDestination(id,{page:'actions',options:{personId:id}})),btn('Самооценка и аудиты',()=>employeeDestination(id,{page:'analytics',options:{assessmentType:'comparison',personId:id}})))));
    body.append(pane('Связанные данные',el('p','Все сведения берутся из общей базы по идентификатору сотрудника. Для исходных СОП и ФРВ предусмотрен отдельный поиск сохранённых ссылок.','muted'),add(el('div',undefined,'employee-overview'),...employeeTabs.slice(1).map(([k,label])=>btn(label+' · '+groups[k].length,()=>show(k),'employee-section-button')))));
    const open=groups.training.filter(x=>['active','planned','in_progress'].includes(x.state));if(open.length)body.append(pane('Действующее обучение',recordsTable(open.slice(0,10))));
    const active=groups.matrices.filter(x=>x.state==='active');if(active.length)body.append(pane('Действующие матрицы',recordsTable(active)));return
@@ -183,7 +184,7 @@ function employeeCard(main,id){
   if(key==='matrices'&&!p.archived)section.append(btn('Создать матрицу с сотрудником',()=>employeeDestination(id,{page:'skills',options:{mode:'builder',personId:id}}),'primary'));
   if(key==='training'&&!p.archived)section.append(btn('Назначить обучение',()=>employeeDestination(id,{page:'twi',options:{mode:'new',traineeId:id}}),'primary'));
   if(key==='assessments')section.append(btn('Журнал практических оценок',()=>employeeDestination(id,{page:'practical',options:{personId:id}})),...(!p.archived?[btn('Новая практическая оценка',()=>employeeDestination(id,{page:'practical',options:{mode:'new',personId:id}}),'primary')]:[]));
-  if(key==='mentoring')section.append(btn('Аудиты L1',()=>employeeDestination(id,{page:'audit',options:{personId:id}})),btn('Самооценки',()=>employeeDestination(id,{page:'self_eval',options:{personId:id}})),...(!p.archived?[btn('Новая самооценка',()=>employeeDestination(id,{page:'self_eval',options:{mode:'new',personId:id}}))]:[]));
+  if(key==='mentoring')section.append(btn('Аудиты L1',()=>employeeDestination(id,{page:'audit',options:{personId:id}})),btn('Самооценки',()=>employeeDestination(id,{page:'self_eval',options:{personId:id}})),btn('Сопоставление с аудитами',()=>employeeDestination(id,{page:'analytics',options:{assessmentType:'comparison',personId:id}})),...(!p.archived?[btn('Новая самооценка',()=>employeeDestination(id,{page:'self_eval',options:{mode:'new',personId:id}}))]:[]));
   if(key==='development'&&!p.archived)section.append(btn('Создать план развития',()=>employeeDestination(id,{page:'development',options:{mode:'new',personId:id}}),'primary'));
   if(key==='documents'){
    const sourceOut=el('div'),searchSources=btn('Найти связи в оригиналах СОП и ФРВ',async()=>{searchSources.disabled=true;sourceOut.replaceChildren(el('p','Проверяются ссылки в исходных файлах…','muted'));try{

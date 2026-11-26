@@ -23,7 +23,7 @@ export function comparisonContext(db,selfId,versionId){
  const version=one(db,"SELECT v.*,c.code method_code FROM checklist_version v JOIN checklist c ON c.id=v.checklist_id WHERE v.id=?",[versionId]);
  if(!self||self.method_code!=='TWI_SELF_APP12'||version?.method_code!=='TWI_L1_RC1')return null;
  const selfCriteria=exactMethod(db,self.method_id,BUILTIN_SELF.criteria),auditCriteria=exactMethod(db,versionId,RC1_CRITERIA);
- return {self,version,selfCriteria,auditCriteria,compatible:!!(selfCriteria&&auditCriteria&&!version.legacy_context_json)};
+ return {self,version,selfCriteria,auditCriteria,compatible:!!(selfCriteria&&auditCriteria&&!version.legacy_context_json&&one(db,'SELECT count(*) n FROM mentor_self_evaluation WHERE person_id=? AND evaluated_on=?',[self.person_id,self.evaluated_on]).n===1)};
 }
 export function matchedComparison(db,selfId,responseId){
  const a=one(db,`SELECT a.mentor_id,a.version_id,a.state,a.assignment_id,a.observed_at,r.response,c.code FROM audit_response r JOIN audit_session a ON a.id=r.audit_id JOIN checklist_criterion c ON c.id=r.criterion_id WHERE r.id=?`,[responseId]);
@@ -38,16 +38,16 @@ export function compareMentor(db,{selfId,versionId,from='',to='',revisionId=''})
  const next=one(db,'SELECT min(evaluated_on) day FROM mentor_self_evaluation WHERE person_id=? AND evaluated_on>?',[self.person_id,self.evaluated_on])?.day;
  const audits=rows(db,`SELECT a.*,d.code sop_code,d.title sop_title,r.version_no sop_version FROM audit_session a JOIN document_revision r ON r.id=a.standard_revision_id JOIN document d ON d.id=r.document_id WHERE a.state='final' AND a.assignment_id IS NOT NULL AND a.mentor_id=? AND a.version_id=? AND a.observed_at>=? ORDER BY a.observed_at,a.id`,[self.person_id,versionId,self.evaluated_on]).filter(a=>(!next||a.observed_at.slice(0,10)<next)&&(!from||a.observed_at.slice(0,10)>=from)&&(!to||a.observed_at.slice(0,10)<=to)&&(!revisionId||a.standard_revision_id===revisionId));
  const ids=new Set(audits.map(a=>a.id)),all=rows(db,`SELECT r.*,a.observed_at,a.standard_revision_id FROM audit_response r JOIN audit_session a ON a.id=r.audit_id WHERE a.version_id=? AND a.mentor_id=? AND a.state='final'`,[versionId,self.person_id]).filter(r=>ids.has(r.audit_id));
- const index=new Map(auditCriteria.map(q=>[Number(q.code),q])),makeRows=data=>selfCriteria.map(q=>{
+ const index=new Map(auditCriteria.map(q=>[Number(q.code),q])),makeRows=(data,auditCount)=>selfCriteria.map(q=>{
   const map=MAP[q.position],level=answers.get(q.id)??null;
   if(!map)return {criterion:q,level,kind:'unmapped',basis:'В L1 нет достаточного наблюдения этого знания или навыка.',yes:0,no:0,unrated:0,observed:0,negative:[],criteria:[],status:'unmapped'};
   const criteria=map.codes.map(k=>index.get(k)),keys=new Set(criteria.map(q=>q.id)),r=data.filter(x=>keys.has(x.criterion_id)),yes=r.filter(x=>x.response==='yes').length,no=r.filter(x=>x.response==='no').length;
   // missing rows and nonbinary observations are not failures.
-  const count=new Set(data.map(x=>x.audit_id)).size,unrated=Math.max(0,count*criteria.length-yes-no);
+  const unrated=Math.max(0,auditCount*criteria.length-yes-no);
   const negative=r.filter(x=>x.response==='no').map(x=>({id:x.id,auditId:x.audit_id,date:x.observed_at,criterion:criteria.find(q=>q.id===x.criterion_id)}));
   const status=!yes&&!no?'no_evidence':level===null?'no_self':level>=3&&no?'discuss':no?'development':yes?'observed':'no_evidence';
   return {criterion:q,level,kind:map.kind,basis:map.basis,yes,no,unrated,observed:yes+no,negative,criteria,status}
  });
- const keys=[...new Set(audits.map(a=>a.standard_revision_id))],groups=keys.map(key=>{const context=audits.find(a=>a.standard_revision_id===key),aa=audits.filter(a=>a.standard_revision_id===key),set=new Set(aa.map(a=>a.id));return {revisionId:key,context,audits:aa,rows:makeRows(all.filter(x=>set.has(x.audit_id)))}});
- return {compatible:true,version:CROSSWALK_VERSION,self,nextDate:next||null,audits,groups,rows:revisionId?groups[0]?.rows||makeRows([]):[],unmapped:selfCriteria.filter(q=>!MAP[q.position]).length};
+ const keys=[...new Set(audits.map(a=>a.standard_revision_id))],groups=keys.map(key=>{const context=audits.find(a=>a.standard_revision_id===key),aa=audits.filter(a=>a.standard_revision_id===key),set=new Set(aa.map(a=>a.id));return {revisionId:key,context,audits:aa,rows:makeRows(all.filter(x=>set.has(x.audit_id)),aa.length)}});
+ return {compatible:true,version:CROSSWALK_VERSION,self,nextDate:next||null,audits,groups,rows:revisionId?groups[0]?.rows||makeRows([],0):[],unmapped:selfCriteria.filter(q=>!MAP[q.position]).length};
 }
