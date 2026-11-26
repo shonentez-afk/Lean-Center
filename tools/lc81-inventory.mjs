@@ -7,8 +7,8 @@ import {DOMAIN_TYPES} from '../src/modules/library/domain.js';
 import {READ_ACTIONS,RESOURCE_TABLES,REFERENCE_CREATE_TYPES,COMMAND_ACTIONS} from '../server/lc81/access-contract.mjs';
 const {SQL,schema,migration}=await pilotSql(),db=createDb(SQL,schema,migration);
 try{
- const source=await fs.readFile('src/app.js','utf8'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
- const nav=ast.body.flatMap(n=>n.type==='VariableDeclaration'?n.declarations:[]).find(n=>n.id.name==='navGroups')?.init;
+ const source=await fs.readFile('src/ui/navigation.js','utf8'),ast=parse(source,{ecmaVersion:'latest',sourceType:'module'});
+ const nav=ast.body.map(n=>n.type==='ExportNamedDeclaration'?n.declaration:n).flatMap(n=>n?.type==='VariableDeclaration'?n.declarations:[]).find(n=>n.id.name==='navGroups')?.init;
  if(nav?.type!=='ArrayExpression')throw Error('Missing navGroups');
  const pageSupport={person:'person.read_basic',sop:'sop.read_effective',twi:'training.read',actions:'task.read'};
  const sections=nav.elements.map(g=>({group:g.elements[0].value,pages:g.elements[1].elements.map(p=>({id:p.value,qa:p.value==='person'?'basic metadata only':pageSupport[p.value]?'limited projection only':'not connected; deny'}))}));

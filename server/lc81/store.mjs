@@ -7,8 +7,9 @@ import {fileURLToPath} from 'node:url';
 import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-store.mjs';
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
-import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask} from './read-policy.mjs';
-import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS} from './access-contract.mjs';
+import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory} from './read-policy.mjs';
+import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY_COMMANDS} from './access-contract.mjs';
+import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {refsForDb,checkContent,MAX_CONTENT} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
 const SITE='8c810000-0000-4000-8000-000000000003';
@@ -58,12 +59,24 @@ function security(db,accountId){
  }).map(g=>({...g,scope:JSON.parse(g.scope_json)}));
  return {accounts:[a],policies,grants};
 }
+function readFor(db,a,action,id,d){
+ return a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,d):readAuthorized(db,security(db,a.id),a.id,action,id,d);
+}
+function directoryAllowed(db,a,action,anchorAction,id,d){
+ return DIRECTORY_COMMANDS.includes(action)&&(a.bootstrap===1?!!readManagerProjection(db,config(db).site,anchorAction,id,d):canChangeDirectory(db,security(db,a.id),a.id,action,anchorAction,id,d));
+}
+function directoryView(db,a,action,data,d){
+ const type=Object.keys(DIRECTORIES).find(t=>DIRECTORIES[t].read===action);
+ if(!type)return data;
+ const def=DIRECTORIES[type];
+ return {...data,can_update:directoryAllowed(db,a,def.update,action,data.id,d),can_archive:!!def.archive&&directoryAllowed(db,a,def.archive,action,data.id,d)};
+}
 function projectView(db,a,action,data,d){
- if(action!=='task.read')return data;
+ if(action!=='task.read')return directoryView(db,a,action,data,d);
  return {...data,can_implement:a.bootstrap!==1&&['open','in_progress','ineffective'].includes(data.state)&&canImplementOwnTask(db,security(db,a.id),a.id,data.id,d)};
 }
 function permissionsFor(db,a){
- if(a.bootstrap===1)return [...READ_ACTIONS]; // Unbound bootstrap cannot perform personal decisions.
+ if(a.bootstrap===1)return [...READ_ACTIONS,...DIRECTORY_COMMANDS]; // Unbound bootstrap cannot perform personal decisions.
  const d=day(),s=security(db,a.id),out=new Set();
  for(const g of s.grants){
   if(g.revoked_at!==null||!period(g,d)||!roleRow(db,g.role_id))continue;
@@ -285,6 +298,30 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const table=RESOURCE_TABLES[action];
    const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day()):readAuthorized(db,s,actor,action,id,day())).filter(Boolean).map(v=>projectView(db,a,action,v.data,day()));
   })},
+  directoryInfo(actor,type){
+   return read(db=>{
+    const a=account(db,actor);
+    must(a&&Object.hasOwn(DIRECTORIES,type),404,'Справочник недоступен');
+    const d=DIRECTORIES[type],date=day();
+    must(permissionsFor(db,a).includes(d.read),404,'Справочник недоступен');
+    const refs={};
+    for(const [t,action] of [['org_unit','org.read'],['equipment','equipment.read'],['workplace','workplace.read']]){
+     refs[t]=rows(db,'SELECT id FROM '+t+' WHERE archived=0 ORDER BY id').flatMap(({id})=>{
+      const r=readFor(db,a,action,id,date);
+      return r?[{id,label:r.data.name,unit_id:r.data.unit_id??null,can_create:type==='org_unit'||type==='person'||type==='equipment'||type==='workplace'||type==='operation'?t==='org_unit'&&directoryAllowed(db,a,d.create,'org.read',id,date):false}]:[];
+     });
+    }
+    return {type,definition:directorySchema(type),refs,can_create:refs.org_unit.some(x=>x.can_create),day:date};
+   });
+  },
+  changeDirectory(actor,revision,input){
+   return mutate(db=>{
+    const a=account(db,actor);must(a&&a.credential_revision===revision,401,'Сеанс завершён');
+    const d=day();
+    must(Object.hasOwn(DIRECTORIES,input?.type)&&permissionsFor(db,a).includes(DIRECTORIES[input.type].read),403,'Справочник недоступен');
+    return applyDirectoryCommand(db,input,{day:d,at:at(),site:config(db).site,read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchorAction,id)=>directoryAllowed(db,a,action,anchorAction,id,d),audit:(action,target)=>audit(db,actor,action,target)});
+   });
+  },
   implementOwnTask(actor,revision,input){
    return mutate(db=>{
     const a=account(db,actor);

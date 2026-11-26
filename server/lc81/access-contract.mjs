@@ -3,6 +3,9 @@
 // and therefore denied. No wildcard permissions or dynamic table names.
 export const RESOURCE_TABLES=Object.freeze({
  'person.read_basic':'person',
+ 'person.read_directory':'person',
+ 'equipment.read':'equipment',
+ 'workplace.read':'workplace',
  'sop.read_effective':'document_revision',
  'training.read':'training_assignment',
  'task.read':'action_item',
@@ -22,6 +25,14 @@ export const RESOURCE_TABLES=Object.freeze({
  "calendar.read":"schedule_event"
 });
 export const READ_ACTIONS=Object.freeze(Object.keys(RESOURCE_TABLES));
-export const COMMAND_ACTIONS=Object.freeze(['task.implement_own']);
+export const DIRECTORIES=Object.freeze({
+ person:{read:'person.read_directory',create:'person.create',update:'person.update',archive:null},
+ org_unit:{read:'org.read',create:'org.create',update:'org.update',archive:null},
+ equipment:{read:'equipment.read',create:'equipment.create',update:'equipment.update',archive:'equipment.archive'},
+ workplace:{read:'workplace.read',create:'workplace.create',update:'workplace.update',archive:'workplace.archive'},
+ operation:{read:'operation.read',create:'operation.create',update:'operation.update',archive:'operation.archive'}
+});
+export const DIRECTORY_COMMANDS=Object.freeze(Object.values(DIRECTORIES).flatMap(d=>[d.create,d.update,d.archive].filter(Boolean)));
+export const COMMAND_ACTIONS=Object.freeze(['task.implement_own',...DIRECTORY_COMMANDS]);
 export const PERMISSIONS=Object.freeze([...READ_ACTIONS,...COMMAND_ACTIONS]);
 export const REFERENCE_CREATE_TYPES=Object.freeze(['person','org_unit','business_role','role_assignment','person_assignment']);

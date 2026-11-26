@@ -33,6 +33,8 @@ import * as local from './storage/local.js';
 import * as net from './storage/network.js';
 import {cloudPilotTransport} from './storage/cloud-pilot.js';
 import {cloudSaveState} from './ui/cloud-save-state.js';
+import {navGroups} from './ui/navigation.js';
+import {registryFields} from './ui/registry-fields.js';
 const root=document.getElementById('app');
 let registryConflict=null,registryPage=0,volatileChanges=0;
 const REGISTRY_PAGE_SIZE=100;
@@ -47,16 +49,7 @@ const contentStore=new ContentStore(()=>cache,()=>folder,()=>cloud),readContent=
 const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
 const planned={forms:'Бланки и методики',sop:'Каталог СОП',sop_constructor:'Конструктор СОП',frv:'ФРВ',twi_plans:'Планы инструктажа TWI',sop_evaluation:'Оценка СОП',my_plan:'Мой план',twi:'План производственного обучения',programs:'Ввод в профессию',internship:'Программы стажировки',preparation:'Подготовка сотрудников',knowledge_bank:'Банк вопросов',supplements:'Ходатайства о доплатах',instruction:'Инструктажи TWI',retraining:'Переобучение',journal:'Журнал заданий',skills:'Матрица компетенций',practical:'Практические оценки',development:'Планы развития',mentoring:'Наставники и ВТ',self_eval:'Самооценка',certification:'Сертификация',appointments:'Назначения',audit:'Аудиты 1-го уровня',calendar:'Календарь',actions:'Задачи и мероприятия',analytics:'Аналитика центра',metrics:'Дерево метрик',roi:'ROI-модель',ai:'Помощник центра',audit_import:'Импорт аудитов RC1',sop_review:'Сохранённая оценка СОП'};
 const labels={home:'Дашборд',...Object.fromEntries(Object.entries(definitions).map(([k,v])=>[k,v.label])),...planned,org_unit:'Структура предприятия',import_xlsx:'Импорт данных',storage:'Настройки и обмен'};
-const navGroups=[
- ['Ежедневная работа',['home','ai','my_plan','calendar','actions']],
- ['Стандартизация и улучшения',['sop','sop_constructor','frv','sop_evaluation']],
- ['Производственное обучение',['twi_plans','twi','programs','internship','preparation','knowledge_bank','instruction','retraining','journal']],
- ['Люди и компетенции',['person','workplace','skills','practical','development']],
- ['Наставники и ВТ',['mentoring','self_eval','certification','appointments','audit','supplements']],
- ['Аналитика',['analytics','metrics','roi']],
- ['Управление центром',['org_unit','forms','import_xlsx','storage']],
- ['Справочники',['profession','position','work_shift','equipment','operation','person_assignment','business_role','role_assignment','skill_category','skill','rating_scale']]
-];
+
 const implemented=new Set(['home','ai','sop','sop_constructor','frv','twi_plans','sop_evaluation','storage','import_xlsx',...TRAINING_PAGES,...Object.keys(definitions)]);
 const collapsedNav=new Set(['Производственное обучение','Наставники и ВТ','Аналитика','Справочники']);
 let librarySelected=null,libraryRevisionSelected=null,evaluationSelected=null,evaluationTab='weighted',evaluationSearch='',employeeSelected=null,employeeTab='overview',employeeReturn=null,employeeSources=null;
@@ -181,23 +174,9 @@ function directoryOverview(main){ main.append(sectionHeading('Справочни
 }
 
 function form(type,v){
- const d=definitions[type],f=el('form'),grid=el('div',undefined,'formgrid'),controls={};
- for(const [k,x] of Object.entries(d.fields)){
-  let input;const initial=v?.[k]??(k==='criticality'?'normal':k==='kind'?'Участок':k==='valid_from'?today():k==='version_no'?'1':'');
-  if(x.legacy){input=el('input');input.type='hidden';input.name=k;input.value=initial;controls[k]=input;grid.append(input);if(initial)grid.append(add(el('div',undefined,'field'),el('span',x.label),el('p',initial,'muted')));continue}
-  if(x.ref||x.options){
-   input=el('select');const option=el('option','—');option.value='';input.append(option);
-   const opts=x.ref?list(ws.working,x.ref).filter(y=>!y.archived||v?.[k]===y.id).map(y=>[y.id,refOption(x.ref,y)]):x.options.map(y=>[y,y==='normal'?'Обычная':y==='important'?'Важная':y==='critical'?'Критическая':y]);
-   for(const [value,label] of opts){const o=el('option',label);o.value=value;input.append(o)}
-  }else if(x.multiline){input=el('textarea');input.rows=5;input.maxLength=5000;input.placeholder='0: Название уровня\n1: Название уровня'}
-  else{input=el('input');input.type=x.date?'date':x.integer?'number':'text';input.maxLength=500;if(x.integer){input.min='1';input.step='1'}}
-  input.name=k;input.required=!!x.required;input.value=initial;controls[k]=input;
-  if(d.history&&v?.id&&k!=='valid_to')input.disabled=true;
-  if(d.history&&v?.valid_to&&k==='valid_to')input.disabled=true;
-  grid.append(add(el('label',undefined,'field'),el('span',x.label),input));
- }
+ const d=definitions[type],f=el('form');
+ const {grid,controls,values}=registryFields(d,v,{today,optionsFor:(ref,k,record)=>list(ws.working,ref).filter(y=>!y.archived||record?.[k]===y.id).map(y=>[y.id,refOption(ref,y)])});
  const submit=el('button','Сохранить','primary');submit.type='submit';submit.disabled=busy||cloudReadonly();
- const values=()=>Object.fromEntries(Object.entries(controls).map(([k,n])=>[k,n.value||null]));
  f.dataset.registryForm='1';
  f.onsubmit=e=>{e.preventDefault();if(cloudReadonly()){message('Только чтение',true);return}const payload=values();run(async()=>{ws.edit(type,v?.id||null,payload);edit=null;return 'Запись сохранена локально. Изменение ожидает публикации.'},{retainForm:true})};
  if(registryConflict?.type===type&&registryConflict.id===(v?.id||null)){

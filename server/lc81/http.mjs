@@ -77,6 +77,8 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='POST'&&p==='/api/lc81/admin/policy'){reply(res,200,await store.setPolicy(a.id,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/grant'){reply(res,200,await store.grant(a.id,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/revoke'){const b=await body(req);must(keys(b,['id']),400,'Неверные поля');reply(res,200,await store.revoke(a.id,b.id));return}
+   if(req.method==='GET'&&p==='/api/lc81/directory/info'){reply(res,200,store.directoryInfo(a.id,url.searchParams.get('type')));return}
+   if(req.method==='POST'&&p==='/api/lc81/directory/change'){reply(res,200,await store.changeDirectory(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/tasks/implement'){reply(res,200,await store.implementOwnTask(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/resources'){
     const action=url.searchParams.get('action'),id=url.searchParams.get('id');

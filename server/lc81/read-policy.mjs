@@ -3,7 +3,7 @@
 // No client-supplied role, scope, actor, SQL, or resource attributes are accepted.
 import {one,rows,isId} from '../../src/core/primitives.js';
 
-import {READ_ACTIONS,PERMISSIONS} from './access-contract.mjs';
+import {READ_ACTIONS,PERMISSIONS,DIRECTORY_COMMANDS} from './access-contract.mjs';
 import {documentTitle} from '../../src/modules/library/revision-title.js';
 export {READ_ACTIONS};
 const validDay=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
@@ -22,7 +22,8 @@ function lineage(db,id){
 }
 const inside=(db,root,id)=>lineage(db,id)?.has(root)===true;
 function unitsFor(db,person,day){
- return rows(db,'SELECT unit_id FROM person_assignment WHERE person_id=? AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)',[person,day,day]).map(x=>x.unit_id).filter(id=>lineage(db,id));
+ const a=rows(db,'SELECT unit_id FROM person_assignment WHERE person_id=? AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)',[person,day,day]);
+ return a.length===1&&lineage(db,a[0].unit_id)?[a[0].unit_id]:[];
 }
 // Fixed SQL, fixed output allowlists. No source JSON, full snapshots, logs,
 // credentials, personal assessments, or attachment bytes in these projections.
@@ -31,6 +32,12 @@ function resolve(db,action,id,day){
   const p=activePerson(db,id);
   if(!p)return null;
   return {data:{id:p.id,display_name:p.display_name},self:p.id,units:unitsFor(db,p.id,day),assigned:[]};
+ }
+ if(action==='person.read_directory'){
+  const p=one(db,'SELECT id,employee_code,display_name,rev FROM person WHERE id=? AND archived=0',[id]),units=unitsFor(db,id,day);
+  if(!p||units.length!==1)return null;
+  const a=one(db,"SELECT u.name AS unit,COALESCE(pos.name,prof.name,'') AS position FROM person_assignment a JOIN org_unit u ON u.id=a.unit_id LEFT JOIN position pos ON pos.id=a.position_id LEFT JOIN profession prof ON prof.id=a.profession_id WHERE a.person_id=? AND a.valid_from<=? AND (a.valid_to IS NULL OR a.valid_to>=?)",[id,day,day]);
+  return {data:{...p,...a},self:null,units,assigned:[]};
  }
  if(action==='sop.read_effective'){
   const r=one(db,"SELECT r.id AS revision_id,r.version_no,r.state,d.id AS document_id,d.code,d.title,o.id AS operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.id=? AND r.state='effective' AND d.kind='sop' AND d.archived=0 AND o.archived=0",[id]);
@@ -56,13 +63,21 @@ function resolve(db,action,id,day){
   return {data,self:owner_id,units:standalone?unitsFor(db,owner_id,day):[],assigned:[]};
  }
  if(action==='org.read'){
-  const r=one(db,'SELECT id,code,name,kind FROM org_unit WHERE id=? AND archived=0',[id]);
+  const r=one(db,'SELECT id,code,name,kind,parent_id,rev FROM org_unit WHERE id=? AND archived=0',[id]);
   return r&&lineage(db,r.id)?{data:r,self:null,units:[r.id],assigned:[]}:null;
  }
- if(action==='operation.read'){
-  const r=one(db,'SELECT id,code,name,criticality,unit_id FROM operation WHERE id=? AND archived=0',[id]);
-  if(!r||!lineage(db,r.unit_id))return null;
-  const {unit_id,...data}=r;return {data,self:null,units:[unit_id],assigned:[]};
+ if(['operation.read','equipment.read','workplace.read'].includes(action)){
+  const sql={
+   'operation.read':'SELECT id,code,name,criticality,unit_id,equipment_id,workplace_id,rev FROM operation WHERE id=? AND archived=0',
+   'equipment.read':'SELECT id,code,name,unit_id,rev FROM equipment WHERE id=? AND archived=0',
+   'workplace.read':'SELECT id,code,name,unit_id,rev FROM workplace WHERE id=? AND archived=0'
+  }[action];
+  const r=one(db,sql,[id]);if(!r||!lineage(db,r.unit_id))return null;
+  // Ref labels are limited to the object's own unit. No foreign unit refs.
+  if(action==='operation.read'){
+   for(const [key,table] of [['equipment_id','equipment'],['workplace_id','workplace']])if(r[key]&&!one(db,'SELECT id FROM '+table+' WHERE id=? AND unit_id=?',[r[key],r.unit_id]))return null;
+  }
+  return {data:r,self:null,units:[r.unit_id],assigned:[]};
  }
  if(action==='sop.read_history'||action==='sop.read_steps'){
   const r=one(db,"SELECT r.id AS revision_id,r.version_no,r.state,r.created_at,r.effective_at,r.review_due,d.id AS document_id,d.code,o.id AS operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.id=? AND d.kind='sop' AND o.archived=0",[id]);
@@ -164,7 +179,7 @@ function decide(db,security,accountId,action,resourceId,day,resourceAction=actio
   if(!role||assignment?.person_id!==account.person_id||assignment.role_id!==role.id||!activePeriod(assignment,day))continue;
   const policy=unique(security.policies,x=>x?.role_id===role.id);
   if(!policy||!Number.isSafeInteger(policy.revision)||policy.revision<1||grant.policy_revision!==policy.revision||!Array.isArray(policy.permissions)||!policy.permissions.includes(action))continue;
-  if(scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
+  if((!DIRECTORY_COMMANDS.includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
  }
  return null;
 }
@@ -182,4 +197,10 @@ export function readAuthorized(db,security,accountId,action,resourceId,day){
 }
 export function canImplementOwnTask(db,security,accountId,id,day){
  return !!decide(db,security,accountId,'task.implement_own',id,day,'task.read');
+}
+
+// Directory changes are never self/assigned privileges. The caller chooses
+// the fixed action and resource anchor from the closed directory contract.
+export function canChangeDirectory(db,security,accountId,action,anchorAction,id,day){
+ return DIRECTORY_COMMANDS.includes(action)&&!!decide(db,security,accountId,action,id,day,anchorAction);
 }
