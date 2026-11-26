@@ -5,7 +5,7 @@ import {auditRegistry} from './audit-analytics.js';
 import {assessmentRegistry} from './assessment-review.js';
 import {actionRows,actionStatus,actionPeople} from './audit-domain.js';
 import {compareMentor} from './mentor-comparison.js';
-import {scheduleKind,schedulePeople,schedulePending} from './center-planning.js';
+import {scheduleKind,schedulePeople,schedulePending,scheduleScopeDate} from './center-planning.js';
 import {corporateEvaluations,weightedHistory} from '../library/sop-assessment-review.js';
 import {frvRegistry} from '../library/frv-effect.js';
 const open=s=>['open','in_progress','implemented','ineffective'].includes(s);
@@ -38,7 +38,7 @@ export function centerMetrics(db,{day,from='',to=day,unitId='',personId=''}){
  const actions=actionRows(db).map(x=>({...x,status:actionStatus(db,x)})).filter(x=>(!unitId||personUnit(db,x.owner_id,day)===unitId)&&(!personId||actionPeople(x).includes(personId))),pending=actions.filter(x=>open(x.status)),implemented=actions.filter(x=>x.implemented_at&&inPeriod(x.implemented_at)),verified=implemented.filter(x=>x.status==='verified');
  const sop=corporateEvaluations(db).filter(x=>inPeriod(x.date)&&scope(x.unit_id,x.actor_id)),weighted=weightedHistory(db).filter(x=>inPeriod(x.date)&&scope(x.unit_id,x.actor_id)),docs=rows(db,`SELECT r.*,d.operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.archived=0`).filter(x=>scope(x.unit_id,x.author_id));
  const frv=frvRegistry(db).filter(x=>x.state==='final'&&inPeriod(x.observed_at)&&scope(x.unit_id,x.author_id));
- const schedules=rows(db,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(db,x)&&(!unitId||personUnit(db,x.owner_id,day)===unitId)&&(!personId||schedulePeople(db,x).includes(personId)));
+ const schedules=rows(db,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(db,x)&&(!unitId||personUnit(db,x.owner_id,scheduleScopeDate(db,x,day))===unitId)&&(!personId||schedulePeople(db,x).includes(personId)));
  const requirements=matrixData(db,day),cells=requirements.people.filter(p=>scope(p.unit_id,p.id)).flatMap(p=>requirements.skills.map(s=>requirements.cells.get(p.id+':'+s.id)).filter(c=>c.goal));
  const count=(group,label,value,definition,page,options={})=>({group,label,value,denominator:null,definition,page,options});
  const ratio=(group,label,value,denominator,definition,page,options={})=>({group,label,value,denominator,definition,page,options});

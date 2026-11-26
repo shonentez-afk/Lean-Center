@@ -12,6 +12,13 @@ export function scheduleDisplayState(db,s){
 }
 export const schedulePending=(db,s)=>['planned','needs_replan'].includes(scheduleDisplayState(db,s));
 export const scheduleStateLabel=(db,s)=>({planned:'Запланировано',done:'Выполнено',cancelled:'Отменено',needs_replan:'Требует перепланирования',replanned:'Перепланировано'})[scheduleDisplayState(db,s)]||s.state;
+// Completed plans belong to the unit at the date of the registered fact.
+ // Open plans remain in the current responsibility scope; cancelled plans
+ // without a fact use their planned date. No current-unit fallback for history.
+export function scheduleScopeDate(db,s,day){
+ const fact=s.completed_audit_id?one(db,'SELECT observed_at day FROM audit_session WHERE id=?',[s.completed_audit_id]):s.completed_assessment_id?one(db,'SELECT assessed_at day FROM assessment_session WHERE id=?',[s.completed_assessment_id]):s.completed_self_id?one(db,'SELECT evaluated_on day FROM mentor_self_evaluation WHERE id=?',[s.completed_self_id]):null;
+ return fact?.day?fact.day.slice(0,10):s.state==='planned'?day:s.due_on;
+}
 export function schedulePeople(db,s){
  const a=['audit','practical'].includes(scheduleKind(s))?one(db,'SELECT trainee_id,mentor_id,supervisor_id FROM training_assignment WHERE id=?',[s.source_id]):null;
  return [...new Set([s.owner_id,...(a?[a.trainee_id,a.mentor_id,a.supervisor_id]:[]),...(scheduleKind(s)==='self_eval'?[s.source_id]:[])].filter(Boolean))];

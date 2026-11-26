@@ -123,7 +123,7 @@ test('LC5.2 FRV losses preserve recorded causes; ROI requires verified facts and
  }finally{f.w.close()}});
 
 import {assessmentAnalysis} from '../src/ui/assessment-analysis.js';
-import {plannedAuditFacts,scheduleDisplayState,schedulePending} from '../src/modules/training/center-planning.js';
+import {plannedAuditFacts,scheduleDisplayState,schedulePending,scheduleScopeDate,scheduleStateLabel} from '../src/modules/training/center-planning.js';
 test('LC5.3 local analysis preserves RC1 recommendation order, progress, denominator and distinct scales',()=>{
  const qs=RC1_CRITERIA.map(q=>({...q,id:String(q.code),position:q.code,section_code:q.section})),responses=qs.map((q,i)=>({criterion_id:q.id,value:[0,7,8,9].includes(i)?0:i===1?'not_observed':1,note:i===1?'Не было возможности':''})),a=assessmentAnalysis(qs,responses);
  assert(a.complete);assert.equal(a.count,19);assert.equal(a.exceptions.length,1);assert.equal(a.weak.length,4);assert.deepEqual(a.top.map(q=>q.position),[1,8,9]);assert.equal(a.top[0].suggestion,RC1_CRITERIA[0].recommendation);assert.equal(a.value,100*15/19);assert.equal(a.weakest.label,RC1_CRITERIA[7].section);
@@ -151,4 +151,20 @@ test('LC5.3 calendar does not offer pre-plan, used or annulled audit records',as
  await f.stage(a,jiStages('classic')[1].code);const next=rows(db,'SELECT id FROM training_session WHERE assignment_id=?',[a]).find(x=>x.id!==fact.id),fresh=(await f.save('audit_session',{...p,assignment_rev:f.getAssignment(a).rev,session_id:next.id})).entity_id;assert.deepEqual(plannedAuditFacts(db,s(),date).map(x=>x.id),[fresh]);await f.save('schedule_event',{command:'complete',audit_id:fresh},plan);assert.equal(s().state,'done');assert.equal(plannedAuditFacts(db,s(),date).length,0);
  await f.save('audit_session',{command:'void',reason:'QA аннулирование'},fresh);assert.equal(scheduleDisplayState(db,s()),'needs_replan');assert.equal(schedulePending(db,s()),true);assert.equal(s().completed_audit_id,fresh);await assert.rejects(f.save('schedule_event',{command:'replan',due_on:'2026-02-01'},plan),/другую дату/);
  const replan=await f.save('schedule_event',{command:'replan',due_on:'2026-02-02'},plan);assert.equal(scheduleDisplayState(db,s()),'replanned');assert.equal(s().completed_audit_id,fresh);assert.equal(one(db,'SELECT state FROM schedule_event WHERE id=?',[replan.id]).state,'planned');assert.deepEqual(plannedAuditFacts(db,one(db,'SELECT * FROM schedule_event WHERE id=?',[replan.id]),date),[]);assert.deepEqual(rows(db,'PRAGMA foreign_key_check'),[])
+ }finally{f.w.close()}});
+
+test('LC5.4.1 calendar scope preserves unit on actual audit date and explains cancelled plan recurrence',async()=>{const f=await fixture();try{
+ const db=f.w.working,role=f.w.edit('business_role',null,{code:'INTERNAL_TRAINER',name:'Внутренний тренер'});f.w.edit('role_assignment',null,{person_id:f.actor,role_id:role,valid_from:'2020-01-01',valid_to:null});
+ const a=await f.addAssignment();await f.approve(a);await f.stage(a,'prepare');
+ const plan=(await f.save('schedule_event',{assignment_id:a,owner_id:f.actor,due_on:'2026-02-01'})).entity_id;
+ const method=(await f.save('checklist_version',{format:'lean-audit-checklist-v1',title:'QA',source_sha256:'a'.repeat(64),criteria:RC1_CRITERIA.map(({rc1_id,...q})=>q)})).entity_id;
+ const fact=one(db,'SELECT id FROM training_session WHERE assignment_id=?',[a]),q=rows(db,'SELECT id FROM checklist_criterion WHERE version_id=? ORDER BY position',[method]),p={assignment_id:a,assignment_rev:f.getAssignment(a).rev,method_id:method,auditor_id:f.actor,session_id:fact.id,observed_on:date,responses:q.map(x=>({criterion_id:x.id,value:1,note:''})),feedback:'QA'};
+ const audit=(await f.save('audit_session',p)).entity_id;await f.save('schedule_event',{command:'complete',audit_id:audit},plan);
+ const open=(await f.save('schedule_event',{assignment_id:a,owner_id:f.actor,due_on:'2026-02-02'})).entity_id;const cancelled=(await f.save('schedule_event',{assignment_id:a,owner_id:f.actor,due_on:'2026-02-03'})).entity_id;await f.save('schedule_event',{command:'cancel'},cancelled);
+ await assert.rejects(f.save('schedule_event',{assignment_id:a,owner_id:f.actor,due_on:'2026-02-03'}),/отменённый план/);
+ const old=one(db,'SELECT * FROM person_assignment WHERE person_id=?',[f.actor]),u=f.w.edit('org_unit',null,{code:'NEW-QA',name:'Новый участок',kind:'Участок',parent_id:null});
+ const oldPayload={person_id:old.person_id,unit_id:old.unit_id,profession_id:old.profession_id,position_id:old.position_id,shift_id:old.shift_id,shift_code:old.shift_code,valid_from:old.valid_from,valid_to:'2026-06-30'};
+ f.w.edit('person_assignment',old.id,oldPayload);f.w.edit('person_assignment',null,{...oldPayload,unit_id:u,valid_from:'2026-07-01',valid_to:null});
+ const s=id=>one(db,'SELECT * FROM schedule_event WHERE id=?',[id]),today='2026-08-01',unitAt=(id,d)=>one(db,"SELECT unit_id FROM person_assignment WHERE person_id=? AND valid_from<=? AND coalesce(valid_to,'9999-12-31')>=?",[id,d,d])?.unit_id;
+ assert.equal(scheduleScopeDate(db,s(plan),today),date);assert.equal(unitAt(f.actor,scheduleScopeDate(db,s(plan),today)),f.unit);assert.equal(unitAt(f.actor,scheduleScopeDate(db,s(open),today)),u);assert.equal(unitAt(f.actor,scheduleScopeDate(db,s(cancelled),today)),f.unit);assert.equal(scheduleStateLabel(db,s(plan)),'Выполнено');
  }finally{f.w.close()}});

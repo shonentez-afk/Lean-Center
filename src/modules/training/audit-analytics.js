@@ -1,3 +1,4 @@
+import {schedulePending} from './center-planning.js';
 import {REVISION_TITLE_SQL} from '../library/revision-title.js';
 import {rows} from '../../core/db.js';
 import {scoreQuestions,actionRows,actionStatus} from './audit-domain.js';
@@ -23,5 +24,5 @@ export function summarizeAudits(db,{versionId,from='',to='',mentorId='',unitId='
 export function centerAuditIndicators(db,day){
  const audits=auditRegistry(db).filter(a=>a.state==='final'&&a.observed_at.slice(0,7)===day.slice(0,7)&&a.observed_at.slice(0,10)<=day),actions=actionRows(db).map(a=>({...a,displayState:actionStatus(db,a)})),open=actions.filter(a=>['open','in_progress','ineffective','implemented'].includes(a.displayState)),versions=[...new Set(audits.map(a=>a.version_id))];
  const month=versions.length===1?summarizeAudits(db,{versionId:versions[0],from:day.slice(0,7)+'-01',to:day}):null;
- return {auditCount:audits.length,month,versionId:versions.length===1?versions[0]:null,methodCount:versions.length,overdue:open.filter(a=>a.due_on&&a.due_on<day).length,verification:open.filter(a=>a.displayState==='implemented').length,retraining:open.filter(a=>['instructor_training','trainee_training'].includes(a.kind)).length,scheduled:rows(db,"SELECT id FROM schedule_event WHERE kind='audit' AND state='planned'").length,repeated:month?.repeated.length??null};
+ return {auditCount:audits.length,month,versionId:versions.length===1?versions[0]:null,methodCount:versions.length,overdue:open.filter(a=>a.due_on&&a.due_on<day).length,verification:open.filter(a=>a.displayState==='implemented').length,retraining:open.filter(a=>['instructor_training','trainee_training'].includes(a.kind)).length,scheduled:rows(db,"SELECT * FROM schedule_event WHERE kind='audit' AND state IN('planned','done')").filter(x=>schedulePending(db,x)).length,repeated:month?.repeated.length??null};
 }
