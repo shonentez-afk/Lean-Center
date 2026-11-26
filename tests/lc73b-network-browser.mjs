@@ -70,7 +70,7 @@ const storage=p=>nav(p,'Настройки и обмен');
 const selectFolder=async p=>{await storage(p);await btn(p,'Выбрать сетевую папку').click();await status(p,/Выбрана папка: QA simulated network/)};
 const warning=p=>p.locator('#lc-network-publication-warning');
 const refresh=async(p,warn)=>{await storage(p);await btn(p,'Обновить из папки').click();await status(p,/Загружена опубликованная база/);if(warn){await warning(p).waitFor();assert.match(await warning(p).innerText(),/пустые манифесты.*: 1\./)}else assert.equal(await warning(p).count(),0)};
-const addPerson=async(p,code)=>{await nav(p,'Сотрудники');await btn(p,'Добавить').click();await p.locator('input[name=employee_code]').fill(code);await p.locator('input[name=display_name]').fill(code);await btn(p,'Сохранить').click();await p.getByRole('cell',{name:code,exact:true}).waitFor()};
+const addPerson=async(p,code)=>{await nav(p,'Сотрудники');await btn(p,'Добавить').click();await p.locator('input[name=employee_code]').fill(code);await p.locator('input[name=display_name]').fill('Сотрудник '+code);await btn(p,'Сохранить').click();await p.getByRole('cell',{name:code,exact:true}).waitFor()};
 const checkPeople=async(p,hasB)=>{await nav(p,'Сотрудники');await p.getByRole('cell',{name:'QA-NET-A',exact:true}).first().waitFor();if(hasB)await p.getByRole('cell',{name:'QA-NET-B',exact:true}).first().waitFor();else assert.equal(await p.getByRole('cell',{name:'QA-NET-B',exact:true}).count(),0)};
 const markers=()=>[...files].filter(([k])=>/^Database\/publication-[0-9a-f-]+\.json$/.test(k));
 const committed=()=>markers().filter(([,b])=>b.length).map(([k,b])=>({key:k,...JSON.parse(b.toString('utf8'))}));
