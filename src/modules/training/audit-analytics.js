@@ -1,6 +1,6 @@
 import {schedulePending} from './center-planning.js';
 import {REVISION_TITLE_SQL} from '../library/revision-title.js';
-import {rows} from '../../core/db.js';
+import {rows} from '../../core/primitives.js';
 import {TWI_POLICY} from './standard-v03.js';
 import {scoreQuestions,actionRows,actionStatus} from './audit-domain.js';
 export const pctText=v=>v===null?'—':(Math.round(v*10)/10).toLocaleString('ru-RU')+'%';

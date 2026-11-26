@@ -1,3 +1,5 @@
+import {MAX_DB,MAX_PACKAGE,MAX_QUEUE_EVENTS,MAX_QUEUE_BYTES,uuid,now,isId,invariant,canonical,sha256,encode,decode,rows,one,meta,setMeta,tx,bytesOf,foldKey} from './primitives.js';
+export {MAX_DB,MAX_PACKAGE,MAX_QUEUE_EVENTS,MAX_QUEUE_BYTES,uuid,now,isId,invariant,canonical,sha256,encode,decode,rows,one,meta,setMeta,tx,bytesOf,foldKey} from './primitives.js';
 import {isTrainingEvent,isLC41Event,isLC42Event,isLC43Event,isLC63Event} from '../modules/training/domain.js';
 import {DOMAIN_TYPES,applyDomainEvent,verifyDomainEvents} from '../modules/library/domain.js';
 import {isLC5Event,isLC51Event,isLC52Event} from '../modules/training/audit-domain.js';
@@ -7,23 +9,6 @@ import {isLC64Event} from '../modules/training/standard-workflows.js';
 import {isLC6Event} from '../modules/effect/domain.js';
 let migration17=null,migration16=null,migration15=null,migration14=null,migration3=null,migration4=null,migration5=null,migration6=null,migration7=null,migration8=null,migration9=null,migration10=null,migration11=null,migration12=null,migration13=null;
 export function configureMigrations(sql,next,last,assessment,training,forms,methods,matrix,audit,assessmentLinks,integration,effect,standard,workflows,preparation){invariant(typeof sql==='string'&&sql.includes('PRAGMA user_version=3')&&typeof next==='string'&&next.includes('PRAGMA user_version=4')&&typeof last==='string'&&last.includes('PRAGMA user_version=5'),'Нет миграций LC2/LC3');migration3=sql;migration4=next;migration5=last;invariant(typeof assessment==='string'&&assessment.includes('PRAGMA user_version=6'),'Нет миграции чек-листа');migration6=assessment;invariant(typeof training==='string'&&training.includes('PRAGMA user_version=7'),'Нет миграции LC4');migration7=training;invariant(typeof forms==='string'&&forms.includes('PRAGMA user_version=8'),'Нет миграции LC4.1');migration8=forms;invariant(typeof methods==='string'&&methods.includes('PRAGMA user_version=9'),'Нет миграции LC4.2');migration9=methods;invariant(typeof matrix==='string'&&matrix.includes('PRAGMA user_version=10'),'Нет миграции LC4.3');migration10=matrix;invariant(typeof audit==='string'&&audit.includes('PRAGMA user_version=11'),'Нет миграции LC5');migration11=audit;invariant(typeof assessmentLinks==='string'&&assessmentLinks.includes('PRAGMA user_version=12'),'Нет миграции LC5.1');migration12=assessmentLinks;invariant(typeof integration==='string'&&integration.includes('PRAGMA user_version=13'),'Нет миграции LC5.2');migration13=integration;invariant(typeof effect==='string'&&effect.includes('PRAGMA user_version=14'),'Нет миграции LC6');migration14=effect;invariant(typeof standard==='string'&&standard.includes('PRAGMA user_version=15'),'Нет миграции LC6.3');migration15=standard;invariant(typeof workflows==='string'&&workflows.includes('PRAGMA user_version=16'),'Нет миграции LC6.4');migration16=workflows;invariant(typeof preparation==='string'&&preparation.includes('PRAGMA user_version=17'),'Нет миграции LC6.5');migration17=preparation}
-export const MAX_DB=100*1024*1024;
-export const MAX_PACKAGE=5*1024*1024;
-export const MAX_QUEUE_EVENTS=2000,MAX_QUEUE_BYTES=MAX_PACKAGE-4096;
-export const uuid=()=>crypto.randomUUID();
-export const now=()=>new Date().toISOString();
-export const isId=x=>typeof x==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x);
-export const invariant=(ok,msg)=>{if(!ok)throw new Error(msg)};
-export const canonical=x=>x===null||typeof x!=='object'?JSON.stringify(x):Array.isArray(x)?'['+x.map(canonical).join(',')+']':'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canonical(x[k])).join(',')+'}';
-export async function sha256(data){const b=typeof data==='string'?new TextEncoder().encode(data):data;return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',b)),x=>x.toString(16).padStart(2,'0')).join('')}
-export function encode(bytes){let s='';for(let i=0;i<bytes.length;i+=16384)s+=String.fromCharCode(...bytes.subarray(i,i+16384));return btoa(s)}
-export function decode(s){invariant(typeof s==='string'&&s.length<=MAX_DB*1.4,'Слишком большой файл базы');return Uint8Array.from(atob(s),c=>c.charCodeAt(0))}
-export function rows(db,sql,args=[]){const st=db.prepare(sql);try{st.bind(args);const result=[];while(st.step())result.push(st.getAsObject());return result}finally{st.free()}}
-export const one=(db,sql,args=[])=>rows(db,sql,args)[0]||null;
-export const meta=(db,key)=>one(db,'SELECT value FROM meta WHERE key=?',[key])?.value||null;
-export const setMeta=(db,key,value)=>db.run('INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)',[key,value]);
-export function tx(db,fn){db.run('BEGIN IMMEDIATE');try{const value=fn();db.run('COMMIT');return value}catch(e){db.run('ROLLBACK');throw e}}
-export function bytesOf(db){const bytes=db.export();db.run('PRAGMA foreign_keys=ON');return bytes}
 export function verifyDb(db,version=SCHEMA_VERSION){invariant(one(db,'PRAGMA integrity_check')?.integrity_check==='ok','Нарушена целостность SQLite');invariant(rows(db,'PRAGMA foreign_key_check').length===0,'Нарушены связи базы');invariant(Number(meta(db,'schema_version'))===version&&one(db,'PRAGMA user_version').user_version===version,'Версия базы не поддерживается');invariant(isId(meta(db,'database_id')),'Некорректный ID базы');const p=meta(db,'publication_id');invariant(!p||one(db,'SELECT id FROM publication WHERE id=?',[p]),'Нет записи публикации');}
 function upgradeDb(db){
  const version=Number(meta(db,'schema_version'));invariant([2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,SCHEMA_VERSION].includes(version),'Версия базы не поддерживается: '+version);verifyDb(db,version);
@@ -63,7 +48,6 @@ export const definitions={
  rating_scale:{label:'Шкалы оценивания',immutable:true,fields:{name:{label:'Название',required:true},version_no:{label:'Версия',required:true,integer:true},levels:{label:'Уровни (значение: название)',required:true,multiline:true,virtual:true}}}
 };
 const legacyTypes=new Set(['org_unit','person','profession','equipment','operation','person_assignment']);
-export const foldKey=x=>String(x??'').normalize('NFKC').trim().toLocaleLowerCase('ru-RU');
 export function parseLevels(text){
  invariant(typeof text==='string'&&text.length<=5000,'Неверное описание уровней');
  const lines=text.split(/\r?\n/).filter(x=>x.trim());invariant(lines.length>=2&&lines.length<=20,'Укажите от 2 до 20 уровней');

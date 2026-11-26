@@ -1,5 +1,5 @@
 // Standard 03 §3.4. Independent evidence, no duplicate qualifications or automatic admission.
-import {one,rows,canonical,invariant,isId} from '../../core/db.js';
+import {one,rows,canonical,invariant,isId} from '../../core/primitives.js';
 import {validDate} from '../library/sop-review.js';
 import {enrollmentTasks,progressFor,latestAssessment,isCurrentStandard,certificateValid} from './domain.js';
 import {PRACTICAL_V03} from './standard-v03.js';

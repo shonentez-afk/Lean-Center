@@ -23,7 +23,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: node tests/lc73b-atlas-browser.mjs
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: LeanCenter-LC7.3B-Architecture-Atlas
           path: artifacts/lc73b
-          if-no-files-found: error
+          if-no-files-found: warn

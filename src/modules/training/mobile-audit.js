@@ -1,5 +1,5 @@
 // Standalone offline form with exact Lean-Center identifiers and immutable method snapshot.
-import {rows,one,invariant,isId,canonical,sha256,meta} from '../../core/db.js';
+import {rows,one,invariant,isId,canonical,sha256,meta} from '../../core/primitives.js';
 import {assessmentAnalysis,renderAssessmentAnalysis} from '../../ui/assessment-analysis.js';
 import {validDate} from '../library/sop-review.js';
 const system='LEAN_CENTER_MOBILE_L1';

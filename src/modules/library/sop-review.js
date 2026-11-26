@@ -1,4 +1,4 @@
-import {invariant,one,rows,canonical,isId,foldKey} from '../../core/db.js';
+import {invariant,one,rows,canonical,isId,foldKey} from '../../core/primitives.js';
 const text=(x,n=500)=>typeof x==='string'&&x.trim()&&x.length<=n;
 const sha=x=>typeof x==='string'&&/^[0-9a-f]{64}$/.test(x);
 const exact=(p,ks)=>invariant(p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).length===ks.length&&ks.every(k=>Object.hasOwn(p,k)),'Неверные поля оценки СОП');

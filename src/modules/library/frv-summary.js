@@ -1,4 +1,4 @@
-import {invariant,sha256,uuid} from '../../core/db.js';
+import {invariant,sha256,uuid} from '../../core/primitives.js';
 import {inspectSource} from './domain.js';
 const positive=v=>typeof v==='number'&&Number.isFinite(v)&&v>0;
 const mean=a=>a.length?a.reduce((s,n)=>s+n,0)/a.length:null;

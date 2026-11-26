@@ -1,5 +1,5 @@
 // Import original RC1 records, not inferred qualifications or invented training facts.
-import {rows,one,invariant,isId,canonical,sha256} from '../../core/db.js';
+import {rows,one,invariant,isId,canonical,sha256} from '../../core/primitives.js';
 import {validDate} from '../library/sop-review.js';
 import {RC1_CRITERIA} from './builtin-forms.js';
 const system='TWI_RC1',object=x=>x&&typeof x==='object'&&!Array.isArray(x);

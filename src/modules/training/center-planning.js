@@ -1,4 +1,4 @@
-import {one,rows,invariant,isId} from '../../core/db.js';
+import {one,rows,invariant,isId} from '../../core/primitives.js';
 import {validDate} from '../library/sop-review.js';
 import {directoryPeople} from '../master-data/people-directory.js';
 export const scheduleKind=s=>s.kind==='audit'?'audit':s.kind==='assessment'&&s.source_type==='practical_assignment'?'practical':s.kind==='assessment'&&s.source_type==='self_person'?'self_eval':'other';

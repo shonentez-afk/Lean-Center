@@ -1,5 +1,5 @@
 // JI-2: standard 03, section 3.2.2.2. JI-1 historical stages are not changed.
-import {invariant} from '../../core/db.js';
+import {invariant} from '../../core/primitives.js';
 const exact=(v,keys)=>invariant(v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k)),'Некорректные параметры методики JI-2');
 const integer=(v,a,b)=>Number.isSafeInteger(v)&&v>=a&&v<=b;
 export const JI2_VARIANTS=['classic','special','smed','hazardous','fractional'];

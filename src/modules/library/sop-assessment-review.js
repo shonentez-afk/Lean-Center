@@ -1,6 +1,6 @@
 import {REVISION_TITLE_SQL} from './revision-title.js';
 // Independent corporate binary evaluations and historical weighted snapshots.
-import {rows,one,canonical} from '../../core/db.js';
+import {rows,one,canonical} from '../../core/primitives.js';
 import {weightedResult} from './stage43-checklist.js';
 import {evaluationResult,sopCriteria} from './sop-review.js';
 const query=`SELECT e.*,d.id document_id,d.code,${REVISION_TITLE_SQL} title,d.operation_id,r.version_no revision_no,r.state revision_state,v.version_no method_version,o.unit_id FROM sop_evaluation e JOIN document_revision r ON r.id=e.revision_id JOIN document d ON d.id=r.document_id JOIN checklist_version v ON v.id=e.method_id LEFT JOIN operation o ON o.id=d.operation_id`;

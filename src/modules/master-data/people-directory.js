@@ -1,5 +1,5 @@
 // Current directory roles are business assignments, never file/app permissions.
-import {rows} from '../../core/db.js';
+import {rows} from '../../core/primitives.js';
 export const personKey=value=>String(value??'').normalize('NFKC').toLocaleLowerCase('ru-RU').replaceAll('ё','е').trim();
 const aliases={
  instructor:['instructor','trainer','internal_trainer','internal trainer','twi_instructor','инструктор','инструктор twi','внутренний тренер','вт'],

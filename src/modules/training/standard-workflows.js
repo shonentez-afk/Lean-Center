@@ -1,5 +1,5 @@
 // TWI standard 03: persisted preparation, knowledge-bank revisions and supplement requests.
-import {one,rows,invariant,canonical,isId} from '../../core/db.js';
+import {one,rows,invariant,canonical,isId} from '../../core/primitives.js';
 import {validDate} from '../library/sop-review.js';
 import {TWI_POLICY} from './standard-v03.js';
 import {QUESTION_BANK_V03} from './question-bank-v03.js';

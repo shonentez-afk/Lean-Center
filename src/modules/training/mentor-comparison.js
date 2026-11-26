@@ -1,6 +1,6 @@
 // Descriptive crosswalk of EXACT original corporate App12/RC1 wording.
  // Not a conversion of scales and not an approved qualification rule.
-import {one,rows} from '../../core/db.js';
+import {one,rows} from '../../core/primitives.js';
 import {BUILTIN_SELF,RC1_CRITERIA} from './builtin-forms.js';
 import {SELF_V03} from './standard-v03.js';
 export const CROSSWALK_VERSION='app12-rc1-descriptive-v1';

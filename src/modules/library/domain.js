@@ -8,7 +8,7 @@ import {TRAINING_TYPES,isTrainingEvent,applyTrainingEvent,verifyTrainingSource} 
 import {applyStage43Checklist,verifyStage43Checklist} from './stage43-checklist.js';
 import {applySopMethod,applySopEvaluation,reviewDue,validDate} from './sop-review.js';
 // LC3: aggregate events + detached original Stage43 content.
-import {invariant,isId,one,rows,canonical,sha256,foldKey} from '../../core/db.js';
+import {invariant,isId,one,rows,canonical,sha256,foldKey} from '../../core/primitives.js';
 export const DOMAIN_TYPES=Object.freeze({document:'Библиотека СОП',frv_study:'Исследования ФРВ',checklist_version:'Методика оценки СОП',sop_evaluation:'Оценка СОП',sop_stage43_checklist:'Чек-лист Stage43',...TRAINING_TYPES,economic_effect:'Экономический эффект',economic_fact:'Денежный факт'});
 export const MAX_CONTENT=30*1024*1024;
 const MIME={sop:'application/vnd.lean.stage43.sop+json',frv:'application/vnd.lean.stage43.frv+json'};

@@ -61,7 +61,9 @@ export function recommendedChecks(snapshot,group='all'){
 
  // Exact unit scope. Bank of questions is enterprise/profession-wide and remains explicitly global.
  export function scopedAttention(db,day,unitId,global=centerAttention(db,day),projection=null){
-  const p=projection||centerProjection(db,{day,from:day.slice(0,7)+'-01',to:day,unitId},{withEvidence:true});
+  // Reuse a projection only for the same current enterprise/unit slice, never a personal or stale report.
+  const reusable=projection?.scope?.day===day&&(projection.scope.unitId||'')===(unitId||'')&&!projection.scope.personId&&projection.metrics?.every(m=>Array.isArray(m.evidence));
+  const p=reusable?projection:centerProjection(db,{day,from:day.slice(0,7)+'-01',to:day,unitId},{withEvidence:true});
   const ms=new Map(p.metrics.map(m=>[m.id,m])),r=(key,page,options,date='',label='')=>({key,page,options,date,label,included:true});
   const unitPerson=id=>!unitId||personUnit(db,id,day)===unitId;
   const assignment=x=>r(x.id,'twi',{id:x.id},x.assigned_on,'Назначение обучения');
@@ -69,7 +71,7 @@ export function recommendedChecks(snapshot,group='all'){
   const plans=global.plans.filter(x=>!unitId||personUnit(db,x.owner_id,scheduleScopeDate(db,x,day))===unitId);
   const plan=k=>plans.filter(x=>scheduleKind(x)===k).map(x=>r(x.id,'calendar',{id:x.id},x.due_on,'План оценки'));
   const metric=id=>ms.get(id).evidence;
-  const queueLink=x=>x.type==='revision'?r(x.id,'twi',{id:x.id},x.due,'Редакция обучения'):x.type==='practical'?r(x.id,'practical',{assessmentId:x.id},x.due,'Практическая оценка'):x.type==='audit'?r(x.id,'audit',{auditId:x.id},x.due,'Аудит L1'):r(x.personId+':'+(x.skillId||x.id),'person',{personId:x.personId},x.due,x.question||'Потребность в развитии');
+  const queueLink=x=>x.type==='revision'?r(x.id,'twi',{id:x.id},x.due,'Редакция обучения'):x.type==='practical'?r(x.id,'practical',{assessmentId:x.id},x.due,'Практическая оценка'):x.type==='audit'?r(x.responseId||x.id,'audit',{auditId:x.id},x.due,x.question||'Аудит L1'):r(x.personId+':'+(x.skillId||x.id),'person',{personId:x.personId},x.due,x.question||'Потребность в развитии');
   const exact={
    sop_overdue:metric('sop_review'),
    sop_passport:rows(db,"SELECT r.id,r.document_id,r.review_due FROM document_revision r JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=d.operation_id WHERE r.state='draft' AND d.archived=0 AND (r.print_format IS NULL OR r.workplace_id IS NULL) AND (?='' OR o.unit_id=?)",[unitId,unitId]).map(revision),

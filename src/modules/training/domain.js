@@ -1,6 +1,6 @@
 import {REVISION_TITLE_SQL,documentTitle} from '../library/revision-title.js';
 // LC4: explicit facts, reviewed qualifications and separately recorded admission.
-import {invariant,one,rows,canonical,isId,foldKey} from '../../core/db.js';
+import {invariant,one,rows,canonical,isId,foldKey} from '../../core/primitives.js';
 import {directoryPeople} from '../master-data/people-directory.js';
 import {matchesRoleKind} from '../master-data/role-matching.js';
 import {linkedTwi} from '../library/linked-materials.js';

@@ -1,5 +1,5 @@
 // Stage43 weighted checklist and corporate SOP_APP4 are separate methodologies.
-import {invariant,one,rows,canonical,isId} from '../../core/db.js';
+import {invariant,one,rows,canonical,isId} from '../../core/primitives.js';
 const scores=[0,.3,.7,1],origins=['seed','auto','manual','legacy'];
 const text=(v,n)=>typeof v==='string'&&v.length<=n;
 const exact=(x,ks)=>x&&typeof x==='object'&&!Array.isArray(x)&&Object.keys(x).length===ks.length&&ks.every(k=>Object.hasOwn(x,k));

@@ -1,7 +1,7 @@
 import {economicEventDay,recordedBusinessDate} from '../../core/business-clock.js';
 import {REVISION_TITLE_SQL} from '../library/revision-title.js';
 // LC5: one audit, explicit decisions and independently verified corrective actions.
-import {rows,one,invariant,isId} from '../../core/db.js';
+import {rows,one,invariant,isId} from '../../core/primitives.js';
 import {sopCriterionSource,sopEvidence,sopEffect} from '../library/sop-assessment-review.js';
 import {rc1Annulment} from './rc1-import.js';
 import {matchedComparison} from './mentor-comparison.js';

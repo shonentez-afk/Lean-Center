@@ -3,7 +3,7 @@ import {calculateEffect} from './math.js';
 import {economicEventDay,economicCommand} from '../../core/business-clock.js';
 export {calculateEffect} from './math.js';
 // LC6: calculations, event guards, current evidence and period facts.
-import {invariant,one,rows,canonical} from '../../core/db.js';
+import {invariant,one,rows,canonical} from '../../core/primitives.js';
 import {actionRows,actionStatus} from '../training/audit-domain.js';
 import {frvSummary} from '../library/frv-summary.js';
 export const CURRENCIES=['RUB','EUR','USD','KZT','CNY','BYN','GBP'];

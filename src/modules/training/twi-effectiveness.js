@@ -1,5 +1,5 @@
 // LC6.2: TWI facts, not invented ratings or financial attribution.
-import {rows,one,invariant,canonical} from '../../core/db.js';
+import {rows,one,invariant,canonical} from '../../core/primitives.js';
 import {matrixData,coverageData,admissionStatus,jiStages} from './domain.js';
 import {jiConfig} from './ji-v03.js';
 import {preparationForEnrollment} from './preparation-results.js';

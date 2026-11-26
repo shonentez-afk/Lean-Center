@@ -7,13 +7,14 @@ const childNodes=n=>Object.entries(n).flatMap(([k,v])=>['loc','start','end','ran
 const names=p=>!p?[]:p.type==='Identifier'?[p.name]:p.type==='RestElement'?names(p.argument):p.type==='AssignmentPattern'?names(p.left):p.type==='ArrayPattern'?p.elements.flatMap(names):p.type==='ObjectPattern'?p.properties.flatMap(q=>names(q.type==='RestElement'?q.argument:q.value)):[];
 const prop=n=>n?.type==='Identifier'?n.name:n?.type==='Literal'?String(n.value):null;
 const fun=n=>n&&['FunctionDeclaration','FunctionExpression','ArrowFunctionExpression'].includes(n.type);
+const staticReceivers=new Set('Object Array String Number Boolean Math JSON Date Promise Reflect Symbol BigInt RegExp console'.split(' '));
 const globals=new Set('Array Object String Number Boolean Date Math JSON Promise Map Set WeakMap WeakSet RegExp Error TypeError RangeError Symbol BigInt parseInt parseFloat isNaN isFinite encodeURIComponent decodeURIComponent atob btoa structuredClone setTimeout clearTimeout setInterval clearInterval queueMicrotask fetch alert confirm prompt requestAnimationFrame cancelAnimationFrame URL URLSearchParams TextEncoder TextDecoder Uint8Array ArrayBuffer Blob File FileReader AbortController MutationObserver ResizeObserver DOMParser CustomEvent Event Worker FormData Buffer console'.split(' '));
 const scope=(parent,kind='block')=>({parent,kind,bindings:new Map()});
 function find(s,name){for(;s;s=s.parent)if(s.bindings.has(name))return s.bindings.get(name);return null}
 function put(s,name,value){if(name)s.bindings.set(name,value)}
 function varScope(s){while(s.parent&&s.kind!=='function'&&s.kind!=='module')s=s.parent;return s}
 const idFor=(file,n)=>file+'#'+n.start;
-const groupOf=p=>p.startsWith('baselines/')?'Stage43 · исходный baseline':p.startsWith('tests/')?'Тесты':p.startsWith('tools/')?'Инструменты':p.startsWith('src/modules/')?p.split('/')[2]:p.startsWith('src/')?p.split('/')[1]:p.split('/')[0];
+const groupOf=p=>p.startsWith('baselines/')?(p.endsWith('.html')?'Stage43 · исполняемый runtime':'Stage43 · исходный baseline'):p.startsWith('tests/')?'Тесты':p.startsWith('tools/')?'Инструменты':p.startsWith('src/modules/')?p.split('/')[2]:p.startsWith('src/')?p.split('/')[1]:p.split('/')[0];
 function sourceRef(file,n,text){return {file,line:n.loc.start.line,endLine:n.loc.end.line,excerpt:text.slice(n.start,Math.min(n.end,n.start+240)).replace(/\s+/g,' ')}}
 function literal(n){if(n?.type==='Literal'&&typeof n.value==='string')return {text:n.value,partial:false};if(n?.type==='TemplateLiteral')return {text:n.quasis.map(q=>q.value.cooked??q.value.raw).join(' __DYNAMIC__ '),partial:n.expressions.length>0};return null}
 export function sqlReferences(sql,tableNames){
@@ -95,6 +96,7 @@ export function analyzeSources(sources,tables=[],{scriptFiles=[]}={}){
     s=scope(s);if(n.type==='CatchClause')for(const name of names(n.param))put(s,name,{kind:'parameter'});
    }
    if(n.type==='CallExpression'||n.type==='NewExpression')m.calls.push({n,s,owner,cls});
+   if(n.type==='AssignmentExpression'&&n.operator==='='&&n.left.type==='MemberExpression'&&!n.left.computed&&/^on[a-z]+$/.test(prop(n.left.property)))m.calls.push({n,s,owner,cls,eventProperty:true});
    if(n.type==='ImportExpression'){const a=literal(n.source);if(a&&!a.partial){const target=resolvePath(file,a.text);addEdge(owner,target||external(a.text),'dynamic-import-literal',ref(n))}else unresolved.push({owner,reason:'dynamic-import',...ref(n)})}
    for(const [k,ch] of childNodes(n))visit(ch,s,owner,n,k,cls);
   }
@@ -112,7 +114,9 @@ export function analyzeSources(sources,tables=[],{scriptFiles=[]}={}){
  }
  for(const m of modules.values()){
   for(const [name,b] of m.exports){const id=resolveBinding(b.kind==='local'?find(m.root,b.name):b);if(id)addEdge(m.file,id,'export',{file:m.file,line:nodes.get(id)?.line||1,endLine:nodes.get(id)?.line||1,excerpt:'export '+name})}
-  for(const {n,s,owner,cls} of m.calls){
+  for(const {n,s,owner,cls,eventProperty} of m.calls){
+   const callbackId=x=>fun(x)?idFor(m.file,x):x?.type==='Identifier'?resolveBinding(find(s,x.name)):null;
+   if(eventProperty){const id=callbackId(n.right);if(id&&nodes.has(id))addEdge(owner,id,'callback-registration',sourceRef(m.file,n,m.text),{registration:prop(n.left.property),certainty:'callback reference, not invocation'});else if(n.right.type!=='Literal')unresolved.push({owner,reason:'event-handler-unresolved',name:prop(n.left.property),...sourceRef(m.file,n,m.text)});continue}
    let c=n.callee;if(c?.type==='ChainExpression')c=c.expression;
    let target=null,reason='dynamic-callee',name=m.text.slice(c.start,Math.min(c.end,c.start+120));
    if(c.type==='Identifier'){
@@ -121,14 +125,19 @@ export function analyzeSources(sources,tables=[],{scriptFiles=[]}={}){
    }else if(c.type==='MemberExpression'&&!c.computed){
     const k=prop(c.property),b=c.object.type==='Identifier'?find(s,c.object.name):null;
     if(b?.kind==='import'&&b.name==='*')target=resolveBinding({...b,name:k});
+    if(!b&&c.object.type==='Identifier'&&staticReceivers.has(c.object.name)&&!scripts.has(m.file))target=external(c.object.name+'.'+k,'runtime');
     if(c.object.type==='ThisExpression'&&cls)target=cls.methods.get((cls.static?'static:':'')+k)||null;
     reason='receiver-not-proven';
    }else if(fun(c))target=idFor(m.file,c);
    const ref=sourceRef(m.file,n,m.text);
+   const member=c.type==='MemberExpression'&&!c.computed?prop(c.property):null;
+   const fn=c.type==='Identifier'&&!find(s,c.name)?c.name:null;
+   const slots=member==='addEventListener'?[1]:['then','catch','finally','map','flatMap','filter','find','findIndex','some','every','forEach','reduce','reduceRight','sort'].includes(member)?(member==='then'?[0,1]:[0]):['setTimeout','setInterval','queueMicrotask','requestAnimationFrame'].includes(fn)?[0]:[];
+   for(const i of slots){const cb=n.arguments[i],id=callbackId(cb);if(id&&nodes.has(id))addEdge(owner,id,'callback-registration',ref,{registration:member==='addEventListener'?(literal(n.arguments[0])?.text||'dynamic-event'):(member||fn),certainty:'callback reference; receiver/timing not proven'});else if(cb)unresolved.push({owner,name:m.text.slice(cb.start,Math.min(cb.end,cb.start+120)),reason:'callback-unresolved',...ref})}
    if(target&&nodes.has(target))addEdge(owner,target,n.type==='NewExpression'?'construct':'call',ref);
    else unresolved.push({owner,name,reason,...ref});
    // SQL references: exact table literals, not inferred query execution. Dynamic expressions stay explicit.
-   const coreQuery=!!target&&target.startsWith('src/core/db.js#')&&['rows','one'].includes(nodes.get(target)?.name);
+   const coreQuery=!!target&&(/^src\/core\/(?:db|primitives)\.js#/.test(target))&&['rows','one'].includes(nodes.get(target)?.name);
    const sqlArg=coreQuery?1:c.type==='MemberExpression'&&['run','exec','prepare'].includes(prop(c.property))?0:-1;
    if(sqlArg>=0){
     const q=literal(n.arguments[sqlArg]),core=coreQuery,certainty=core?'core-query-literal':'receiver-unproven';
