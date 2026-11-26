@@ -77,6 +77,28 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(store.listResources(manager.id,'person.read_basic').length,5);
   assert.equal(store.listResources(manager.id,'sop.read_history').length,revisions.length);
   assert.throws(()=>store.adminData(manager.id),/администратора/);
+  const ms=store.session(manager.id,1);assert(ms);
+  assert(ms.permissions.includes('person.create'));
+  const command=(type,operation,id,expected_revision,fields)=>({type,operation,id,expected_revision,fields});
+  const person=await store.changeDirectory(manager.id,1,command('person','create',null,0,{employee_code:'LC81-NEW',display_name:'Новый учебный сотрудник',unit_id:x.unitB}));
+  assert.equal(store.readResource(manager.id,'person.read_directory',person.id).unit,'Учебный участок Б');
+  assert.equal(store.readResource(manager.id,'person.read_directory',person.id).can_update,true);
+  const update=await store.changeDirectory(manager.id,1,command('person','update',person.id,person.rev,{employee_code:'LC81-NEW',display_name:'Изменённый учебный сотрудник'}));
+  assert.equal(update.rev,person.rev+1);
+  await assert.rejects(store.changeDirectory(manager.id,1,command('person','update',person.id,person.rev,{employee_code:'LC81-NEW',display_name:'Устаревшая версия'})),/изменилась/);
+  assert.equal(store.readResource(manager.id,'person.read_directory',person.id).display_name,'Изменённый учебный сотрудник');
+  const equipment=await store.changeDirectory(manager.id,1,command('equipment','create',null,0,{unit_id:x.unitB,code:'LC81-EQ',name:'Учебное оборудование'}));
+  const workplace=await store.changeDirectory(manager.id,1,command('workplace','create',null,0,{unit_id:x.unitB,code:'LC81-WP',name:'Учебное рабочее место'}));
+  const operation=await store.changeDirectory(manager.id,1,command('operation','create',null,0,{unit_id:x.unitB,code:'LC81-OP',name:'Учебная операция',equipment_id:equipment.id,workplace_id:workplace.id,criticality:'normal'}));
+  await assert.rejects(store.changeDirectory(manager.id,1,command('equipment','archive',equipment.id,equipment.rev,null)),/проверку/);
+  await assert.rejects(store.changeDirectory(manager.id,1,command('operation','update',operation.id,operation.rev,{unit_id:x.f.unit,code:'LC81-OP',name:'Перенос',equipment_id:null,workplace_id:null,criticality:'normal'})),/Перенос/);
+  await assert.rejects(store.changeDirectory(manager.id,1,command('business_role','create',null,0,{code:'ADMIN',name:'Подмена'})),/недоступен/);
+  await assert.rejects(store.changeDirectory(manager.id,1,{...command('person','update',person.id,update.rev,{employee_code:'LC81-NEW',display_name:'Подмена'}),actor_id:admin.id}),/Неизвестный/);
+  const photo=await store.sopPhoto(manager.id,1,x.revision.revision,1);
+  assert.equal(photo.type,'image/png');assert.equal(photo.bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+  await assert.rejects(store.sopPhoto(manager.id,1,x.f.doc.id,1),/недоступно/,'superseded revision must not disclose its photo');
+  await assert.rejects(store.sopPhoto(manager.id,1,x.revision.revision,2),/недоступно/);
+
   worker=await store.createAccount(admin.id,{person_id:x.f.trainee,login:'worker@example.invalid',password:workerPass,generate:false});
   const rights=['person.read_basic','task.read','task.implement_own','training.read'];
   await store.setPolicy(admin.id,{role_id:x.workerRole,revision:0,permissions:rights});
@@ -87,6 +109,9 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const tasks=store.listResources(worker.id,'task.read');
   assert.deepEqual(tasks.map(r=>r.id),[x.ownTask]);assert.equal(tasks[0].can_implement,true);
   assert.equal(store.readResource(worker.id,'task.read',x.otherTask),null);
+  await assert.rejects(store.sopPhoto(worker.id,user.credential_revision,x.revision.revision,1),/недоступно/);
+  await assert.rejects(store.changeDirectory(worker.id,user.credential_revision,{type:'person',operation:'update',id:x.personB,expected_revision:1,fields:{employee_code:'QA-B',display_name:'Чужая запись'}}),/недоступен/);
+
   await assert.rejects(store.implementOwnTask(worker.id,user.credential_revision,{id:x.otherTask,expected_revision:1,result:'Чужое'}),/своё/);
   await assert.rejects(store.implementOwnTask(admin.id,admin.credential_revision,{id:x.ownTask,expected_revision:tasks[0].rev,result:'От администратора'}),/своё/);
   const done=await store.implementOwnTask(worker.id,user.credential_revision,{id:x.ownTask,expected_revision:tasks[0].rev,result:'Учебное выполнено'});

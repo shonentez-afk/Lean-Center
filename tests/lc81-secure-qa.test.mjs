@@ -134,3 +134,28 @@ test('login rate limit and CSRF checks apply before authentication',async t=>{
  for(let i=0;i<6;i++)assert.equal((await h.request('/api/lc81/login',{body:{login:'admin',password:secret()}})).status,401);
  assert.equal((await h.request('/api/lc81/login',{body:{login:'admin',password:h.adminPassword}})).status,429);
 });
+
+test('scoped directory write through HTTP: no self escalation or cross-unit change',async t=>{
+ const h=await harness(t),a=await h.login('admin',h.adminPassword),ac=a.cookie;
+ const d=await h.admin(ac);
+ const ref=async(type,payload)=>(await h.post(ac,'reference',{type,payload})).id;
+ const u1=await ref('org_unit',{code:'A',name:'Участок A',kind:'Участок',parent_id:d.site}),u2=await ref('org_unit',{code:'B',name:'Участок B',kind:'Участок',parent_id:d.site});
+ const create=async(unit,code)=>{const r=await h.request('/api/lc81/directory/change',{cookie:ac,body:{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:code,display_name:code,unit_id:unit}}});assert.equal(r.status,200,JSON.stringify(r.data));return r.data.id};
+ const p1=await create(u1,'PERSON-A'),p2=await create(u2,'PERSON-B'),r=await ref('business_role',{code:'QA-EDIT',name:'Редактор участка'}),assignment=await ref('role_assignment',{person_id:p1,role_id:r,valid_from:day,valid_to:null});
+ const pw=secret(),worker=await h.post(ac,'account',{person_id:p1,login:'unit-editor',password:pw,generate:false});
+ await h.post(ac,'policy',{role_id:r,revision:0,permissions:['org.read','person.read_directory','person.update','person.create']});
+ await h.post(ac,'grant',{account_id:worker.id,assignment_id:assignment,scope:{kind:'unit_tree',unit_id:u1},valid_to:null});
+ const w=await h.login('unit-editor',pw),wc=w.cookie;
+ const list=await h.request('/api/lc81/resources?action=person.read_directory',{cookie:wc});assert.equal(list.status,200);assert.deepEqual(list.data.items.map(x=>x.id),[p1]);
+ assert.equal(list.data.items[0].can_update,true);
+ const info=await h.request('/api/lc81/directory/info?type=person',{cookie:wc});assert.equal(info.status,200);assert.deepEqual(info.data.refs.org_unit.map(x=>x.id),[u1]);assert(info.data.can_create);
+ const cmd=(id,rev,fields)=>({type:'person',operation:'update',id,expected_revision:rev,fields});
+ const denied=await h.request('/api/lc81/directory/change',{cookie:wc,body:cmd(p2,1,{employee_code:'PERSON-B',display_name:'Чужая запись'})});assert.equal(denied.status,403);
+ const allowed=await h.request('/api/lc81/directory/change',{cookie:wc,body:cmd(p1,1,{employee_code:'PERSON-A',display_name:'Новое имя'})});assert.equal(allowed.status,200);assert.equal(allowed.data.rev,2);
+ assert.equal((await h.request('/api/lc81/directory/change',{cookie:wc,body:cmd(p1,1,{employee_code:'PERSON-A',display_name:'Старые данные'})})).status,409);
+ assert.equal((await h.request('/api/lc81/directory/change',{cookie:wc,body:{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:'NO',display_name:'NO',unit_id:u2}}})).status,403);
+ assert.equal((await h.request('/api/lc81/admin/manager-policy',{cookie:wc,body:{revision:1}})).status,403);
+ assert.equal((await h.request('/api/lc81/admin',{cookie:wc})).status,403);
+ assert.equal((await h.request('/api/lc81/sop/photo?revision_id='+p2+'&position=1',{cookie:wc})).status,404);
+ assert.equal((await h.request('/api/v1/snapshot',{cookie:wc})).status,404);
+});
