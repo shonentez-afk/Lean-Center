@@ -1,0 +1,29 @@
+name: LC7.3B architecture atlas
+on:
+  push:
+    branches: [feature/lc7.3b-architecture-audit]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: lc73b-atlas-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  atlas:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run test:architecture
+      - run: npm run audit:architecture
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/lc73b-atlas-browser.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LeanCenter-LC7.3B-Architecture-Atlas
+          path: artifacts/lc73b
+          if-no-files-found: error
