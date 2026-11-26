@@ -3,6 +3,7 @@ import {one,rows,invariant,canonical,isId} from '../../core/db.js';
 import {validDate} from '../library/sop-review.js';
 import {TWI_POLICY} from './standard-v03.js';
 import {QUESTION_BANK_V03} from './question-bank-v03.js';
+import {preparationProgress} from './preparation-results.js';
 
 export const STANDARD_TYPES=Object.freeze({twi_preparation:'Программа подготовки',twi_knowledge_bank:'Банк вопросов',twi_supplement:'Ходатайство о доплате'});
 export const PROGRAM_DOCS=Object.freeze({
@@ -52,9 +53,9 @@ export function sharedTrainingTask(db,enrollmentId,taskId){
  const x=one(db,'SELECT p.internship_id enrollmentId,s.internship_task_id taskId FROM twi_preparation_shared s JOIN twi_preparation p ON p.id=s.preparation_id WHERE p.adaptation_id=? AND s.adaptation_task_id=?',[enrollmentId,taskId]);return x||null
 }
 export function preparationRows(db,personId=''){
- return rows(db,'SELECT * FROM twi_preparation ORDER BY created_at DESC,id').map(x=>({...x,documents:[doc(db,x.adaptation_id),doc(db,x.safety_id),doc(db,x.internship_id)],shifts:JSON.parse(x.shifts_json),shared:rows(db,'SELECT * FROM twi_preparation_shared WHERE preparation_id=?',[x.id])})).filter(x=>!personId||[x.trainee_id,x.manager_id,...x.documents.flatMap(d=>[d?.mentor_id,d?.manager_id])].includes(personId))
+ return rows(db,'SELECT * FROM twi_preparation ORDER BY created_at DESC,id').map(x=>({...x,documents:[doc(db,x.adaptation_id),doc(db,x.safety_id),doc(db,x.internship_id)],shifts:JSON.parse(x.shifts_json),shared:rows(db,'SELECT * FROM twi_preparation_shared WHERE preparation_id=?',[x.id]),progress:preparationProgress(db,x)})).filter(x=>!personId||[x.trainee_id,x.manager_id,...x.documents.flatMap(d=>[d?.mentor_id,d?.manager_id])].includes(personId))
 }
-export function preparationState(r){return r.documents.some(d=>!d||d.state==='cancelled')?'Требует решения':r.documents.every(d=>d.state==='completed')?'Все три документа завершены':'В процессе'}
+export function preparationState(r){return r.progress?.status|| (r.documents.some(d=>!d||d.state==='cancelled')?'Требует решения':r.documents.every(d=>d.state==='completed')?'Все три документа завершены':'В процессе')}
 export function bankRows(db){return rows(db,'SELECT * FROM twi_knowledge_bank ORDER BY reviewed_on DESC,version_no DESC,id').map(x=>({...x,blocks:JSON.parse(x.blocks_json)}))}
 const norm=s=>s.normalize('NFKC').trim().replace(/\s+/g,' ').toLocaleLowerCase('ru-RU');
 export function bankChanges(previous,next){

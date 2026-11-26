@@ -7,7 +7,7 @@ import {inspectSource,refsForDb,refsForEvents,unionRefs} from '../src/modules/li
 import {makeTransfer} from '../src/modules/library/content.js';
 import {sopTwiSignature,twiFields} from '../src/modules/library/linked-materials.js';
 const read=p=>fs.readFileSync(p,'utf8');
-export const schema=read('db/schema_v1.sql'),migrations=['002_lc1','003_lc2','004_lc3','005_lc3_requirements','006_stage43_checklist','007_lc4_training','008_lc4_corporate_forms','009_lc42_methods','010_lc43_matrix','011_lc5_audit','012_lc51_assessments','013_lc52_integration','014_lc6_effect','015_lc63_twi_standard','016_lc64_twi_workflows'].map(x=>read('db/migrations/'+x+'.sql'));
+export const schema=read('db/schema_v1.sql'),migrations=['002_lc1','003_lc2','004_lc3','005_lc3_requirements','006_stage43_checklist','007_lc4_training','008_lc4_corporate_forms','009_lc42_methods','010_lc43_matrix','011_lc5_audit','012_lc51_assessments','013_lc52_integration','014_lc6_effect','015_lc63_twi_standard','016_lc64_twi_workflows','017_lc65_preparation_results'].map(x=>read('db/migrations/'+x+'.sql'));
 configureMigrations(...migrations.slice(1));
 export const SQL=await initSqlJs();
 export const date='2026-01-20';
@@ -23,6 +23,7 @@ export async function makeSop(action='Учебная операция',outdated=
 export async function fixture({installMethod=true}={}){
  const w=new Workspace(SQL,createDb(SQL,schema,migrations[0])),sources=new Map(),readContent=async r=>sources.get(r.sha256)?.text;
  let clock=Date.parse(date+'T00:00:00Z');
+ const advanceTo=day=>{clock=Date.parse(day+'T00:00:00Z')};
  const save=async(t,p,id=null)=>{const old=id?one(w.working,'SELECT * FROM '+t+' WHERE id=?',[id]):null,e={id:uuid(),entity_type:t,entity_id:id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload:p,occurred_at:new Date(clock++).toISOString()};await w.applyContentEvents([e],readContent);return e};
  const unit=w.edit('org_unit',null,{code:'QA',name:'Учебный участок',kind:'Участок',parent_id:null}),workplace=w.edit('workplace',null,{unit_id:unit,code:'QA-WP',name:'Стенд'}),operation=w.edit('operation',null,{unit_id:unit,workplace_id:workplace,equipment_id:null,code:'QA-OP',name:'Учебная операция',criticality:'normal'});
  const trainee=w.edit('person',null,{employee_code:'LC4-001',display_name:'Ученик Тестовый'}),mentor=w.edit('person',null,{employee_code:'LC4-002',display_name:'Инструктор Тестовый'}),actor=w.edit('person',null,{employee_code:'LC4-003',display_name:'Ответственный Тестовый'}),other=w.edit('person',null,{employee_code:'LC4-004',display_name:'Без полномочий'});
@@ -51,5 +52,5 @@ export async function fixture({installMethod=true}={}){
  const admit=async(id,overrides={})=>save('admission_decision',{assignment_id:id,assignment_rev:getAssignment(id).rev,actor_id:actor,decided_on:date,valid_until:null,decision:'granted',evidence:'Учебное решение',feedback:'Учебная обратная связь',...overrides});
  const backupBundle=async()=>makeTransfer('backup',await backup(w),unionRefs(refsForDb(w.base),refsForEvents(w.pending)),readContent);
  const revise=async(outdated=false)=>{const s=await makeSop('Новая учебная редакция',outdated);sources.set(s.source.sha256,s);const e=await save('document',{command:'revise',revision_id:null,title:'Учебная операция',operation_id:operation,source:s.source,projection:s.projection},doc.entity_id);await publishRevision(doc.entity_id,e.id);return {revision:e.id,source:s}};
- return {w,save,source,readContent,sources,unit,workplace,operation,trainee,mentor,actor,other,profession,shift,skill,scale,doc,certificate,appointment,auth,method,base,addAssignment,getAssignment,approve,stage,verify,assess,qualify,admit,backupBundle,revise}
+ return {w,save,advanceTo,source,readContent,sources,unit,workplace,operation,trainee,mentor,actor,other,profession,shift,skill,scale,doc,certificate,appointment,auth,method,base,addAssignment,getAssignment,approve,stage,verify,assess,qualify,admit,backupBundle,revise}
 }

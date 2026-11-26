@@ -9,7 +9,9 @@ import {isRC1Import,applyRC1Event} from './rc1-import.js';
 import {LC5_TYPES,applyLC5Event} from './audit-domain.js';
 import {SELF_LEVELS} from './builtin-forms.js';
 import {STANDARD_TYPES,PROGRAM_DOCS,applyStandardEvent,sharedTrainingTask} from './standard-workflows.js';
-export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,...STANDARD_TYPES,
+import {PREPARATION_FACT_TYPES,applyPreparationEvent,preparationForEnrollment,preparationFinishAllowed,preparationTrainingDone} from './preparation-results.js';
+import {validateJi2,ji2Stages,jiConfig} from './ji-v03.js';
+export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,...STANDARD_TYPES,...PREPARATION_FACT_TYPES,
  competency_matrix:'Матрица компетенций',audit_session:'Аудит инструктора',mentor_self_evaluation:'Самооценка наставника',mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
  training_program:'Программа обучения',training_enrollment:'Персональная программа',training_task_result:'Результат задания программы',
  training_assignment:'Назначение обучения',training_session:'Факт инструктажа',training_verification:'Проверка знаний',
@@ -37,13 +39,15 @@ const sha=x=>typeof x==='string'&&/^[0-9a-f]{64}$/.test(x);
 const roles=['instructor','mentor','internal_trainer'];
 export const programKinds={entry:'Ввод в профессию',internship:'Стажировка',production:'Производственное обучение'};
 export const parts={general:'Общая часть',individual:'Индивидуальная часть',practice:'Практические навыки',knowledge:'Проверка знаний'};
-export const variants={classic:'Классический',special:'Специальные навыки',smed:'Сложность повтора / SMED',hazardous:'Особые условия безопасности'};
+export const variants={classic:'Классический',special:'Специальные навыки',smed:'Сложность повтора / SMED',hazardous:'По опасным операциям',fractional:'Дробный инструктаж'};
 export const conclusions={not_meet:'Не соответствует',basic:'Соответствует базовому уровню',exceeds:'Превосходит базовый уровень'};
 const prepare=[['prepare','Подготовка']];
 const show=[['show1','Показ: действия'],['show2','Показ: действия и ключевые моменты'],['show3','Показ: действия, ключевые моменты и причины']];
 const practice=[['try1','Проба: выполнение'],['try2','Проба: объяснение действий'],['try3','Проба: действия и ключевые моменты'],['try4','Проба: действия, ключевые моменты и причины']];
 const support=[['support','Самостоятельное задание и последующая поддержка'],...Array.from({length:5},(_,i)=>['follow'+(i+1),'Контрольная проверка '+(i+1)])];
-export function jiStages(variant){
+export function jiStages(variant,config=null){
+ if(config)return ji2Stages(variant,config);
+ // JI-1 remains read/replay only for published historical packages and regression fixtures.
  invariant(Object.hasOwn(variants,variant),'Выберите вид инструктажа');
  let middle;
  if(variant==='classic')middle=[...show,...practice];
@@ -53,13 +57,13 @@ export function jiStages(variant){
  return [...prepare,...middle,...support].map(([code,label])=>({code,label,phase:code.startsWith('follow')?'followup':code==='support'?'support':code.startsWith('try')?'practice':code.startsWith('show')?'presentation':'prepare'}))
 }
 export function progressFor(db,a){
- const stages=jiStages(a.method_variant),facts=rows(db,'SELECT * FROM training_session WHERE assignment_id=? AND stage_code IS NOT NULL ORDER BY held_at,recorded_at,id',[a.id]);
+ const stages=jiStages(a.method_variant,jiConfig(a)),facts=rows(db,'SELECT * FROM training_session WHERE assignment_id=? AND stage_code IS NOT NULL ORDER BY held_at,recorded_at,id',[a.id]);
  const done=new Set(facts.filter(x=>x.result==='completed').map(x=>x.stage_code)),next=stages.find(x=>!done.has(x.code))||null;
  const intro=stages.filter(x=>!['support','followup'].includes(x.phase)).every(x=>done.has(x.code));
  const followup=stages.filter(x=>x.phase==='followup'&&done.has(x.code)).length;
  const supportOn=facts.find(x=>x.stage_code==='support'&&x.result==='completed')?.held_at.slice(0,10)||null;
  let followupDue=null;if(supportOn){const [y,m,d]=supportOn.split('-').map(Number);const end=new Date(Date.UTC(y,m,Math.min(d,new Date(Date.UTC(y,m+1,0)).getUTCDate())));followupDue=end.toISOString().slice(0,10)}
- return {stages,facts,done,next,intro,followup,followupDue,complete:!next,completed:stages.filter(x=>done.has(x.code)).length}
+ return {stages,facts,done,next,intro,followup,followupRequired:stages.filter(x=>x.phase==='followup').length,followupDue,complete:!next,completed:stages.filter(x=>done.has(x.code)).length}
 }
 const active=(db,table,id)=>{invariant(isId(id),'Выберите запись: '+table);const x=one(db,'SELECT * FROM '+table+' WHERE id=?',[id]);invariant(x&&!x.archived,'Запись недоступна: '+table);return x};
 const person=(db,id)=>active(db,'person',id);
@@ -111,7 +115,8 @@ export function validatePracticalMethod(p){
 export function verifyTrainingSource(e,source,raw){
  invariant(e.entity_type==='training_assignment'&&e.operation==='create'&&source.kind==='sop'&&canonical(source)===canonical(e.payload.source),'Некорректный исходник назначения');
  const t=linkedTwi(raw.constructor);
- invariant(t.exists&&!t.outdated&&e.payload.plan_reviewed===true,'Сформируйте и проверьте актуальный план TWI в редакции СОП')
+ invariant(t.exists&&!t.outdated&&e.payload.plan_reviewed===true,'Сформируйте и проверьте актуальный план TWI в редакции СОП');
+ if(e.payload.method_version==='JI-2')validateJi2(e.payload.variant,e.payload.method_config,raw.constructor.steps.length)
 }
 export function validateMentorMethod(p,format){
  exact(p,['format','title','source_sha256','criteria',...(format==='lean-self-checklist-v2'?['levels']:[])]);
@@ -151,7 +156,7 @@ export function admissionStatus(db,personId,operationId,day){return admissionRec
 export function enrollmentTasks(db,enrollment){
  return rows(db,'SELECT * FROM training_program_task WHERE program_id=? ORDER BY position',[enrollment.program_id]).map(task=>{
   const shared=sharedTrainingTask(db,enrollment.id,task.id),a=latestTaskAssignment(db,shared?.enrollmentId||enrollment.id,shared?.taskId||task.id),result=latest(db,'training_task_result','enrollment_id=? AND task_id=?',[enrollment.id,task.id],'held_on');
-  return {...task,assignment:a,result,shared,done:task.sop_revision_id?a?.state==='completed':result?.result==='completed'}
+  return {...task,assignment:a,result,shared,done:task.sop_revision_id?(preparationForEnrollment(db,enrollment.id)?preparationTrainingDone(db,a):a?.state==='completed'):result?.result==='completed'}
  })
 }
 function latestTaskAssignment(db,enrollmentId,taskId){return one(db,"SELECT * FROM training_assignment WHERE enrollment_id=? AND program_task_id=? AND state<>'cancelled' ORDER BY assigned_on DESC,id DESC LIMIT 1",[enrollmentId,taskId])}
@@ -169,6 +174,7 @@ export function applyTrainingEvent(db,e,old){
  if(isRC1Import(e))return applyRC1Event(db,e,old);
  if(Object.hasOwn(LC5_TYPES,t))return applyLC5Event(db,e,old);
  if(Object.hasOwn(STANDARD_TYPES,t))return applyStandardEvent(db,e,old);
+ if(Object.hasOwn(PREPARATION_FACT_TYPES,t))return applyPreparationEvent(db,e,old);
  if(t==='checklist_version'){
   createOnly(e,old);const mentor=['lean-audit-checklist-v1','lean-self-checklist-v1','lean-audit-checklist-v2','lean-self-checklist-v2'].includes(p.format);if(mentor)validateMentorMethod(p,p.format);else validatePracticalMethod(p);const code=p.format==='lean-audit-checklist-v1'?AUDIT_CODE:p.format==='lean-audit-checklist-v2'?AUDIT_STANDARD_CODE:['lean-self-checklist-v1','lean-self-checklist-v2'].includes(p.format)?SELF_CODE:PRACTICAL_CODE,methods=trainingMethods(db,code);
   invariant(!methods.some(m=>canonical(JSON.parse(m.methodology_json))===canonical(p)),'Такая методика уже зарегистрирована');
@@ -319,7 +325,7 @@ export function applyTrainingEvent(db,e,old){
   }
   changeOnly(e,old);exact(p,['command','actor_id','conclusion','feedback']);person(db,p.actor_id);
   invariant(old.state==='active'&&['finish','cancel'].includes(p.command)&&required(p.feedback),'Укажите итог и обратную связь');
-  if(p.command==='finish')invariant(Object.hasOwn(conclusions,p.conclusion)&&enrollmentTasks(db,old).every(x=>x.done),'Сначала завершите задания программы и укажите заключение');
+  if(p.command==='finish'){invariant(Object.hasOwn(conclusions,p.conclusion)&&enrollmentTasks(db,old).every(x=>x.done),'Сначала завершите задания программы и укажите заключение');preparationFinishAllowed(db,old,p.conclusion)}
   else invariant(p.conclusion===null,'Отмена не является квалификационным заключением');
   if(p.command==='cancel')invariant(!one(db,"SELECT id FROM training_assignment WHERE enrollment_id=? AND state IN('planned','in_progress')",[id]),'Сначала отмените незавершённые назначения программы');
   update(db,t,id,{state:p.command==='finish'?'completed':'cancelled',conclusion:p.conclusion,feedback:p.feedback,finished_by:p.actor_id,finished_at:e.occurred_at});return
@@ -332,7 +338,8 @@ export function applyTrainingEvent(db,e,old){
  }
  if(t==='training_assignment'){
   if(!old){
-   createOnly(e,old);exact(p,['trainee_id','mentor_id','supervisor_id','authorization_id','revision_id','source','skill_id','scale_id','target_level','assigned_by','assigned_on','due_on','reason','variant','shift_id','enrollment_id','program_task_id','plan_reviewed']);
+   createOnly(e,old);const revised=Object.hasOwn(p,'method_version');exact(p,['trainee_id','mentor_id','supervisor_id','authorization_id','revision_id','source','skill_id','scale_id','target_level','assigned_by','assigned_on','due_on','reason','variant','shift_id','enrollment_id','program_task_id','plan_reviewed',...(revised?['method_version','method_config']:[])]);
+   if(revised){invariant(p.method_version==='JI-2','Выберите действующую методику JI-2');validateJi2(p.variant,p.method_config)}else invariant(p.variant!=='fractional','Дробный инструктаж требует JI-2');
    const r=effective(db,p.revision_id);invariant(canonical(r.source)===canonical(p.source)&&p.plan_reviewed===true,'Исходник назначения должен соответствовать действующей редакции и проверенному TWI');
    invariant(period(p.assigned_on,p.due_on)&&p.due_on&&required(p.reason)&&Object.hasOwn(variants,p.variant),'Укажите даты, вид и основание обучения');
    invariant(r.effective_at&&p.assigned_on>=r.effective_at.slice(0,10),'Начало обучения не может предшествовать вступлению СОП в действие');
@@ -346,7 +353,7 @@ export function applyTrainingEvent(db,e,old){
     invariant(n?.state==='active'&&n.trainee_id===p.trainee_id&&task?.program_id===n.program_id&&task.sop_revision_id===r.id&&task.skill_id===p.skill_id&&task.scale_id===p.scale_id&&task.target_level===p.target_level&&p.assigned_on>=n.start_on&&p.due_on<=n.due_on&&!latestTaskAssignment(db,n.id,task.id),'Назначение не соответствует заданию персональной программы')
    }
    invariant(!one(db,"SELECT id FROM training_assignment WHERE trainee_id=? AND sop_revision_id=? AND skill_id=? AND state IN('planned','in_progress')",[p.trainee_id,r.id,p.skill_id]),'У сотрудника уже есть открытое назначение по этому навыку и редакции');
-   store(db,t,{id,trainee_id:p.trainee_id,mentor_id:p.mentor_id,supervisor_id:p.supervisor_id,operation_id:r.operation_id,sop_revision_id:r.id,twi_revision_id:r.id,due_on:p.due_on,state:'planned',rev:1,source_sha256:r.source.sha256,skill_id:p.skill_id,scale_id:p.scale_id,target_level:p.target_level,assigned_by:p.assigned_by,assigned_on:p.assigned_on,reason:p.reason,method_variant:p.variant,method_version:'JI-1',authorization_id:p.authorization_id,shift_id:p.shift_id,enrollment_id:p.enrollment_id,program_task_id:p.program_task_id,recorded_names_json:canonical(names(db,{trainee:p.trainee_id,instructor:p.mentor_id,supervisor:p.supervisor_id,assignedBy:p.assigned_by}))});
+   store(db,t,{id,trainee_id:p.trainee_id,mentor_id:p.mentor_id,supervisor_id:p.supervisor_id,operation_id:r.operation_id,sop_revision_id:r.id,twi_revision_id:r.id,due_on:p.due_on,state:'planned',rev:1,source_sha256:r.source.sha256,skill_id:p.skill_id,scale_id:p.scale_id,target_level:p.target_level,assigned_by:p.assigned_by,assigned_on:p.assigned_on,reason:p.reason,method_variant:p.variant,method_version:revised?'JI-2':'JI-1',method_config_json:revised?canonical(p.method_config):null,authorization_id:p.authorization_id,shift_id:p.shift_id,enrollment_id:p.enrollment_id,program_task_id:p.program_task_id,recorded_names_json:canonical(names(db,{trainee:p.trainee_id,instructor:p.mentor_id,supervisor:p.supervisor_id,assignedBy:p.assigned_by}))});
    return
   }
   changeOnly(e,old);invariant(old.source_sha256&&['planned','in_progress'].includes(old.state),'Назначение закрыто или относится к legacy');
@@ -373,8 +380,8 @@ export function applyTrainingEvent(db,e,old){
   invariant(p.mentor_ack===true&&p.trainee_ack===true,'Нужны отметки подтверждения обеих сторон (не электронная подпись)');
   const witness=optional(db,'person',p.witness_id);
   if(a.method_variant==='special'&&stage.phase==='presentation')invariant(witness&&witness.id!==a.trainee_id,'Укажите демонстратора');
-  if(a.method_variant==='hazardous'&&stage.phase==='practice'){const safety=latestVerification(db,a.id,'safety');invariant(safety?.result==='pass'&&safety.evaluated_on<=day,'Сначала зарегистрируйте подтверждение обязательной проверки безопасности')}
-  store(db,t,{id,assignment_id:a.id,mentor_id:a.mentor_id,held_at:p.held_at,notes:p.notes,result:p.result,steps_json:canonical({version:a.method_version,variant:a.method_variant,stage:stage.code,label:stage.label,repeat:pr.done.has(stage.code)}),rev:1,stage_code:stage.code,duration_minutes:p.duration_minutes,witness_id:p.witness_id,witness_name:witness?.display_name||null,mentor_ack:1,trainee_ack:1,recorded_at:e.occurred_at});
+  if((a.method_variant==='hazardous'||jiConfig(a)?.hazardous)&&stage.phase==='practice'){const safety=latestVerification(db,a.id,'safety');invariant(safety?.result==='pass'&&safety.evaluated_on<=day,'Сначала зарегистрируйте подтверждение обязательной проверки безопасности')}
+  store(db,t,{id,assignment_id:a.id,mentor_id:a.mentor_id,held_at:p.held_at,notes:p.notes,result:p.result,steps_json:canonical({version:a.method_version,variant:a.method_variant,stage:stage.code,label:stage.label,...(stage.execution?{execution:stage.execution}:{}),...(stage.segment?{segment:stage.segment}:{}),repeat:pr.done.has(stage.code)}),rev:1,stage_code:stage.code,duration_minutes:p.duration_minutes,witness_id:p.witness_id,witness_name:witness?.display_name||null,mentor_ack:1,trainee_ack:1,recorded_at:e.occurred_at});
   const done=progressFor(db,a);update(db,'training_assignment',a.id,{state:done.complete?'completed':'in_progress'});
   if(a.enrollment_id){const n=one(db,'SELECT * FROM training_enrollment WHERE id=?',[a.enrollment_id]);if(n?.state==='active')update(db,'training_enrollment',n.id,{state:n.state})}return
  }

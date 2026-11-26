@@ -1,3 +1,4 @@
+import {jiMethodLabel,validateJi2} from './ji-v03.js';
 import {PROGRAM_DOCS,preparationRows,preparationState} from './standard-workflows.js';
 import {standardWorkflowScreen} from './standard-workflows-view.js';
 import {STANDARD_FORMS,standardWorkbook,PRACTICAL_V03,AUDIT_V03,SELF_V03,TWI_POLICY} from './standard-v03.js';
@@ -162,29 +163,31 @@ export function trainingScreen(main,page,c){
   const actor=person('training_assigner','Ответственный за назначение'),skill=ref('skill','training_skill',preset.skillId||'','— Выберите —',s=>s.operation_id===currentStandard(db,rev.value)?.operation_id);
   const target=scaleFields('training_target',preset.scaleId||'',preset.targetLevel??null),shift=ref('work_shift','training_shift',preset.shiftId||'','— Не указана —');
   const reason=note('training_reason',preset.reason||''),variant=simple('training_variant',variants,preset.variant||'classic'),review=check('plan_reviewed','Проверил план TWI выбранной версии СОП и возможность обучения');
-  const sourceInfo=el('div');let epoch=0;
+  const sourceInfo=el('div'),jiBox=el('div'),followups=num('ji_followups',5,2,10),realShow=select('ji_real_show',[[1,'1-й показ'],[2,'2-й показ'],[3,'3-й показ']],'2',null),realTry=select('ji_real_try',[[1,'1-я проба'],[2,'2-я проба'],[3,'3-я проба'],[4,'4-я проба']],'3',null),segments=fieldInput('ji_segments',''),hazard=check('ji_hazard','Для практических проб необходима подтверждённая проверка безопасности');let epoch=0,stepCount=0;
+  function config(){const k=variant.value;let groups=[];if(k==='fractional'){groups=segments.value.split(',').map(x=>{const m=x.trim().match(/^(\d+)(?:\s*[-–]\s*(\d+))?$/);invariant(m,'Укажите группы шагов, например 1–2, 3–5');return {from:Number(m[1]),to:Number(m[2]||m[1])}})}return validateJi2(k,{followups:Number(followups.value),segments:groups,realShow:k==='smed'?Number(realShow.value):null,realTry:k==='smed'?Number(realTry.value):null,hazardous:k==='hazardous'||hazard.input.checked},stepCount||null)}
+  function drawJi(){const k=variant.value;jiBox.replaceChildren(msg('Методика JI-2 · стандарт 03. Контрольные проверки планируются в течение месяца после шага 4.'),f('Количество контрольных проверок',followups),...(k==='smed'?[msg('Два имитационных показа и один реальный; три имитационные пробы и одна реальная.'),grid(f('Реальное выполнение инструктором',realShow),f('Реальное выполнение учеником',realTry))]:[]),...(k==='fractional'?[msg('Укажите последовательные группы шагов СОП без пропусков. Всего шагов: '+(stepCount||'выберите СОП')),f('Группы шагов через запятую',segments)]:[]),...(k==='hazardous'?[msg('Показ лучшим исполнителем или видео с объяснением; подготовительная, самостоятельная и командная практика. Обязательна проверка безопасности.')]:[hazard.element]));}variant.onchange=drawJi;drawJi();
   async function refreshSource(){
    const seq=++epoch,r=currentStandard(db,rev.value);sourceInfo.replaceChildren(msg(r?'Проверка плана TWI…':'Выберите действующий СОП с планом TWI.'));
-   review.input.checked=false;review.input.disabled=true;
+   review.input.checked=false;review.input.disabled=true;stepCount=0;segments.value='';drawJi();
    if(!r)return;try{
     const raw=JSON.parse(await readContent(r.source)),x=linkedTwi(raw.constructor);if(seq!==epoch||!sourceInfo.isConnected)return;
     sourceInfo.replaceChildren(msg('План TWI: '+x.status+' · '+x.filled+'/15 полей',x.outdated||!x.exists?'warn':'muted'),btn('Открыть карточку СОП',()=>goDocument(r.document_id,r.id)));
-    review.input.disabled=!x.exists||x.outdated
+    stepCount=raw.constructor.steps.length;segments.value=Array.from({length:stepCount},(_,i)=>String(i+1)).join(', ');drawJi();review.input.disabled=!x.exists||x.outdated
    }catch(e){if(seq===epoch)sourceInfo.replaceChildren(msg(e.message,'bad'))}
   }
   rev.onchange=()=>{replaceOptions(skill,ref('skill','training_skill','','— Выберите —',s=>s.operation_id===currentStandard(db,rev.value)?.operation_id));instructor.set('');void refreshSource()};
   assigned.onchange=()=>{instructor.set('');if(!preset.programTaskId){trainee.set('');supervisor.set('')}};
   if(preset.programTaskId){rev.disabled=true;skill.disabled=true;target.scale.disabled=true;target.level.disabled=true;trainee.button.disabled=true}
-  const form=pane('Новое назначение обучения',row(back()),msg('Для назначения требуется действующий СОП, проверенный TWI, цель по навыку и действующее право инструктора обучать этой операции.'),f('СОП и редакция',rev),sourceInfo,review.element,grid(trainee.element,instructor.element,supervisor.element,actor.element),grid(f('Навык',skill),f('Смена',shift),f('Вид инструктажа',variant),f('Начало',assigned),f('Срок',due)),target.element,f('Основание обучения',reason),save('Сохранить назначение','training_assignment',()=>{
+  const form=pane('Новое назначение обучения',row(back()),msg('Для назначения требуется действующий СОП, проверенный TWI, цель по навыку и действующее право инструктора обучать этой операции.'),f('СОП и редакция',rev),sourceInfo,review.element,grid(trainee.element,instructor.element,supervisor.element,actor.element),grid(f('Навык',skill),f('Смена',shift),f('Вид инструктажа',variant),f('Начало',assigned),f('Срок',due)),jiBox,target.element,f('Основание обучения',reason),save('Сохранить назначение','training_assignment',()=>{
    const r=currentStandard(db,rev.value),auth=currentAuths(r?.operation_id,assigned.value).find(x=>x.person_id===instructor.value);
    invariant(r&&auth,'Выберите действующий СОП и инструктора с полномочием');
-   return {trainee_id:trainee.value,mentor_id:instructor.value,supervisor_id:nullable(supervisor.value),authorization_id:auth.id,revision_id:r.id,source:r.source,skill_id:skill.value,scale_id:target.scale.value,target_level:target.level.value===''?null:Number(target.level.value),assigned_by:actor.value,assigned_on:assigned.value,due_on:due.value,reason:reason.value,variant:variant.value,shift_id:nullable(shift.value),enrollment_id:preset.enrollmentId||null,program_task_id:preset.programTaskId||null,plan_reviewed:review.input.checked}
+   return {trainee_id:trainee.value,mentor_id:instructor.value,supervisor_id:nullable(supervisor.value),authorization_id:auth.id,revision_id:r.id,source:r.source,skill_id:skill.value,scale_id:target.scale.value,target_level:target.level.value===''?null:Number(target.level.value),assigned_by:actor.value,assigned_on:assigned.value,due_on:due.value,reason:reason.value,variant:variant.value,method_version:'JI-2',method_config:config(),shift_id:nullable(shift.value),enrollment_id:preset.enrollmentId||null,program_task_id:preset.programTaskId||null,plan_reviewed:review.input.checked}
   },null,id=>{route={page,id,tab:'overview'}}));
   void Promise.resolve().then(refreshSource);return form
  }
  function overview(a){
   const s=currentStandard(db,a.sop_revision_id),p=progressFor(db,a),e=evidenceSummary(a),name=JSON.parse(a.recorded_names_json||'{}');
-  const panel=pane('Назначение',tableOf(['Реквизит','Значение'],[['Обучаемый',name.trainee||n('person',a.trainee_id)],['Инструктор',name.instructor||n('person',a.mentor_id)],['Наставник программы',name.supervisor||n('person',a.supervisor_id)],['СОП',revLabel(a.sop_revision_id)],['Навык и цель',n('skill',a.skill_id)+' · '+a.target_level+' · '+n('rating_scale',a.scale_id)],['Вид инструктажа',variants[a.method_variant]],['Смена',n('work_shift',a.shift_id)],['Период',a.assigned_on+' — '+a.due_on],['Причина',a.reason],['Состояние',stateLabel(a)],['Инструктаж',p.completed+' / '+p.stages.length],['Допуск',e.ad.status]]),row(btn('Карточка СОП',()=>goDocument(s.document_id,s.id)),...(a.enrollment_id?[btn('Персональная программа',()=>go(enrollmentPage(a.enrollment_id),{enrollmentId:a.enrollment_id}))]:[])));
+  const panel=pane('Назначение',tableOf(['Реквизит','Значение'],[['Обучаемый',name.trainee||n('person',a.trainee_id)],['Инструктор',name.instructor||n('person',a.mentor_id)],['Наставник программы',name.supervisor||n('person',a.supervisor_id)],['СОП',revLabel(a.sop_revision_id)],['Навык и цель',n('skill',a.skill_id)+' · '+a.target_level+' · '+n('rating_scale',a.scale_id)],['Вид инструктажа',variants[a.method_variant]+' · '+jiMethodLabel(a)],['Смена',n('work_shift',a.shift_id)],['Период',a.assigned_on+' — '+a.due_on],['Причина',a.reason],['Состояние',stateLabel(a)],['Инструктаж',p.completed+' / '+p.stages.length],['Допуск',e.ad.status]]),row(btn('Карточка СОП',()=>goDocument(s.document_id,s.id)),...(a.enrollment_id?[btn('Персональная программа',()=>go(enrollmentPage(a.enrollment_id),{enrollmentId:a.enrollment_id}))]:[])));
   if(!sameRevision(a))panel.append(msg('Редакция СОП больше не действует. История сохранена; требуется решение о переобучении.','warn'),btn('Переобучение',()=>go('retraining')));
   if(a.approval_json){const x=JSON.parse(a.approval_json);panel.append(msg('Согласовано '+x.approved_on+' · НР: '+x.names.responsible+' · руководитель: '+x.names.head+(x.note?' · '+x.note:'')))}
   if(activePlan(a)&&sameRevision(a)&&!a.approval_json){
@@ -206,7 +209,7 @@ export function trainingScreen(main,page,c){
  }
  function instruction(a){
   const pr=progressFor(db,a),can=a.state!=='cancelled'&&a.approval_json&&sameRevision(a);
-  const panel=pane('Выполнение инструктажа',msg('Вводная часть: '+(pr.intro?'завершена':'в процессе')+' · контрольные проверки: '+pr.followup+'/5'+(pr.followupDue?' · срок поддержки '+pr.followupDue:''),pr.followupDue&&day>pr.followupDue&&pr.followup<5?'warn':'muted'));
+  const panel=pane('Выполнение инструктажа',msg('Вводная часть: '+(pr.intro?'завершена':'в процессе')+' · контрольные проверки: '+pr.followup+'/'+pr.followupRequired+(pr.followupDue?' · срок поддержки '+pr.followupDue:''),pr.followupDue&&day>pr.followupDue&&pr.followup<pr.followupRequired?'warn':'muted'));
   const bar=el('progress');bar.max=pr.stages.length;bar.value=pr.completed;bar.setAttribute('aria-label','Прогресс инструктажа');panel.append(bar,tableOf(['Этап','Состояние','Попыток'],pr.stages.map(s=>[s.label,pr.done.has(s.code)?'Выполнен':s.code===pr.next?.code?'Следующий':'Ожидает',pr.facts.filter(x=>x.stage_code===s.code).length])));
   if(can){
    const stage=select('session_stage',pr.stages.filter(x=>pr.done.has(x.code)||x.code===pr.next?.code).map(x=>[x.code,x.label+(pr.done.has(x.code)?' · повтор':'')]),pr.next?.code||pr.stages[0].code,null);

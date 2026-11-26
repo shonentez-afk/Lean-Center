@@ -1,6 +1,8 @@
 // LC6.2: TWI facts, not invented ratings or financial attribution.
 import {rows,one,invariant,canonical} from '../../core/db.js';
 import {matrixData,coverageData,admissionStatus,jiStages} from './domain.js';
+import {jiConfig} from './ji-v03.js';
+import {preparationForEnrollment} from './preparation-results.js';
 import {sharedTrainingTask} from './standard-workflows.js';
 import {auditRegistry} from './audit-analytics.js';
 import {actionRows,actionStatus} from './audit-domain.js';
@@ -25,7 +27,7 @@ function rowFor(db,a,day,to){
  const practices=sorted(a.practices.filter(x=>within(x.assessed_at,'',to)),'assessed_at'),admissions=sorted(a.admissions.filter(x=>within(x.decided_on,'',to)),'decided_on');
  const grant=admissions.find(x=>x.decision==='granted'&&elapsed(a.assigned_on,x.decided_on)>=0)||null;
  const current=admissionStatus(db,a.trainee_id,a.operation_id,day),facts=a.sessions.filter(x=>within(x.held_at,'',to)),known=facts.filter(x=>Number.isFinite(x.duration_minutes)&&x.duration_minutes>=0);
- const introStages=jiStages(a.method_variant).filter(x=>!['support','followup'].includes(x.phase)),beforeGrant=grant?facts.filter(x=>introStages.some(s=>s.code===x.stage_code)&&dayOf(x.held_at)<=grant.decided_on&&(!x.recorded_at||x.recorded_at<=grant.recorded_at)):[],completeTime=!!grant&&beforeGrant.length>0&&beforeGrant.every(x=>Number.isFinite(x.duration_minutes)&&x.duration_minutes>=0)&&jiStages(a.method_variant).filter(x=>!['support','followup'].includes(x.phase)).every(s=>beforeGrant.some(x=>x.stage_code===s.code&&x.result==='completed'));
+ const introStages=jiStages(a.method_variant,jiConfig(a)).filter(x=>!['support','followup'].includes(x.phase)),beforeGrant=grant?facts.filter(x=>introStages.some(s=>s.code===x.stage_code)&&dayOf(x.held_at)<=grant.decided_on&&(!x.recorded_at||x.recorded_at<=grant.recorded_at)):[],completeTime=!!grant&&beforeGrant.length>0&&beforeGrant.every(x=>Number.isFinite(x.duration_minutes)&&x.duration_minutes>=0)&&jiStages(a.method_variant,jiConfig(a)).filter(x=>!['support','followup'].includes(x.phase)).every(s=>beforeGrant.some(x=>x.stage_code===s.code&&x.result==='completed'));
  return {...a,first:practices[0]||null,last:practices.at(-1)||null,grant,current:current.current&&current.record?.assignment_id===a.id,currentLabel:current.record?.assignment_id===a.id?current.status:'Нет актуального допуска по назначению',elapsed:grant?elapsed(a.assigned_on,grant.decided_on):null,knownMinutes:known.reduce((s,x)=>s+x.duration_minutes,0),missing:facts.length-known.length,completeTime,minutesToGrant:completeTime?beforeGrant.reduce((s,x)=>s+x.duration_minutes,0):null,sourceFacts:beforeGrant.map(x=>[x.id,x.duration_minutes,x.held_at,x.result,x.stage_code])};
 }
 const summarize=as=>({assignments:as.length,people:unique(as.map(a=>a.trainee_id)).length,completed:as.filter(a=>a.state==='completed').length,granted:as.filter(a=>a.grant).length,current:as.filter(a=>a.current).length,assessed:as.filter(a=>a.first).length,firstPass:as.filter(a=>a.first&&a.first.conclusion!=='not_meet').length,repeat:as.filter(a=>a.first?.conclusion==='not_meet'&&a.last?.id!==a.first.id).length,recovered:as.filter(a=>a.first?.conclusion==='not_meet'&&a.last?.id!==a.first.id&&a.last?.conclusion!=='not_meet').length,medianDays:median(as.filter(a=>a.elapsed!==null).map(a=>a.elapsed)),durationN:as.filter(a=>a.completeTime).length,meanMinutes:mean(as.filter(a=>a.completeTime).map(a=>a.minutesToGrant))});
@@ -61,7 +63,7 @@ export function twiComparison(db,p,day){
  let source,all,unitId;
  if(p.kind==='assignment'){
   source=trainingFacts(db).find(x=>x.id===p.source_id);invariant(source&&source.state!=='cancelled','Назначение обучения недоступно');unitId=source.unit_id;
-  const key=x=>canonical([x.operation_id,x.sop_revision_id,x.skill_id,x.scale_id,x.target_level,x.method_variant,x.method_version]);
+  const key=x=>canonical([x.operation_id,x.sop_revision_id,x.skill_id,x.scale_id,x.target_level,x.method_variant,x.method_version,x.method_config_json||null]);
   all=trainingFacts(db).filter(x=>x.state!=='cancelled'&&key(x)===key(source)).map(x=>({id:x.id,person:x.trainee_id,date:x.assigned_on,record:x}));
  }else{
   source=one(db,'SELECT * FROM training_program WHERE id=?',[p.source_id]);invariant(source,'Версия программы недоступна');
@@ -74,13 +76,13 @@ export function twiComparison(db,p,day){
   const tasks=rows(db,'SELECT id FROM training_program_task WHERE program_id=? ORDER BY position,id',[source.id]),results=rows(db,'SELECT * FROM training_task_result WHERE enrollment_id=? AND held_on<=? ORDER BY held_on,recorded_at,id',[a.id,to]);
   const linked=trainingFacts(db).filter(x=>x.state!=='cancelled'&&within(x.assigned_on,a.start_on,to));
   const detailed=rows(db,'SELECT * FROM training_program_task WHERE program_id=? ORDER BY position,id',[source.id]),facts=[],assignmentIds=[];
-  let done=detailed.length>0;
+  let done=detailed.length>0;const prep=preparationForEnrollment(db,a.id);
   for(const task of detailed){
    if(task.sop_revision_id){
     const shared=sharedTrainingTask(db,a.id,task.id),as=linked.filter(x=>x.enrollment_id===(shared?.enrollmentId||a.id)&&x.program_task_id===(shared?.taskId||task.id));const last=as.at(-1);
-    if(!last||last.state!=='completed'||last.sop_revision_id!==task.sop_revision_id){done=false;continue}
-    for(const x of as){assignmentIds.push(x.id);const fs=x.sessions.filter(y=>within(y.held_at,a.start_on,to));facts.push(...fs.map(y=>[y.id,y.duration_minutes,y.held_at,y.result]));if(!fs.length||fs.some(y=>!Number.isFinite(y.duration_minutes)))done=false}
-    if(!jiStages(last.method_variant).every(s=>last.sessions.some(y=>dayOf(y.held_at)<=to&&y.stage_code===s.code&&y.result==='completed')))done=false;
+    if(!last||(!prep&&last.state!=='completed')||last.sop_revision_id!==task.sop_revision_id){done=false;continue}
+    for(const x of as){assignmentIds.push(x.id);const fs=x.sessions.filter(y=>within(y.held_at,a.start_on,to)&&(!prep||!jiStages(x.method_variant,jiConfig(x)).some(s=>s.code===y.stage_code&&s.phase==='followup')));facts.push(...fs.map(y=>[y.id,y.duration_minutes,y.held_at,y.result]));if(!fs.length||fs.some(y=>!Number.isFinite(y.duration_minutes)))done=false}
+    if(!jiStages(last.method_variant,jiConfig(last)).filter(s=>!prep||s.phase!=='followup').every(s=>last.sessions.some(y=>dayOf(y.held_at)<=to&&y.stage_code===s.code&&y.result==='completed')))done=false;
    }else{const rs=results.filter(y=>y.task_id===task.id);if(rs.at(-1)?.result!=='completed')done=false;facts.push(...rs.map(y=>[y.id,y.minutes,y.held_on,y.result]))}
   }
   const complete=!!(a.state==='completed'&&dayOf(a.finished_at)<=to&&a.conclusion&&a.conclusion!=='not_meet'&&done&&facts.length&&facts.every(y=>Number.isFinite(y[1])&&y[1]>=0&&dayOf(y[2])<=dayOf(a.finished_at)));

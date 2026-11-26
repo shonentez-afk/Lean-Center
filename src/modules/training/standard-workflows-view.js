@@ -3,6 +3,7 @@
 import {rows,one,invariant,uuid} from '../../core/db.js';
 import {STANDARD_FORMS,standardWorkbook,TWI_POLICY} from './standard-v03.js';
 import {QUESTION_BANK_V03} from './question-bank-v03.js';
+import {preparationResultPanels} from './preparation-results-view.js';
 import {PROGRAM_DOCS,SUPPLEMENT_TASKS,adaptationBounds,preparationRows,preparationState,bankRows,bankBaseline,bankChanges,bankControl,supplementRows,supplementStatus} from './standard-workflows.js';
 const roles={instructor:'Инструктор',internal_trainer:'Внутренний тренер'};
 const states={draft:'Черновик',approved:'Согласовано',declined:'Отклонено',active:'В процессе',completed:'Завершено',cancelled:'Отменено'};
@@ -24,7 +25,7 @@ export function standardWorkflowScreen(page,c,h,route){
    return stack(pane('Программа подготовки · '+name(x.trainee_id),row(back(),btn('Карточка сотрудника',()=>c.openEmployee(x.trainee_id))),msg(kinds[x.category]+' · '+preparationState(x)+' · '+x.note),tableOf(['Документ','Начало','Окончание','Ответственный','Версия','Состояние',''],d.map((y,i)=>[...lines[i],btn('Открыть документ',()=>go(show(y),{enrollmentId:y.id}))])),exportForm('Скачать структуру программы (прил. 17)',17,fields,lines,'TWI-17-'+x.id.slice(0,8))),
     pane('План смен стажировки',msg('Не менее двух смен. Плановые смены не означают фактического прохождения стажировки.'),tableOf(['Дата','Смена'],x.shifts.map(s=>[s.date,n('work_shift',s.shift_id)]))),
     pane('Общие базовые операции',msg('Совпадающие СОП, навык, шкала и цель в адаптации и стажировке используют один факт стажировки.'),table(['Задание адаптации','Задание стажировки'],x.shared.map(s=>[one(db,'SELECT title FROM training_program_task WHERE id=?',[s.adaptation_task_id])?.title,one(db,'SELECT title FROM training_program_task WHERE id=?',[s.internship_task_id])?.title]),'Общие операции с точным совпадением не найдены.')),
-    pane('Проверки знаний по стандарту 03',msg('ОТ: протокол по окончании программы. Стажировка: базовые операции, практический чек-лист и отметка об освоении. Адаптация: основные операции, теория по четырём профессиональным блокам, комиссия и обратная связь. Завершение комплекта не является допуском к работе.'),row(btn('Банк вопросов',()=>go('knowledge_bank')),btn('Практические оценки',()=>go('practical',{personId:x.trainee_id})),btn('Матрица компетенций',()=>go('skills',{personId:x.trainee_id})))));
+    ...preparationResultPanels(c,h,x));
   }
   if(route.mode==='new'){
    const trainee=person('prep_new_trainee','Обучаемый',route.personId||'',{}),manager=person('prep_new_manager','Руководитель'),category=simple('prep_new_category',kinds,'new'),why=note('prep_new_note'),controls={},shiftBox=el('div',undefined,'stack'),shifts=[],bounds=msg('');
