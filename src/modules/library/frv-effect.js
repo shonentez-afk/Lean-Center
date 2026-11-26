@@ -1,6 +1,7 @@
 // Facts from original verified FRV files; no invented loss reasons or approved savings.
 import {rows,invariant} from '../../core/db.js';
 import {frvSummary} from './frv-summary.js';
+import {checkContent} from './domain.js';
 import {actionRows,actionStatus} from '../training/audit-domain.js';
 export const FRV_CATEGORIES={VA:'ВДЦ',NVA_Necessary:'М2',NVA_Waste:'М1',WAIT:'Ожидание',BREAK:'Перерыв',OTHER:'Не классифицировано'};
 const finite=x=>typeof x==='number'&&Number.isFinite(x);
@@ -25,7 +26,7 @@ export function frvLosses(raw){
 }
 export async function verifiedFrvEffect(db,studyId,readContent){
  const study=frvRegistry(db).find(x=>x.id===studyId);invariant(study?.state==='final','Для расчёта нужен завершённый ФРВ');
- const raw=JSON.parse(await readContent(study.source)),s=frvSummary(raw);
+ const raw=JSON.parse(await checkContent(study.source,await readContent(study.source))),s=frvSummary(raw);
  invariant(s.comparable&&s.baselineCount>0&&s.improvedCount>0&&s.delta!==null,'Нет подтверждённого сопоставления полных циклов до/после');
  const actions=actionRows(db).filter(a=>a.study_id===studyId&&actionStatus(db,a)==='verified');
  invariant(actions.length,'Нет связанных мероприятий с подтверждённой эффективностью');
