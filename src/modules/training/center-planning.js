@@ -7,6 +7,10 @@ export function schedulePeople(db,s){
  const a=['audit','practical'].includes(scheduleKind(s))?one(db,'SELECT trainee_id,mentor_id,supervisor_id FROM training_assignment WHERE id=?',[s.source_id]):null;
  return [...new Set([s.owner_id,...(a?[a.trainee_id,a.mentor_id,a.supervisor_id]:[]),...(scheduleKind(s)==='self_eval'?[s.source_id]:[])].filter(Boolean))];
 }
+export function plannedAuditFacts(db,s,maxDate='9999-12-31'){
+ if(scheduleKind(s)!=='audit'||s.state!=='planned'||s.source_type!=='training_assignment')return [];
+ return rows(db,"SELECT * FROM audit_session WHERE state='final' AND assignment_id=? AND auditor_id=? AND substr(observed_at,1,10)<=? AND id NOT IN(SELECT completed_audit_id FROM schedule_event WHERE completed_audit_id IS NOT NULL) ORDER BY observed_at DESC,recorded_at DESC,id",[s.source_id,s.owner_id,maxDate]).filter(a=>!s.created_at||a.recorded_at>=s.created_at&&a.observed_at.slice(0,10)>=s.created_at.slice(0,10));
+}
 export function plannedAssessmentFacts(db,s){
  const type=scheduleKind(s);if(!['practical','self_eval'].includes(type))return [];
  const sql=type==='practical'?`SELECT id,assessed_at date,recorded_at,person_id,evaluator_id FROM assessment_session WHERE assignment_id=? AND evaluator_id=? AND assessment_kind='practical' AND state='confirmed' AND id NOT IN(SELECT completed_assessment_id FROM schedule_event WHERE completed_assessment_id IS NOT NULL)`:`SELECT id,evaluated_on date,recorded_at,person_id FROM mentor_self_evaluation WHERE person_id=? AND id NOT IN(SELECT completed_self_id FROM schedule_event WHERE completed_self_id IS NOT NULL)`;

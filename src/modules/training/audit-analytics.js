@@ -11,9 +11,13 @@ export function summarizeAudits(db,{versionId,from='',to='',mentorId='',unitId='
  const aggregate=(key,keys=[])=>{const m=new Map(keys.map(k=>[k,[]]));for(const q of selected){const k=key(q,ids.get(q.audit_id));if(!m.has(k))m.set(k,[]);m.get(k).push(q)}return [...m].map(([key,qs])=>({key,audits:new Set(qs.map(q=>q.audit_id)).size,...scoreQuestions(qs)}))};
  const groups=aggregate(q=>q.section_code,[...new Set(criteria.map(c=>c.section_code))]);
  const byCriterion=aggregate(q=>q.criterion_id,criteria.map(c=>c.id)).map(x=>({...x,criterion:criteria.find(c=>c.id===x.key)}));
- const repeated=aggregate((q,a)=>JSON.stringify([a.mentor_id,a.operation_id,a.standard_revision_id,q.criterion_id])).filter(x=>x.no>=2).map(x=>({...x,context:JSON.parse(x.key)})).sort((a,b)=>b.no-a.no);
+ // Reports by different trainers are separate observations, not different instruction facts.
+ const recurrence=new Map();
+ for(const q of selected.filter(q=>q.response==='no')){const a=ids.get(q.audit_id),key=JSON.stringify([a.mentor_id,a.operation_id,a.standard_revision_id,q.criterion_id]),x=recurrence.get(key)||{key,context:JSON.parse(key),facts:new Set(),reports:new Set(),historical:new Set(),no:0};x.no++;x.reports.add(a.id);if(a.training_session_id)x.facts.add(a.training_session_id);else x.historical.add(a.id);recurrence.set(key,x)}
+ const contexts=[...recurrence.values()].map(x=>({key:x.key,context:x.context,factCount:x.facts.size,negativeReports:x.reports.size,negativeAnswers:x.no,unlinked:x.historical.size}));
+ const repeated=contexts.filter(x=>x.factCount>=2).sort((a,b)=>b.factCount-a.factCount||b.negativeAnswers-a.negativeAnswers),unlinked=contexts.filter(x=>x.unlinked>0);
  const heat=aggregate((q,a)=>JSON.stringify([a.mentor_id,q.criterion_id])),heatmap=new Map(heat.map(x=>[x.key,x]));
- return {audits:all,criteria,stats:scoreQuestions(selected),groups,byCriterion,byMonth:aggregate((q,a)=>a.observed_at.slice(0,7)).sort((a,b)=>a.key.localeCompare(b.key)),byMentor:aggregate((q,a)=>a.mentor_id),byUnit:aggregate((q,a)=>a.unit_id||''),byShift:aggregate((q,a)=>a.shift_id||''),repeated,heatmap};
+ return {audits:all,criteria,stats:scoreQuestions(selected),groups,byCriterion,byMonth:aggregate((q,a)=>a.observed_at.slice(0,7)).sort((a,b)=>a.key.localeCompare(b.key)),byMentor:aggregate((q,a)=>a.mentor_id),byUnit:aggregate((q,a)=>a.unit_id||''),byShift:aggregate((q,a)=>a.shift_id||''),repeated,unlinked,heatmap};
 }
 export function centerAuditIndicators(db,day){
  const audits=auditRegistry(db).filter(a=>a.state==='final'&&a.observed_at.slice(0,7)===day.slice(0,7)&&a.observed_at.slice(0,10)<=day),actions=actionRows(db).map(a=>({...a,displayState:actionStatus(db,a)})),open=actions.filter(a=>['open','in_progress','ineffective','implemented'].includes(a.displayState)),versions=[...new Set(audits.map(a=>a.version_id))];

@@ -47,7 +47,7 @@ export function centerMetrics(db,{day,from='',to=day,unitId='',personId=''}){
  count('Обучение','Назначено обучения',planned.length,'Назначения, созданные в период; без отменённых. Сотрудник — обучаемый.','twi',{}),
  ratio('Обучение','Завершено из назначенных',completed.length,planned.length,'Текущие состояния назначений, созданных в период; не исторический срез закрытий.','twi',{}),
  count('Обучение','Просрочено обучений',a.filter(x=>['planned','in_progress'].includes(x.state)&&x.due_on<day).length,'Открытые назначения со сроком до текущей даты.','twi',{filter:'overdue'}),
- count('Наставничество','Аудиты L1',audit.length,'Зафиксированные аудиты инструктора в период; версии не смешиваются в процент.','audit',f),
+ count('Наставничество','Аудиты L1',audit.length,'Зафиксированные аудиты инструктора в период; версии не смешиваются в процент.','audit',{...f,role:'mentor',state:'final'}),
  count('Наставничество','Самооценки',self.length,'Факты самооценки наставника в период.','self_eval',f),
  count('Наставничество','Запланировано оценок',schedules.filter(x=>['audit','practical','self_eval'].includes(scheduleKind(x))).length,'Текущие незакрытые плановые оценки; подразделение ответственного.','calendar',{personId,unitId,month:'',scheduleType:'planned'}),
  count('Компетенции','Практические оценки',practice.length,'Подтверждённые практические оценки обучаемого в период.','practical',f),
