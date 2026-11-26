@@ -1,5 +1,5 @@
 import {refsForEvents,refsForDb,validateRef,checkContent} from '../modules/library/domain.js';
-import {invariant,uuid,sha256,canonical,readSnapshot,MAX_DB,MAX_PACKAGE} from '../core/db.js';
+import {invariant,uuid,sha256,canonical,readSnapshot,checkPackage,MAX_DB,MAX_PACKAGE} from '../core/db.js';
 const textBytes=s=>new TextEncoder().encode(s);
 export async function chooseFolder(){invariant(window.showDirectoryPicker,'Выбор папки запрещён браузером. Используйте ручной импорт и экспорт.');return window.showDirectoryPicker({id:'lean-center-network',mode:'readwrite'})}
 export async function permission(h,request=false){if(!h)return false;let p=await h.queryPermission({mode:'readwrite'});if(p!=='granted'&&request)p=await h.requestPermission({mode:'readwrite'});return p==='granted'}
@@ -12,7 +12,18 @@ export async function ensureContent(h,ref,read){validateRef(ref);invariant(await
  if(exists){await readContent(h,ref);return}
  invariant(typeof read==='function','Нет исходного файла '+ref.sha256);const text=await checkContent(ref,await read(ref));try{await writeNew(d,name,text)}catch(e){if(!String(e.message).startsWith('Файл уже существует:'))throw e}await readContent(h,ref)
 }
-export async function sendPackage(h,p,read){invariant(await permission(h,true),'Нет доступа к папке');for(const ref of refsForEvents(p.events))await ensureContent(h,ref,read);const d=await sub(h,'Exchange',true);await writeNew(d,'change-'+p.id+'.leanpkg',canonical(p))}
+export async function sendPackage(h,p,read){
+ invariant(await permission(h,true),'Нет доступа к папке');await checkPackage(p);
+ // Verify detached documents even when this exact queue was already sent.
+ for(const ref of refsForEvents(p.events))await ensureContent(h,ref,read);
+ const d=await sub(h,'Exchange',true);
+ const sameQueue=q=>q.database_id===p.database_id&&q.device_id===p.device_id&&q.base_publication_id===p.base_publication_id&&q.schema_version===p.schema_version&&canonical(q.events)===canonical(p.events);
+ for(const item of await listPackages(h)){const q=item.p;if(!q)continue;
+  if(q.id===p.id){await checkPackage(q);invariant(q.hash===p.hash,'Повтор ID пакета с иным содержимым');return {duplicate:true,id:q.id}}
+  if(sameQueue(q)){try{await checkPackage(q)}catch{continue}return {duplicate:true,id:q.id}}
+ }
+ await writeNew(d,'change-'+p.id+'.leanpkg',canonical(p));return {duplicate:false,id:p.id}
+}
 export async function listPackages(h){invariant(await permission(h,false),'Нет доступа к папке');let d;try{d=await sub(h,'Exchange')}catch(e){if(e.name==='NotFoundError')return [];throw e}const result=[];for await(const [name,entry] of d.entries()){if(entry.kind!=='file'||!/^change-[0-9a-f-]+\.leanpkg$/i.test(name))continue;try{const p=JSON.parse(new TextDecoder().decode(await readFile(d,name,MAX_PACKAGE)));invariant(name==='change-'+p.id+'.leanpkg','Имя пакета не совпадает с ID');result.push({name,p})}catch(e){result.push({name,error:e.message})}}return result.sort((a,b)=>(a.p?.created_at||'').localeCompare(b.p?.created_at||''))}
 export async function latestSnapshot(h,SQL,databaseId=null){invariant(await permission(h,false),'Нет доступа к папке');let d;try{d=await sub(h,'Database')}catch(e){if(e.name==='NotFoundError')return null;throw e}const manifests=[];for await(const [name,entry] of d.entries()){if(entry.kind!=='file'||!/^publication-[0-9a-f-]+\.json$/i.test(name))continue;const m=JSON.parse(new TextDecoder().decode(await readFile(d,name,65536)));invariant(name==='publication-'+m.id+'.json','Имя манифеста не совпадает');if(!databaseId||m.database_id===databaseId)manifests.push(m)}
  if(!manifests.length)return null;invariant(new Set(manifests.map(m=>m.database_id)).size===1,'В папке несколько баз. Используйте отдельную папку для каждой.');const ids=new Set(manifests.map(m=>m.id)),parents=new Set(manifests.map(m=>m.parent_id));const heads=manifests.filter(m=>!parents.has(m.id));invariant(heads.length===1,'Обнаружены параллельные публикации; требуется разбор');const head=heads[0];const seen=new Set();let node=head;while(node){invariant(!seen.has(node.id),'Цикл публикаций');seen.add(node.id);node=node.parent_id?manifests.find(m=>m.id===node.parent_id):null}invariant(seen.size===ids.size,'Разорвана цепочка публикаций');const bytes=await readFile(d,'snapshot-'+head.id+'.sqlite');const db=await readSnapshot(SQL,head,bytes);return {manifest:head,db,bytes}}
