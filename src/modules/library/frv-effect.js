@@ -1,3 +1,4 @@
+import {calculateEffect} from '../effect/math.js';
 // Facts from original verified FRV files; no invented loss reasons or approved savings.
 import {rows,invariant} from '../../core/db.js';
 import {frvSummary} from './frv-summary.js';
@@ -34,8 +35,5 @@ export async function verifiedFrvEffect(db,studyId,readContent){
 }
 export function roiScenario(effect,inputs){
  invariant(effect?.summary?.comparable&&finite(effect.summary.delta),'Нет подтверждённых замеров');
- const {cyclesPerYear,hourRate,realization,investment,annualCost}=inputs;
- invariant([cyclesPerYear,hourRate,realization,investment,annualCost].every(finite)&&cyclesPerYear>0&&hourRate>=0&&realization>=0&&realization<=100&&investment>=0&&annualCost>=0,'Заполните объём, ставку, долю реализации 0–100% и затраты');
- const hours=effect.summary.delta*cyclesPerYear/3600,annualBenefit=hours*hourRate*realization/100,annualNet=annualBenefit-annualCost,yearOne=annualNet-investment;
- return {hours,annualBenefit,annualNet,yearOne,roi:investment>0?yearOne/investment*100:null,payback:investment>0&&annualNet>0?12*investment/annualNet:null};
+ return calculateEffect('time',{...inputs,deltaSeconds:effect.summary.delta});
 }

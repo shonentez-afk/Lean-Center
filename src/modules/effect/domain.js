@@ -1,3 +1,5 @@
+import {calculateEffect} from './math.js';
+export {calculateEffect} from './math.js';
 // LC6: calculations, event guards, current evidence and period facts.
 import {invariant,one,rows,canonical} from '../../core/db.js';
 import {actionRows,actionStatus} from '../training/audit-domain.js';
@@ -13,21 +15,6 @@ const person=(db,id)=>invariant(one(db,'SELECT id FROM person WHERE id=? AND arc
 const due=(e,d)=>invariant(date(d)&&d>=day(e),'Укажите контрольный срок не раньше даты записи');
 const insert=(db,t,v)=>{const keys=Object.keys(v);db.run('INSERT INTO '+t+'('+keys.join(',')+') VALUES('+keys.map(()=>'?').join(',')+')',keys.map(k=>v[k]))};
 const update=(db,t,id,v)=>{const keys=Object.keys(v);db.run('UPDATE '+t+' SET '+keys.map(k=>k+'=?').join(',')+',rev=rev+1 WHERE id=?',[...keys.map(k=>v[k]),id])};
-export function calculateEffect(method,p){
- invariant(['time','direct'].includes(method),'Выберите способ расчёта');
- exact(p,method==='time'?['deltaSeconds','cyclesPerYear','hourRate','realization','investment','annualCost']:['annualGross','investment','annualCost']);
- invariant(bounded(p.investment,0,1e12)&&bounded(p.annualCost,0,1e12),'Укажите неотрицательные затраты и инвестиции');
- let hours=null,gross;
- if(method==='time'){
-  invariant(bounded(p.deltaSeconds,-1e7,1e7)&&Number.isSafeInteger(p.cyclesPerYear)&&bounded(p.cyclesPerYear,1,1e10)&&bounded(p.hourRate,0,1e10)&&bounded(p.realization,0,100),'Укажите разницу секунд, целый годовой объём, ставку и долю реализации 0–100%');
-  hours=p.deltaSeconds*p.cyclesPerYear/3600;gross=hours*p.hourRate*p.realization/100;
- }else{invariant(bounded(p.annualGross,-1e12,1e12),'Укажите годовой валовый эффект');gross=p.annualGross}
- const annualNet=gross-p.annualCost,yearOne=annualNet-p.investment;
- invariant([gross,annualNet,yearOne].every(x=>bounded(x,-1e15,1e15)),'Расчёт превышает допустимый диапазон');
- const roi=p.investment>0?yearOne/p.investment*100:null,payback=p.investment>0&&annualNet>0?12*p.investment/annualNet:null;
- invariant((roi===null||Number.isFinite(roi))&&(payback===null||Number.isFinite(payback)),'Проверьте слишком малые значения затрат');
- return {hours,annualBenefit:gross,annualNet,yearOne,roi,payback};
-}
 export function measurementOf(raw){
  const s=frvSummary(raw);invariant(s.comparable&&s.baselineCount>0&&s.improvedCount>0,'Нужно одобренное сравнение полных циклов ФРВ до/после');
  return {before:s.before,after:s.after,baselineCount:s.baselineCount,improvedCount:s.improvedCount};
@@ -81,17 +68,17 @@ export function applyEconomicEvent(db,e,old){
  const p=e.payload,id=e.entity_id,t=e.entity_type;
  if(t==='economic_effect'){
   if(!old){
-   exact(p,['command','study_id','action_id','owner_id','unit_id','currency','method','title','plan','review_due']);
+   exact(p,['command','study_id','action_id','owner_id','unit_id','currency','method','title','plan','plan_basis','review_due']);
    invariant(e.operation==='create'&&p.command==='create'&&((!!p.study_id)!=(!!p.action_id))&&text(p.title,500)&&CURRENCIES.includes(p.currency),'Укажите источник, название и валюту');
    person(db,p.owner_id);invariant(one(db,'SELECT id FROM org_unit WHERE id=? AND archived=0',[p.unit_id]),'Выберите подразделение');
    invariant(!effectForSource(db,p.study_id,p.action_id),'Для источника уже существует карточка эффекта');
    if(p.study_id){const f=one(db,'SELECT f.state,o.unit_id FROM frv_study f JOIN operation o ON o.id=f.operation_id WHERE f.id=?',[p.study_id]);invariant(f&&f.state!=='archived'&&f.unit_id===p.unit_id&&p.method==='time','ФРВ требует своего подразделения и расчёта по времени')}
    else{const a=actionRows(db).find(x=>x.id===p.action_id);invariant(a&&a.state!=='cancelled'&&!a.study_id,'Выберите самостоятельное мероприятие; для связанного ФРВ используйте его общую карточку')}
-   calculateEffect(p.method,p.plan);due(e,p.review_due);
-   insert(db,t,{id,study_id:p.study_id,action_id:p.action_id,owner_id:p.owner_id,unit_id:p.unit_id,currency:p.currency,method:p.method,title:p.title.trim(),plan_json:canonical(p.plan),review_due:p.review_due,state:'active',created_at:e.occurred_at,rev:1});return
+   calculateEffect(p.method,p.plan);invariant(text(p.plan_basis),'Укажите основание планового расчёта');due(e,p.review_due);
+   insert(db,t,{id,study_id:p.study_id,action_id:p.action_id,owner_id:p.owner_id,unit_id:p.unit_id,currency:p.currency,method:p.method,title:p.title.trim(),plan_json:canonical(p.plan),plan_basis:p.plan_basis.trim(),review_due:p.review_due,state:'active',created_at:e.occurred_at,rev:1});return
   }
   invariant(e.operation==='update'&&old.state==='active','Карточка недоступна для изменения');
-  if(p.command==='plan'){exact(p,['command','plan']);invariant(!old.actual_json,'Исходный план зафиксирован после проверки расчёта');calculateEffect(old.method,p.plan);update(db,t,id,{plan_json:canonical(p.plan)});return}
+  if(p.command==='plan'){exact(p,['command','plan','plan_basis']);invariant(!old.actual_json,'Исходный план зафиксирован после проверки расчёта');calculateEffect(old.method,p.plan);invariant(text(p.plan_basis),'Укажите основание планового расчёта');update(db,t,id,{plan_json:canonical(p.plan),plan_basis:p.plan_basis.trim()});return}
   if(p.command==='reschedule'){exact(p,['command','review_due','reason']);due(e,p.review_due);invariant(text(p.reason),'Укажите основание нового срока');update(db,t,id,{review_due:p.review_due,reviewed_at:null});return}
   if(p.command==='cancel'){exact(p,['command','reason']);invariant(text(p.reason)&&!one(db,"SELECT id FROM economic_fact WHERE effect_id=? AND state<>'void'",[id]),'Укажите основание; сначала разрешите все денежные факты');update(db,t,id,{state:'cancelled'});return}
   exact(p,['command','inputs','measurement','reviewer_id','evidence','actions','source']);invariant(p.command==='measure'&&text(p.evidence),'Укажите основание проверки расчёта');
