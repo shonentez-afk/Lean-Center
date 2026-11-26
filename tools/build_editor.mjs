@@ -21,10 +21,12 @@ export function buildEditor(bridge,editorCSS=''){
  // Allow only the existing Stage43 Yandex proxy; no automatic network probe.
  // AI calls are explicit user actions. Keep offline import, photo and export.
  replace("initDocumentManager();pingAI()","initDocumentManager();");
- // Preserve five text entries in the derived editor without changing the baseline.
+ // Preserve extended KM lists through Stage42 normalization/export, but use
+ // one native add button and one handler for the full existing 60-KM limit.
  replace("s.keyMoments.map(String).slice(0,3)","s.keyMoments.map(String).slice(0,5)");
  if(html.split('s.keyMoments.length<3').length!==3)throw Error('KM editor anchors changed');
- html=html.replaceAll('s.keyMoments.length<3','s.keyMoments.length<5');
+ html=html.replaceAll('s.keyMoments.length<3','s.keyMoments.length<60');
+ replace("    const cards=document.querySelectorAll('#stepsContainer .step-card');\n    cards.forEach((card,i)=>{\n      const step=state.steps[i];\n      if(!step||step.keyMoments.length<3||step.keyMoments.length>=60)return;\n      const first=card.querySelector('[data-km=\"'+step.id+'\"]');\n      const area=first?.parentElement?.parentElement;\n      if(!area||area.querySelector('[data-stage42-add-more-km]'))return;\n      const btn=document.createElement('button');\n      btn.type='button';\n      btn.dataset.stage42AddMoreKm=String(step.id);\n      btn.className='text-xs text-red-700 mt-1 font-medium';\n      btn.textContent='＋ Добавить КМ';\n      btn.addEventListener('click',event=>{\n        event.preventDefault();\n        if(state.documentManager?.status==='Опубликован'||\n           state.documentManager?.status==='Архив')return;\n        if(step.keyMoments.length>=60)return;\n        step.keyMoments.push('');\n        stateChanged();\n        renderSteps();\n      });\n      area.appendChild(btn);\n    });\n",'    // Extended KM addition is handled by the native button.\n');
  replace("ws.getCell(5,7).value={formula:timeCellRefs.join('+')}","ws.getCell(5,7).value={formula:timeCellRefs.join('+'),result:exportData.totalTimeSeconds/86400}");
  // LC5.4: exact patches to the pinned runtime. Original Stage43 blob stays immutable.
  replace("modeButtons.forEach(btn=>btn.onclick=()=>{mode=btn.dataset.illMode;iconKind=null;modeButtons.forEach(x=>x.dataset.active=x===btn?'1':'0');iconButtons.forEach(x=>x.dataset.active='0');help.textContent=modeHelp[mode]||'';canvas.style.cursor=mode==='select'?'default':'crosshair'});","modeButtons.forEach(btn=>btn.onclick=()=>{mode=btn.dataset.illMode;iconKind=null;if(mode!=='select'){selected.clear();primary=-1;textInput.value='';draw()}else syncText();modeButtons.forEach(x=>x.dataset.active=x===btn?'1':'0');iconButtons.forEach(x=>x.dataset.active='0');help.textContent=modeHelp[mode]||'';canvas.style.cursor=mode==='select'?'default':'crosshair'});");

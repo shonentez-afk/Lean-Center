@@ -88,6 +88,23 @@ try{
  await emptyEditor.locator('#meta-operation').fill('Черновик проверки нового редактора');
  // LC5.4: exact real editor input and both Stage43 XLSX templates without photos.
  await emptyEditor.evaluate(()=>{state.steps=Array.from({length:2},(_,i)=>{const s=createEmptyStep();s.action=i?'Проверить метку учебной панели':'Открыть учебный кожух';s.keyMoments=['Ключевой момент'];s.reason='Причина';return s});state.safetyIconIds=[ICON_LIB.find(x=>x.id==='M004')?.id||ICON_LIB[0].id];stateToHtml()});
+ // One add control per step at all counts, including the former 3/4 overlap.
+ const kmCard=emptyEditor.locator('#stepsContainer .step-card').first(),kmFields=kmCard.locator('[data-km]'),kmAdd=kmCard.locator('[data-add-km],[data-stage42-add-more-km]');
+ for(let count=1;count<=5;count++){
+  assert.equal(await kmFields.count(),count);
+  assert.equal(await kmAdd.count(),1,'exactly one add-KM control at '+count);
+  assert.equal(await kmCard.locator('[data-add-km]').count(),1);
+  await kmAdd.click();
+  await emptyEditor.waitForFunction(n=>state.steps[0].keyMoments.length===n,count+1);
+  await kmFields.last().fill('Учебный КМ '+(count+1));
+ }
+ assert.equal(await kmFields.count(),6);
+ assert.equal(await kmAdd.count(),1);
+ assert.deepEqual(await emptyEditor.evaluate(()=>state.steps[0].keyMoments),['Ключевой момент','Учебный КМ 2','Учебный КМ 3','Учебный КМ 4','Учебный КМ 5','Учебный КМ 6']);
+ // Restore original photo/time fixture through the real remove controls.
+ for(let count=6;count>1;count--){await kmCard.locator('[data-rm-km]').last().click();await emptyEditor.waitForFunction(n=>state.steps[0].keyMoments.length===n,count-1)}
+ assert.equal(await kmFields.count(),1);
+ assert.equal(await kmAdd.count(),1);
  const times=emptyEditor.locator('[data-step-field=duration]');
  await times.nth(0).fill('12');await times.nth(1).fill('00:23');assert.deepEqual(await emptyEditor.evaluate(()=>state.steps.map(s=>s.durationSeconds)),[12,23]);
  await times.nth(0).fill('12:99');assert.equal(await times.nth(0).getAttribute('aria-invalid'),'true');assert.equal(await emptyEditor.evaluate(()=>state.steps[0].durationSeconds),12);
