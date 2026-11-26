@@ -153,7 +153,7 @@ import {validateChecklist,evaluationResult,sopCriteria} from '../src/modules/lib
 import {validatePracticalMethod,validateMentorMethod,trainingMethods,AUDIT_CODE,SELF_CODE} from '../src/modules/training/domain.js';
 import {builtinOrderDocx} from '../src/modules/training/local-docx.js';
 test('LC4.2 built-in forms contain source criteria and no example responses; variable revisions retain history',async()=>{
- assert.equal(BUILTIN_SOP.criteria.length,20);assert.equal(BUILTIN_PRACTICAL.criteria.length,11);assert.equal(BUILTIN_SELF.criteria.length,20);assert.equal(RC1_CRITERIA.length,20);assert.equal(FORM_CATALOG.length,13);
+ assert.equal(BUILTIN_SOP.criteria.length,20);assert.equal(BUILTIN_PRACTICAL.criteria.length,11);assert.equal(BUILTIN_SELF.criteria.length,20);assert.equal(RC1_CRITERIA.length,20);assert.equal(FORM_CATALOG.length,17);
  assert.match(BUILTIN_PRACTICAL.criteria[9].question,/безопасно/);assert.equal(BUILTIN_SOP.criteria[19].question,'Дата изменения СОП не превышает 12 месяцев на момент проверки');
  validateChecklist(BUILTIN_SOP);validatePracticalMethod(BUILTIN_PRACTICAL);validateMentorMethod(BUILTIN_SELF,BUILTIN_SELF.format);
  assert.equal(practicalResult([{value:1},{value:0}],2).fraction,.5);assert.equal(evaluationResult([{value:1},{value:0},{value:1}],3).fraction,2/3);
@@ -268,3 +268,6 @@ test('LC4.4.1 recognizes the actual appendix 6 two-line header and skips instruc
  const range=suggestMatrixRange(example);assert.deepEqual(range,{headerRow:7,personCol:2,firstRow:8,lastRow:9,firstSkill:4,lastSkill:5});
  const source=readMatrixRange(example,range);assert.deepEqual(source.cols.map(c=>c.label),['Учебный СОП 1','Учебный СОП 2']);assert.equal(source.people[1].values[0].raw,'0');assert.equal(source.people[1].values[0].value,null);
 });
+
+import {STANDARD_FORMS,PRACTICAL_V03,AUDIT_V03,SELF_V03,TWI_POLICY,blankRows} from '../src/modules/training/standard-v03.js';
+test('TWI v03 catalogue covers all 17 appendices, exact checklist counts and RC1 remains independent',()=>{assert.deepEqual(STANDARD_FORMS.map(f=>f.id),Array.from({length:17},(_,i)=>i+1));assert.equal(PRACTICAL_V03.criteria.length,11);assert.equal(AUDIT_V03.criteria.length,17);assert.equal(SELF_V03.criteria.length,16);assert.deepEqual(Object.keys(SELF_V03.levels),['0','1','2','3']);assert.equal(RC1_CRITERIA.length,20);assert.equal(TWI_POLICY.auditsPerCalendarYear,3);for(const f of STANDARD_FORMS)assert(blankRows(f).length>0)});

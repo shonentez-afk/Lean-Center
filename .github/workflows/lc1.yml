@@ -1,7 +1,7 @@
 name: LC6.2 TWI effectiveness full regression
 on:
   push:
-    branches: [feature/lc6-economic-effect]
+    branches: [feature/lc6-economic-effect, feature/lc6.3-twi-standard-v03]
     paths: ['src/**','db/**','tests/**','tools/build_lc1.mjs','tools/build_folder.mjs','tools/build_editor.mjs','tools/package_folder.py','docs/DEPLOY_NETWORK_RU.md','package.json','.github/workflows/lc1.yml']
   workflow_dispatch:
 permissions:
