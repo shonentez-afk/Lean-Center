@@ -5,6 +5,9 @@ import {one,rows,uuid,openDb,bytesOf,meta,setMeta,Workspace,checkPackage,canonic
 import {inspectSource} from '../src/modules/library/domain.js';
 import {calculateEffect,measurementOf,effectEvidence,effectCurrent,effectOverview,effectPending,effectFacts,factCurrent,factNet,periodTargets,targetNeedsAttention} from '../src/modules/effect/domain.js';
 import {employeeRelations} from '../src/modules/master-data/employee-records.js';
+import {jiStages} from '../src/modules/training/domain.js';
+import {twiOverview,twiComparison} from '../src/modules/training/twi-effectiveness.js';
+import {twiBasis,twiBasisCurrent,twiEffectsFor} from '../src/modules/effect/domain.js';
 import {economicReport,economicReportSheets,attainment} from '../src/modules/effect/reporting.js';
 import * as net from '../src/storage/network.js';
 const timePlan={deltaSeconds:30,cyclesPerYear:3600,hourRate:100,realization:50,investment:1000,annualCost:500};
@@ -108,4 +111,45 @@ test('LC6.1 monthly and yearly aggregation keeps currencies, signed totals, rank
  const f=(effect,to,gross)=>({effect,period_to:to,gross_minor:gross,recurring_minor:0,investment_minor:0,eligible:true});
  const facts=[f(a,'2026-01-31',10000),f(a,'2026-02-28',-2000),f(b,'2026-02-28',9000),f(e,'2026-02-28',5000),{...f(a,'2026-03-31',99999),eligible:false}];
  const x=economicReport({facts,targets:[]}),rub=x.series.filter(y=>y.currency==='RUB');assert.deepEqual(rub.map(y=>y.cumulative),[10000,17000]);assert.deepEqual(x.ranks.filter(y=>y.currency==='RUB').map(y=>[y.key,y.rank,y.net]),[['u2',1,9000],['u1',2,8000]]);assert.equal(x.series.find(y=>y.currency==='EUR').net,5000);assert.deepEqual(economicReport({facts,targets:[]},{grain:'year'}).series.map(y=>[y.currency,y.key,y.net]),[['EUR','2026',5000],['RUB','2026',17000]]);
+});
+
+test('LC6.2 TWI cohort separates first practice, repeat practice, recorded and current admission, intro and follow-up time',async()=>{
+ const f=await fixture();try{
+  const id=await f.addAssignment();await f.approve(id);
+  const intro=jiStages('classic').filter(x=>!['support','followup'].includes(x.phase));
+  for(const x of intro)await f.stage(id,x.code,{duration_minutes:10});
+  await f.assess(id,{conclusion:'not_meet'});const practical=(await f.assess(id)).entity_id;await f.qualify(id,practical);await f.verify(id,'safety');await f.verify(id,'theory');await f.admit(id);
+  for(const x of jiStages('classic').filter(x=>['support','followup'].includes(x.phase)))await f.stage(id,x.code,{duration_minutes:5});
+  const scope={day:date,from:date,to:date,unitId:f.unit},db=f.w.working,x=twiOverview(db,scope);
+  assert.equal(x.stats.assignments,1);assert.equal(x.stats.people,1);assert.equal(x.stats.firstPass,0);assert.equal(x.stats.repeat,1);assert.equal(x.stats.recovered,1);assert.equal(x.stats.granted,1);assert.equal(x.stats.current,1);assert.equal(x.stats.medianDays,0);assert.equal(x.stats.meanMinutes,intro.length*10);assert.equal(x.minutes,intro.length*10+6*5);
+  assert.equal(twiOverview(db,{...scope,personId:f.mentor,role:'mentor'}).stats.assignments,1);assert.equal(twiOverview(db,{...scope,personId:f.mentor,role:'trainee'}).stats.assignments,0);assert.equal(twiOverview(db,{...scope,personId:f.actor,role:'auditor'}).stats.assignments,0);
+  assert.equal(twiOverview(db,{...scope,revisionId:f.doc.id}).stats.assignments,1);
+  const r=await f.revise();assert.equal(twiOverview(db,scope).stats.current,0);assert.equal(twiOverview(db,scope).stats.granted,1);assert.equal(twiOverview(db,{...scope,revisionId:r.revision}).stats.assignments,0);
+ }finally{f.w.close()}
+});
+test('LC6.2 comparable TWI program groups, verified ROI link, cross-card deduplication and stale evidence',async()=>{
+ const f=await fixture();let restored;try{
+  const db=f.w.working,taskId=await task(f);await verifyTask(f,taskId);
+  const program=(await f.save('training_program',{code:'QA-TWI',kind:'entry',title:'QA подготовка',profession_id:f.profession,position_id:null,created_by:f.actor,tasks:[{part:'general',title:'QA задание',hours:1,day_offset:0,sop_revision_id:null,skill_id:null,scale_id:null,target_level:null}]})).entity_id;
+  let clock=Date.parse('2026-01-21T09:00:00Z');
+  async function later(t,p,id=null){const old=id?one(db,'SELECT * FROM '+t+' WHERE id=?',[id]):null,e={id:uuid(),entity_type:t,entity_id:id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload:p,occurred_at:new Date(clock++).toISOString()};await f.w.applyContentEvents([e],f.readContent);return e}
+  const enrollment=d=>({program_id:program,trainee_id:f.trainee,mentor_id:f.mentor,manager_id:f.actor,start_on:d,due_on:'2026-02-01',reason:'QA группа'});
+  const record=async(save,d,min)=>{const id=(await save('training_enrollment',enrollment(d))).entity_id;await save('training_task_result',{enrollment_id:id,task_id:program+':1',actor_id:f.mentor,held_on:d,result:'completed',minutes:min,evidence:'QA факт задания',enrollment_rev:one(db,'SELECT rev FROM training_enrollment WHERE id=?',[id]).rev});await save('training_enrollment',{command:'finish',actor_id:f.actor,conclusion:'basic',feedback:'QA итог'},id);return id};
+  const before=await record(f.save,date,60),after=await record(later,'2026-01-21',40);
+  const scope={kind:'program',source_id:program,unit_id:f.unit,before_from:date,before_to:date,after_from:'2026-01-21',after_to:'2026-01-21'},comparison=twiComparison(db,scope,'2026-01-21');
+  assert(comparison.comparable);assert.equal(comparison.deltaMinutes,20);assert.equal(comparison.baseline.meanMinutes,60);assert.equal(comparison.result.meanMinutes,40);assert.equal(comparison.before[0].id,before);assert.equal(comparison.after[0].id,after);
+  const p={...plan(f,null,taskId),method:'time',plan:timePlan},id=(await later('economic_effect',p)).entity_id,r=()=>one(db,'SELECT * FROM economic_effect WHERE id=?',[id]);
+  const basis={command:'twi_basis',scope,comparison,actor_id:f.actor,note:'QA одинаковая программа, сопоставимые условия'};
+  await assert.rejects(later('economic_effect',{...basis,comparison:{...comparison,deltaMinutes:99}},id),/сопоставимые/);
+  await later('economic_effect',basis,id);const b=twiBasis(db,id);assert(twiBasisCurrent(db,r(),b.id));assert(twiEffectsFor(db,'program',program).some(x=>x.id===id));assert(twiEffectsFor(db,'enrollment',after).some(x=>x.id===id));assert(twiEffectsFor(db,'person',f.trainee).some(x=>x.id===id));assert(employeeRelations(db,f.mentor).effectiveness.some(x=>x.id===id));
+  const measure={command:'measure',inputs:{...timePlan,deltaSeconds:1200},measurement:null,source:null,reviewer_id:f.actor,evidence:'QA ставка и объём',actions:effectEvidence(db,r()),twi_basis_id:b.id};
+  await assert.rejects(later('economic_effect',{...measure,inputs:{...timePlan,deltaSeconds:999}},id),/зафиксированного сравнения/);
+  await later('economic_effect',measure,id);assert(effectCurrent(db,r()));
+  const otherTask=await task(f),other=(await later('economic_effect',{...p,action_id:otherTask})).entity_id;await assert.rejects(later('economic_effect',basis,other),/уже учтены/);
+  const fact=(await later('economic_fact',{command:'create',effect_id:id,actual_event_id:r().actual_event_id,period_from:date,period_to:'2026-01-21',gross_minor:10000,recurring_minor:0,investment_minor:0,registered_by:f.mentor,evidence:'QA денежный документ'})).entity_id;await later('economic_fact',{command:'confirm',verifier_id:f.actor,note:'QA проверено'},fact);
+  assert.equal(effectOverview(db,{day:'2026-01-21'}).currencies[0].net,10000);
+  restored=await restore(SQL,await backup(f.w),f.readContent);assert(twiBasisCurrent(restored.working,one(restored.working,'SELECT * FROM economic_effect WHERE id=?',[id]),b.id));
+  await later('training_enrollment',enrollment('2026-01-21'));assert(!twiComparison(db,scope,'2026-01-21').comparable);assert(!effectCurrent(db,r()));assert.equal(effectOverview(db,{day:'2026-01-21'}).currencies.length,0);
+  assert.equal(one(db,'SELECT state FROM economic_fact WHERE id=?',[fact]).state,'confirmed');
+ }finally{restored?.close();f.w.close()}
 });
