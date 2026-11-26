@@ -33,6 +33,6 @@ export function assessmentIndicators(db,day){
  const from=day.slice(0,7)+'-01',recent=type=>assessmentRegistry(db,type).filter(x=>x.state==='confirmed'&&x.date.slice(0,10)>=from&&x.date.slice(0,10)<=day),pr=recent('practical'),self=recent('self_eval');
  const latest=new Map();for(const x of assessmentRegistry(db,'practical').filter(x=>x.state==='confirmed'&&x.date.slice(0,10)<=day)){const k=JSON.stringify([x.person_id,x.operation_id,x.standard_revision_id,x.method_id]);if(!latest.has(k))latest.set(k,x)}
  const pending=actionRows(db).filter(a=>(a.source_assessment_id||a.source_self_id)&&['open','in_progress','implemented','ineffective'].includes(actionStatus(db,a)));
- const pendingSource=new Set(pending.map(a=>a.source_assessment_id).filter(Boolean)),needs=[...latest.values()].filter(x=>x.conclusion==='not_meet'&&!pendingSource.has(x.id));
+ const key=x=>JSON.stringify([x.person_id,x.operation_id,x.standard_revision_id,x.method_id]),byId=new Map(assessmentRegistry(db,'practical').map(x=>[x.id,x])),pendingContexts=new Set(pending.filter(a=>a.kind==='trainee_training'&&byId.has(a.source_assessment_id)).map(a=>key(byId.get(a.source_assessment_id)))),needs=[...latest.values()].filter(x=>x.conclusion==='not_meet'&&!pendingContexts.has(key(x)));
  return {practical:pr.length,self:self.length,negative:pr.filter(x=>x.conclusion==='not_meet').length,needs:needs.length,needsIds:new Set(needs.map(x=>x.id)),pending:pending.length};
 }

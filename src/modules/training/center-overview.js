@@ -49,7 +49,7 @@ export function centerMetrics(db,{day,from='',to=day,unitId='',personId=''}){
  count('Обучение','Просрочено обучений',a.filter(x=>['planned','in_progress'].includes(x.state)&&x.due_on<day).length,'Открытые назначения со сроком до текущей даты.','twi',{filter:'overdue'}),
  count('Наставничество','Аудиты L1',audit.length,'Зафиксированные аудиты инструктора в период; версии не смешиваются в процент.','audit',f),
  count('Наставничество','Самооценки',self.length,'Факты самооценки наставника в период.','self_eval',f),
- count('Наставничество','Запланировано оценок',schedules.filter(x=>['audit','practical','self_eval'].includes(scheduleKind(x))).length,'Текущие незакрытые плановые оценки; подразделение ответственного.','calendar',{personId,month:'',scheduleType:'planned'}),
+ count('Наставничество','Запланировано оценок',schedules.filter(x=>['audit','practical','self_eval'].includes(scheduleKind(x))).length,'Текущие незакрытые плановые оценки; подразделение ответственного.','calendar',{personId,unitId,month:'',scheduleType:'planned'}),
  count('Компетенции','Практические оценки',practice.length,'Подтверждённые практические оценки обучаемого в период.','practical',f),
  ratio('Компетенции','Заключения «Не соответствует»',practice.filter(x=>x.conclusion==='not_meet').length,practice.length,'Отдельное заключение оценщика, не процент чек-листа.','practical',{...f,filter:'not_meet'}),
  ratio('Компетенции','Требования без разрыва',cells.filter(x=>!x.gap).length,cells.length,'Текущие требования по сотрудникам и навыкам, с той же шкалой и актуальной редакцией. Не означает допуск.','skills',{}),
