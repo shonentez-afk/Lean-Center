@@ -33,6 +33,7 @@ import {fillOrderTemplate,draftDocx,orderPayment,builtinOrderDocx} from './local
 import {rows,one,list,uuid,invariant,sha256,canonical,meta} from '../../core/db.js';
 import {directoryPeople} from '../master-data/people-directory.js';
 import {openPeopleDropdown} from '../../ui/people-picker.js';
+import {protectWorkForm,workFields} from '../../ui/form-guard.js';
 import {linkedTwi} from '../library/linked-materials.js';
 import {TRAINING_TYPES,programKinds,parts,variants,conclusions,jiStages,progressFor,currentStandard,isCurrentStandard,activeAuthorizations,authorizationValid,certificateValid,orderPosition,practicalMethods,practicalCriteria,practicalResult,validatePracticalMethod,validateMentorMethod,trainingMethods,auditMethods,AUDIT_CODE,AUDIT_STANDARD_CODE,SELF_CODE,selfLevels,selfLevelsForMethod,methodLabel,latestAssessment,latestVerification,admissionStatus,enrollmentTasks,matrixData,coverageData} from './domain.js';
 export const TRAINING_PAGES=['twi','programs','internship','instruction','retraining','journal','skills','practical','development','mentoring','certification','appointments','my_plan','forms','audit','self_eval','actions','calendar','analytics','audit_import','sop_review','metrics','roi','preparation','knowledge_bank','supplements'];
@@ -54,7 +55,7 @@ export function trainingScreen(main,page,c){
  const blocked=!!ws.conflicts.length,day=today(),n=(type,id)=>refName(type,id),stack=(...x)=>add(el('div',undefined,'stack'),...x),row=(...x)=>add(el('div',undefined,'row'),...x),grid=(...x)=>add(el('div',undefined,'formgrid'),...x);
  const msg=(s,cls='muted')=>el('p',s,cls);
  const action=(label,fn,kind='primary',disabled=false)=>btn(label,fn,kind,disabled||blocked);
- const goLocal=(options={})=>{c.rememberNavigation?.();route={page,...options};render()};
+ const goLocal=(options={})=>{if(c.allowDiscardForm&&!c.allowDiscardForm())return false;c.rememberNavigation?.();route={page,...options};render();return true};
  const back=()=>btn('К списку',()=>goLocal());
  const select=(name,options,value='',emptyLabel='— Выберите —')=>{
   const s=el('select');s.name=name;if(emptyLabel!==null){const o=el('option',emptyLabel);o.value='';s.append(o)}
@@ -72,15 +73,15 @@ export function trainingScreen(main,page,c){
  const f=(label,input)=>inputField(label,input);
  function person(name,label,initial='',{allowed=null,optional=false,filter=()=>true,onChange=()=>{},at=()=>day}={}){
   let id=initial;
-  const button=btn('',()=>openPeopleDropdown(button,{people:()=>directoryPeople(db,at()||day).filter(filter),allowed,optional,label,selectedId:id,onChoose:p=>{id=p?.id||'';refresh();onChange(id)}}),'lc-directory-trigger');
+  const button=btn('',()=>openPeopleDropdown(button,{people:()=>directoryPeople(db,at()||day).filter(filter),allowed,optional,label,selectedId:id,onChoose:p=>{id=p?.id||'';refresh();button.dispatchEvent(new Event('lc-person-change',{bubbles:true}));onChange(id)}}),'lc-directory-trigger');
   button.name=name;button.setAttribute('aria-label','Выбрать: '+label);button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-expanded','false');
-  function refresh(){button.textContent=(id?n('person',id):'Выбрать сотрудника')+' ▾';button.dataset.personId=id||''}button.lcRestorePerson=v=>{if(v===id)return;id=v;refresh();onChange(id)};
+  function refresh(){button.textContent=(id?n('person',id):'Выбрать сотрудника')+' ▾';button.dataset.personId=id||''}button.lcRestorePerson=v=>{if(v===id)return;id=v;refresh();button.dispatchEvent(new Event('lc-person-change',{bubbles:true}));onChange(id)};
   refresh();return {get value(){return id},element:add(el('div',undefined,'field'),el('span',label),button),button,set(v){id=v;refresh()}}
  }
  function event(type,payload,old=null){const instant=new Date();return {id:uuid(),entity_type:type,entity_id:old?.id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload:economicEventPayload(type,payload,instant),occurred_at:instant.toISOString()}}
  async function write(type,payload,old=null){const e=event(type,payload,old);await ws.applyContentEvents([e],readContent);return e.entity_id}
  function save(label,type,payload,old=null,done=()=>{},disabled=false){
-  return action(label,()=>run(async()=>{const id=await write(type,typeof payload==='function'?payload():payload,old);done(id);return 'Запись сохранена. Ожидает публикации базы.'},{retainForm:['training_enrollment','action_item','economic_effect','economic_fact','twi_preparation','twi_knowledge_bank','twi_supplement'].includes(type)}),'primary',disabled)
+  const button=action(label,()=>run(async()=>{const id=await write(type,typeof payload==='function'?payload():payload,old);done(id);return 'Запись сохранена. Ожидает публикации базы.'},{retainForm:['training_enrollment','action_item','economic_effect','economic_fact','twi_preparation','twi_knowledge_bank','twi_supplement'].includes(type)}),'primary',disabled);if(type==='action_item')button.dataset.lcActionWrite='1';return button
  }
  const reasonInput=()=>note('reason','','Основание изменения');
  function closeRecord(label,type,old,command){
@@ -1125,5 +1126,18 @@ export function trainingScreen(main,page,c){
  else if(page==='metrics')content=metricsPage();
  else if(page==='roi')content=roiPage();
  else if(page==='audit_import')content=auditImportPage();
- if(content){main.append(content);main.dataset.lc4Page=page}
+ if(content){
+  main.append(content);main.dataset.lc4Page=page;
+  // Register creation/editing screens explicitly; ordinary registry filters
+  // and analytics selections are not work drafts.
+  if(['new','new_fact','new_assessment','program','builder','link','group','auth'].includes(route.mode)||page==='roi'&&content.querySelector('[name=lc6_title]')){
+   protectWorkForm(content,{dynamic:page!=='actions'});
+  }else if(page==='actions'&&route.id){
+   // Protect result, verification, follow-up and cancellation inputs too.
+   for(const button of content.querySelectorAll('[data-lc-action-write]')){
+    const scope=button.closest('details,section.panel');
+    if(scope&&workFields(scope).some(e=>e.closest('details,section.panel')===scope))protectWorkForm(scope);
+   }
+  }
+ }
 }

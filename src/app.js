@@ -17,6 +17,7 @@ import {BUILTIN_SOP,previewCriteria} from './modules/training/builtin-forms.js';
 import {TRAINING_PAGES,trainingScreen,resetTrainingRoute,setTrainingRoute,getTrainingRoute} from './modules/training/screens.js';
 import {directoryPeople,personKey} from './modules/master-data/people-directory.js';
 import {openPeopleDropdown,closePeopleDropdown} from './ui/people-picker.js';
+import {protectWorkForm,hasUnsavedForms} from './ui/form-guard.js';
 import {weightedHistory,corporateEvaluations} from './modules/library/sop-assessment-review.js';
 import {stage43Checklist,weightedResult,stage43Checks} from './modules/library/stage43-checklist.js';
 import {linkedFrv,linkedTwi} from './modules/library/linked-materials.js';
@@ -32,8 +33,8 @@ import * as net from './storage/network.js';
 const root=document.getElementById('app');
 let registryConflict=null,registryPage=0,volatileChanges=0;
 const REGISTRY_PAGE_SIZE=100;
-const registryDirty=()=>document.querySelector('main form[data-registry-form]')?.lcIsDirty?.()===true;
-const allowDiscardRegistry=()=>!registryDirty()||window.confirm('В форме есть несохранённые изменения. Уйти без сохранения?');
+const workFormDirty=()=>hasUnsavedForms(root);
+const allowDiscardForm=()=>!workFormDirty()||window.confirm('В форме есть несохранённые изменения. Уйти без сохранения?');
 let SQL,ws,cache,folder,generation=0,busy=false,master=false,page='home',theme=false,status='Готово',error=false,chart=null,edit=null,query='',incoming=[],importState=null,historyPerson=null,archiveFilter='active',libraryDraft=null,editorSession=null,libraryFilter='all';
 const contentStore=new ContentStore(()=>cache,()=>folder),readContent=ref=>contentStore.get(ref);
 const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
@@ -71,7 +72,7 @@ function rememberNavigation(){
  if(restoringNav||!ws)return;initNav();navSnapshots.set(navCurrent,navSnapshot());const previous=navCurrent;navCurrent=++navSerial;navParent=previous;try{if(navSupported)history.pushState({lcNav:navCurrent,parent:previous},'')}catch{navSupported=false}mobileMenu=false;
 }
 function restoreNavigation(id,parent){
- const snap=navSnapshots.get(id);if(!snap||busy||editorSession&&!editorSession.host.hidden||!allowDiscardRegistry())return false;
+ const snap=navSnapshots.get(id);if(!snap||busy||editorSession&&!editorSession.host.hidden||!allowDiscardForm())return false;
  navSnapshots.set(navCurrent,navSnapshot());navCurrent=id;navParent=parent;restoringNav=true;
  try{
   closePeopleDropdown();({page,employeeSelected,employeeTab,employeeReturn,query,archiveFilter,registryPage,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson}=snap);registryPage??=0;employeeSources=null;registryConflict=null;edit=null;mobileMenu=false;setTrainingRoute(page,snap.route);render();
@@ -85,7 +86,7 @@ function restoreNavigation(id,parent){
 function navigationBack(){if(busy||navParent===null)return;if(navSupported){history.back();return}restoreNavigation(navParent,navSnapshots.get(navParent)?.parent??null)}
 window.addEventListener('popstate',e=>{const id=e.state?.lcNav;if(id===navCurrent)return;if(id&&navSnapshots.has(id)){const direction=id<navCurrent?1:-1;if(!restoreNavigation(id,e.state.parent??null)&&navSupported)history.go(direction)}});
 function navigate(p,{retainEmployee=false}={}){
- if(busy||!allowDiscardRegistry())return false;
+ if(busy||!allowDiscardForm())return false;
  registryConflict=null;registryPage=0;
  if(editorSession&&!editorSession.host.hidden)hideEditor(editorSession);
  rememberNavigation();
@@ -208,7 +209,7 @@ function form(type,v){
  }
  const submit=el('button','Сохранить','primary');submit.type='submit';submit.disabled=busy;
  const values=()=>Object.fromEntries(Object.entries(controls).map(([k,n])=>[k,n.value||null]));
- const initialValues=canonical(values());f.dataset.registryForm='1';f.lcIsDirty=()=>canonical(values())!==initialValues;
+ f.dataset.registryForm='1';
  f.onsubmit=e=>{e.preventDefault();const payload=values();run(async()=>{ws.edit(type,v?.id||null,payload);edit=null;return 'Запись сохранена локально. Изменение ожидает публикации.'},{retainForm:true})};
  if(registryConflict?.type===type&&registryConflict.id===(v?.id||null)){
   const draft=()=>({entity_type:type,entity_id:v?.id||null,base_revision:v?.rev||0,payload:values()});
@@ -237,7 +238,7 @@ function form(type,v){
  }
  if(d.history&&v?.id)f.append(el('p','История неизменяема: можно только закрыть открытое назначение датой окончания. Для перевода создайте новое назначение после закрытия.','muted'));
  if(type==='rating_scale')f.append(el('p','После сохранения шкала неизменяема. Для новой методики создайте следующую версию. Уровни задаются пользователем; корпоративские пороги не предустановлены.','muted'));
- return add(f,grid,add(el('div',undefined,'row'),submit,btn('Отмена',()=>{if(!allowDiscardRegistry())return;registryConflict=null;edit=null;render()})))
+ return protectWorkForm(add(f,grid,add(el('div',undefined,'row'),submit,btn('Отмена',()=>{if(!allowDiscardForm())return;registryConflict=null;edit=null;render()}))))
 }
 function orgTree(panel,items){
  const box=el('div',undefined,'org-tree'),children=new Map();
@@ -307,9 +308,9 @@ function registry(main,type){
  if(type==='person'&&employeeSelected){employeeCard(main,employeeSelected);return}
  const d=definitions[type],items=list(ws.working,type),search=el('input');search.type='search';search.placeholder='Поиск по справочнику';search.value=query;
  const filter=el('select');for(const [value,label] of [['active',d.history?'Действующие':'Активные'],['all','Все записи'],['inactive',d.history?'История / будущие':'Архив']]){const o=el('option',label);o.value=value;filter.append(o)}filter.value=archiveFilter;
- const panel=pane(d.label,add(el('div',undefined,'row'),search,filter,btn('Добавить',()=>{if(!allowDiscardRegistry())return;registryConflict=null;edit=historyPerson?{person_id:historyPerson}:{};render()},'primary',!!ws.conflicts.length),btn('Импорт Excel',()=>openImport(type))));
+ const panel=pane(d.label,add(el('div',undefined,'row'),search,filter,btn('Добавить',()=>{if(!allowDiscardForm())return;registryConflict=null;edit=historyPerson?{person_id:historyPerson}:{};render()},'primary',!!ws.conflicts.length),btn('Импорт Excel',()=>openImport(type))));
  main.append(panel);
- if(historyPerson)panel.append(add(el('div',undefined,'row'),el('span','История сотрудника: '+refName('person',historyPerson),'pill'),btn('Все сотрудники',()=>{if(!allowDiscardRegistry())return;registryConflict=null;edit=null;historyPerson=null;registryPage=0;render()})));
+ if(historyPerson)panel.append(add(el('div',undefined,'row'),el('span','История сотрудника: '+refName('person',historyPerson),'pill'),btn('Все сотрудники',()=>{if(!allowDiscardForm())return;registryConflict=null;edit=null;historyPerson=null;registryPage=0;render()})));
  if(edit!==null)panel.append(pane(edit.id?'Редактирование':'Новая запись',form(type,edit)));
  const wrap=el('div',undefined,'tablewrap'),paging=el('div',undefined,'row');panel.append(paging,wrap);
  const directory=type==='person'?new Map(directoryPeople(ws.working,today()).map(p=>[p.id,p])):null;
@@ -324,8 +325,8 @@ function registry(main,type){
   const body=el('tbody');for(const v of visible){const tr=el('tr',undefined,!activeRecord(d,v)?'archive':'');for(const [k,f] of fields)tr.append(type==='person'&&k==='display_name'?add(el('td'),btn(v.display_name,()=>openEmployee(v.id),'employee-name-link')):el('td',String(showVal(k,f,v)),f.multiline?'multiline-cell':''));if(type==='person'){const p=directory.get(v.id);tr.append(el('td',p?.unit||'—'),el('td',p?.position||'—'))}
    const state=v.archived?'Архив':d.history?(v.valid_from>today()?'Будущее':v.valid_to&&v.valid_to<today()?'Завершено':'Действует'):'Активно';
    tr.append(el('td',state+' · v'+v.rev));const a=el('td');if(type==='person')a.append(btn('Карточка',()=>openEmployee(v.id),'primary'));if(type==='org_unit'||type==='operation')a.append(btn('Эффективность TWI',()=>goTraining('analytics',{assessmentType:'twi_effect',...(type==='org_unit'?{unitId:v.id}:{operationId:v.id})})));
-   if(!v.archived){if(!d.immutable&&(!d.history||!v.valid_to))a.append(btn(d.history?'Закрыть / изменить':'Изменить',()=>{if(!allowDiscardRegistry())return;registryConflict=null;edit=v;render()},'',!!ws.conflicts.length));if(d.immutable)a.append(btn('Новая версия',()=>{if(!allowDiscardRegistry())return;registryConflict=null;edit={name:v.name,version_no:String(Math.max(...items.filter(x=>x.name===v.name).map(x=>x.version_no))+1),levels:v.levels};render()},'',!!ws.conflicts.length));
-    if(!d.history)a.append(btn('Архив',()=>{if(allowDiscardRegistry()&&confirm('Архивировать запись? История сохранится.')){registryConflict=null;edit=null;run(async()=>{ws.edit(type,v.id,null,'archive');return 'Запись архивирована'})}},'danger',!!ws.conflicts.length));
+   if(!v.archived){if(!d.immutable&&(!d.history||!v.valid_to))a.append(btn(d.history?'Закрыть / изменить':'Изменить',()=>{if(!allowDiscardForm())return;registryConflict=null;edit=v;render()},'',!!ws.conflicts.length));if(d.immutable)a.append(btn('Новая версия',()=>{if(!allowDiscardForm())return;registryConflict=null;edit={name:v.name,version_no:String(Math.max(...items.filter(x=>x.name===v.name).map(x=>x.version_no))+1),levels:v.levels};render()},'',!!ws.conflicts.length));
+    if(!d.history)a.append(btn('Архив',()=>{if(allowDiscardForm()&&confirm('Архивировать запись? История сохранится.')){registryConflict=null;edit=null;run(async()=>{ws.edit(type,v.id,null,'archive');return 'Запись архивирована'})}},'danger',!!ws.conflicts.length));
     // All employee-related sections are opened from the dossier.
    }tr.append(a);body.append(tr)
   }t.append(body);wrap.append(t)
@@ -646,7 +647,7 @@ function disposeEditor(s,confirmed=false){
  clearTimeout(s.timeout);hideEditor(s);s.host.remove();editorSession=null;return true
 }
 function launchEditor(ctx){
- if(!allowDiscardRegistry())return;edit=null;registryConflict=null;
+ if(!allowDiscardForm())return;edit=null;registryConflict=null;
  if(libraryDraft){message('Сначала завершите или отмените текущий предпросмотр.',true);return}
  if(editorSession){
   const old=editorSession.ctx;
@@ -700,7 +701,7 @@ window.addEventListener('message',async e=>{
   if(error){reply(status);showEditor(s)}else{reply('Документ подготовлен к сохранению в Lean Center.');hideEditor(s);render()}
  }else if(m.type==='error'){clearTimeout(s.timeout);editorStatus(s,'Ошибка: '+String(m.message||'ошибка'),true);message('Редактор: '+String(m.message||'ошибка'),true)}
 });
-window.addEventListener('beforeunload',e=>{if(editorSession||libraryDraft||registryDirty()||!cache&&volatileChanges>0||busy){e.preventDefault();e.returnValue=''}});
+window.addEventListener('beforeunload',e=>{if(editorSession||libraryDraft||workFormDirty()||!cache&&volatileChanges>0||busy){e.preventDefault();e.returnValue=''}});
 function sourceSummary(d){
  const p=d.projection;return d.source.kind==='sop'?'Шагов: '+p.steps.length+' · Фото: '+p.photos+' · TWI: '+(p.twi?'есть':'нет'):'Циклов: '+p.cycles+' · Полных: '+p.complete+' · Измерений: '+p.measurements.length+' · Без измерения/действия: '+p.unmeasured
 }
@@ -813,7 +814,7 @@ function render(){
  initNav();chart?.dispose();chart=null;document.documentElement.classList.toggle('dark',theme);
  const header=el('header',undefined,'corp-header');
  const brand=add(el('div',undefined,'brand-lockup'),el('div',undefined,'brand-mark'),add(el('div'),el('div','LEAN CENTER','brand'),el('div','Обучение на рабочем месте · TWI','brand-sub')));
- const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{if(!allowDiscardRegistry())return;edit=null;registryConflict=null;theme=!theme;try{localStorage.setItem('lean-center-theme',theme?'dark':'light')}catch{}render()}),btn('Хранение',()=>navigate('storage')));
+ const metaPanel=add(el('div',undefined,'header-meta'),el('span',window.LC_BUILD.version||'lc3.7','version'),btn(theme?'Светлая тема':'Тёмная тема',()=>{if(!allowDiscardForm())return;edit=null;registryConflict=null;theme=!theme;try{localStorage.setItem('lean-center-theme',theme?'dark':'light')}catch{}render()}),btn('Хранение',()=>navigate('storage')));
  if(editorSession&&editorSession.host.hidden&&!libraryDraft)metaPanel.append(btn('Вернуться в редактор',()=>showEditor(editorSession),'primary'));header.append(brand,metaPanel);
  const side=el('aside',undefined,'sidebar');side.id='lc53-sidebar';side.setAttribute('aria-label','Навигация');side.classList.toggle('lc53-menu-open',mobileMenu);const menu=btn(mobileMenu?'Закрыть меню':'Меню',()=>{mobileMenu=!mobileMenu;side.classList.toggle('lc53-menu-open',mobileMenu);menu.textContent=mobileMenu?'Закрыть меню':'Меню';menu.setAttribute('aria-expanded',String(mobileMenu))},'lc53-mobile-menu');menu.setAttribute('aria-controls',side.id);menu.setAttribute('aria-expanded',String(mobileMenu));header.append(menu);
  const group=(name,keys)=>{side.append(el('div',name,'navgroup'));for(const k of keys)side.append(navButton(k))};
@@ -828,7 +829,7 @@ function render(){
  if(ws.dirty)main.append(el('p','Принятые изменения ещё не опубликованы.','warn'));
  if(employeeReturn&&page!=='person')main.append(add(el('div',undefined,'row employee-return'),btn('← К карточке сотрудника',()=>openEmployee(employeeReturn,{restore:true})),el('span',refName('person',employeeReturn),'muted')));
  root.replaceChildren(add(el('div',undefined,'shell'),header,side,main));main.inert=!!editorSession&&!editorSession.host.hidden;if(editorSession?.loaded)editorSession.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:editorSession.session,type:'theme',theme:theme?'dark':'light'},'*');
- if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,goResearch,readContent,pick,downloadBytes,notify:message,openEmployee,rememberNavigation});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
+ if(page==='home')home(main);else if(page==='storage')storage(main);else if(page==='import_xlsx')importScreen(main);else if(page==='sop_constructor')constructorScreen(main);else if(page==='twi_plans')twiPlansScreen(main);else if(page==='sop'||page==='frv')libraryScreen(main,page);else if(page==='sop_evaluation')sopEvaluationScreen(main);else if(Object.hasOwn(definitions,page))registry(main,page);else if(TRAINING_PAGES.includes(page))trainingScreen(main,page,{ws,el,add,btn,pane,tableOf,inputField,fieldInput,refName,refOption,today,run,render,go:goTraining,goDocument,goResearch,readContent,pick,downloadBytes,notify:message,openEmployee,rememberNavigation,allowDiscardForm:()=>busy||allowDiscardForm()});else main.append(pane(labels[page],el('p','Модуль запланирован на следующие этапы. В этой сборке готовится единая база и рабочая оболочка.','muted')));
  main.append(el('p',(LC_BUILD.version||'Lean Center')+' · автономная рабочая копия · общий сетевой обмен','foot'))
 }
 window.addEventListener('resize',()=>chart?.resize());
