@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {randomBytes} from 'node:crypto';
+import {editorFrame} from './editor-frame.mjs';
 import {PilotError} from '../lc74-store.mjs';
 import {normalizeLogin,tokenDigest} from './credentials.mjs';
 const COOKIE='__Host-lc81',SESSION_MS=8*60*60*1000,MAX_SESSIONS=256;
@@ -24,7 +25,7 @@ const publicFiles=new Map(await Promise.all([
 const keys=(o,k)=>o&&typeof o==='object'&&!Array.isArray(o)&&Object.keys(o).length===k.length&&k.every(x=>Object.hasOwn(o,x));
 function reply(res,status,value,type='application/json; charset=utf-8',headers={}){
  const bytes=Buffer.isBuffer(value)?value:Buffer.from(JSON.stringify(value),'utf8');
- res.writeHead(status,{'Content-Type':type,'Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",...headers});res.end(bytes);
+ res.writeHead(status,{'Content-Type':type,'Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; frame-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",...headers});res.end(bytes);
 }
 async function body(req,max=32768){
  must(/^application\/json(?:;|$)/i.test(req.headers['content-type']||''),415,'Ожидается JSON');
@@ -88,6 +89,13 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='POST'&&p==='/api/lc81/admin/grant'){reply(res,200,await store.grant(a.id,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/revoke'){const b=await body(req);must(keys(b,['id']),400,'Неверные поля');reply(res,200,await store.revoke(a.id,b.id));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/manager-policy'){reply(res,200,await store.upgradeManagerPolicy(a.id,await body(req)));return}
+   if(req.method==='GET'&&p==='/editor/frame'){
+    const kind=url.searchParams.get('kind'),tab=url.searchParams.get('tab')||null;
+    must(['sop','frv'].includes(kind)&&a.permissions.some(x=>x===kind+'.create'||x===kind+'.edit_draft'||kind==='sop'&&x==='sop.revise'),403,'Редактор недоступен');
+    const html=editorFrame(url.searchParams.get('session'),kind,tab);
+    reply(res,200,html,'text/html; charset=utf-8',{'X-Frame-Options':'SAMEORIGIN','Content-Security-Policy':"sandbox allow-scripts allow-modals; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src data: blob:; object-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'; child-src 'none'"});
+    return;
+   }
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/detail'){
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;

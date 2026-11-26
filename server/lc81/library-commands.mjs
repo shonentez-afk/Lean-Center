@@ -14,7 +14,7 @@ export const CONTEXT_FIELDS=Object.freeze(['kind','command','id','revision_id','
 export const libraryReadAction=kind=>kind==='sop'?'sop.read_history':'frv.read';
 const sourceOf=(row,field)=>{const p=JSON.parse(row[field]);return {source:validateRef(p.source),projection:p.projection}};
 const opName=(db,id)=>one(db,'SELECT o.name,u.name unit FROM operation o JOIN org_unit u ON u.id=o.unit_id WHERE o.id=? AND o.archived=0 AND u.archived=0',[id]);
-export function resolveLibraryContext(db,input,{read,allows,permissions}){
+export function resolveLibraryContext(db,input,{read,allows,permissions,readScope}){
  must(exact(input,CONTEXT_FIELDS)&&['sop','frv'].includes(input.kind)&&['create','save','revise'].includes(input.command),400,'Неверный контекст редактора');
  const {kind,command,id,revision_id,operation_id,origin_id,origin_revision}=input,creating=command==='create';
  must(isId(operation_id)&&read('operation.read',operation_id),403,'Операция недоступна');
@@ -23,7 +23,7 @@ export function resolveLibraryContext(db,input,{read,allows,permissions}){
  const operation=opName(db,operation_id);must(operation,403,'Операция недоступна');
  let row=null,rev=null,descriptor=null,origin=null,expected=0,title='',code='',observed_at='';
  if(creating){
-  must(id===null&&revision_id===null&&allows(kind+'.create','operation.read',operation_id),403,'Нет права создавать документы для операции');
+  must(id===null&&revision_id===null&&readScope(kind,operation_id)&&allows(kind+'.create','operation.read',operation_id),403,'Нет права создавать документы для операции');
   title=operation.name;
   if(origin_id!==null){
    must(read('frv.read',origin_id)&&allows('sop.from_frv','frv.read',origin_id),403,'Исследование недоступно');
@@ -72,7 +72,7 @@ function apply(db,event,audit,action){
  audit(action,event.id);
 }
 export function saveLibrary(db,request,ctx,inspected,{at,audit}){
- must(exact(request,['context','expected_revision','title','code','observed_at','text'])&&Number.isSafeInteger(request.expected_revision)&&request.expected_revision===ctx.expected,409,'Документ изменился. Откройте актуальную редакцию.');
+ must(exact(request,['request_id','context','expected_revision','title','code','observed_at','text'])&&Number.isSafeInteger(request.expected_revision)&&request.expected_revision===ctx.expected,409,'Документ изменился. Откройте актуальную редакцию.');
  const {kind,command,id,revision_id,operation_id}=ctx.input;
  must(clean(request.title,500),422,'Укажите название');
  must(kind==='sop'?request.observed_at===null&& (command==='create'?clean(request.code,200):request.code===null):request.code===null&&date(request.observed_at),422,'Заполните реквизиты документа');

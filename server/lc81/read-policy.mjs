@@ -213,3 +213,8 @@ export function canUseLibrary(db,security,accountId,action,anchorAction,id,day){
  const allowed=['sop.create','sop.edit_draft','sop.revise','sop.passport','sop.from_frv','frv.create','frv.edit_draft','frv.finalize','sop.read_twi','sop.read_linked_frv','frv.read_summary'];
  return allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,anchorAction);
 }
+
+export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
+ const action=kind==='sop'?'sop.read_history':kind==='frv'?'frv.read':null;
+ return !!action&&!!decide(db,security,accountId,action,id,day,'operation.read');
+}

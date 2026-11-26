@@ -7,6 +7,7 @@
  const send=make('lc-editor-send',kind==='frv'?'Сохранить ФРВ':context.tab==='twi'?'Сохранить план и СОП':context.tab==='frv'?'Сохранить ФРВ и СОП':'Сохранить СОП в каталог'),download=make('lc-editor-download','Скачать JSON'),status=document.createElement('span');status.id='lc-editor-status';status.textContent='Ожидание загрузки…';bar.append(status);document.body.prepend(bar);
  // The old Stage43 header is hidden by the center theme. Move the original
  // controls (and their existing listeners) into the integrated toolbar.
+ if(context.protectedMemory===true){download.hidden=true;const warning=document.createElement('span');warning.textContent='Рабочая копия только в памяти. Сохраните в каталог до закрытия. Экспорт и внешний ИИ в защищённом QA пока отключены.';bar.append(warning)}
  const aiModel=document.getElementById('modelSelector'),aiBadge=document.getElementById('aiConnectivityBadge'),aiTest=document.getElementById('aiTestBtn');
  const aiPanel=document.createElement('div');aiPanel.id='lc-editor-ai';aiPanel.setAttribute('role','group');aiPanel.setAttribute('aria-label','Подключение ИИ');
  if(aiTest){aiTest.type='button';aiPanel.append(aiTest)}
@@ -267,6 +268,7 @@
   frvStudySyncFields();checkpoint();try{await frvStudyFlush()}catch(e){if(draftAvailable)console.warn('FRV temporary storage failed',e);else console.warn('FRV storage unavailable; exporting rescue copy',e)}checkpoint();return JSON.stringify(frvStudyExport(),null,2)
  }
  async function act(toCenter){
+  if(context.protectedMemory===true&&!toCenter)return;
   if(!loaded||busy||outerModal)return;busy=true;send.disabled=true;download.disabled=true;
   try{const text=await exportText();if(toCenter){if(sopKey)await sopCheckpoint(text);tell('source',{kind,text});say('Передано. Подтвердите сохранение в библиотеке Lean Center.')}
    else{const u=URL.createObjectURL(new Blob([text],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='LeanCenter-'+kind+'-'+session+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);say('JSON сформирован. Проверьте загрузку файла.')}

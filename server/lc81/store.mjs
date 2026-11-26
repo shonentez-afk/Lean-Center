@@ -7,8 +7,9 @@ import {fileURLToPath} from 'node:url';
 import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-store.mjs';
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
-import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary} from './read-policy.mjs';
+import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation} from './read-policy.mjs';
 import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS} from './access-contract.mjs';
+import {requestDigest,getReceipt,addReceipt} from './library-receipts.mjs';
 import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,inspectLibraryText,saveLibrary,passportLibrary,finalizeLibrary,detailDescriptor,projectLibraryDetail,libraryReadAction} from './library-commands.mjs';
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
@@ -76,7 +77,7 @@ function directoryView(db,a,action,data,d){
 }
 function photoAllowed(db,a,id,d){return !!readFor(db,a,'sop.read_steps',id,d)&&(a.bootstrap===1||canReadSopPhoto(db,security(db,a.id),a.id,id,d))}
 function libraryAccess(db,a,d){
- return {read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchor,id)=>(LIBRARY_COMMANDS.includes(action)||DETAIL_ACTIONS.includes(action))&&(a.bootstrap===1?action!=='frv.finalize'&&!!readManagerProjection(db,config(db).site,anchor,id,d):canUseLibrary(db,security(db,a.id),a.id,action,anchor,id,d)),permissions:permissionsFor(db,a)};
+ return {read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchor,id)=>(LIBRARY_COMMANDS.includes(action)||DETAIL_ACTIONS.includes(action))&&(a.bootstrap===1?action!=='frv.finalize'&&!!readManagerProjection(db,config(db).site,anchor,id,d):canUseLibrary(db,security(db,a.id),a.id,action,anchor,id,d)),readScope:(kind,id)=>a.bootstrap===1?!!readManagerProjection(db,config(db).site,'operation.read',id,d):canReadLibraryAtOperation(db,security(db,a.id),a.id,kind,id,d),permissions:permissionsFor(db,a)};
 }
 function projectView(db,a,action,data,d){
  if(action==='sop.read_history'){
@@ -89,7 +90,7 @@ function projectView(db,a,action,data,d){
  }
  if(action==='frv.read'){
   const v=libraryAccess(db,a,d);
-  return {...data,can_edit:data.state==='draft'&&v.allows('frv.edit_draft',action,data.id),can_finalize:!!a.person_id&&data.state==='draft'&&v.allows('frv.finalize',action,data.id),can_summary:v.allows('frv.read_summary',action,data.id),can_create_sop:data.state!=='archived'&&v.permissions.includes('sop.read_history')&&!!v.read('operation.read',data.operation_id)&&v.allows('sop.create','operation.read',data.operation_id)&&v.allows('sop.from_frv',action,data.id)};
+  return {...data,can_edit:data.state==='draft'&&v.allows('frv.edit_draft',action,data.id),can_finalize:!!a.person_id&&data.state==='draft'&&v.allows('frv.finalize',action,data.id),can_summary:v.allows('frv.read_summary',action,data.id),can_create_sop:data.state!=='archived'&&v.permissions.includes('sop.read_history')&&v.readScope('sop',data.operation_id)&&!!v.read('operation.read',data.operation_id)&&v.allows('sop.create','operation.read',data.operation_id)&&v.allows('sop.from_frv',action,data.id)};
  }
  if(action==='sop.read_steps')return {...data,can_read_photo:photoAllowed(db,a,data.revision_id,d)};
  if(action!=='task.read')return directoryView(db,a,action,data,d);
@@ -350,7 +351,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     must(access.permissions.includes(libraryReadAction(kind)),404,'Раздел недоступен');
     return {operations:rows(db,'SELECT id FROM operation WHERE archived=0 ORDER BY name').flatMap(({id})=>{
      const r=access.read('operation.read',id);
-     return r&&access.allows(kind+'.create','operation.read',id)?[{id,name:r.data.name,code:r.data.code}]:[];
+     return r&&access.readScope(kind,id)&&access.allows(kind+'.create','operation.read',id)?[{id,name:r.data.name,code:r.data.code}]:[];
     }),day:day()};
    });
   },
@@ -367,17 +368,29 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    });
   },
   async saveLibrary(actor,revision,request){
-   must(keys(request,['context','expected_revision','title','code','observed_at','text']),400,'Неверные поля сохранения');
+   must(keys(request,['request_id','context','expected_revision','title','code','observed_at','text'])&&typeof request.text==='string'&&Buffer.byteLength(request.text,'utf8')<=MAX_CONTENT,400,'Неверные поля сохранения');
+   const digest=requestDigest(request);
+   const priorResult=db=>{
+    const a=checkedAccount(db,actor,revision),prior=getReceipt(db,actor,request.request_id,digest);
+    if(!prior)return null;
+    const kind=request.context?.kind,access=libraryAccess(db,a,day());
+    must(['sop','frv'].includes(kind)&&access.read(libraryReadAction(kind),kind==='sop'?prior.revision_id:prior.id),403,'Документ недоступен');
+    return {...prior,duplicate:true};
+   };
+   const prior=read(priorResult);if(prior)return prior;
    const ctx=read(db=>resolveCtx(db,actor,revision,request.context));
    must(request.expected_revision===ctx.expected,409,'Документ изменился. Откройте актуальную редакцию.');
    // Revalidate the actual measured source when creating a draft from FRV.
    if(ctx.origin)try{await sourceForEditor(ctx,readFile)}catch(e){throw new PilotError(422,'Проект из ФРВ не подтверждён')}
    const inspected=await inspectLibraryText(ctx.input.kind,request.text);
+   let replay=false;
    return mutate(db=>{
+    const existing=priorResult(db);if(existing){replay=true;return existing}
     const current=resolveCtx(db,actor,revision,request.context);
     must(contextStamp(current)===contextStamp(ctx),409,'Документ изменился при сохранении');
-    return saveLibrary(db,request,current,inspected,{at:at(),audit:(action,target)=>audit(db,actor,action,target)});
-   },candidate=>persistSource(candidate,inspected.source,request.text));
+    const result=saveLibrary(db,request,current,inspected,{at:at(),audit:(action,target)=>audit(db,actor,action,target)});
+    addReceipt(db,actor,request.request_id,digest,result,at());return result;
+   },candidate=>replay?undefined:persistSource(candidate,inspected.source,request.text));
   },
   passportLibrary(actor,revision,input){return mutate(db=>{
    const a=checkedAccount(db,actor,revision);
