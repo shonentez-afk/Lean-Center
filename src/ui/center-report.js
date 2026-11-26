@@ -1,6 +1,6 @@
 import {analyticsPalette} from '../analytics/palette.js';
 // Local only: snapshots describe the already rendered report, not a second computation.
-export function reportSnapshot(node,title,scope,facts,notices=[]){node.dataset.lcReport='1';node.lcReport={title,scope,facts:facts.map(([label,value])=>({label,value:String(value??'—')})),notices}}
+export function reportSnapshot(node,title,scope,facts,notices=[],extra={}){node.dataset.lcReport='1';node.lcReport={title,scope,facts:facts.map(([label,value])=>({label,value:String(value??'—')})),notices,...extra}}
 export function clearReport(node){delete node.lcReport;delete node.dataset.lcReport}
 export function localChart(host,labels,series,{dark=document.documentElement.classList.contains('dark'),onClick=null,percentAxis=false}={}){
  if(!globalThis.echarts||!host.isConnected)return null;
@@ -14,3 +14,11 @@ export function localChart(host,labels,series,{dark=document.documentElement.cla
  return chart
 }
 export function reportChart(el,labels,series,onClick,options={}){const h=el('div',undefined,'lc73-report-chart');queueMicrotask(()=>localChart(h,labels,series,{onClick,...options}));return h}
+
+ // Construct cells only for the visible page. Keep complete source arrays for exports.
+ export function pagedReportTable({el,add,btn,table},headers,records,renderRow,{limit=50}={}){
+  const host=el('div',undefined,'stack lc73-paged-report');let offset=0;
+  function draw(){const end=Math.min(offset+limit,records.length);host.replaceChildren(table(headers,records.slice(offset,end).map((x,i)=>renderRow(x,offset+i))));
+   if(records.length>limit)host.append(add(el('div',undefined,'row'),btn('Предыдущие строки',()=>{offset=Math.max(0,offset-limit);draw()},'',offset===0),el('span',(offset+1)+'–'+end+' / '+records.length,'muted'),btn('Следующие строки',()=>{offset+=limit;draw()},'',end>=records.length)))}
+  draw();return host
+ }

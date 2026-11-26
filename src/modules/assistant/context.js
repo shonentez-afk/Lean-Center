@@ -137,7 +137,7 @@ export function analyzeContext(db,day,ctx){
   check('roi_drafts',effectFacts(db,x.id).filter(f=>f.state==='draft').length,'',dest);
   const targets=periodTargets(db,x,day);check('ctx_roi_period',targets.filter(targetNeedsAttention).length,'',targets.filter(targetNeedsAttention).map(t=>link(t.from+' — '+t.to,'roi',{id:x.id,targetId:t.id})));check('roi_deviations',targets.filter(t=>!t.cancel&&t.shortfall&&!t.currentReview).length,'',dest);
  }else if(ctx.kind==='analytics'){
-  if(ctx.report){out.title=ctx.report.title;out.scope=ctx.report.scope;out.facts=ctx.report.facts;out.notices.push(...ctx.report.notices);notice('Локальный срез отображённого отчёта. Числовые факты не отправляются в облако.');check('ctx_metric_review',out.facts.length,'Проверьте определения и основания выбранного отчёта.',[]);return out}
+  if(ctx.report){out.title=ctx.report.title;out.scope=ctx.report.scope;out.facts=ctx.report.facts;out.notices.push(...ctx.report.notices);notice('Локальный срез отображённого отчёта. Числовые факты не отправляются в облако.');if(ctx.report.metrics)out.metrics=ctx.report.metrics;for(const x of ctx.report.checks||[])if(Object.hasOwn(ASSISTANT_RULES,x.id))check(x.id,x.count,'',x.links||[]);check('ctx_metric_review',out.facts.length,'Проверьте определения и основания выбранного отчёта.',ctx.report.links||[]);return out}
   if(ctx.page==='home'){out.available=false;notice('Нет корректного отображённого среза. Уточните фильтры дашборда.');return out}
   if(ctx.page==='analytics'&&r.assessmentType&&r.assessmentType!=='audit'&&!ctx.report){out.available=false;notice('Нет подтверждённого отображённого среза этого отчёта. Уточните фильтры и наличие фактов.');return out}
   const from=r.from||'',to=r.to||day;if(from&&!validDate(from)||!validDate(to)||from&&from>to){notice('Некорректный период анализа.');return out}
@@ -147,7 +147,7 @@ export function analyzeContext(db,day,ctx){
    const a=summarizeAudits(db,{versionId:r.versionId,from,to,mentorId:scope.personId,unitId:scope.unitId,shiftId:r.shiftId||''});out.title='Аналитика L1 · выбранная методика';fact('Аудиты',a.audits.length);fact('Да / наблюдалось',a.stats.yes+' / '+a.stats.observed);fact('Повторяющиеся контексты',a.repeated.length);check('ctx_audit_repeat',a.repeated.length,'',[link('Исходная аналитика','analytics',{assessmentType:'audit',...r})]);if(!a.stats.observed)check('ctx_metric_missing',1,'Нет бинарных наблюдений.',[link('Исходная аналитика','analytics',{assessmentType:'audit',...r})])
   }else{
    out.title='Сводка дерева метрик';notice('Сводка по общим метрикам в указанном периоде; не интерпретация всех настроек конкретной диаграммы.');
-   const ms=centerMetrics(db,scope);out.metrics=ms.map(m=>({label:m.label,value:m.denominator===null?String(m.value):m.denominator?m.value+' / '+m.denominator:'— (нет знаменателя)',definition:m.definition,target:link('Источник',m.page,m.options)}));
+   const ms=centerMetrics(db,scope);out.metrics=ms.map(m=>({label:m.label,value:m.denominator===null?String(m.value):m.denominator?m.value+' / '+m.denominator:'— (нет знаменателя)',definition:m.definition,target:link('Подтверждающие записи','metrics',{...scope,metricId:m.id,mode:'evidence'})}));
    check('ctx_metric_missing',ms.filter(m=>m.denominator===0).length,'',[link('Дерево метрик','metrics',{from,to,unitId:scope.unitId,personId:scope.personId})]);check('ctx_metric_review',ms.length,'',[link('Дерево метрик','metrics',{from,to,unitId:scope.unitId,personId:scope.personId})]);
   }
  }

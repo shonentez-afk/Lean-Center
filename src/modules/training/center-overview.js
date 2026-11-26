@@ -4,7 +4,7 @@ import {effectOverview} from '../effect/domain.js';
 // Read-only queues and KPI definitions over authoritative records.
 import {rows,one} from '../../core/db.js';
 import {matrixData} from './domain.js';
-import {METRIC_DEFINITIONS} from './metric-catalog.js';
+import {METRIC_DEFINITIONS,METRIC_CONTRACTS} from './metric-catalog.js';
 import {auditRegistry} from './audit-analytics.js';
 import {assessmentRegistry} from './assessment-review.js';
 import {actionRows,actionStatus,actionPeople} from './audit-domain.js';
@@ -45,41 +45,41 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
  const frv=frvRegistry(db).filter(x=>x.state==='final'&&inPeriod(x.observed_at)&&scope(x.unit_id,x.author_id));
  const schedules=rows(db,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(db,x)&&(!unitId||personUnit(db,x.owner_id,scheduleScopeDate(db,x,day))===unitId)&&(!personId||schedulePeople(db,x).includes(personId)));
  const requirements=matrixData(db,day),cells=requirements.people.filter(p=>scope(p.unit_id,p.id)).flatMap(p=>requirements.skills.map(s=>({...requirements.cells.get(p.id+':'+s.id),person:p,skill:s})).filter(c=>c.goal));
- const count=(group,label,value,definition,page,options={})=>({group,label,value,denominator:null,definition,page,options});
- const ratio=(group,label,value,denominator,definition,page,options={})=>({group,label,value,denominator,definition,page,options});
- const f={from,to,personId,unitId},twi=twiOverview(db,{...f,day,role:'trainee'}),ts=twi.stats,economic=effectOverview(db,{day,from,to,unitId,personId});
+ const count=(id,group,label,value,definition,page,options={})=>({id,group,label,value,denominator:null,definition,page,options});
+ const ratio=(id,group,label,value,denominator,definition,page,options={})=>({id,group,label,value,denominator,definition,page,options});
+ const f={from,to,personId,unitId},twi=twiOverview(db,{...f,day,role:'trainee'},{matrix:requirements}),ts=twi.stats,economic=effectOverview(db,{day,from,to,unitId,personId});
  const prepRows=preparationControl(db,day,{from,to,unitId,personId,role:'trainee'}),currentPrepRows=preparationControl(db,day,{unitId,personId,role:'trainee'}),prep=preparationStats(prepRows),currentPrep=preparationStats(currentPrepRows),prepRoute={assessmentType:'preparation',...f};
  const metrics=[
- count('Подготовка','Начато комплектов',prep.total,'Когорта по началу адаптации, подразделение обучаемого на текущую дату.','analytics',prepRoute),
- ratio('Подготовка','Завершено из начатых',prep.complete,prep.total,'Текущий статус комплектов выбранной когорты; три закрытых документа и актуальное положительное решение.','analytics',prepRoute),
- count('Подготовка','Просрочено комплектов',currentPrep.overdue,'Текущие открытые комплекты с просроченным этапом или нехваткой запланированных смен.','preparation',{unitId,personId,filter:'overdue',role:'trainee'}),
- count('Подготовка','Требуется повторная проверка',currentPrep.review,'Решение комиссии больше не подтверждается актуальными основаниями.','preparation',{unitId,personId,filter:'review',role:'trainee'}),
- count('Обучение','Назначено обучения',planned.length,'Назначения, созданные в период; без отменённых. Сотрудник — обучаемый.','twi',{}),
- ratio('Обучение','Завершено из назначенных',completed.length,planned.length,'Текущие состояния назначений, созданных в период; не исторический срез закрытий.','twi',{}),
- count('Эффективность TWI','Уникальные обучаемые',ts.people,'Уникальные люди среди назначений, начатых в периоде.','analytics',{...f,assessmentType:'twi_effect',role:'trainee'}),
- ratio('Эффективность TWI','Первое положительное заключение',ts.firstPass,ts.assessed,'Первая действующая подтверждённая практика назначения до конца периода; базовый уровень или выше, не допуск.','analytics',{...f,assessmentType:'twi_effect',role:'trainee',detail:'first'}),
- count('Эффективность TWI','Назначения с первым зарегистрированным допуском',ts.granted,'Первый зарегистрированный допуск до конца периода, независимо от текущего статуса.','analytics',{...f,assessmentType:'twi_effect',role:'trainee',detail:'granted'}),
- count('Эффективность TWI','Действующие допуски по назначениям',ts.current,'Текущее решение по операции и действующие доказательства; исторические решения отдельно.','analytics',{...f,assessmentType:'twi_effect',role:'trainee',detail:'current'}),
- count('Обучение','Просрочено обучений',a.filter(x=>['planned','in_progress'].includes(x.state)&&x.due_on<day).length,'Открытые назначения со сроком до текущей даты.','twi',{filter:'overdue'}),
- count('Наставничество','Аудиты L1',audit.length,'Зафиксированные аудиты инструктора в период; версии не смешиваются в процент.','audit',{...f,role:'mentor',state:'final'}),
- count('Наставничество','Самооценки',self.length,'Факты самооценки наставника в период.','self_eval',f),
- count('Наставничество','Запланировано оценок',schedules.filter(x=>['audit','practical','self_eval'].includes(scheduleKind(x))).length,'Незакрытые планы и планы с аннулированным подтверждением; подразделение ответственного.','calendar',{personId,unitId,month:'',scheduleType:'planned'}),
- count('Компетенции','Практические оценки',practice.length,'Подтверждённые практические оценки обучаемого в период.','practical',f),
- ratio('Компетенции','Заключения «Не соответствует»',practice.filter(x=>x.conclusion==='not_meet').length,practice.length,'Отдельное заключение оценщика, не процент чек-листа.','practical',{...f,filter:'not_meet'}),
- ratio('Компетенции','Требования без разрыва',cells.filter(x=>!x.gap).length,cells.length,'Текущие требования по сотрудникам и навыкам, с той же шкалой и актуальной редакцией. Не означает допуск.','skills',{}),
- count('СОП','Корпоративские оценки',sop.length,'Сохранённые бинарные оценки в период; сотрудник — оценщик.','analytics',{...f,assessmentType:'sop',sopKind:'sop_evaluation'}),
- count('СОП','Снимки взвешенных чек-листов',weighted.length,'Исторические сохранения и правки, не количество уникальных документов.','analytics',{...f,assessmentType:'sop',sopKind:'weighted_sop'}),
- count('СОП','Просрочен пересмотр',docs.filter(x=>x.review_due&&x.review_due<day).length,'Действующие редакции со сроком пересмотра до текущей даты; сотрудник — автор.','sop',{}),
- count('ФРВ','Завершённые исследования',frv.length,'Финальные исследования в период, сотрудник — сохранённый автор. Не денежный эффект.','analytics',{...f,assessmentType:'frv'}),
- count('Мероприятия','Открытые мероприятия',pending.length,'Текущие открытые/в работе/ожидают проверки/неэффективны. Подразделение исполнителя; сотрудник — участник.','actions',{personId,unitId}),
- count('Мероприятия','Просроченные мероприятия',pending.filter(x=>x.due_on&&x.due_on<day).length,'Незакрытые мероприятия со сроком до текущей даты.','actions',{personId,unitId,filter:'overdue'}),
- ratio('Мероприятия','Подтверждён эффект',verified.length,implemented.length,'Из мероприятий с фактом выполнения в период; проверка эффективности учитывает повторные нарушения.','actions',{personId,unitId,filter:'verified'}),
- count('Экономика','Карточки эффекта требуют проверки',economic.pending,'Открытые контрольные сроки или утратившие актуальность доказательства.','roi',{...f,filter:'pending'}),
- count('Экономика','Просроченные проверки эффекта',economic.overdue,'Текущие незакрытые контрольные сроки до сегодняшней даты.','roi',{...f,filter:'overdue'}),
- count('Экономика','Подтверждённые денежные факты',economic.facts.filter(x=>x.eligible).length,'Факты полностью в выбранном периоде с действующими доказательствами; не годовые сценарии.','roi',{...f,filter:'confirmed'}),
- count('Экономика','Черновики денежных фактов',economic.drafts,'Текущие денежные факты, ожидающие независимого подтверждения.','roi',{...f,filter:'drafts'}),
- count('Экономика','Цели эффекта требуют внимания',economic.targetAttention.length,'Текущие открытые, неполные или требующие разбора цели.','roi',{...f,filter:'targets'}),
- count('Экономика','Неразобранные отклонения',economic.allTargets.filter(t=>t.shortfall&&!t.currentReview).length,'Текущие цели с полным фактом ниже плана без актуального разбора.','roi',{...f,filter:'deviations'})
+ count('prep_started','Подготовка','Начато комплектов',prep.total,'Когорта по началу адаптации, подразделение обучаемого на текущую дату.','analytics',prepRoute),
+ ratio('prep_completed','Подготовка','Завершено из начатых',prep.complete,prep.total,'Текущий статус комплектов выбранной когорты; три закрытых документа и актуальное положительное решение.','analytics',prepRoute),
+ count('prep_overdue','Подготовка','Просрочено комплектов',currentPrep.overdue,'Текущие открытые комплекты с просроченным этапом или нехваткой запланированных смен.','preparation',{unitId,personId,filter:'overdue',role:'trainee'}),
+ count('prep_review','Подготовка','Требуется повторная проверка',currentPrep.review,'Решение комиссии больше не подтверждается актуальными основаниями.','preparation',{unitId,personId,filter:'review',role:'trainee'}),
+ count('training_assigned','Обучение','Назначено обучения',planned.length,'Назначения, созданные в период; без отменённых. Сотрудник — обучаемый.','twi',{}),
+ ratio('training_completed','Обучение','Завершено из назначенных',completed.length,planned.length,'Текущие состояния назначений, созданных в период; не исторический срез закрытий.','twi',{}),
+ count('twi_people','Эффективность TWI','Уникальные обучаемые',ts.people,'Уникальные люди среди назначений, начатых в периоде.','analytics',{...f,assessmentType:'twi_effect',role:'trainee'}),
+ ratio('twi_first','Эффективность TWI','Первое положительное заключение',ts.firstPass,ts.assessed,'Первая действующая подтверждённая практика назначения до конца периода; базовый уровень или выше, не допуск.','analytics',{...f,assessmentType:'twi_effect',role:'trainee',detail:'first'}),
+ count('twi_granted','Эффективность TWI','Назначения с первым зарегистрированным допуском',ts.granted,'Первый зарегистрированный допуск до конца периода, независимо от текущего статуса.','analytics',{...f,assessmentType:'twi_effect',role:'trainee',detail:'granted'}),
+ count('twi_current','Эффективность TWI','Действующие допуски по назначениям',ts.current,'Текущее решение по операции и действующие доказательства; исторические решения отдельно.','analytics',{...f,assessmentType:'twi_effect',role:'trainee',detail:'current'}),
+ count('training_overdue','Обучение','Просрочено обучений',a.filter(x=>['planned','in_progress'].includes(x.state)&&x.due_on<day).length,'Открытые назначения со сроком до текущей даты.','twi',{filter:'overdue'}),
+ count('audit_count','Наставничество','Аудиты L1',audit.length,'Зафиксированные аудиты инструктора в период; версии не смешиваются в процент.','audit',{...f,role:'mentor',state:'final'}),
+ count('self_count','Наставничество','Самооценки',self.length,'Факты самооценки наставника в период.','self_eval',f),
+ count('assessment_planned','Наставничество','Запланировано оценок',schedules.filter(x=>['audit','practical','self_eval'].includes(scheduleKind(x))).length,'Незакрытые планы и планы с аннулированным подтверждением; подразделение ответственного.','calendar',{personId,unitId,month:'',scheduleType:'planned'}),
+ count('practice_count','Компетенции','Практические оценки',practice.length,'Подтверждённые практические оценки обучаемого в период.','practical',f),
+ ratio('practice_negative','Компетенции','Заключения «Не соответствует»',practice.filter(x=>x.conclusion==='not_meet').length,practice.length,'Отдельное заключение оценщика, не процент чек-листа.','practical',{...f,filter:'not_meet'}),
+ ratio('skill_coverage','Компетенции','Требования без разрыва',cells.filter(x=>!x.gap).length,cells.length,'Текущие требования по сотрудникам и навыкам, с той же шкалой и актуальной редакцией. Не означает допуск.','skills',{}),
+ count('sop_evaluations','СОП','Корпоративские оценки',sop.length,'Сохранённые бинарные оценки в период; сотрудник — оценщик.','analytics',{...f,assessmentType:'sop',sopKind:'sop_evaluation'}),
+ count('sop_weighted','СОП','Снимки взвешенных чек-листов',weighted.length,'Исторические сохранения и правки, не количество уникальных документов.','analytics',{...f,assessmentType:'sop',sopKind:'weighted_sop'}),
+ count('sop_review','СОП','Просрочен пересмотр',docs.filter(x=>x.review_due&&x.review_due<day).length,'Действующие редакции со сроком пересмотра до текущей даты; сотрудник — автор.','sop',{}),
+ count('frv_final','ФРВ','Завершённые исследования',frv.length,'Финальные исследования в период, сотрудник — сохранённый автор. Не денежный эффект.','analytics',{...f,assessmentType:'frv'}),
+ count('actions_open','Мероприятия','Открытые мероприятия',pending.length,'Текущие открытые/в работе/ожидают проверки/неэффективны. Подразделение исполнителя; сотрудник — участник.','actions',{personId,unitId}),
+ count('actions_overdue','Мероприятия','Просроченные мероприятия',pending.filter(x=>x.due_on&&x.due_on<day).length,'Незакрытые мероприятия со сроком до текущей даты.','actions',{personId,unitId,filter:'overdue'}),
+ ratio('actions_verified','Мероприятия','Подтверждён эффект',verified.length,implemented.length,'Из мероприятий с фактом выполнения в период; проверка эффективности учитывает повторные нарушения.','actions',{personId,unitId,filter:'verified'}),
+ count('effect_pending','Экономика','Карточки эффекта требуют проверки',economic.pending,'Открытые контрольные сроки или утратившие актуальность доказательства.','roi',{...f,filter:'pending'}),
+ count('effect_overdue','Экономика','Просроченные проверки эффекта',economic.overdue,'Текущие незакрытые контрольные сроки до сегодняшней даты.','roi',{...f,filter:'overdue'}),
+ count('effect_facts','Экономика','Подтверждённые денежные факты',economic.facts.filter(x=>x.eligible).length,'Факты полностью в выбранном периоде с действующими доказательствами; не годовые сценарии.','roi',{...f,filter:'confirmed'}),
+ count('effect_drafts','Экономика','Черновики денежных фактов',economic.drafts,'Текущие денежные факты, ожидающие независимого подтверждения.','roi',{...f,filter:'drafts'}),
+ count('effect_targets','Экономика','Цели эффекта требуют внимания',economic.targetAttention.length,'Текущие открытые, неполные или требующие разбора цели.','roi',{...f,filter:'targets'}),
+ count('effect_deviations','Экономика','Неразобранные отклонения',economic.allTargets.filter(t=>t.shortfall&&!t.currentReview).length,'Текущие цели с полным фактом ниже плана без актуального разбора.','roi',{...f,filter:'deviations'})
  ];
  const slice={day,from,to,unitId,personId};
  const row=(x,page,options,extra={})=>({key:x.id,unitId:x.unit_id||'',personId:'',date:'',label:x.title||'',included:true,page,options,...extra});
@@ -90,9 +90,9 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
   const pr=(x,included=true)=>row(x,'practical',{assessmentId:x.id},{personId:x.person_id,operationId:x.operation_id,date:x.date,method:x.method_id,state:x.conclusion,included});
   const sr=x=>row(x,'self_eval',{id:x.id},{personId:x.person_id,date:x.date,method:x.method_id});
   const act=(x,included=true)=>row(x,'actions',{id:x.id},{unitId:personUnit(db,x.owner_id,day),personId:x.owner_id,date:x.implemented_at||x.due_on,state:x.status,included});
-  const monetary=x=>row(x,'roi',{id:x.effect.id,factId:x.id},{unitId:x.effect.unit_id,personId:x.effect.owner_id,date:x.period_to,currency:x.effect.currency,state:x.state,label:x.effect.title||''});
+  const monetary=x=>row(x,'roi',{id:x.effect.id,factId:x.id},{unitId:x.effect.unit_id,personId:x.effect.owner_id,date:x.period_to,currency:x.effect.currency,period:x.period_from+' — '+x.period_to,state:x.state,label:x.effect.title||''});
   const card=x=>row(x,'roi',{id:x.id},{personId:x.owner_id,date:x.review_due,currency:x.currency,state:x.state});
-  const target=x=>row(x,'roi',{id:x.record.id,targetId:x.id},{unitId:x.record.unit_id,personId:x.record.owner_id,date:x.to,currency:x.record.currency,state:x.status,label:x.record.title||''});
+  const target=x=>row(x,'roi',{id:x.record.id,targetId:x.id},{unitId:x.record.unit_id,personId:x.record.owner_id,date:x.to,currency:x.record.currency,period:x.from+' — '+x.to,state:x.status,label:x.record.title||''});
   const evidence=[
    prepRows.map(x=>prepRecord(x)),prepRows.map(x=>prepRecord(x,x.status==='complete')),currentPrepRows.filter(x=>x.overdue).map(x=>prepRecord(x)),currentPrepRows.filter(x=>x.status==='review').map(x=>prepRecord(x)),
    planned.map(x=>assignment(x)),planned.map(x=>assignment(x,x.state==='completed')),
@@ -100,7 +100,7 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
    twi.cohort.filter(x=>x.first).map(x=>assignment(x,x.first.conclusion!=='not_meet')),twi.cohort.filter(x=>x.grant).map(x=>assignment(x)),twi.cohort.filter(x=>x.current).map(x=>assignment(x)),a.filter(x=>['planned','in_progress'].includes(x.state)&&x.due_on<day).map(x=>assignment(x)),
    audit.map(ar),self.map(sr),schedules.filter(x=>['audit','practical','self_eval'].includes(scheduleKind(x))).map(x=>row(x,'calendar',{id:x.id},{unitId:personUnit(db,x.owner_id,scheduleScopeDate(db,x,day)),personId:x.owner_id,date:x.due_on,state:scheduleKind(x),label:'План '+scheduleKind(x)})),
    practice.map(x=>pr(x)),practice.map(x=>pr(x,x.conclusion==='not_meet')),
-   cells.map(c=>row({id:c.person.id+':'+c.skill.id},'person',{personId:c.person.id},{unitId:c.person.unit_id,personId:c.person.id,skillId:c.skill.id,professionId:c.person.profession_id,operationId:c.skill.operation_id,label:c.skill.name,method:c.goal.scale_id,state:c.gap?'Разрыв':'Покрыто',included:!c.gap,wide:true,requirementId:c.goal.id,assessmentId:c.fact?.session_id||null})),
+   cells.map(c=>row({id:c.person.id+':'+c.skill.id},'person',{personId:c.person.id},{unitId:c.person.unit_id,personId:c.person.id,skillId:c.skill.id,professionId:c.person.profession_id,operationId:c.skill.operation_id,label:c.skill.name,method:c.goal.scale_id,state:c.gap?'Разрыв':'Покрыто',included:!c.gap,wide:true,requirementId:c.goal.id,assessmentId:c.fact?.assessment_kind==='practical'?c.fact.session_id:null,sourceAssessmentId:c.fact?.session_id||null,requiredLevel:c.goal.required_level,observedLevel:c.fact?.level??null,reason:!c.fact?'Нет оценки':!c.valid?'Нет действующей числовой оценки':!c.same?'Другая шкала':!c.revisionCurrent?'Неактуальная редакция':c.gap?'Уровень ниже требования':'Требование покрыто'})),
    sop.map(x=>row(x,'sop_review',{kind:'sop_evaluation',id:x.id},{personId:x.actor_id,operationId:x.operation_id,date:x.date,method:x.method_id})),
    weighted.map(x=>row(x,'sop_review',{kind:'weighted_sop',id:x.id},{personId:x.actor_id,operationId:x.operation_id,date:x.date,method:x.methodKey})),
    docs.filter(x=>x.review_due&&x.review_due<day).map(x=>row(x,'sop',{documentId:x.document_id,revisionId:x.id},{personId:x.author_id,operationId:x.operation_id,date:x.review_due})),
@@ -108,9 +108,9 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
    pending.map(x=>act(x)),pending.filter(x=>x.due_on&&x.due_on<day).map(x=>act(x)),implemented.map(x=>act(x,x.status==='verified')),
    economic.pendingRows.map(card),economic.overdueRows.map(card),economic.facts.filter(x=>x.eligible).map(monetary),economic.draftRows.map(monetary),economic.targetAttention.map(target),economic.allTargets.filter(x=>x.shortfall&&!x.currentReview).map(target)
   ];
-  for(let i=0;i<metrics.length;i++){const m=metrics[i],rs=evidence[i];if(!rs||rs.filter(x=>x.included).length!==m.value||(m.denominator!==null&&rs.length!==m.denominator))throw Error('Metric evidence mismatch: '+METRIC_DEFINITIONS[i].id);m.evidence=rs}
+  for(let i=0;i<metrics.length;i++){const m=metrics[i],rs=evidence[i];if(m.id!==METRIC_DEFINITIONS[i].id||!rs||rs.filter(x=>x.included).length!==m.value||(m.denominator!==null&&rs.length!==m.denominator))throw Error('Metric evidence mismatch: '+METRIC_DEFINITIONS[i].id);m.evidence=rs}
  }
- for(let i=0;i<metrics.length;i++){const m=metrics[i],d=METRIC_DEFINITIONS[i];Object.assign(m,d,{scope:slice,availability:m.denominator===0?'no_denominator':'available',comparisonEligible:false,source:'center-overview.js::centerProjection'});m.dimensions=m.id==='twi_people'?['personId']:['unitId','personId','method','skillId','professionId','operationId','state','currency'].filter(k=>m.evidence?.some(r=>r[k]))}
+ for(let i=0;i<metrics.length;i++){const m=metrics[i],d=METRIC_DEFINITIONS[i];if(m.id!==d.id)throw Error('Registry order mismatch '+m.id);const [source,unit,rules]=METRIC_CONTRACTS[m.id];Object.assign(m,d,{scope:slice,availability:m.denominator===0?'no_denominator':'available',comparisonEligible:false,source,unit,rules,aggregation:m.denominator!==null?'ratio_of_sums':m.id==='twi_people'?'distinct_person':'count_rows',target:null});m.dimensions=m.id==='twi_people'?['personId']:['unitId','personId','method','skillId','professionId','operationId','state','currency','period','reason'].filter(k=>m.evidence?.some(r=>r[k]))}
  // Use the same source records as the metric counts, including the monthly trends.
  const monthly=(items,date)=>{const out=new Map();for(const x of items){const id=date(x).slice(0,7),g=out.get(id)||{id,count:0};g.count++;out.set(id,g)}return [...out.values()].sort((a,b)=>a.id.localeCompare(b.id))};
  const cohortMonths=monthly(planned,x=>x.assigned_on).map(x=>({id:x.id,assignments:x.count,completed:completed.filter(a=>a.assigned_on.slice(0,7)===x.id).length}));

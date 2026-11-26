@@ -42,17 +42,17 @@ export function centerAttention(db,day){
  const overdueTraining=one(db,"SELECT count(*) n FROM training_assignment WHERE source_sha256 IS NOT NULL AND state IN('planned','in_progress') AND due_on<?",[day]).n;
  const revisedTraining=one(db,"SELECT count(*) n FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1)").n;
  const standard=standardControls(db,day),prep=standard.stats,ai=centerAuditIndicators(db,day),ass=assessmentIndicators(db,day),cmp=comparisonIndicators(db,day),plans=rows(db,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(db,x));
- const economic=effectOverview(db,{day,from:day.slice(0,7)+'-01',to:day});
+ const economic=effectOverview(db,{day,from:day.slice(0,7)+'-01',to:day}),queue=retrainingQueue(db,day);
  const values={
   sop_overdue:overdue,sop_passport:without,training_overdue:overdueTraining,training_revision:revisedTraining,annual_l1:standard.annual.filter(x=>x.remaining).length,
-  action_overdue:ai.overdue,action_verify:ai.verification,retraining_need:retrainingQueue(db,day).filter(x=>x.status==='needs').length,audit_planned:plans.filter(x=>scheduleKind(x)==='audit').length,
+  action_overdue:ai.overdue,action_verify:ai.verification,retraining_need:queue.filter(x=>x.status==='needs').length,audit_planned:plans.filter(x=>scheduleKind(x)==='audit').length,
   practical_need:ass.needs,practical_planned:plans.filter(x=>scheduleKind(x)==='practical').length,self_planned:plans.filter(x=>scheduleKind(x)==='self_eval').length,mentor_discussion:cmp.people,
   roi_pending:economic.pending,roi_overdue:economic.overdue,roi_drafts:economic.drafts,roi_targets:economic.targetAttention.length,roi_deviations:economic.allTargets.filter(t=>t.shortfall&&!t.currentReview).length,
   prep_overdue:prep.overdue,prep_review:prep.review,prep_finish:prep.finish,[standard.bankUnregistered?'bank_unregistered':'bank_stale']:standard.bankUnregistered?1:standard.bankStale,supplements_draft:standard.supplementDrafts
  };
  const items=Object.entries(values).map(([id,count])=>({id,count,...ATTENTION_RULES[id]}));
  const people=one(db,'SELECT count(*) n FROM person WHERE archived=0').n,docs=one(db,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='effective' AND d.archived=0").n;
- return {day,items,people,docs,standard,prep,ai,ass,economic}
+ return {day,items,people,docs,standard,prep,ai,ass,economic,queue,cmp,plans}
 }
 export function recommendedChecks(snapshot,group='all'){
  const order={urgent:0,review:1,plan:2};
@@ -61,33 +61,32 @@ export function recommendedChecks(snapshot,group='all'){
 
  // Exact unit scope. Bank of questions is enterprise/profession-wide and remains explicitly global.
  export function scopedAttention(db,day,unitId,global=centerAttention(db,day),projection=null){
-  if(!unitId)return global;
   const p=projection||centerProjection(db,{day,from:day.slice(0,7)+'-01',to:day,unitId},{withEvidence:true});
   const ms=new Map(p.metrics.map(m=>[m.id,m])),r=(key,page,options,date='',label='')=>({key,page,options,date,label,included:true});
-  const unitPerson=id=>personUnit(db,id,day)===unitId;
+  const unitPerson=id=>!unitId||personUnit(db,id,day)===unitId;
   const assignment=x=>r(x.id,'twi',{id:x.id},x.assigned_on,'Назначение обучения');
   const revision=x=>r(x.id,'sop',{documentId:x.document_id,revisionId:x.id},x.review_due,'Редакция СОП');
-  const plans=rows(db,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(db,x)&&personUnit(db,x.owner_id,scheduleScopeDate(db,x,day))===unitId);
+  const plans=global.plans.filter(x=>!unitId||personUnit(db,x.owner_id,scheduleScopeDate(db,x,day))===unitId);
   const plan=k=>plans.filter(x=>scheduleKind(x)===k).map(x=>r(x.id,'calendar',{id:x.id},x.due_on,'План оценки'));
   const metric=id=>ms.get(id).evidence;
   const queueLink=x=>x.type==='revision'?r(x.id,'twi',{id:x.id},x.due,'Редакция обучения'):x.type==='practical'?r(x.id,'practical',{assessmentId:x.id},x.due,'Практическая оценка'):x.type==='audit'?r(x.id,'audit',{auditId:x.id},x.due,'Аудит L1'):r(x.personId+':'+(x.skillId||x.id),'person',{personId:x.personId},x.due,x.question||'Потребность в развитии');
   const exact={
    sop_overdue:metric('sop_review'),
-   sop_passport:rows(db,"SELECT r.id,r.document_id,r.review_due FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.state='draft' AND d.archived=0 AND (r.print_format IS NULL OR r.workplace_id IS NULL) AND o.unit_id=?",[unitId]).map(revision),
+   sop_passport:rows(db,"SELECT r.id,r.document_id,r.review_due FROM document_revision r JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=d.operation_id WHERE r.state='draft' AND d.archived=0 AND (r.print_format IS NULL OR r.workplace_id IS NULL) AND (?='' OR o.unit_id=?)",[unitId,unitId]).map(revision),
    training_overdue:metric('training_overdue'),
-   training_revision:rows(db,"SELECT a.id,a.assigned_on FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=a.operation_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1) AND o.unit_id=?",[unitId]).map(assignment),
+   training_revision:rows(db,"SELECT a.id,a.assigned_on FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=a.operation_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1) AND (?='' OR o.unit_id=?)",[unitId,unitId]).map(assignment),
    annual_l1:global.standard.annual.filter(x=>x.remaining&&unitPerson(x.personId)).map(x=>r(x.personId,'audit',{mode:'annual',year:day.slice(0,4),personId:x.personId},'',x.name)),
    action_overdue:metric('actions_overdue'),action_verify:metric('actions_open').filter(x=>x.state==='implemented'),
-   retraining_need:retrainingQueue(db,day).filter(x=>x.unitId===unitId&&x.status==='needs').map(queueLink),
+   retraining_need:global.queue.filter(x=>(!unitId||x.unitId===unitId)&&x.status==='needs').map(queueLink),
    audit_planned:plan('audit'),
-   practical_need:assessmentRegistry(db,'practical').filter(x=>global.ass.needsIds.has(x.id)&&x.unit_id===unitId).map(x=>r(x.id,'practical',{assessmentId:x.id},x.date,'Практическая оценка')),
+   practical_need:assessmentRegistry(db,'practical').filter(x=>global.ass.needsIds.has(x.id)&&(!unitId||x.unit_id===unitId)).map(x=>r(x.id,'practical',{assessmentId:x.id},x.date,'Практическая оценка')),
    practical_planned:plan('practical'),self_planned:plan('self_eval'),
-   mentor_discussion:comparisonIndicators(db,day).personIds.filter(unitPerson).map(id=>r(id,'analytics',{assessmentType:'comparison',personId:id,discussionOnly:true},'','Самооценка и наблюдения')),
+   mentor_discussion:global.cmp.personIds.filter(unitPerson).map(id=>r(id,'analytics',{assessmentType:'comparison',personId:id,discussionOnly:true},'','Самооценка и наблюдения')),
    roi_pending:metric('effect_pending'),roi_overdue:metric('effect_overdue'),roi_drafts:metric('effect_drafts'),roi_targets:metric('effect_targets'),roi_deviations:metric('effect_deviations'),
    prep_overdue:metric('prep_overdue'),prep_review:metric('prep_review'),
-   prep_finish:global.standard.items.filter(x=>x.unitId===unitId&&x.status==='finish').map(x=>r(x.id,'preparation',{id:x.id},x.due,x.name)),
+   prep_finish:global.standard.items.filter(x=>(!unitId||x.unitId===unitId)&&x.status==='finish').map(x=>r(x.id,'preparation',{id:x.id},x.due,x.name)),
    supplements_draft:global.standard.supplements.filter(x=>x.state==='draft'&&unitPerson(x.person_id)).map(x=>r(x.id,'supplements',{id:x.id},x.month,'Ходатайство о доплате'))
   };
-  const items=global.items.map(x=>Object.hasOwn(exact,x.id)?{...x,count:exact[x.id].length,records:exact[x.id],scope:'unit'}:{...x,scope:'global'});
+  const items=global.items.map(x=>{if(!Object.hasOwn(exact,x.id))return {...x,scope:'global'};const records=exact[x.id];if(!unitId&&records.length!==x.count)return {...x,scope:'global',evidenceMismatch:true};return {...x,count:records.length,records,scope:unitId?'unit':'enterprise'}});
   return {...global,items,unitId};
  }

@@ -1,3 +1,4 @@
+import {centerProjection} from '../src/modules/training/center-overview.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,SQL,schema,migrations,date} from './lc4-fixture.mjs';
@@ -63,7 +64,8 @@ test('LC6 direct action effect, currencies and voiding keep monetary facts separ
    const fact=(await f.save('economic_fact',{command:'create',effect_id:id,actual_event_id:r().actual_event_id,period_from:'2026-01-01',period_to:'2026-01-19',gross_minor:10000,recurring_minor:1000,investment_minor:500,registered_by:f.mentor,evidence:'QA документы'})).entity_id;await f.save('economic_fact',{command:'confirm',verifier_id:f.actor,note:'QA проверено'},fact);ids.push(fact)
   }
   assert.deepEqual(effectOverview(db,{day:date}).currencies.map(x=>[x.currency,x.net]),[['EUR',8500],['RUB',8500]]);
-  await f.save('economic_fact',{command:'void',actor_id:f.actor,reason:'QA исправление документа'},ids[0]);assert.deepEqual(effectOverview(db,{day:date}).currencies.map(x=>x.currency),['EUR']);assert.equal(one(db,'SELECT void_reason FROM economic_fact WHERE id=?',[ids[0]]).void_reason,'QA исправление документа');assert.deepEqual(rows(db,'PRAGMA foreign_key_check'),[]);
+  const proj=centerProjection(db,{day:date,from:'2026-01-01',to:date,unitId:f.unit},{withEvidence:true}),fm=proj.metrics.find(x=>x.id==='effect_facts');assert.equal(fm.value,2);assert.deepEqual(new Set(fm.evidence.map(x=>x.options.factId)),new Set(ids));assert.deepEqual(proj.currencies.map(x=>[x.currency,x.net]),[['EUR',8500],['RUB',8500]]);assert.deepEqual(new Set(fm.evidence.map(x=>x.currency)),new Set(['EUR','RUB']));
+  await f.save('economic_fact',{command:'void',actor_id:f.actor,reason:'QA исправление документа'},ids[0]);assert.deepEqual(effectOverview(db,{day:date}).currencies.map(x=>x.currency),['EUR']);assert.equal(one(db,'SELECT void_reason FROM economic_fact WHERE id=?',[ids[0]]).void_reason,'QA исправление документа');assert.equal(centerProjection(db,{day:date},{withEvidence:true}).metrics.find(x=>x.id==='effect_facts').value,1);assert.deepEqual(rows(db,'PRAGMA foreign_key_check'),[]);
  }finally{f.w.close()}
 });
 

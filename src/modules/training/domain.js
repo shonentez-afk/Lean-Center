@@ -464,7 +464,7 @@ export function matrixData(db,day){
  const skills=rows(db,'SELECT s.*,c.name category FROM skill s JOIN skill_category c ON c.id=s.category_id WHERE s.archived=0 AND c.archived=0 ORDER BY c.name,s.name');
  const requirements=rows(db,"SELECT * FROM role_requirement WHERE valid_from<=? AND coalesce(valid_to,'9999-12-31')>=?",[day,day]);
  const req=new Map(requirements.map(x=>[x.profession_id+':'+x.skill_id,x]));
- const facts=rows(db,`SELECT * FROM (SELECT i.*,s.person_id,s.assessed_at,s.standard_revision_id,s.evaluator_id,s.assignment_id,s.recorded_at,
+ const facts=rows(db,`SELECT * FROM (SELECT i.*,s.person_id,s.assessed_at,s.standard_revision_id,s.evaluator_id,s.assignment_id,s.recorded_at,s.assessment_kind,
  ROW_NUMBER() OVER(PARTITION BY s.person_id,i.skill_id ORDER BY s.assessed_at DESC,coalesce(s.recorded_at,'') DESC,s.id DESC) rn
  FROM assessment_item i JOIN assessment_session s ON s.id=i.session_id WHERE s.state='confirmed' AND substr(s.assessed_at,1,10)<=?) WHERE rn=1`,[day]);
  const observed=new Map(facts.map(x=>[x.person_id+':'+x.skill_id,x]));

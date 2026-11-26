@@ -67,7 +67,7 @@ test('LC5.1 self and practical journals, criterion links, participant roles and 
 import {BUILTIN_SOP} from '../src/modules/training/builtin-forms.js';
 import {compareMentor,matchedComparison} from '../src/modules/training/mentor-comparison.js';
 import {plannedAssessmentFacts,scheduleKind,schedulePeople} from '../src/modules/training/center-planning.js';
-import {retrainingQueue,centerMetrics,comparisonIndicators} from '../src/modules/training/center-overview.js';
+import {retrainingQueue,centerMetrics,centerProjection,comparisonIndicators} from '../src/modules/training/center-overview.js';
 import {corporateEvaluations,corporateAnswers,sopEvidence} from '../src/modules/library/sop-assessment-review.js';
 import {inspectSource} from '../src/modules/library/domain.js';
 import {frvLosses,verifiedFrvEffect,roiScenario} from '../src/modules/library/frv-effect.js';
@@ -94,7 +94,7 @@ test('LC5.2 planned assessment completion requires a new exact fact; no reuse, n
  const assignment=await f.addAssignment();await f.approve(assignment);const pp={command:'plan_assessment',type:'practical',source_id:assignment,owner_id:f.actor,due_on:'2026-02-01'},id=(await f.save('schedule_event',pp)).entity_id;const s=one(db,'SELECT * FROM schedule_event WHERE id=?',[id]);assert(schedulePeople(db,s).includes(f.trainee));assert(schedulePeople(db,s).includes(f.mentor));
  for(const stage of jiStages('classic').filter(x=>!['support','followup'].includes(x.phase)))await f.stage(assignment,stage.code);
  const practical=(await f.assess(assignment,{conclusion:'not_meet'})).entity_id;assert.equal(plannedAssessmentFacts(db,s)[0].id,practical);await f.save('schedule_event',{command:'complete_assessment',fact_id:practical},id);assert.equal(one(db,'SELECT completed_assessment_id FROM schedule_event WHERE id=?',[id]).completed_assessment_id,practical);
- assert(retrainingQueue(db,date).some(x=>x.type==='practical'&&x.id===practical&&x.status==='needs'));const metrics=centerMetrics(db,{day:date,from:date,to:date,unitId:f.unit,personId:f.trainee});assert.equal(metrics.find(x=>x.label==='Практические оценки').value,1);assert.equal(metrics.find(x=>x.label==='Заключения «Не соответствует»').value,1);assert.equal(metrics.find(x=>x.label==='Самооценки').value,0);
+ assert(retrainingQueue(db,date).some(x=>x.type==='practical'&&x.id===practical&&x.status==='needs'));const metrics=centerMetrics(db,{day:date,from:date,to:date,unitId:f.unit,personId:f.trainee});assert.equal(metrics.find(x=>x.label==='Практические оценки').value,1);assert.equal(metrics.find(x=>x.label==='Заключения «Не соответствует»').value,1);assert.equal(metrics.find(x=>x.label==='Самооценки').value,0);const exact=centerProjection(db,{day:date,from:date,to:date,unitId:f.unit,personId:f.trainee},{withEvidence:true}).metrics.find(x=>x.id==='practice_negative');assert.equal(exact.denominator,1);assert.equal(exact.evidence[0].options.assessmentId,practical);assert(exact.evidence[0].included);
  assert(employeeRelations(db,f.trainee).development.some(x=>x.dest?.options?.id===id));assert.deepEqual(rows(db,'PRAGMA foreign_key_check'),[])
  }finally{f.w.close()}});
 test('LC5.2 SOP criterion action verification requires later comparable positive assessment',async()=>{const f=await fixture();try{
@@ -119,7 +119,7 @@ test('LC5.2 FRV losses preserve recorded causes; ROI requires verified facts and
  const action=(await f.save('action_item',{response_id:null,title:'QA ФРВ',owner_id:f.mentor,subject_id:null,due_on:'2026-02-01',kind:'corrective',priority:'normal',source_link:{kind:'frv_study',id:study}})).entity_id;
  await f.save('action_item',{command:'implement',result:'QA'},action);await f.save('action_item',{command:'verify',verifier_id:f.actor,audit_id:null,outcome:'effective',evidence:'Проверены замеры QA'},action);
  const effect=await verifiedFrvEffect(db,study,f.readContent),model=roiScenario(effect,{cyclesPerYear:3600,hourRate:100,realization:50,investment:1000,annualCost:500});assert.equal(model.hours,60);assert.equal(model.annualBenefit,3000);assert.equal(model.yearOne,1500);assert.equal(model.roi,150);assert.throws(()=>roiScenario(effect,{cyclesPerYear:3600,hourRate:100,realization:101,investment:1000,annualCost:500}),/0–100/);
- assert.equal(centerMetrics(db,{day:date,from:date,to:date,unitId:f.unit}).find(x=>x.label==='Завершённые исследования').value,1);
+ assert.equal(centerMetrics(db,{day:date,from:date,to:date,unitId:f.unit}).find(x=>x.label==='Завершённые исследования').value,1);const projection=centerProjection(db,{day:date,from:date,to:date,unitId:f.unit},{withEvidence:true});assert.equal(projection.metrics.find(x=>x.id==='frv_final').evidence.length,1);
  }finally{f.w.close()}});
 
 import {assessmentAnalysis} from '../src/ui/assessment-analysis.js';
