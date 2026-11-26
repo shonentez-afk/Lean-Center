@@ -1,0 +1,525 @@
+{
+  "sourceCommit": "49966639c10acf96db4ee0f44b85aea036f1f7dc",
+  "files": [
+    {
+      "path": "amvera.yml",
+      "sha": "2f5cf62f4061ad28b0ddfd12c82a00f5163a2004"
+    },
+    {
+      "path": "baselines/sop-stage43/releases/stage43-sop-print-formats-20261125.html",
+      "sha": "5e35036ce243fed74ea018ac8eaf5f6c4a3c3e45"
+    },
+    {
+      "path": "baselines/sop-stage43/src/vendor/ExcelJS_LICENSE.txt",
+      "sha": "e3aa07e7d910aa2e216eb4a58c89100ee6e615fd"
+    },
+    {
+      "path": "baselines/sop-stage43/src/vendor/exceljs.min.js",
+      "sha": "db8015d619026253d574bed2a01865c05baec99a"
+    },
+    {
+      "path": "db/migrations/002_lc1.sql",
+      "sha": "500984290fbaa87d0ac3b7113711339c1fa9e127"
+    },
+    {
+      "path": "db/migrations/003_lc2.sql",
+      "sha": "eb3c65df9a339c6193d60f2e16f6307343ad0ce2"
+    },
+    {
+      "path": "db/migrations/004_lc3.sql",
+      "sha": "9dda4a36756ba1b30ba47c6d1f276121250cd649"
+    },
+    {
+      "path": "db/migrations/005_lc3_requirements.sql",
+      "sha": "2d0b94355a66a0e947bbfb3694a9dbf196808f04"
+    },
+    {
+      "path": "db/migrations/006_stage43_checklist.sql",
+      "sha": "46a7384820269b9de425c981e596e2508c931f4a"
+    },
+    {
+      "path": "db/migrations/007_lc4_training.sql",
+      "sha": "f849cb1d6410a0a2041f0fed09bd87d757213bdd"
+    },
+    {
+      "path": "db/migrations/008_lc4_corporate_forms.sql",
+      "sha": "79f725b43a7c6abd52e1c5e83ec05ada68fe0223"
+    },
+    {
+      "path": "db/migrations/009_lc42_methods.sql",
+      "sha": "806619aa90b7110eee5bea349cbdb82d78dd7781"
+    },
+    {
+      "path": "db/migrations/010_lc43_matrix.sql",
+      "sha": "b4e127da662bd767820b213be708e56966799996"
+    },
+    {
+      "path": "db/migrations/011_lc5_audit.sql",
+      "sha": "5fc061417adff4dc20cf287cac80a141b39e9f95"
+    },
+    {
+      "path": "db/migrations/012_lc51_assessments.sql",
+      "sha": "b26f040ccc88d5a7f2a254c29d97271856a93f27"
+    },
+    {
+      "path": "db/migrations/013_lc52_integration.sql",
+      "sha": "63a2b2762bbfcea5d2366b122a20fe4d0c45d6da"
+    },
+    {
+      "path": "db/migrations/014_lc6_effect.sql",
+      "sha": "56c525cbe6d4ba5eecc074cb861ba80a9167823b"
+    },
+    {
+      "path": "db/migrations/015_lc63_twi_standard.sql",
+      "sha": "650f291d1613e71f744f513108640af7556e889a"
+    },
+    {
+      "path": "db/migrations/016_lc64_twi_workflows.sql",
+      "sha": "61b7c608e7e8b202b9d1242dfac10a218ec2e905"
+    },
+    {
+      "path": "db/migrations/017_lc65_preparation_results.sql",
+      "sha": "010687474d2bf1a7ad71da9fd542bcb613297e18"
+    },
+    {
+      "path": "db/schema_v1.sql",
+      "sha": "b716737621bc476fc5fa54be13560a91cb69f612"
+    },
+    {
+      "path": "docs/DEPLOY_NETWORK_RU.md",
+      "sha": "7086afe472cb786291569e6a1335c911bf89085c"
+    },
+    {
+      "path": "package-lock.json",
+      "sha": "5d6ca7f7104a15f0592c3770dd1e1f098ccea129"
+    },
+    {
+      "path": "package.json",
+      "sha": "9257165c78aa368202adbd94d3d9a25552467adc"
+    },
+    {
+      "path": "server/lc74-http.mjs",
+      "sha": "d878a04dd9ddb9acaf1cdf4883f4e8dc1297aed5"
+    },
+    {
+      "path": "server/lc74-store.mjs",
+      "sha": "a8fe41a2df84ad777881fccf8a8bf42b9daf9ea2"
+    },
+    {
+      "path": "server/main.mjs",
+      "sha": "d86f1d10c97216cc54914eb9f98eae43c461d587"
+    },
+    {
+      "path": "server/maintenance.mjs",
+      "sha": "4d408f041dcccc5f9a95d595e094c37ad18ac66f"
+    },
+    {
+      "path": "src/analytics/palette.js",
+      "sha": "9fe2fdb10ed878ddfc01766a7f48767e443ee9a1"
+    },
+    {
+      "path": "src/app.js",
+      "sha": "ec15af23df296cbe9807d6a99479cf5af380f864"
+    },
+    {
+      "path": "src/core/business-clock.js",
+      "sha": "7292ea2352a430f8d9d331a13acd5099f098e793"
+    },
+    {
+      "path": "src/core/cloud-release.js",
+      "sha": "63af9c39cdce04032b23ee7154d4a66d222dfc89"
+    },
+    {
+      "path": "src/core/db.js",
+      "sha": "8f67b1f9fc49db701bc8cb6b8f6f9f690fc88eec"
+    },
+    {
+      "path": "src/core/primitives.js",
+      "sha": "9f92780d55ba6f7997ac2e8d59ded5c171c2a0c8"
+    },
+    {
+      "path": "src/modules/assistant/cloud-panel.js",
+      "sha": "cd9bd313555707c02725ecd994ff221ce6ead742"
+    },
+    {
+      "path": "src/modules/assistant/cloud.js",
+      "sha": "4bb10491db9b4b5daeaa2ab35e35e0b84dfa7f04"
+    },
+    {
+      "path": "src/modules/assistant/context-panel.js",
+      "sha": "3c4cf251b071b488fe36114b8a8a041943887e92"
+    },
+    {
+      "path": "src/modules/assistant/context-rules.js",
+      "sha": "57b82c5a48b2f2c3c23a13970e9cd4df3bd51e22"
+    },
+    {
+      "path": "src/modules/assistant/context.js",
+      "sha": "72e01c401d36ff184f12a69dd4732400e8bda567"
+    },
+    {
+      "path": "src/modules/assistant/screen.js",
+      "sha": "ccd4cc8d59ed95839f754b36d2f736c6822e8d19"
+    },
+    {
+      "path": "src/modules/effect/domain.js",
+      "sha": "08a5be261d159df1851f19e0c8d73611f164836c"
+    },
+    {
+      "path": "src/modules/effect/math.js",
+      "sha": "f925a7bdc4ed5f6da020b4205bde5021d2ce2762"
+    },
+    {
+      "path": "src/modules/effect/report-view.js",
+      "sha": "2b3ca692e2b6826b8382018ea756cb505c16a79e"
+    },
+    {
+      "path": "src/modules/effect/reporting.js",
+      "sha": "58282fe9a36d2479464570a707d2979ff2266adb"
+    },
+    {
+      "path": "src/modules/effect/screens.js",
+      "sha": "12ca6e5c73d20d412882dd864890be00a26acdda"
+    },
+    {
+      "path": "src/modules/library/content.js",
+      "sha": "66630d9ea5324a793287d9e0f5699e77e5ee4d3a"
+    },
+    {
+      "path": "src/modules/library/domain.js",
+      "sha": "9efc787dd65f4ad72d4b8e2b4fab1ea5a274d185"
+    },
+    {
+      "path": "src/modules/library/frv-effect.js",
+      "sha": "7c32a3fe10f218b0394ab47ac8b3b163770426ff"
+    },
+    {
+      "path": "src/modules/library/frv-summary.js",
+      "sha": "b39c1fe7879a660e17d3c7f28faf8d8e25acd8b4"
+    },
+    {
+      "path": "src/modules/library/lean-bridge.js",
+      "sha": "176e006046712554ada3c62e18cc95eea72f8bd3"
+    },
+    {
+      "path": "src/modules/library/linked-materials.js",
+      "sha": "c60b40d3e253b9a49cd8c2ac46054db79fa76aec"
+    },
+    {
+      "path": "src/modules/library/revision-title.js",
+      "sha": "7cda6f4d83b5dd304debefbb900a855ea287f67b"
+    },
+    {
+      "path": "src/modules/library/sop-assessment-review.js",
+      "sha": "b8e409d842e99d42d1ed755ac39cc878bde2d07c"
+    },
+    {
+      "path": "src/modules/library/sop-limits.js",
+      "sha": "e714ed1972f8defbb577fa69513a27215c71fbc5"
+    },
+    {
+      "path": "src/modules/library/sop-review.js",
+      "sha": "0ad43781cccffe44ceb6e21206e4e19fcf243950"
+    },
+    {
+      "path": "src/modules/library/sop-step-quality.js",
+      "sha": "10cfc9b838e44d06f78c6833005e77c89af1753b"
+    },
+    {
+      "path": "src/modules/library/source-validation.js",
+      "sha": "5a299f1904efda1d1fc1a20eea10ba31de3e6ee4"
+    },
+    {
+      "path": "src/modules/library/stage43-checklist.js",
+      "sha": "7e2a48fea7e0c2455de95ca4d337a2d43f61a851"
+    },
+    {
+      "path": "src/modules/master-data/employee-records.js",
+      "sha": "d3eff53f0baacc3ad277401054813146c85a6ed0"
+    },
+    {
+      "path": "src/modules/master-data/import-xlsx.js",
+      "sha": "d483ffd5a053314b2c6a985baa5bef4792dbbec9"
+    },
+    {
+      "path": "src/modules/master-data/people-directory.js",
+      "sha": "4b6d707d25ac51ce5c68bceba288571f991870f1"
+    },
+    {
+      "path": "src/modules/master-data/role-matching.js",
+      "sha": "23b6e8ad883fa472427059f09f5da3758c7e67df"
+    },
+    {
+      "path": "src/modules/training/action-calendar.js",
+      "sha": "4ffe093082fccaab94b165a98561644a0a5c8867"
+    },
+    {
+      "path": "src/modules/training/assessment-review.js",
+      "sha": "1097ab7cfceabfe99ae31b08cade075db3a80ce3"
+    },
+    {
+      "path": "src/modules/training/audit-analytics.js",
+      "sha": "ce72cd7ac4196ff0bb9ef36f13d87b711cbfda94"
+    },
+    {
+      "path": "src/modules/training/audit-domain.js",
+      "sha": "2b0f565106b34c39b5de5574035335d285351d42"
+    },
+    {
+      "path": "src/modules/training/builtin-forms.js",
+      "sha": "d3eb9286b08816948321055b0a2d0139996d5dfa"
+    },
+    {
+      "path": "src/modules/training/center-attention.js",
+      "sha": "71d30b9e5ddee2e8367d6fd3c0e77925f72b76ad"
+    },
+    {
+      "path": "src/modules/training/center-dashboard.js",
+      "sha": "f52135725120bb55dd446fcc8e1126323758a017"
+    },
+    {
+      "path": "src/modules/training/center-overview.js",
+      "sha": "21d61b56cf457ab0c8ead30559f126a3fb989833"
+    },
+    {
+      "path": "src/modules/training/center-planning.js",
+      "sha": "0d42d287b7d31d40add2478174b48c504afd61d5"
+    },
+    {
+      "path": "src/modules/training/corporate-forms.js",
+      "sha": "6cbf074c71c0ab1aca294157d32a48edae49c354"
+    },
+    {
+      "path": "src/modules/training/dashboard-period.js",
+      "sha": "4cc6c6382606405cced5e1d4c90bbe7529da6066"
+    },
+    {
+      "path": "src/modules/training/domain.js",
+      "sha": "c91d329b6cd874b565f597b274d2883d2971ef5a"
+    },
+    {
+      "path": "src/modules/training/event-calendar.js",
+      "sha": "9888c6f2dee573ae7ca92dd6c8c16e0c85559c13"
+    },
+    {
+      "path": "src/modules/training/ji-v03.js",
+      "sha": "c9db6b1a2e871742cafd531caf7e8132a73e4335"
+    },
+    {
+      "path": "src/modules/training/local-docx.js",
+      "sha": "878165df3987eccf8638961448864bc2b4ae504d"
+    },
+    {
+      "path": "src/modules/training/matrix-assistant.js",
+      "sha": "a38d84742e29dc6c93147b3c5edcca5a321570bf"
+    },
+    {
+      "path": "src/modules/training/matrix-view.js",
+      "sha": "3ff2ebc58273efa6261383bf538ae2a0e1d7d53f"
+    },
+    {
+      "path": "src/modules/training/mentor-comparison.js",
+      "sha": "622863e9d0e46f7417d5945f92603a48b8da5d4b"
+    },
+    {
+      "path": "src/modules/training/metric-catalog.js",
+      "sha": "1c2698dbb4d82bc79cc657c97a5f3cbcebe39957"
+    },
+    {
+      "path": "src/modules/training/mobile-audit.js",
+      "sha": "f66bf9d8eb23ce9a8661dcc2190b81fdafb37f25"
+    },
+    {
+      "path": "src/modules/training/preparation-results-view.js",
+      "sha": "c23738d0c67a8bbf246c4d81eb441d1d86bd8333"
+    },
+    {
+      "path": "src/modules/training/preparation-results.js",
+      "sha": "7f2fa4cff363c9bafaf18433aecc5fe34c2a4d8b"
+    },
+    {
+      "path": "src/modules/training/question-bank-v03.js",
+      "sha": "353d22c207c3e891fd8d8a350e2efcad081c6d7f"
+    },
+    {
+      "path": "src/modules/training/rc1-import.js",
+      "sha": "f40a3bcac6fae0dca04ede7bc969c55bbacc1b00"
+    },
+    {
+      "path": "src/modules/training/screens.js",
+      "sha": "141351d51edc91ae523e51e33e4f3bd3bac7bcd2"
+    },
+    {
+      "path": "src/modules/training/standard-final-prints.js",
+      "sha": "ee1ea180384a902e317bab37ef0a8fc9dec22124"
+    },
+    {
+      "path": "src/modules/training/standard-overview.js",
+      "sha": "5cfd72c2cb4d014555b11904b442804387c937e1"
+    },
+    {
+      "path": "src/modules/training/standard-prints.js",
+      "sha": "9b599c8e49e977c1c7469e7bde397a232ecbf952"
+    },
+    {
+      "path": "src/modules/training/standard-v03.js",
+      "sha": "7f8b74fee9ee4b2577b2306bce85a82ab03ddf45"
+    },
+    {
+      "path": "src/modules/training/standard-workflows-view.js",
+      "sha": "e93d83ce22e47b6a74e0fc1875f91d988ce4bf74"
+    },
+    {
+      "path": "src/modules/training/standard-workflows.js",
+      "sha": "e7d5fa675a4dd11c12e6854cf9ea25ba8d7c9f88"
+    },
+    {
+      "path": "src/modules/training/training-facts.js",
+      "sha": "d4c7c0646ae71e3086a43dc6a73ba3cde8911d0e"
+    },
+    {
+      "path": "src/modules/training/twi-effectiveness-view.js",
+      "sha": "be63b5d7bb6527d2649eb2eea94466939e9a1a52"
+    },
+    {
+      "path": "src/modules/training/twi-effectiveness.js",
+      "sha": "c0909343584d71e6734deb942fbcbf80ddb617b8"
+    },
+    {
+      "path": "src/storage/cloud-pilot.js",
+      "sha": "6c47bbec95bf278963f578e121b30a56811efa32"
+    },
+    {
+      "path": "src/storage/local.js",
+      "sha": "42fb5dd016ff06a5ce8590aaf0077f467f31f592"
+    },
+    {
+      "path": "src/storage/network.js",
+      "sha": "14feaa1a53392f25035b768a2ba2c55662e75b72"
+    },
+    {
+      "path": "src/ui/assessment-analysis.js",
+      "sha": "2604ef20cd8a30a6268f1537667ad780f796be6c"
+    },
+    {
+      "path": "src/ui/brand/favicon-32.png",
+      "sha": "7ab0eef6db083f97504ac1a297db4345adb7a61f"
+    },
+    {
+      "path": "src/ui/brand/favicon.png",
+      "sha": "4b378efb8c985c33c1d64eff2eb4c25db6c2e287"
+    },
+    {
+      "path": "src/ui/brand/tn-two-line-dark.svg",
+      "sha": "322b4d25c5763f99fca56323ed7253871ab1731b"
+    },
+    {
+      "path": "src/ui/brand/tn-two-line-light.svg",
+      "sha": "bc59d2d9480bd40c3d9d395f46b8de05f61e3c26"
+    },
+    {
+      "path": "src/ui/brand/twi-workplace.webp",
+      "sha": "b65aecb101c405f358a25f968ca084e5646c6eb3"
+    },
+    {
+      "path": "src/ui/center-report.js",
+      "sha": "841ed7ad1386cabd1007b1509c369b86b151704d"
+    },
+    {
+      "path": "src/ui/cloud-pilot.css",
+      "sha": "6e4146184b62a2088cdeb8b355ac0d8dc6abd257"
+    },
+    {
+      "path": "src/ui/editor.css",
+      "sha": "6bae743057909e91dc7ca72e025a46dc1422dfa1"
+    },
+    {
+      "path": "src/ui/folder.html",
+      "sha": "85d0322ba8b87938e4fcffd814999e0c5ca2b986"
+    },
+    {
+      "path": "src/ui/form-guard.js",
+      "sha": "fb2a4a834fbe1c21096638359a83dc9d0d7ad12d"
+    },
+    {
+      "path": "src/ui/index.html",
+      "sha": "d72475bf3956edeeaca58a1ccaa9ab9705855180"
+    },
+    {
+      "path": "src/ui/people-picker.css",
+      "sha": "717202ff2556825edbe19e8f0fd1501472f5cdf9"
+    },
+    {
+      "path": "src/ui/people-picker.js",
+      "sha": "0948aa33a61dbbaa26544b4a05a7223e8a7b4e69"
+    },
+    {
+      "path": "src/ui/styles.css",
+      "sha": "8770be0f4e2737e306e2f1419a561a31223b7fe9"
+    },
+    {
+      "path": "tools/build_editor.mjs",
+      "sha": "fb3df569aabe72ae211c8721884bb1fb0fd66984"
+    },
+    {
+      "path": "tools/build_folder.mjs",
+      "sha": "46b2191f2c58bdb9e757ede16785aea77b349f86"
+    },
+    {
+      "path": "tools/build_lc1.mjs",
+      "sha": "2f72817520123f96bc72df888150a5f6559b790b"
+    },
+    {
+      "path": "tools/cloud-identity.mjs",
+      "sha": "78c50a452a6f1f7158ab832b9ca333b1a374023a"
+    },
+    {
+      "path": "tools/import_sop_baseline.py",
+      "sha": "160e834cd4df2d9099e21a70996e537ddf2b0a9d"
+    },
+    {
+      "path": "tools/lc73b/analytics-coverage.mjs",
+      "sha": "2c2e496d771e61d6f25f3b98474f6c65c0c8e9dc"
+    },
+    {
+      "path": "tools/lc73b/analyze.mjs",
+      "sha": "a6beecdc6e0048b5517218a7b89eac2be6e4d437"
+    },
+    {
+      "path": "tools/lc73b/atlas-client.js",
+      "sha": "836fc8ebcb749b8d0ccf4f18d7668b6edf041acd"
+    },
+    {
+      "path": "tools/lc73b/atlas-render.mjs",
+      "sha": "f111797c56cba37c0810410376e97ba984e825dd"
+    },
+    {
+      "path": "tools/lc73b/atlas.html",
+      "sha": "fa5599ec308382c6407995624f118abb63c578ec"
+    },
+    {
+      "path": "tools/lc73b/build-atlas.mjs",
+      "sha": "18600dd40c6c9400d268965d96707e041aabdc7a"
+    },
+    {
+      "path": "tools/lc73b/contracts.mjs",
+      "sha": "64cecfb99909cd5d5096b1604925ca6125a69b72"
+    },
+    {
+      "path": "tools/lc73b/derived-runtime.mjs",
+      "sha": "df799dbbd59a07e58da838b18a3f93f65bbba602"
+    },
+    {
+      "path": "tools/lc73b/unresolved-summary.mjs",
+      "sha": "15ef60297770d7f8f5538dccd769b1fc09ba20cc"
+    },
+    {
+      "path": "tools/package_folder.py",
+      "sha": "8e0101e40f9334766c886182901b8619b013cc73"
+    },
+    {
+      "path": "tools/twi-pilot-token-generator.html",
+      "sha": "2fe0616dffba5f4169aba24784ba7983d613a5f1"
+    }
+  ]
+}
