@@ -1,3 +1,4 @@
+import {trainingEnrollmentFinishDay} from './event-calendar.js';
 // LC6.2: TWI facts, not invented ratings or financial attribution.
 import {rows,one,invariant,canonical} from '../../core/primitives.js';
 import {matrixData,coverageData,admissionStatus,jiStages} from './domain.js';
@@ -87,8 +88,9 @@ export function twiComparison(db,p,day){
     if(!jiStages(last.method_variant,jiConfig(last)).filter(s=>!prep||s.phase!=='followup').every(s=>last.sessions.some(y=>dayOf(y.held_at)<=to&&y.stage_code===s.code&&y.result==='completed')))done=false;
    }else{const rs=results.filter(y=>y.task_id===task.id);if(rs.at(-1)?.result!=='completed')done=false;facts.push(...rs.map(y=>[y.id,y.minutes,y.held_on,y.result]))}
   }
-  const complete=!!(a.state==='completed'&&dayOf(a.finished_at)<=to&&a.conclusion&&a.conclusion!=='not_meet'&&done&&facts.length&&facts.every(y=>Number.isFinite(y[1])&&y[1]>=0&&dayOf(y[2])<=dayOf(a.finished_at)));
-  return {id:x.id,person:x.person,complete,minutes:complete?facts.reduce((n,y)=>n+y[1],0):null,days:complete?elapsed(a.start_on,a.finished_at):null,finish:a.finished_at,conclusion:a.conclusion,assignmentIds,facts}
+  const finishDay=trainingEnrollmentFinishDay(db,a);
+  const complete=!!(a.state==='completed'&&finishDay&&finishDay<=to&&a.conclusion&&a.conclusion!=='not_meet'&&done&&facts.length&&facts.every(y=>Number.isFinite(y[1])&&y[1]>=0&&dayOf(y[2])<=finishDay));
+  return {id:x.id,person:x.person,complete,minutes:complete?facts.reduce((n,y)=>n+y[1],0):null,days:complete?elapsed(a.start_on,finishDay):null,finish:a.finished_at,conclusion:a.conclusion,assignmentIds,facts}
  }).sort((a,b)=>a.id.localeCompare(b.id));
  const before=cohort(p.before_from,p.before_to),after=cohort(p.after_from,p.after_to),stat=a=>({total:a.length,complete:a.filter(x=>x.complete).length,people:unique(a.map(x=>x.person)).length,meanMinutes:mean(a.filter(x=>x.complete).map(x=>x.minutes)),medianDays:median(a.filter(x=>x.complete).map(x=>x.days))});
  const b=stat(before),a=stat(after),comparable=b.total>0&&a.total>0&&b.complete===b.total&&a.complete===a.total;

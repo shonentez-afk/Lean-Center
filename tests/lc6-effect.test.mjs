@@ -1,3 +1,4 @@
+import {trainingEnrollmentFinishDay} from '../src/modules/training/event-calendar.js';
 import {assertAnalyticsContracts} from './lc73b-analytics-contract.mjs';
 import {centerProjection} from '../src/modules/training/center-overview.js';
 import test from 'node:test';
@@ -193,4 +194,29 @@ test('LC6.7.2 ROI local midnight, stored offset and deterministic replay; old ev
  const fact=(await event('economic_fact',input,nextLocal)).entity_id;await event('economic_fact',{command:'confirm',verifier_id:f.actor,note:'QA'},new Date('2026-11-02T00:01:00Z'),fact);
  assert.equal(effectOverview(db,{day:'2026-11-02',from:'2026-11-01'}).currencies[0].net,100);reopened=await restore(SQL,await backup(f.w),f.readContent);assert.equal(effectOverview(reopened.working,{day:'2026-11-02',from:'2026-11-01'}).currencies[0].net,100);const closed=periodTargets(reopened.working,one(reopened.working,'SELECT * FROM economic_effect WHERE id=?',[id]),'2026-11-02').find(t=>t.id===target);assert.equal(closed.late,true);assert.equal(closed.closed,true)
  }finally{reopened?.close();f.w.close()}
+});
+
+test('LC7.3B TWI program comparisons use saved civil completion, retain raw timestamp and old basis',async()=>{
+ const f=await fixture();try{
+  const db=f.w.working,program=(await f.save('training_program',{code:'QA-CIVIL-TWI',kind:'entry',title:'QA civil',profession_id:f.profession,position_id:null,created_by:f.actor,tasks:[{part:'general',title:'QA',hours:1,day_offset:0,sop_revision_id:null,skill_id:null,scale_id:null,target_level:null}]})).entity_id;
+  const at=async(t,payload,occurred_at,id=null)=>{const old=id?one(db,'SELECT * FROM '+t+' WHERE id=?',[id]):null,e={id:uuid(),entity_type:t,entity_id:id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload,occurred_at};await f.w.applyContentEvents([e],f.readContent);return e};
+  const enrollment=d=>({program_id:program,trainee_id:f.trainee,mentor_id:f.mentor,manager_id:f.actor,start_on:d,due_on:'2026-02-01',reason:'QA'});
+  const record=async(day,stamp,minutes,offset)=>{
+   const time=i=>new Date(Date.parse(stamp)+i*1000).toISOString();
+   const id=(await at('training_enrollment',enrollment(day),time(0))).entity_id;
+   await at('training_task_result',{enrollment_id:id,task_id:program+':1',actor_id:f.mentor,held_on:day,result:'completed',minutes,evidence:'QA',enrollment_rev:one(db,'SELECT rev FROM training_enrollment WHERE id=?',[id]).rev},time(1));
+   const finish={command:'finish',actor_id:f.actor,conclusion:'basic',feedback:'QA'};
+   if(offset!==undefined)await assert.rejects(at('training_enrollment',{...finish,business_offset_minutes:null},time(2),id),/время предприятия/);
+   await at('training_enrollment',{...finish,...(offset===undefined?{}:{business_offset_minutes:offset})},time(2),id);return id
+  };
+  const before=await record(date,'2026-01-20T10:00:00Z',60),east=await record('2026-01-21','2026-01-20T17:30:00Z',40,420),west=await record('2026-01-22','2026-01-23T02:30:00Z',30,-300),legacy=await record('2026-01-24','2026-01-23T17:30:00Z',20);
+  const row=id=>one(db,'SELECT * FROM training_enrollment WHERE id=?',[id]),scope=d=>({kind:'program',source_id:program,unit_id:f.unit,before_from:date,before_to:date,after_from:d,after_to:d});
+  assert.equal(trainingEnrollmentFinishDay(db,row(east)),'2026-01-21');assert.equal(trainingEnrollmentFinishDay(db,row(west)),'2026-01-22');assert.equal(trainingEnrollmentFinishDay(db,row(legacy)),'2026-01-23');
+  const checks=[];
+  for(const [d,id,delta] of [['2026-01-21',east,20],['2026-01-22',west,30]]){
+   const c=twiComparison(db,scope(d),d);assert(c.comparable);assert.equal(c.deltaMinutes,delta);assert.equal(c.before[0].id,before);assert.equal(c.after[0].id,id);assert.equal(c.after[0].days,0);assert.equal(c.after[0].finish,row(id).finished_at);checks.push([d,c])
+  }
+  assert(!twiComparison(db,scope('2026-01-24'),'2026-01-24').comparable);
+  const restored=await restore(SQL,await backup(f.w),f.readContent);try{for(const [d,c] of checks)assert.deepEqual(twiComparison(restored.working,scope(d),d),c)}finally{restored.close()}
+ }finally{f.w.close()}
 });

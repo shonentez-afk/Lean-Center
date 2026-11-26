@@ -90,3 +90,10 @@ test('LC7.3B SOP review calendar: due day is not overdue, next day is, exact met
   }
  }finally{f.w.close()}
 });
+
+test('LC7.3B event clock writes offset only for new calendar commands',async()=>{
+ const {economicEventPayload}=await import('../src/core/business-clock.js');
+ const instant=new Date('2026-01-20T17:30:00Z'),offset=-instant.getTimezoneOffset();
+ for(const [type,p] of [['schedule_event',{assignment_id:'QA'}],['schedule_event',{command:'plan_assessment'}],['schedule_event',{command:'replan'}],['training_enrollment',{command:'finish'}]])assert.deepEqual(economicEventPayload(type,p,instant),{...p,business_offset_minutes:offset});
+ for(const [type,p] of [['schedule_event',{command:'complete'}],['schedule_event',{command:'cancel'}],['training_enrollment',{command:'cancel'}]])assert.deepEqual(economicEventPayload(type,p,instant),p)
+});

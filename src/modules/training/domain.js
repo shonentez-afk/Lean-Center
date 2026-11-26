@@ -1,3 +1,4 @@
+import {economicEventDay} from '../../core/business-clock.js';
 import {variants,jiStages,progressFor,currentStandard,isCurrentStandard,certificateValid,latestVerification,latestAssessment,enrollmentTasks,sharedTrainingTask,preparationForEnrollment,preparationTrainingDone,within,beforeRevocation,latest,latestTaskAssignment} from './training-facts.js';
 export {variants,jiStages,progressFor,currentStandard,isCurrentStandard,certificateValid,latestVerification,latestAssessment,enrollmentTasks} from './training-facts.js';
 import {REVISION_TITLE_SQL,documentTitle} from '../library/revision-title.js';
@@ -278,7 +279,8 @@ export function applyTrainingEvent(db,e,old){
    invariant(!one(db,"SELECT id FROM training_enrollment WHERE program_id=? AND trainee_id=? AND state='active'",[p.program_id,p.trainee_id]),'Такая персональная программа уже активна');
    store(db,t,{id,...p,state:'active',rev:1});return
   }
-  changeOnly(e,old);exact(p,['command','actor_id','conclusion','feedback']);person(db,p.actor_id);
+  changeOnly(e,old);exact(p,['command','actor_id','conclusion','feedback',...(p.command==='finish'&&Object.hasOwn(p,'business_offset_minutes')?['business_offset_minutes']:[])]);person(db,p.actor_id);
+  if(p.command==='finish'&&Object.hasOwn(p,'business_offset_minutes'))economicEventDay(e);
   invariant(old.state==='active'&&['finish','cancel'].includes(p.command)&&required(p.feedback),'Укажите итог и обратную связь');
   if(p.command==='finish'){invariant(Object.hasOwn(conclusions,p.conclusion)&&enrollmentTasks(db,old).every(x=>x.done),'Сначала завершите задания программы и укажите заключение');preparationFinishAllowed(db,old,p.conclusion)}
   else invariant(p.conclusion===null,'Отмена не является квалификационным заключением');

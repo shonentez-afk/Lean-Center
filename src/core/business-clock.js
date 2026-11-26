@@ -1,11 +1,13 @@
-// Persist the author's local offset with economic events and action implementation. UTC timestamps remain immutable.
+// Persist the author's local offset with selected civil-calendar events. UTC timestamps remain immutable.
 export function businessDay(instant=new Date(),offsetMinutes=-instant.getTimezoneOffset()){
  if(!(instant instanceof Date)||!Number.isFinite(instant.getTime())||!Number.isInteger(offsetMinutes)||offsetMinutes< -720||offsetMinutes>840)throw new Error('Некорректное время предприятия');
  return new Date(instant.getTime()+offsetMinutes*60000).toISOString().slice(0,10)
 }
 export function economicEventPayload(type,payload,instant=new Date()){
  if(type==='action_item'&&payload?.command==='verify')return {...payload,verification_date_basis:'implementation-civil-v1'};
- return (['economic_effect','economic_fact'].includes(type)||type==='action_item'&&payload?.command==='implement')?{...payload,business_offset_minutes:-instant.getTimezoneOffset()}:payload
+ const scheduleCreation=type==='schedule_event'&&(payload?.command==='plan_assessment'||payload?.command==='replan'||!Object.hasOwn(payload||{},'command')&&Object.hasOwn(payload||{},'assignment_id'));
+ const enrollmentFinish=type==='training_enrollment'&&payload?.command==='finish';
+ return (['economic_effect','economic_fact'].includes(type)||type==='action_item'&&payload?.command==='implement'||scheduleCreation||enrollmentFinish)?{...payload,business_offset_minutes:-instant.getTimezoneOffset()}:payload
 }
 export function economicEventDay(event){
  const p=event.payload??event.p,instant=new Date(event.occurred_at);

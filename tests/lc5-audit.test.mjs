@@ -1,3 +1,4 @@
+import {scheduleCreationDate} from '../src/modules/training/event-calendar.js';
 import {assertAnalyticsContracts} from './lc73b-analytics-contract.mjs';
 import {ACTION_VERIFY_DATE_BASIS,actionVerificationBasis} from '../src/modules/training/action-calendar.js';
 import test from 'node:test';
@@ -211,5 +212,48 @@ test('LC7.3B CAPA new civil calendar rejects same local day, old SOP verificatio
  // No marker represents a historical command; replay remains deterministic.
  await at('action_item',verify,'2026-01-21T10:00:00Z',act);assert.equal(actionStatus(db,a()),'verified');
  const reopened=await restore(SQL,await backup(f.w),f.readContent);try{assert.equal(actionStatus(reopened.working,actionRows(reopened.working).find(x=>x.id===act)),'verified')}finally{reopened.close()}
+ }finally{f.w.close()}
+});
+
+test('LC7.3B schedule creation and replan use stored civil day; old plans retain UTC-prefix replay',async()=>{
+ const f=await fixture();try{
+  const db=f.w.working,role=f.w.edit('business_role',null,{code:'INTERNAL_TRAINER',name:'Внутренний тренер'});
+  f.w.edit('role_assignment',null,{person_id:f.actor,role_id:role,valid_from:'2020-01-01',valid_to:null});
+  const at=async(type,payload,occurred_at,id=null)=>{const old=id?one(db,'SELECT * FROM '+type+' WHERE id=?',[id]):null,e={id:uuid(),entity_type:type,entity_id:id||uuid(),operation:old?'update':'create',expected_revision:old?.rev||0,payload,occurred_at};await f.w.applyContentEvents([e],f.readContent);return e};
+  const a=await f.addAssignment();await f.approve(a);
+  const first=(await f.stage(a,'prepare')).entity_id,second=(await f.stage(a,jiStages('classic')[1].code)).entity_id;
+  const method=(await f.save('checklist_version',{format:'lean-audit-checklist-v1',title:'QA calendar',source_sha256:'a'.repeat(64),criteria:RC1_CRITERIA.map(({rc1_id,...q})=>q)})).entity_id;
+  const q=rows(db,'SELECT id FROM checklist_criterion WHERE version_id=? ORDER BY position',[method]),audit=(session_id,observed_on)=>({command:'observe_lc5',assignment_id:a,assignment_rev:f.getAssignment(a).rev,method_id:method,auditor_id:f.actor,session_id,observed_on,responses:q.map(x=>({criterion_id:x.id,value:1,note:''})),feedback:'QA'});
+  const planPayload={assignment_id:a,owner_id:f.actor,due_on:'2026-01-21',business_offset_minutes:420};
+  await assert.rejects(at('schedule_event',{...planPayload,due_on:date},'2026-01-20T17:30:00Z'),/Срок/);
+  await assert.rejects(at('schedule_event',{...planPayload,business_offset_minutes:841},'2026-01-20T17:30:00Z'),/время предприятия/);
+  const plan=(await at('schedule_event',planPayload,'2026-01-20T17:30:00Z')).entity_id,s=id=>one(db,'SELECT * FROM schedule_event WHERE id=?',[id]);
+  assert.equal(scheduleCreationDate(db,s(plan)),'2026-01-21');
+  const old=(await at('audit_session',audit(first,date),'2026-01-20T17:31:00Z')).entity_id;
+  assert.deepEqual(plannedAuditFacts(db,s(plan)),[]);
+  await assert.rejects(at('schedule_event',{command:'complete',audit_id:old},'2026-01-21T03:00:00Z',plan),/после планирования/);
+  const valid=(await at('audit_session',audit(second,'2026-01-21'),'2026-01-21T03:01:00Z')).entity_id;
+  assert.deepEqual(plannedAuditFacts(db,s(plan)).map(x=>x.id),[valid]);
+  await at('schedule_event',{command:'complete',audit_id:valid},'2026-01-21T03:02:00Z',plan);
+  await at('audit_session',{command:'void',reason:'QA'},'2026-01-21T17:20:00Z',valid);
+  const replan=(await at('schedule_event',{command:'replan',due_on:'2026-01-23',business_offset_minutes:420},'2026-01-21T17:30:00Z',plan)).id;
+  assert.equal(scheduleCreationDate(db,s(replan)),'2026-01-22');
+  assert.equal(scheduleDisplayState(db,s(plan)),'replanned');
+  const self=(await f.save('checklist_version',BUILTIN_SELF)).entity_id,criteria=rows(db,'SELECT id FROM checklist_criterion WHERE version_id=? ORDER BY position',[self]);
+  const selfPayload={person_id:f.mentor,method_id:self,evaluated_on:'2026-01-21',place:'QA',responses:criteria.map(x=>({criterion_id:x.id,value:3,note:''})),feedback:'QA'};
+  const assessment={command:'plan_assessment',type:'self_eval',source_id:f.mentor,owner_id:f.mentor,due_on:'2026-01-21'};
+  await at('mentor_self_evaluation',selfPayload,'2026-01-22T02:29:00Z');
+  const west=(await at('schedule_event',{...assessment,business_offset_minutes:-300},'2026-01-22T02:30:00Z')).entity_id;
+  assert.equal(scheduleCreationDate(db,s(west)),'2026-01-21');
+  assert.deepEqual(plannedAssessmentFacts(db,s(west)),[]);
+  const fresh=(await at('mentor_self_evaluation',selfPayload,'2026-01-22T02:31:00Z')).entity_id;
+  assert.deepEqual(plannedAssessmentFacts(db,s(west),'2026-01-20'),[]);
+  assert.deepEqual(plannedAssessmentFacts(db,s(west),'2026-01-21').map(x=>x.id),[fresh]);
+  await at('schedule_event',{command:'complete_assessment',fact_id:fresh},'2026-01-22T02:32:00Z',west);
+  const legacy=(await at('schedule_event',{...assessment,due_on:'2026-01-23'},'2026-01-22T02:40:00Z')).entity_id;
+  await at('mentor_self_evaluation',selfPayload,'2026-01-22T02:41:00Z');
+  assert.equal(scheduleCreationDate(db,s(legacy)),'2026-01-22');assert.deepEqual(plannedAssessmentFacts(db,s(legacy)),[]);
+  const restored=await restore(SQL,await backup(f.w),f.readContent);
+  try{for(const [id,day,state] of [[plan,'2026-01-21','cancelled'],[replan,'2026-01-22','planned'],[west,'2026-01-21','done'],[legacy,'2026-01-22','planned']]){const row=one(restored.working,'SELECT * FROM schedule_event WHERE id=?',[id]);assert.equal(row.state,state);assert.equal(scheduleCreationDate(restored.working,row),day)}assert.deepEqual(rows(restored.working,'PRAGMA foreign_key_check'),[])}finally{restored.close()}
  }finally{f.w.close()}
 });
