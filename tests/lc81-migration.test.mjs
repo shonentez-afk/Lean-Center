@@ -185,7 +185,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(JSON.parse(imported.text).constructor.steps[0].frvSource.observedTimeSec,12);
  }finally{await store.close()}
  const privateCopy=await fs.readFile(path.join(restored,'secure.lc81'));
- const verified=openDb(SQL,new Uint8Array(privateCopy.subarray('LC81QA1\\n'.length+65)),{upgrade:false});
+ const verified=openDb(SQL,new Uint8Array(privateCopy.subarray('LC81QA1\n'.length+65)),{upgrade:false});
  try{assert(one(verified,'SELECT study_id FROM sop_frv_origin WHERE revision_id=?',[fromFrv.revision_id]));assert(one(verified,'SELECT count(*) n FROM lc81_library_receipt').n>=5)}finally{verified.close()}
  const srcFile=path.join(restored,'documents',x.f.source.source.sha256+'.json');
  await fs.writeFile(srcFile,'corrupted');

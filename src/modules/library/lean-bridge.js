@@ -19,6 +19,7 @@
   aiNotice.title=enabled?'При явном запуске ИИ данные текущей задачи отправляются во внешний сервис. Только учебные данные.':'Локальная работа доступна. Для внешнего ИИ требуется разрешение владельца стенда.';
   if(!enabled){if(aiTest)aiTest.disabled=true;if(aiModel)aiModel.disabled=true}
  }aiPanel.append(aiNotice);bar.append(aiPanel);
+ if(context.protectedMemory===true){for(const control of [aiTest,aiModel,document.getElementById('generateBtn')])if(control){control.inert=true;control.title='Недоступно в защищённом QA';control.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation()},true)}}
  // Stage43 notifications are fixed inside the iframe, not the outer page.
  // Keep them below the actual sticky toolbar, including wrapped rows.
  function syncToastPosition(){const bottom=bar.getBoundingClientRect().bottom;document.documentElement.style.setProperty('--lc-toast-top',Math.max(12,Math.ceil(bottom)+12)+'px')}

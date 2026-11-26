@@ -2,7 +2,7 @@
 // browser persistence is unavailable there; keep the editor's existing
 // IndexedDB/photo APIs working against an ephemeral in-memory implementation.
 import * as idb from 'fake-indexeddb';
-for(const name of ['indexedDB','IDBCursor','IDBCursorWithValue','IDBDatabase','IDBFactory','IDBIndex','IDBKeyRange','IDBObjectStore','IDBOpenDBRequest','IDBRequest','IDBTransaction','IDBVersionChangeEvent']){
+for(const name of ['indexedDB','IDBCursor','IDBCursorWithValue','IDBDatabase','IDBFactory','IDBIndex','IDBKeyRange','IDBObjectStore','IDBOpenDBRequest','IDBRecord','IDBRequest','IDBTransaction','IDBVersionChangeEvent']){
  if(!(name in idb))throw Error('Missing editor memory API '+name);
  Object.defineProperty(globalThis,name,{value:idb[name],writable:false,configurable:false});
 }

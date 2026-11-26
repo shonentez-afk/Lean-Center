@@ -114,7 +114,8 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='POST'&&p==='/api/lc81/library/finalize'){reply(res,200,await store.finalizeLibrary(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/sop/photo'){
     const pos=url.searchParams.get('position');must(/^\d{1,4}$/.test(pos||''),404,'Фото недоступно');
-    const r=await store.sopPhoto(a.id,a.credential_revision,url.searchParams.get('revision_id'),Number(pos));reply(res,200,r.bytes,r.type);return;
+    must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
+    try{const r=await store.sopPhoto(a.id,a.credential_revision,url.searchParams.get('revision_id'),Number(pos));reply(res,200,r.bytes,r.type);return}finally{libraryBusy--}
    }
    if(req.method==='GET'&&p==='/api/lc81/directory/info'){reply(res,200,store.directoryInfo(a.id,url.searchParams.get('type')));return}
    if(req.method==='POST'&&p==='/api/lc81/directory/change'){reply(res,200,await store.changeDirectory(a.id,a.credential_revision,await body(req)));return}
