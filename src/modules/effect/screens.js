@@ -1,5 +1,5 @@
 // LC6 uses the same UI helpers, workspace, and navigation as LC5.
-import {one,invariant} from '../../core/db.js';
+import {one,rows,invariant} from '../../core/db.js';
 import {actionRows,actionStatus,ACTION_STATES} from '../training/audit-domain.js';
 import {frvRegistry,verifiedFrvEffect} from '../library/frv-effect.js';
 import {CURRENCIES,calculateEffect,effectRows,effectFacts,effectForSource,effectOverview,effectEvidence,effectCurrent,effectPending,effectStatus,factCurrent,factNet} from './domain.js';
@@ -23,7 +23,7 @@ export function economicScreen(c,h,route){
   }else field('annualGross','Оценка годового валового эффекта',-1e12,1e12);
   field('investment','Разовые инвестиции',0,1e12);field('annualCost','Ежегодные дополнительные затраты',0,1e12);
   const values=()=>Object.fromEntries(Object.entries(fields).map(([k,i])=>[k,readNum(i)]));
-  const preview=()=>{try{result.replaceChildren(modelTable(method,values(),currency))}catch(e){result.replaceChildren(msg(e.message,'warn'))}};
+  const preview=()=>{try{result.replaceChildren(modelTable(method,values(),typeof currency==='function'?currency():currency))}catch(e){result.replaceChildren(msg(e.message,'warn'))}};
   for(const i of Object.values(fields))i.oninput=()=>result.replaceChildren();
   return {values,element:stack(grid(...list),btn('Рассчитать сценарий',preview),result)};
  }
@@ -41,24 +41,24 @@ export function economicScreen(c,h,route){
  function createPage(studyId='',actionId=''){
   const linked=actions.find(a=>a.id===actionId);if(linked?.study_id){studyId=linked.study_id;actionId=''}
   const old=effectForSource(db,studyId||null,actionId||null);if(old)return detailPage(old);
-  const type=simple('lc6_source_type',{frv:'Исследование ФРВ',action:'Самостоятельное мероприятие'},actionId?'action':'frv'),study=select('lc6_study',studies.filter(x=>x.state!=='archived'&&x.unit_id&&!effectForSource(db,x.id,null)).map(x=>[x.id,x.title]),studyId),task=select('lc6_action',actions.filter(x=>!x.study_id&&x.state!=='cancelled'&&!effectForSource(db,null,x.id)).map(x=>[x.id,x.title]),actionId),owner=person('lc6_owner','Ответственный за эффект',linked?.owner_id||''),unit=ref('org_unit','lc6_unit'),title=c.fieldInput('lc6_title',''),method=simple('lc6_method',methodLabel,actionId?'direct':'time'),currency=simple('lc6_currency',Object.fromEntries(CURRENCIES.map(x=>[x,x])),'RUB','— Выберите валюту —'),due=planningDate('lc6_review_due'),basis=note('lc6_plan_basis','','Источник исходных допущений, объёма, ставки и затрат'),sourceBox=el('div'),modelBox=el('div');
+  const type=simple('lc6_source_type',{frv:'Исследование ФРВ',action:'Самостоятельное мероприятие'},route.effectSourceType||(actionId?'action':'frv')),study=select('lc6_study',studies.filter(x=>x.state!=='archived'&&x.unit_id&&!effectForSource(db,x.id,null)).map(x=>[x.id,x.title]),studyId),task=select('lc6_action',actions.filter(x=>!x.study_id&&x.state!=='cancelled'&&!effectForSource(db,null,x.id)).map(x=>[x.id,x.title]),actionId),owner=person('lc6_owner','Ответственный за эффект',linked?.owner_id||''),unit=ref('org_unit','lc6_unit'),title=c.fieldInput('lc6_title',''),method=simple('lc6_method',methodLabel,route.effectMethod||(actionId?'direct':'time')),currency=simple('lc6_currency',Object.fromEntries(CURRENCIES.map(x=>[x,x])),route.effectCurrency||'RUB','— Выберите валюту —'),due=planningDate('lc6_review_due'),basis=note('lc6_plan_basis','','Источник исходных допущений, объёма, ставки и затрат'),sourceBox=el('div'),modelBox=el('div');
   let model;
-  function drawModel(){model=modelEditor(method.value,{},'lc6_plan',null,currency.value);modelBox.replaceChildren(model.element)}
+  function drawModel(){route.effectMethod=method.value;model=modelEditor(method.value,{},'lc6_plan',null,()=>currency.value);modelBox.replaceChildren(model.element)}
   function sourceChange(){
    const isFrv=type.value==='frv',s=studies.find(x=>x.id===study.value),a=actions.find(x=>x.id===task.value);
    sourceBox.replaceChildren(f(isFrv?'Исследование ФРВ':'Мероприятие',isFrv?study:task));
    unit.disabled=isFrv;method.disabled=isFrv;
    if(isFrv){method.value='time';unit.value=s?.unit_id||'';if(s){title.value=s.title;owner.set(s.author_id||linked?.owner_id||owner.value)}}
    else if(a){title.value=a.title;owner.set(a.owner_id);const assignment=one(db,"SELECT unit_id FROM person_assignment WHERE person_id=? AND valid_from<=? AND coalesce(valid_to,'9999-12-31')>=? ORDER BY valid_from DESC LIMIT 1",[a.owner_id,day,day]);if(assignment)unit.value=assignment.unit_id}
-   drawModel()
+   route.effectSourceType=type.value;route.studyId=isFrv?study.value:'';route.actionId=isFrv?'':task.value;drawModel()
   }
-  type.onchange=study.onchange=task.onchange=sourceChange;method.onchange=drawModel;currency.onchange=()=>{const values=model;try{model=modelEditor(method.value,values.values(),'lc6_plan',null,currency.value);modelBox.replaceChildren(model.element)}catch{drawModel()}};
+  type.onchange=study.onchange=task.onchange=sourceChange;method.onchange=drawModel;currency.onchange=()=>{route.effectCurrency=currency.value};
   sourceChange();
   return stack(header(),pane('Новая карточка экономического эффекта',back(),msg('Одна карточка на ФРВ, включая все его мероприятия, или на самостоятельное мероприятие без связи с ФРВ. План можно оформить до выполнения.'),f('Вид источника',type),sourceBox,grid(f('Название',title),owner.element,f('Подразделение эффекта',unit),f('Метод расчёта',method),f('Валюта',currency),f('Контрольная дата',due)),f('Основание плана',basis),modelBox,save('Сохранить план эффекта','economic_effect',()=>({command:'create',study_id:type.value==='frv'?study.value:null,action_id:type.value==='action'?task.value:null,owner_id:owner.value,unit_id:unit.value,currency:currency.value,method:method.value,title:title.value,plan:model.values(),plan_basis:basis.value,review_due:planningValue(due)}),null,id=>goLocal({id}))))
  }
  function detailPage(r){
   const plan=JSON.parse(r.plan_json),actual=r.actual_json?JSON.parse(r.actual_json):null,current=effectCurrent(db,r,actions),facts=effectFacts(db,r.id),related=actions.filter(a=>r.study_id?a.study_id===r.study_id:a.id===r.action_id),sourceButton=r.study_id?btn('Открыть ФРВ',()=>c.goResearch(r.study_id)):btn('Открыть мероприятие',()=>go('actions',{id:r.action_id}));
-  const top=pane(r.title,back(),msg(sourceLabel(r)+' · '+methodLabel[r.method]+' · '+r.currency),msg('Ответственный: '+n('person',r.owner_id)+' · '+n('org_unit',r.unit_id)+' · '+effectStatus(db,r,actions)+' · Контроль '+r.review_due),row(sourceButton,btn('Карточка сотрудника',()=>c.openEmployee(r.owner_id)),btn('Календарь',()=>go('calendar',{month:r.review_due.slice(0,7),scheduleType:'effect'}))),table(['Связанные мероприятия','Состояние',''],related.map(a=>[a.title,ACTION_STATES[actionStatus(db,a)],btn('Открыть',()=>go('actions',{id:a.id}))])));
+  const top=pane(r.title,back(),msg(sourceLabel(r)+' · '+methodLabel[r.method]+' · '+r.currency),msg('Ответственный: '+n('person',r.owner_id)+' · '+n('org_unit',r.unit_id)+' · '+effectStatus(db,r,actions)+' · Контроль '+r.review_due),row(sourceButton,btn('Карточка сотрудника',()=>c.openEmployee(r.owner_id)),btn('Календарь',()=>go('calendar',{month:r.review_due.slice(0,7),scheduleType:effectPending(db,r,actions)?'effect':'all',personId:r.owner_id}))),table(['Связанные мероприятия','Состояние',''],related.map(a=>[a.title,ACTION_STATES[actionStatus(db,a)],btn('Открыть',()=>go('actions',{id:a.id}))])));
   const planned=pane('1. Плановый эффект',msg(r.plan_basis),tableOf(['Исходный параметр','План'],inputLines(r.method,plan)),modelTable(r.method,plan,r.currency));
   if(r.state==='active'&&!actual){const editor=modelEditor(r.method,plan,'lc6_edit_plan',null,r.currency),basis=note('lc6_edit_basis',r.plan_basis),d=el('details');d.append(el('summary','Изменить план до проверки'),f('Основание',basis),editor.element,save('Сохранить изменения плана','economic_effect',()=>({command:'plan',plan:editor.values(),plan_basis:basis.value}),r));planned.append(d)}
   const measured=pane('2. Проверенный расчёт',actual?msg('Проверяющий: '+n('person',actual.reviewer_id)+' · '+actual.at+' · '+(current?'Доказательства действуют':'Доказательства утратили актуальность; требуется повторная проверка'),current?'muted':'warn'):msg('Расчёт ещё не проверен.'));
@@ -68,15 +68,20 @@ export function economicScreen(c,h,route){
   if(r.state==='active'){
    const holder=el('div'),reviewer=person('lc6_reviewer','Проверяющий расчёта','',{filter:x=>x.id!==r.owner_id}),evidence=note('lc6_measure_evidence','','Основание проверки объёма, ставки, затрат и замеров'),available=effectEvidence(db,r,actions);
    let serial=0;
+   function showModel(source,measurement){
+    const initial={...(actual?.inputs||plan)},fixed=measurement?measurement.before-measurement.after:null;if(fixed!==null)initial.deltaSeconds=fixed;
+    const model=modelEditor(r.method,initial,'lc6_actual',fixed,r.currency);
+    holder.replaceChildren(...(measurement?[msg('ФРВ: '+fmt(measurement.before)+' → '+fmt(measurement.after)+' сек; полных циклов '+measurement.baselineCount+' / '+measurement.improvedCount+'. Разница рассчитана из исходного файла.')]:[msg('Ручное основание: укажите документированные измерения или расчёты в доказательствах. Не является автоматически измеренным ФРВ.')]),reviewer.element,f('Доказательства проверенного расчёта',evidence),model.element,action('Зафиксировать проверенный расчёт',()=>run(async()=>{const e=event('economic_effect',{command:'measure',inputs:model.values(),measurement,reviewer_id:reviewer.value,evidence:evidence.value,actions:available,source},r);await ws.applyContentEvents([e],readContent);route.measurePrepared=null;return 'Проверенный расчёт сохранён. Ожидает публикации базы.'},{retainForm:true})));
+   }
    async function prepare(){const request=++serial;holder.replaceChildren(msg('Проверка исходных доказательств…'));try{
     invariant(available.length,'Сначала подтвердите эффективность связанного мероприятия');
-    let source=null,measurement=null,initial={...(actual?.inputs||plan)},fixed=null;
-    if(r.study_id){const e=await verifiedFrvEffect(db,r.study_id,readContent),x=e.summary;source=e.study.source;measurement={before:x.before,after:x.after,baselineCount:x.baselineCount,improvedCount:x.improvedCount};fixed=x.before-x.after;initial.deltaSeconds=fixed}
+    let source=null,measurement=null;
+    if(r.study_id){const e=await verifiedFrvEffect(db,r.study_id,readContent),x=e.summary;source=e.study.source;measurement={before:x.before,after:x.after,baselineCount:x.baselineCount,improvedCount:x.improvedCount}}
     if(!holder.isConnected||request!==serial)return;
-    const model=modelEditor(r.method,initial,'lc6_actual',fixed,r.currency);
-    holder.replaceChildren(...(measurement?[msg('ФРВ: '+fmt(measurement.before)+' → '+fmt(measurement.after)+' сек; полных циклов '+measurement.baselineCount+' / '+measurement.improvedCount+'. Разница рассчитана из исходного файла.')]:[msg('Ручное основание: укажите документированные измерения или расчёты в доказательствах. Не является автоматически измеренным ФРВ.')]),reviewer.element,f('Доказательства проверенного расчёта',evidence),model.element,action('Зафиксировать проверенный расчёт',()=>run(async()=>{const e=event('economic_effect',{command:'measure',inputs:model.values(),measurement,reviewer_id:reviewer.value,evidence:evidence.value,actions:available,source},r);await ws.applyContentEvents([e],readContent);return 'Проверенный расчёт сохранён. Ожидает публикации базы.'},{retainForm:true})));
+    route.measurePrepared={id:r.id,source,measurement};showModel(source,measurement);
    }catch(e){if(holder.isConnected&&request===serial)holder.replaceChildren(msg(e.message,'warn'))}}
    measured.append(action(actual?'Повторно проверить расчёт':'Проверить основания и открыть модель',prepare),holder);
+   if(route.measurePrepared?.id===r.id)showModel(route.measurePrepared.source,route.measurePrepared.measurement);
   }
   const finance=pane('3. Денежные факты за период',msg('Суммы вводятся по первичным документам. Чистый факт = валовая экономия − текущие затраты − инвестиции за указанный период. Пересекающиеся периоды запрещены. Подтверждение в центре не заменяет корпоративское финансовое согласование.'),table(['Период','Валовый факт','Текущие затраты','Инвестиции','Чистый факт','Состояние',''],facts.map(x=>[x.period_from+' — '+x.period_to,money(x.gross_minor/100,r.currency),money(x.recurring_minor/100,r.currency),money(x.investment_minor/100,r.currency),money(factNet(x)/100,r.currency),x.state==='confirmed'&&!factCurrent(db,r,x,actions)?'Подтверждён ранее · требуется проверка':factState[x.state],btn('Открыть факт',()=>goLocal({id:r.id,factId:x.id}))])));
   if(facts.length)finance.append(exportButton('Денежные-факты-'+r.id.slice(0,8),['ID','С','По','Валюта','Валовый факт','Затраты','Инвестиции','Чистый факт','Состояние','Основание','Подтвердил','Комментарий','ID расчёта'],facts.map(x=>[x.id,x.period_from,x.period_to,r.currency,x.gross_minor/100,x.recurring_minor/100,x.investment_minor/100,factNet(x)/100,x.state==='confirmed'&&!factCurrent(db,r,x,actions)?'Подтверждён ранее · требуется проверка':factState[x.state],x.evidence,n('person',x.verifier_id),x.confirmation_note||x.void_reason||'',x.actual_event_id])));
@@ -85,6 +90,7 @@ export function economicScreen(c,h,route){
   const selected=facts.find(x=>x.id===route.factId);if(selected)finance.append(factDetail(r,selected,current));
   const controls=pane('4. Контроль эффективности',msg('Контрольный срок выводится в общий календарь и план сотрудника. Если исходное доказательство теряет силу, проверка снова требует внимания.'));
   if(r.state==='active'){const due=planningDate('lc6_next_review'),why=note('lc6_review_reason');controls.append(grid(f('Следующая дата проверки',due),f('Основание переноса / повторной проверки',why)),save('Назначить контрольную проверку','economic_effect',()=>({command:'reschedule',review_due:planningValue(due),reason:why.value}),r));const cancel=note('lc6_cancel_reason'),d=el('details');d.append(el('summary','Отменить карточку эффекта'),f('Причина',cancel),save('Отменить карточку','economic_effect',()=>({command:'cancel',reason:cancel.value}),r));controls.append(d)}
+  const history=rows(db,"SELECT id,occurred_at,payload_json FROM change_event WHERE entity_type='economic_effect' AND entity_id=? ORDER BY occurred_at DESC,id DESC",[r.id]);controls.append(pane('История карточки',table(['Дата','Событие','Основание','Проверяющий'],history.map(x=>{const v=JSON.parse(x.payload_json);return [x.occurred_at,({create:'План создан',plan:'План изменён',measure:'Расчёт проверен',reschedule:'Контроль перенесён',cancel:'Карточка отменена'})[v.command]||v.command,v.plan_basis||v.evidence||v.reason||'—',v.reviewer_id?n('person',v.reviewer_id):'—']}))));
   return stack(header(),top,planned,measured,finance,controls)
  }
  function factForm(r,x){
