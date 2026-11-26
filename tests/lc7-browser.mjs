@@ -23,7 +23,7 @@ try{
   if(r.method()==='OPTIONS')return route.fulfill({status:204,headers});
   posts.push(r.postDataJSON());if(mode==='offline')return route.abort('failed');
   if(mode==='http')return route.fulfill({status:403,headers,body:'{}'});
-  return route.fulfill({status:200,headers,body:JSON.stringify({...(mode==='unknown-model'?{}:{model:mode==='mismatch'?'yandexgpt-lite/latest':CENTER_MODELS[r.postDataJSON().model].route}),choices:[{message:{content:JSON.stringify({recommendations:[{id:mode==='bad'?'unknown':'action_overdue',text:advice}]})}}]})})
+  const json=JSON.stringify({recommendations:[{id:mode==='bad'?'unknown':'action_overdue',text:advice}]});return route.fulfill({status:200,headers,body:JSON.stringify({...(mode==='unknown-model'?{}:{model:mode==='mismatch'?'yandexgpt-lite/latest':CENTER_MODELS[r.postDataJSON().model].route}),...(mode==='truncated'?{finish_status:'ALTERNATIVE_STATUS_TRUNCATED_FINAL'}:{}),choices:[{message:{content:mode==='fenced'?'\x60\x60\x60json\n'+json+'\n\x60\x60\x60':json}}]})})
  });
  const btn=name=>page.locator('main').getByRole('button',{name,exact:true}),heading=name=>page.getByRole('heading',{name,exact:true,level:1}).waitFor();
  const nav=async name=>{const n=page.locator('.sidebar .nav').filter({has:page.getByText(name,{exact:true})});assert.equal(await n.count(),1);if(!await n.isVisible())await n.locator('xpath=ancestor::details[1]/summary').click();await n.click()};
@@ -31,32 +31,32 @@ try{
  const card=id=>page.locator('[data-lc7-rule="'+id+'"]');
  await page.clock.setFixedTime(new Date('2026-01-22T12:00:00Z'));
  await page.goto(pathToFileURL(path.resolve('dist/LeanCenter/index.html')).href);await heading('Дашборд');
- await btn('ИИ-помощник · рекомендации по данным').click();await heading('ИИ-помощник');
+ await btn('Помощник центра · рекомендации по данным').click();await heading('Помощник центра');
  await page.getByText('Нет активных сотрудников. Заполните справочники и назначения.',{exact:true}).waitFor();
  await card('bank_unregistered').waitFor();await group().selectOption('roi');assert.equal(await card('bank_unregistered').count(),0);assert(await send().isDisabled());assert.equal(posts.length,0);
  await nav('Настройки и обмен');const fc=page.waitForEvent('filechooser');await btn('Восстановить копию').click();await (await fc).setFiles(file);await page.getByText('Копия восстановлена; проверьте ID базы',{exact:true}).waitFor();
  await nav('Дашборд');const attention=page.locator('.attention-row').filter({hasText:'Просрочено мероприятий'});assert.equal(await attention.locator('strong').textContent(),'1');
- await btn('ИИ-помощник · рекомендации по данным').click();await group().selectOption('actions');await card('action_overdue').waitFor();assert.equal(await card('action_overdue').locator('strong').textContent(),'1');
+ await btn('Помощник центра · рекомендации по данным').click();await group().selectOption('actions');await card('action_overdue').waitFor();assert.equal(await card('action_overdue').locator('strong').textContent(),'1');
  assert(await send().isDisabled());assert.equal(posts.length,0);
- await page.getByText('Посмотреть точное содержимое запроса',{exact:true}).click();
+ await page.getByRole('button',{name:'Получить дополнительные советы ИИ онлайн',exact:true}).click();await page.getByText('Подробнее: модель и содержимое запроса',{exact:true}).click();await page.getByText('Посмотреть точное содержимое запроса',{exact:true}).click();
  const preview=JSON.parse(await page.locator('.lc7-preview').textContent());assert.deepEqual(preview,cloudRequest(['action_overdue']));assert(!JSON.stringify(preview).includes(title));assert(!JSON.stringify(preview).includes('LC4-002'));
  // Consent is per request and is lost when changing scope.
  await consent().check();assert(await send().isEnabled());await group().selectOption('roi');await group().selectOption('actions');assert(!(await consent().isChecked()));assert(await send().isDisabled());assert.equal(posts.length,0);
  const request=async m=>{mode=m;await consent().check();await send().click()};
- await request('ok');await page.getByText(advice,{exact:true}).waitFor();assert.deepEqual(posts[0],cloudRequest(['action_overdue']));assert.equal(await page.locator('img[src="https://example.invalid/qa"]').count(),0);assert(await send().isDisabled());assert(!(await consent().isChecked()));
+ await request('fenced');await page.getByText(advice,{exact:true}).waitFor();assert.deepEqual(posts[0],cloudRequest(['action_overdue']));assert.equal(await page.locator('img[src="https://example.invalid/qa"]').count(),0);assert(await send().isDisabled());assert(!(await consent().isChecked()));
  await fs.mkdir('artifacts/lc7',{recursive:true});await page.screenshot({path:'artifacts/lc7/assistant-cloud.png',fullPage:true});
- await consent().check();await model().selectOption('yandexgpt');assert(!(await consent().isChecked()));assert(await send().isDisabled());assert.deepEqual(JSON.parse(await page.locator('.lc7-preview').textContent()),cloudRequest(['action_overdue'],'yandexgpt'));
+ await consent().check();if(!await model().isVisible())await page.getByText('Подробнее: модель и содержимое запроса',{exact:true}).click();await model().selectOption('yandexgpt');assert(!(await consent().isChecked()));assert(await send().isDisabled());assert.deepEqual(JSON.parse(await page.locator('.lc7-preview').textContent()),cloudRequest(['action_overdue'],'yandexgpt'));
  await request('ok');await page.getByText(/Прокси подтвердил маршрут: YandexGPT 5 Pro/).waitFor();assert.deepEqual(posts.at(-1),cloudRequest(['action_overdue'],'yandexgpt'));
  await model().selectOption('yandexgpt-5');await request('ok');await page.getByText(/Прокси подтвердил маршрут: YandexGPT 5.1/).waitFor();assert.deepEqual(posts.at(-1),cloudRequest(['action_overdue'],'yandexgpt-5'));
  await request('mismatch');await page.getByText(/Прокси сообщил другой маршрут: YandexGPT Lite/).waitFor();
  await request('unknown-model');await page.getByText(/Прокси не подтвердил маршрут модели/).waitFor();
- await request('bad');await page.getByText(/ИИ вернул неизвестную/).waitFor();await card('action_overdue').waitFor();
+ await request('truncated');await page.getByText(/оборван по лимиту токенов/).waitFor();assert(!(await consent().isChecked()));await request('bad');await page.getByText(/ИИ вернул неизвестную/).waitFor();await card('action_overdue').waitFor();
  await request('http');await page.getByText(/Облачная модель недоступна \(HTTP 403\)/).waitFor();await card('action_overdue').waitFor();
  await request('offline');await page.getByText(/Облачный сервис недоступен/).waitFor();await card('action_overdue').waitFor();
- assert.equal(posts.length,8);assert.deepEqual(unexpected,[]);assert.deepEqual(errors,[]);
+ assert.equal(posts.length,9);assert.deepEqual(unexpected,[]);assert.deepEqual(errors,[]);
  await card('action_overdue').getByRole('button',{name:'Открыть источник',exact:true}).click();await heading('Задачи и мероприятия');assert.equal(await page.locator('[name=lc5_action_filter]').inputValue(),'overdue');await page.getByText(title,{exact:true}).first().waitFor();
  await page.getByText('Локальная база · '+expectedPending+' ожидающих изменений',{exact:true}).waitFor();
- await nav('ИИ-помощник');await group().selectOption('actions');assert.equal(await card('action_overdue').locator('strong').textContent(),'1');assert.equal(posts.length,8);
+ await page.goBack();await heading('Помощник центра');assert.equal(await group().inputValue(),'actions');assert(!(await consent().isChecked()));assert.equal(await card('action_overdue').locator('strong').textContent(),'1');assert.equal(posts.length,9);await card('action_overdue').getByRole('button',{name:'Открыть источник',exact:true}).click();await heading('Задачи и мероприятия');await btn('← Назад').click();await heading('Помощник центра');assert.equal(await group().inputValue(),'actions');assert(!(await consent().isChecked()));
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'artifacts/lc7/assistant-mobile.png',fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),true);
  await ctx.close();console.log('LC7.1 browser PASS: shared dashboard counts, source navigation, empty state, explicit consent, exact outbound data, cloud model routes, mismatch and unconfirmed metadata, cloud failures, read-only and mobile');

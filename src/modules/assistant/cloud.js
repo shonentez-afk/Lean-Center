@@ -30,13 +30,36 @@ export function cloudRequest(ids,model=CENTER_MODEL,context=null){
   if(!exactKeys(context,['kind','counts'])||typeof context.kind!=='string'||!Object.hasOwn(CONTEXT_KINDS,context.kind)||!Array.isArray(context.counts)||context.counts.length!==ids.length||context.counts.some((x,i)=>!exactKeys(x,['id','count'])||x.id!==ids[i]||!Number.isSafeInteger(x.count)||x.count<1||x.count>10000000))throw Error('Недопустимые обезличенные показатели');
   packet={context:CONTEXT_KINDS[context.kind],rules:rules.map((r,i)=>({...r,count:context.counts[i].count}))};
  }
- return {model,temperature:0.2,max_tokens:1200,task:'chat',messages:[
-  {role:'system',content:'Ты помощник Lean/TWI. '+(packet?'Даны обезличенные количества сигналов контроля без идентификаторов и исходных данных. Не выводи причины или выводы о личности только по количествам. ':'Даны только общие темы контроля, без фактических данных предприятия. ')+'Предложи безопасные конкретные шаги проверки, не придумывай факты, числа, нормы, людей, допуски, финансовый эффект. Не утверждай документы и не назначай задачи. Ответ строго JSON: {"recommendations":[{"id":"код темы","text":"рекомендация на русском"}]}. Только переданные коды, не более одной рекомендации на код, до 600 символов на рекомендацию, без Markdown.'},
+ return {model,temperature:0.2,max_tokens:Math.min(3600,800+ids.length*350),task:'chat',messages:[
+  {role:'system',content:'Ты помощник Lean/TWI. '+(packet?'Даны обезличенные количества сигналов контроля без идентификаторов и исходных данных. Не выводи причины или выводы о личности только по количествам. ':'Даны только общие темы контроля, без фактических данных предприятия. ')+'Предложи безопасные конкретные шаги проверки, не придумывай факты, числа, нормы, людей, допуски, финансовый эффект. Не утверждай документы и не назначай задачи. Ответ строго JSON: {"recommendations":[{"id":"код темы","text":"рекомендация на русском"}]}. Только переданные коды, не более одной рекомендации на код, цель 120–220 символов на рекомендацию, максимум 600. Верни один полный объект JSON, без Markdown, пояснений и обрыва; если мало места, сократи текст. Не добавляй полей.'},
   {role:'user',content:JSON.stringify(packet||rules)}
  ]}
 }
+// Some models wrap an otherwise complete JSON object in Markdown or a short introduction.
+// Never repair truncated JSON, merge objects, accept extra keys or execute model text.
+function decodeAdvice(raw){
+ if(typeof raw!=='string'||raw.length>MAX_BYTES)throw Error('ИИ вернул некорректный JSON');
+ const text=raw.replace(/^\uFEFF/,'').trim();
+ const parse=s=>{let x=JSON.parse(s);if(typeof x==='string')x=JSON.parse(x.trim());return x};
+ try{return parse(text)}catch{}
+ const cleanOutside=s=>!/[{}\[\]\x60]/.test(s);
+ const fences=[...text.matchAll(/\x60\x60\x60/g)];
+ if(fences.length===2){
+  const first=fences[0].index,last=fences[1].index;
+  if(cleanOutside(text.slice(0,first))&&cleanOutside(text.slice(last+3))){
+   const inner=text.slice(first+3,last).replace(/^\s*(?:json|JSON)\s*\r?\n/,'').trim();
+   try{return parse(inner)}catch{}
+  }
+ }else if(!fences.length){
+  const start=text.indexOf('{'),end=text.lastIndexOf('}');
+  if(start>=0&&end>start&&cleanOutside(text.slice(0,start))&&cleanOutside(text.slice(end+1))){
+   try{return parse(text.slice(start,end+1))}catch{}
+  }
+ }
+ throw Error('ИИ вернул некорректный JSON: не получен полный структурированный ответ. Можно повторить запрос с меньшим числом тем');
+}
 export function parseCloudAdvice(raw,ids){
- cloudRequest(ids);let body;try{body=JSON.parse(raw)}catch{throw Error('ИИ вернул некорректный JSON')}
+ cloudRequest(ids);const body=decodeAdvice(raw);
  if(!exactKeys(body,['recommendations'])||!Array.isArray(body.recommendations)||!body.recommendations.length||body.recommendations.length>ids.length)throw Error('ИИ вернул неподдерживаемую структуру');
  const allowed=new Set(ids),seen=new Set();
  return body.recommendations.map(x=>{
@@ -59,6 +82,9 @@ export async function askCenterCloud(ids,{fetcher=globalThis.fetch,signal,model=
   const response=await fetcher(CENTER_PROXY,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(payload),credentials:'omit',redirect:'error',referrerPolicy:'no-referrer',signal:controller.signal});
   if(!response.ok)throw Error('Облачная модель недоступна (HTTP '+response.status+')');
   let outer;try{outer=JSON.parse(await readBounded(response))}catch(e){if(e.name==='AbortError'||/лимит/.test(e.message))throw e;throw Error('Некорректный ответ облачного сервиса')}
+  const status=outer?.finish_status??outer?.result?.alternatives?.[0]?.status??outer?.choices?.[0]?.finish_reason;
+  if(status==='ALTERNATIVE_STATUS_TRUNCATED_FINAL'||status==='length'||status==='max_tokens')throw Error('Ответ ИИ оборван по лимиту токенов. Выберите меньше тем и повторите запрос');
+  if(status==='ALTERNATIVE_STATUS_CONTENT_FILTER'||status==='content_filter')throw Error('Ответ остановлен фильтром содержимого модели');
   const answer=outer?.choices?.[0]?.message?.content??outer?.result?.alternatives?.[0]?.message?.text;
   if(typeof answer!=='string')throw Error('Пустой ответ облачной модели');
   return {recommendations:parseCloudAdvice(answer,ids),requested:model,reported:modelFromProxy(outer?.model)}

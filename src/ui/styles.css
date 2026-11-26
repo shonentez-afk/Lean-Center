@@ -213,3 +213,22 @@ body.editor-active{overflow:hidden}.editor-host{position:fixed;inset:0;z-index:2
 
 /* LC7.3A daily and analytical views */
 .lc73-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.lc73-kpis .tile{min-width:0;white-space:normal;overflow-wrap:anywhere}.lc73-kpis .tile b{font-size:clamp(17px,2vw,26px)}.lc73-report-chart{height:260px;width:100%;min-width:0}.lc73-analytics-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.lc73-analytics-groups details{border:1px solid var(--line,#dadddf);padding:8px;border-radius:6px;min-width:0}.lc73-analytics-groups summary{font-weight:600;cursor:pointer;margin-bottom:6px}.attention-row small{display:block;font-size:11px}.stack details>summary{cursor:pointer;overflow-wrap:anywhere}.stack details .stack{padding-inline-start:8px}@media(max-width:720px){.lc73-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.lc73-report-chart{height:220px}}@media(max-width:420px){.lc73-kpis{grid-template-columns:1fr}.lc73-analytics-groups{grid-template-columns:1fr}}
+
+/* LC7.3A: chart canvas may retain its desktop width briefly during ResizeObserver.
+   Contain the chart, not the entire page; keep detailed tables independently scrollable. */
+.lc73-report-chart{min-width:0;max-width:100%;overflow:hidden}
+.lc7-cloud-technical{min-width:0;overflow-wrap:anywhere}
+.lc72-helper-button,.lc72-version-helper{white-space:normal;max-width:100%;overflow-wrap:anywhere}
+.lc72-context-body{min-width:0}
+@media(max-width:600px){
+ .main .formgrid>.field{min-width:0;max-width:100%}
+ .main .formgrid>.field>input,.main .formgrid>.field>select{width:100%;min-width:0;max-width:100%;box-sizing:border-box}
+ .main .attention-row{grid-template-columns:minmax(0,60px) minmax(0,1fr);gap:6px}
+ .main .attention-row>button{grid-column:2;justify-self:start;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+ .main .attention-row>span,.main .attention-row>div{min-width:0;overflow-wrap:anywhere}
+ .main .lc73-kpis .tile{max-width:100%}
+ .main [data-lc-report]>.panel{min-width:0;max-width:100%}
+ .main [data-lc-report] .panel>details{min-width:0;max-width:100%;overflow-x:auto}
+ .main [data-lc-report] button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+ .lc72-context-head>div{min-width:0}.lc72-context-head button{max-width:45%;white-space:normal}
+}

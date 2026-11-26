@@ -7,7 +7,7 @@ export function assistantScreen(main,{db,day,el,add,btn,pane,openAttention}){
  for(const [id,label] of Object.entries(ATTENTION_GROUPS)){const o=el('option',label);o.value=id;group.append(o)}
  const local=el('div'),cloud=el('div'),state={controller:null,serial:0,model:CENTER_MODEL};
  controls.append(add(el('label',undefined,'field'),el('span','Направление'),group));
- main.append(pane('Рабочий помощник центра',el('p','Локальные рекомендации по текущей рабочей копии на '+day+'. Те же правила и источники, что в «Требует внимания» на дашборде.','muted'),el('p','Рекомендации помогают принять решение; не являются допуском, оценкой, утверждением СОП или подтверждением денежного эффекта.'),controls),local,cloud);
+ main.append(pane('Что требует внимания',el('p','Локальные рекомендации по текущей рабочей копии на '+day+'. Те же правила и источники, что в «Требует внимания» на дашборде.','muted'),el('p','Рекомендации помогают принять решение; не являются допуском, оценкой, утверждением СОП или подтверждением денежного эффекта.'),el('p','Готовые проверки по темам; свободного чата нет.','muted'),controls,btn('Получить дополнительные советы ИИ онлайн',()=>{cloud.scrollIntoView({block:'start'});cloud.querySelector('summary')?.focus()})),local,cloud);
  function draw(){
   state.controller?.abort();state.controller=null;state.serial++;
   local.replaceChildren();cloud.replaceChildren();const checks=recommendedChecks(data,group.value);

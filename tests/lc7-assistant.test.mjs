@@ -78,3 +78,12 @@ test('LC7 model selection: allowlist, exact model aliases, honest route confirma
  assert.equal(modelFromProxy('gpt://private-folder/other'),null);assert.equal(modelFromProxy(undefined),null);
  for(const bad of ['gpt://other/model','__proto__',null,{},'yandexgpt-6'])assert.throws(()=>cloudRequest(ids,bad),/разрешённого списка/);
 });
+
+test('LC7.3A cloud format: complete fenced, BOM, prefaced and double-encoded JSON, strict schema retained',async()=>{
+ const ids=['action_overdue'],recommendations=[{id:ids[0],text:'Проверить сроки.'}],json=JSON.stringify({recommendations});
+ for(const raw of ['\uFEFF'+json,'\x60\x60\x60json\n'+json+'\n\x60\x60\x60','Вот JSON:\n\x60\x60\x60JSON\n'+json+'\n\x60\x60\x60','Результат:\n'+json,JSON.stringify(json)])assert.deepEqual(parseCloudAdvice(raw,ids),recommendations);
+ for(const raw of [json.slice(0,-1),json+json,'['+json+']','\x60\x60\x60json\n'+json.slice(0,-1)+'\n\x60\x60\x60','\x60\x60\x60json\n'+JSON.stringify({recommendations:[{id:'unknown',text:'x'}]})+'\n\x60\x60\x60'])assert.throws(()=>parseCloudAdvice(raw,ids));
+ assert(cloudRequest(Object.keys(ATTENTION_RULES).slice(0,8)).max_tokens>=3000);
+ for(const finish_status of ['ALTERNATIVE_STATUS_TRUNCATED_FINAL','ALTERNATIVE_STATUS_CONTENT_FILTER'])await assert.rejects(askCenterCloud(ids,{fetcher:async()=>new Response(JSON.stringify({finish_status,choices:[{message:{content:json}}]}))}),/лимиту токенов|фильтром содержимого/);
+ assert.deepEqual((await askCenterCloud(ids,{fetcher:async()=>new Response(JSON.stringify({choices:[{message:{content:'\x60\x60\x60json\n'+json+'\n\x60\x60\x60'}}]}))})).recommendations,recommendations);
+});

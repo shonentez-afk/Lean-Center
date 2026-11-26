@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,SQL,schema,migrations,date} from './lc4-fixture.mjs';
 import {rows,one,createDb} from '../src/core/db.js';
-import {analyzeContext,contextSelection,contextLinks} from '../src/modules/assistant/context.js';
+import {analyzeContext,contextSelection,contextLinks,helperLabel,isCurrentTarget} from '../src/modules/assistant/context.js';
 import {cloudRequest,CENTER_MODEL,askCenterCloud} from '../src/modules/assistant/cloud.js';
 import {RC1_CRITERIA} from '../src/modules/training/builtin-forms.js';
 import {auditDetails} from '../src/modules/training/audit-domain.js';
@@ -57,4 +57,13 @@ test('LC7.2 cloud context is opt-in, validated and only carries integer counts a
  const recommendations=[{id:'ctx_gap',text:'QA advice'}];
  const result=await askCenterCloud(ids,{context,fetcher:async(_url,opts)=>{assert.deepEqual(JSON.parse(opts.body),cloudRequest(ids,CENTER_MODEL,context));return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({recommendations})}}]}))}});
  assert.deepEqual(result.recommendations,recommendations);
+});
+
+test('LC7.3A assistant never silently substitutes a SOP revision; personal sections and same-card links are honest',async()=>{
+ const f=await fixture();try{const db=f.w.working,older=f.doc.id,latest=(await f.revise()).revision;
+  const getSop=revisionId=>analyzeContext(db,day,contextSelection('sop',{documentId:f.doc.entity_id,revisionId}));
+  assert.equal(getSop(older).facts.find(x=>x.label==='Редакция').value,'1');assert.equal(getSop(latest).facts.find(x=>x.label==='Редакция').value,'2');assert.equal(getSop(older).facts.find(x=>x.label==='Статус').value,'Заменён');assert.equal(getSop(latest).facts.find(x=>x.label==='Статус').value,'Действует');assert.equal(getSop('missing').available,false);assert.equal(getSop(null).available,false);assert(getSop(null).scope.includes('редакция не выбрана'));assert(!getSop(null).facts.some(x=>x.label==='Редакция'));
+  const task=(await f.save('action_item',action(f,'QA same card'))).entity_id,ctx=contextSelection('actions',{route:{id:task}}),a=analyzeContext(db,day,ctx);assert.equal(a.facts.find(x=>x.label==='Состояние').value,'Открыто');assert(contextLinks(a).some(x=>isCurrentTarget(ctx,x)));assert(!isCurrentTarget(ctx,{page:'actions',options:{id:'another'}}));
+  for(const page of ['calendar','my_plan','journal']){const context=contextSelection(page,{route:{personId:f.trainee,month:'2026-01'}}),data=analyzeContext(db,day,context);assert.equal(helperLabel(context),'Обзор центра');assert(data.scope.includes('Весь центр'));assert(data.notices.some(x=>x.includes('не проверяет выбранный месяц')))}
+ }finally{f.w.close()}
 });

@@ -7,7 +7,7 @@ import {REVISION_TITLE_SQL,documentTitle} from './modules/library/revision-title
 import {assessmentAnalysis,renderAssessmentAnalysis} from './ui/assessment-analysis.js';
 import {centerAttention} from './modules/training/center-attention.js';
 import {assistantScreen} from './modules/assistant/screen.js';
-import {CONTEXT_PAGES,contextSelection} from './modules/assistant/context.js';
+import {CONTEXT_PAGES,contextSelection,helperLabel} from './modules/assistant/context.js';
 import {openContextPanel} from './modules/assistant/context-panel.js';
 import {frvRegistry} from './modules/library/frv-effect.js';
 import {pctText} from './modules/training/audit-analytics.js';
@@ -39,7 +39,7 @@ const allowDiscardForm=()=>!workFormDirty()||window.confirm('В форме ес�
 let SQL,ws,cache,folder,generation=0,busy=false,master=false,page='home',theme=false,status='Готово',error=false,chart=null,edit=null,query='',incoming=[],importState=null,historyPerson=null,archiveFilter='active',libraryDraft=null,editorSession=null,libraryFilter='all';
 const contentStore=new ContentStore(()=>cache,()=>folder),readContent=ref=>contentStore.get(ref);
 const sourceRefs=()=>unionRefs(refsForDb(ws.base),refsForEvents(ws.pending));
-const planned={forms:'Бланки и методики',sop:'Каталог СОП',sop_constructor:'Конструктор СОП',frv:'ФРВ',twi_plans:'Планы инструктажа TWI',sop_evaluation:'Оценка СОП',my_plan:'Мой план',twi:'План производственного обучения',programs:'Ввод в профессию',internship:'Программы стажировки',preparation:'Подготовка сотрудников',knowledge_bank:'Банк вопросов',supplements:'Ходатайства о доплатах',instruction:'Инструктажи TWI',retraining:'Переобучение',journal:'Журнал заданий',skills:'Матрица компетенций',practical:'Практические оценки',development:'Планы развития',mentoring:'Наставники и ВТ',self_eval:'Самооценка',certification:'Сертификация',appointments:'Назначения',audit:'Аудиты 1-го уровня',calendar:'Календарь',actions:'Задачи и мероприятия',analytics:'Аналитика центра',metrics:'Дерево метрик',roi:'ROI-модель',ai:'ИИ-помощник',audit_import:'Импорт аудитов RC1',sop_review:'Сохранённая оценка СОП'};
+const planned={forms:'Бланки и методики',sop:'Каталог СОП',sop_constructor:'Конструктор СОП',frv:'ФРВ',twi_plans:'Планы инструктажа TWI',sop_evaluation:'Оценка СОП',my_plan:'Мой план',twi:'План производственного обучения',programs:'Ввод в профессию',internship:'Программы стажировки',preparation:'Подготовка сотрудников',knowledge_bank:'Банк вопросов',supplements:'Ходатайства о доплатах',instruction:'Инструктажи TWI',retraining:'Переобучение',journal:'Журнал заданий',skills:'Матрица компетенций',practical:'Практические оценки',development:'Планы развития',mentoring:'Наставники и ВТ',self_eval:'Самооценка',certification:'Сертификация',appointments:'Назначения',audit:'Аудиты 1-го уровня',calendar:'Календарь',actions:'Задачи и мероприятия',analytics:'Аналитика центра',metrics:'Дерево метрик',roi:'ROI-модель',ai:'Помощник центра',audit_import:'Импорт аудитов RC1',sop_review:'Сохранённая оценка СОП'};
 const labels={home:'Дашборд',...Object.fromEntries(Object.entries(definitions).map(([k,v])=>[k,v.label])),...planned,org_unit:'Структура предприятия',import_xlsx:'Импорт данных',storage:'Настройки и обмен'};
 const navGroups=[
  ['Ежедневная работа',['home','ai','my_plan','calendar','actions']],
@@ -64,7 +64,7 @@ let mobileMenu=false,navSerial=0,navCurrent=null,navParent=null,navSupported=tru
 const navSnapshots=new Map();
 try{theme=localStorage.getItem('lean-center-theme')==='dark'}catch{}
 function initNav(){if(navCurrent!==null)return;navCurrent=++navSerial;try{history.scrollRestoration='manual';history.replaceState({lcNav:navCurrent,parent:null},'')}catch{navSupported=false}}
-const filterName=n=>!!n&&(/_filter_|^lc5_analytics_|^lc51_analytics_|^lc52_(analytics|metrics|frv|sop|retrain|calendar_unit|action_unit)|^compare_|^lc62_|^lc66_prep_|^lc6_analytics_|^lc61_grain$|^lc5_calendar_(month|person|type)$/.test(n));
+const filterName=n=>!!n&&(/_filter_|^lc5_analytics_|^lc51_analytics_|^lc52_(analytics|metrics|frv|sop|retrain|calendar_unit|action_unit)|^compare_|^lc7_group$|^lc62_|^lc66_prep_|^lc6_analytics_|^lc61_grain$|^lc5_calendar_(month|person|type)$/.test(n));
 function navSnapshot(){
  const controls=[...document.querySelectorAll('main input[name],main select[name],main button.lc-directory-trigger[name]')].filter(e=>filterName(e.name)).map(e=>({name:e.name,value:e.dataset.personId??e.value,person:typeof e.lcRestorePerson==='function'}));
  return {parent:navParent,page,route:getTrainingRoute(),employeeSelected,employeeTab,employeeReturn,query,archiveFilter,registryPage,libraryFilter,librarySelected,libraryRevisionSelected,evaluationSelected,evaluationTab,evaluationSearch,historyPerson,scroll:window.scrollY,controls};
@@ -727,7 +727,7 @@ function libraryScreen(main,kind){
    if(kind==='sop'&&!a&&libraryFilter==='overdue')visible=!!one(ws.working,"SELECT id FROM document_revision WHERE document_id=? AND state='effective' AND review_due<?",[v.id,today()]);
    if(kind==='sop'&&!a&&libraryFilter==='missing_passport')visible=!!one(ws.working,"SELECT id FROM document_revision WHERE document_id=? AND state='draft' AND (print_format IS NULL OR workplace_id IS NULL)",[v.id]);
    return visible&&[v.title,v.code,refName('operation',v.operation_id)].some(x=>String(x||'').toLowerCase().includes(query.toLowerCase()))});
-  if(!filtered.length){out.append(pane('Нет записей',el('p','Создайте документ в редакторе или импортируйте переносимый JSON Stage43.','muted')));return}
+  if(!filtered.length){librarySelected=null;libraryRevisionSelected=null;out.append(pane('Нет записей',el('p','Создайте документ в редакторе или импортируйте переносимый JSON Stage43.','muted')));return}
   if(!filtered.some(x=>x.id===librarySelected)){librarySelected=null;libraryRevisionSelected=null}
   if(!librarySelected){out.append(pane(kind==='sop'?'Каталог документов':'Журнал исследований',tableOf(['Код / дата','Название','Операция','Статус',''],filtered.map(v=>{const rev=kind==='sop'?one(ws.working,"SELECT * FROM document_revision WHERE document_id=? ORDER BY CASE WHEN state='effective' THEN 0 ELSE 1 END,version_no DESC LIMIT 1",[v.id]):null;return [v.code||v.observed_at,v.title,refName('operation',v.operation_id),v.archived?'Архив':revisionLabels[rev?.state||v.state]||'—',btn('Открыть',()=>{librarySelected=v.id;libraryRevisionSelected=null;draw()},'primary')]}))));return}
   out.append(add(el('div',undefined,'row'),btn('К списку',()=>{librarySelected=null;libraryRevisionSelected=null;draw()})));
@@ -735,12 +735,12 @@ function libraryScreen(main,kind){
    const p=pane((kind==='sop'?v.code+' · ':'')+v.title,el('p','Операция: '+refName('operation',v.operation_id)+' · Ревизия записи: '+v.rev,'muted'));
    if(kind==='sop'){
     const versions=rows(ws.working,'SELECT * FROM document_revision WHERE document_id=? ORDER BY version_no DESC',[v.id]);
-    if(libraryRevisionSelected&&!versions.some(x=>x.id===libraryRevisionSelected))libraryRevisionSelected=null;
+    if(libraryRevisionSelected&&!versions.some(x=>x.id===libraryRevisionSelected)){p.append(el('p','Запрошенная редакция недоступна. Выберите другую редакцию явно.','warn'),btn('Все версии СОП',()=>{libraryRevisionSelected=null;draw()}));out.append(p);return}
     if(libraryRevisionSelected)p.append(btn('Все версии СОП',()=>{libraryRevisionSelected=null;draw()}),el('p','Открыта редакция по связи из другого раздела.','muted'));
     for(const revision of versions.filter(x=>!libraryRevisionSelected||x.id===libraryRevisionSelected)){
      const data=JSON.parse(revision.payload_json),c=libraryContext(kind,v.id,revision.id),section=el('div',undefined,'library-version');section.dataset.revisionId=revision.id;
      const header=add(el('div',undefined,'row'),el('strong','Версия '+revision.version_no),el('span',documentTitle(ws.working,v.id,revision.id)),el('span',revisionLabels[revision.state]||revision.state,'pill'),el('span',revision.created_at.slice(0,10),'muted'));
-     section.append(header,el('p',sourceSummary(data),'muted'),el('p','Пересмотр: '+(revision.review_due||'дата не задана')+' · '+(revision.print_format==='portrait'?'А3 книжный':revision.print_format==='landscape'?'А3 альбомный':'формат не выбран')+' · Рабочее место: '+(revision.workplace_name||'не определено'),revision.review_due&&revision.review_due<today()&&revision.state==='effective'?'bad':'muted'),sourceDetails(data));
+     header.append(btn('Проверить эту редакцию',()=>openCurrentAssistant(main,contextSelection('sop',{documentId:v.id,revisionId:revision.id})), 'lc72-version-helper'));section.append(header,el('p',sourceSummary(data),'muted'),el('p','Пересмотр: '+(revision.review_due||'дата не задана')+' · '+(revision.print_format==='portrait'?'А3 книжный':revision.print_format==='landscape'?'А3 альбомный':'формат не выбран')+' · Рабочее место: '+(revision.workplace_name||'не определено'),revision.review_due&&revision.review_due<today()&&revision.state==='effective'?'bad':'muted'),sourceDetails(data));
      const tabs=el('div',undefined,'library-tabs'),body=el('div',undefined,'library-tab-body');
      const steps=()=>tableOf(['№','Действие','Сек','Ключевые моменты','Почему важно'],data.projection.steps.map((s,i)=>[i+1,s.action,s.seconds,s.key_points.join('\n'),s.reason]));
      const passport=()=>add(el('div'),el('p','Рабочее место: '+(revision.workplace_name||'—')+' · Оборудование: '+(revision.equipment_name||'—')+' · Дата изменения: '+(revision.changed_on||'—')),sourcePassport(data),...(!v.archived&&revision.state==='draft'?[passportForm(c,revision)]:[]));
@@ -800,8 +800,9 @@ function currentAssistantContext(main){
  if(page==='analytics'&&(route.assessmentType||'audit')==='audit'){for(const [key,name] of Object.entries({versionId:'lc5_analytics_version',from:'lc5_analytics_from',to:'lc5_analytics_to',personId:'lc5_analytics_mentor',unitId:'lc5_analytics_unit',shiftId:'lc5_analytics_shift'})){const v=read(name);if(v!==undefined)route[key]=v}}
  if(page==='metrics'){for(const [key,name] of Object.entries({from:'lc52_metrics_from',to:'lc52_metrics_to',personId:'lc52_metrics_person',unitId:'lc52_metrics_unit'})){const v=read(name);if(v!==undefined)route[key]=v}}
  const evaluated=page==='sop_evaluation'&&evaluationSelected?one(ws.working,'SELECT id,document_id FROM document_revision WHERE id=?',[evaluationSelected]):null;
- return contextSelection(page,{route,employeeId:employeeSelected,documentId:evaluated?.document_id||librarySelected,revisionId:evaluated?.id||libraryRevisionSelected,report:main.querySelector('[data-lc-report]')?.lcReport||null})
+ return contextSelection(page,{route,employeeId:employeeSelected,documentId:evaluated?.document_id||librarySelected,revisionId:evaluated?.id||libraryRevisionSelected,report:main.querySelector('[data-lc-report]')?.lcReport||null,reportExpected:['home','analytics','metrics'].includes(page)})
 }
+function openCurrentAssistant(main,explicit=null){openContextPanel(main,{getDb:()=>ws.working,getDay:today,getContext:()=>explicit||currentAssistantContext(main),el,add,btn,pane,openTarget:openAssistantTarget,dirty:workFormDirty})}
 function openAssistantTarget(x){
  if(x.page==='sop'){if(x.options.documentId)goDocument(x.options.documentId,x.options.revisionId||null);else openAttention(x);return}
  if(x.page==='frv'&&x.options.studyId){goResearch(x.options.studyId);return}
@@ -822,7 +823,7 @@ function render(){
  const main=el('main',undefined,'main');
  const section=navGroups.find(([,keys])=>keys.includes(page))?.[0]||'Рабочее пространство';
  const top=add(el('div',undefined,'top'),add(el('div'),el('div',section,'eyebrow'),el('h1',labels[page]),el('div','Локальная база · '+ws.pending.length+' ожидающих изменений','muted')),el('span',folder?'Сетевая папка выбрана':'Локальная рабочая копия','pill'));
- if(CONTEXT_PAGES.has(page)){const helper=btn('Помощник',()=>openContextPanel(main,{getDb:()=>ws.working,getDay:today,getContext:()=>currentAssistantContext(main),el,add,btn,pane,openTarget:openAssistantTarget,dirty:workFormDirty}),'lc72-helper-button');helper.prepend(icon('ai'));top.append(helper)}
+ if(CONTEXT_PAGES.has(page)){const helper=btn('',()=>openCurrentAssistant(main),'lc72-helper-button'),label=el('span','Проверить раздел');helper.append(icon('ai'),label);top.append(helper);const update=()=>{if(!main.isConnected)return;const name=helperLabel(currentAssistantContext(main));if(label.textContent!==name)label.textContent=name};const obs=new MutationObserver(update);obs.observe(main,{childList:true,subtree:true});const parentObs=new MutationObserver(()=>{if(!main.isConnected){obs.disconnect();parentObs.disconnect()}});parentObs.observe(root,{childList:true});queueMicrotask(update)}
  main.append(top);if(navParent!==null)main.append(add(el('div',undefined,'row lc53-nav-return'),btn('← Назад',navigationBack)));const stat=el('div',status,'status'+(error?' error':''));stat.id='status';stat.setAttribute('role','status');main.append(stat);
  if(!cache)main.append(pane('Режим работы только в памяти',el('p','IndexedDB недоступен. Изменения только в памяти — скачивайте резервную копию до закрытия.','bad'),btn('Скачать резервную копию из памяти',saveMemoryBackup,'primary')));
  if(ws.conflicts.length)main.append(pane('Локальные изменения заблокированы',el('p','Конфликт: '+ws.conflicts.length+' · Ожидают разрешения в очереди: '+ws.blockedPending.length+'. Эти записи пока не входят в реестры и показатели; они сохранены в локальной очереди.','bad'),btn('Открыть очередь изменений',()=>navigate('storage'))));

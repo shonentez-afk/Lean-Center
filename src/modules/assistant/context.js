@@ -2,7 +2,7 @@
 import {one,rows} from '../../core/db.js';
 import {matrixData,isCurrentStandard,progressFor,admissionStatus,authorizationValid,certificateValid,enrollmentTasks,latestAssessment} from '../training/domain.js';
 import {matrixFromRecord,matrixProjection} from '../training/matrix-view.js';
-import {actionRows,actionStatus,actionPeople,auditDetails,actionSource} from '../training/audit-domain.js';
+import {actionRows,actionStatus,actionPeople,auditDetails,actionSource,ACTION_STATES} from '../training/audit-domain.js';
 import {annualAuditCoverage,summarizeAudits} from '../training/audit-analytics.js';
 import {assessmentRegistry,assessmentAnswers,assessmentScore} from '../training/assessment-review.js';
 import {preparationControl,prepLabels} from '../training/standard-overview.js';
@@ -23,10 +23,10 @@ const allowedPages=new Set(['person','skills','twi','instruction','practical','p
 export const CONTEXT_PAGES=new Set(['home','person','skills','twi','instruction','practical','programs','internship','preparation','audit','mentoring','certification','appointments','actions','development','sop','frv','roi','analytics','metrics','retraining','self_eval','sop_evaluation','sop_review','twi_plans','my_plan','journal','calendar','knowledge_bank','supplements']);
 const groups={person:'training',skills:'training',twi:'training',instruction:'training',practical:'training',programs:'preparation',internship:'preparation',preparation:'preparation',audit:'audit',mentoring:'audit',certification:'audit',appointments:'audit',actions:'actions',development:'training',sop:'docs',frv:'docs',roi:'roi',retraining:'training',self_eval:'audit',sop_evaluation:'docs',sop_review:'docs',twi_plans:'docs',journal:'training',knowledge_bank:'preparation',supplements:'preparation'};
 const sections={person:'Сотрудники',skills:'Компетенции',twi:'Производственное обучение',instruction:'Инструктажи TWI',practical:'Практические оценки',programs:'Ввод в профессию',internship:'Стажировка',preparation:'Подготовка сотрудников',audit:'Аудит L1',mentoring:'Наставники и ВТ',certification:'Сертификация',appointments:'Назначения',actions:'Мероприятия',development:'Планы развития',sop:'Каталог СОП',frv:'ФРВ',roi:'Экономический эффект',analytics:'Аналитика',metrics:'Дерево метрик',self_eval:'Самооценка'};
-export function contextSelection(page,{route={},employeeId=null,documentId=null,revisionId=null,report=null}={}){
+export function contextSelection(page,{route={},employeeId=null,documentId=null,revisionId=null,report=null,reportExpected=false}={}){
  let kind='section',id=null;
  if(page==='person'&&employeeId){kind='person';id=employeeId}
- else if((page==='mentoring'||page==='my_plan')&&route.personId){kind='person';id=route.personId}
+ else if(page==='mentoring'&&route.personId){kind='person';id=route.personId}
  else if(page==='skills'&&route.matrixId){kind='matrix';id=route.matrixId}
  else if(['twi','instruction','practical'].includes(page)&&route.id){kind='training';id=route.id}
  else if(page==='practical'&&route.assessmentId){kind='practical';id=route.assessmentId}
@@ -39,7 +39,7 @@ export function contextSelection(page,{route={},employeeId=null,documentId=null,
  else if(['sop','frv','sop_evaluation'].includes(page)&&documentId){kind=page==='sop_evaluation'?'sop':page;id=documentId}
  else if(page==='roi'&&(route.id||route.studyId||route.actionId)){kind='roi';id=route.id||null}
  else if(['home','analytics','metrics'].includes(page))kind='analytics';
- return {page,kind,id,revisionId:revisionId||null,route:{...route},report}
+ return {page,kind,id,revisionId:revisionId||null,route:{...route},report,reportExpected}
 }
 export function analyzeContext(db,day,ctx){
  const out={kind:ctx.kind,title:sections[ctx.page]||'Рабочий раздел',day,scope:'Сохранённые записи текущей рабочей копии',facts:[],checks:[],notices:[],available:true};
@@ -57,8 +57,9 @@ export function analyzeContext(db,day,ctx){
  };
  const relatedDraft=(kind,sourceId,title,existing,extra={})=>existing.length?existing.map(actionLink):[link('Подготовить проект мероприятия','actions',{mode:'new',sourceKind:kind,sourceId,draftTitle:title,...extra})];
  if(ctx.kind==='section'){
-  notice('Конкретная запись не выбрана. Показаны общие сигналы направления, а не результат фильтрации открытого реестра.');
-  const data=centerAttention(db,day);for(const q of recommendedChecks(data,groups[ctx.page]||'all'))check(q.id,q.count,'По всему центру.',[link('Открыть источник',q.page,q.options)]);
+  if(['calendar','my_plan','journal'].includes(ctx.page)){out.title='Обзор центра · не личная выборка';out.scope='Весь центр, текущая дата '+day;notice('Этот режим не проверяет выбранный месяц, сотрудника или смену в календаре, личном плане или журнале. Ниже только общие сигналы центра.');}
+  else{out.title='Проверка раздела · '+(sections[ctx.page]||'Рабочий раздел');out.scope='Общие сигналы направления по всему центру';notice('Конкретная запись не выбрана. Показаны общие сигналы направления, а не результат фильтрации открытого реестра.');}
+  const data=centerAttention(db,day);for(const q of recommendedChecks(data,['calendar','my_plan','journal'].includes(ctx.page)?'all':groups[ctx.page]||'all'))check(q.id,q.count,'По всему центру.',[link('Открыть источник',q.page,q.options)]);
  }else if(ctx.kind==='person'){
   const p=byId(db,'person',id);if(!p)return missing();out.title=p.display_name;fact('Состояние',p.archived?'Архив':'Активен');
   const groups=employeeRelations(db,id);fact('Связанные записи обучения',groups.training.length);fact('Связанные оценки и допуски',groups.assessments.length);fact('Связанные записи наставничества',groups.mentoring.length);
@@ -115,7 +116,7 @@ export function analyzeContext(db,day,ctx){
   else if(ctx.page==='certification'){const x=byId(db,'mentor_credential',id);if(!x)return missing();out.title='Документ · '+text(db,'person',x.person_id);fact('Вид',x.kind==='certificate'?'Сертификат':'Свидетельство');fact('Срок',x.valid_until||'Не установлен');if(!certificateValid(db,id,day))check('ctx_cert',1,'',[link('Открыть документ','certification',{id})])}
   else{const x=byId(db,'mentor_appointment',id);if(!x)return missing();out.title='Назначение · '+text(db,'person',x.person_id);fact('Период',x.valid_from+' — '+(x.valid_to||'бессрочно'));if(x.revoked_at||x.valid_from>day||x.valid_to&&x.valid_to<day||!certificateValid(db,x.credential_id,day))check('ctx_cert',1,'',[link('Открыть назначение','appointments',{id})])}
  }else if(ctx.kind==='sop'){
-  const d=byId(db,'document',id);if(!d)return missing();const revisions=rows(db,"SELECT * FROM document_revision WHERE document_id=? ORDER BY CASE WHEN state='effective' THEN 0 ELSE 1 END,version_no DESC",[id]),v=ctx.revisionId?revisions.find(x=>x.id===ctx.revisionId):revisions[0];if(!v)return missing();out.title=d.code+' · '+documentTitle(db,id,v.id)+' · v'+v.version_no;fact('Редакция',v.version_no);fact('Статус',d.archived?'Архив':v.state);fact('Пересмотр',v.review_due||'Не назначен');const p=JSON.parse(v.payload_json),dest=[link('Открыть редакцию','sop',{documentId:id,revisionId:v.id})];fact('Шаги в исходнике',p.projection?.steps?.length??'—');
+  const d=byId(db,'document',id);if(!d)return missing();const revisions=rows(db,"SELECT * FROM document_revision WHERE document_id=? ORDER BY version_no DESC",[id]);const statuses={draft:'Черновик',review:'На согласовании',approved:'Согласован',effective:'Действует',superseded:'Заменён',withdrawn:'Выведен из действия'};if(!ctx.revisionId&&revisions.length>1){out.title=d.code+' · '+d.title;out.scope='Обзор документа, редакция не выбрана';out.available=false;fact('Редакций',revisions.length);for(const v of revisions)fact('Версия '+v.version_no,statuses[v.state]||'Неизвестное состояние');notice('Выберите «Проверить эту редакцию» рядом с нужной версией. Другая редакция не будет подставлена автоматически.');return out}const v=ctx.revisionId?revisions.find(x=>x.id===ctx.revisionId):revisions[0];if(!v)return missing();out.title=d.code+' · '+documentTitle(db,id,v.id)+' · v'+v.version_no;fact('Редакция',v.version_no);fact('Статус',d.archived?'Архив':statuses[v.state]||'Неизвестное состояние');fact('Пересмотр',v.review_due||'Не назначен');const p=JSON.parse(v.payload_json),dest=[link('Открыть редакцию','sop',{documentId:id,revisionId:v.id})];fact('Шаги в исходнике',p.projection?.steps?.length??'—');
   if(d.archived||v.state!=='effective')check('ctx_sop_state',1,'',dest);
   if(!d.archived&&v.state==='effective'&&v.review_due&&v.review_due<day)check('sop_overdue',1,'',dest);
   if(!d.archived&&v.state==='draft'&&(!v.print_format||!v.workplace_id))check('sop_passport',1,'',dest);
@@ -126,7 +127,7 @@ export function analyzeContext(db,day,ctx){
   const loss=(x.projection?.measurements||[]).filter(o=>o.seconds>0&&['NVA_Waste','WAIT'].includes(o.category));
   check('ctx_frv_loss',loss.length,'Число наблюдений, не секунды или рубли.',[...dest,...(x.state==='final'?relatedDraft('frv_study',id,'Разбор наблюдавшихся потерь ФРВ',actions().filter(a=>a.study_id===id&&openAction(a.display))):[])]);
  }else if(ctx.kind==='action'){
-  const a=actions().find(x=>x.id===id);if(!a)return missing();out.title=a.title;fact('Состояние',a.display);fact('Срок',a.due_on);fact('Ответственный',text(db,'person',a.owner_id));const dest=[link('Открыть мероприятие','actions',{id})];
+  const a=actions().find(x=>x.id===id);if(!a)return missing();out.title=a.title;fact('Состояние',ACTION_STATES[a.display]||'Неизвестное состояние');fact('Срок',a.due_on);fact('Ответственный',text(db,'person',a.owner_id));const dest=[link('Открыть мероприятие','actions',{id})];
   if(openAction(a.display)){if(a.due_on&&a.due_on<day)check('action_overdue',1,'',dest);if(a.display==='implemented')check('action_verify',1,'',dest);else check('ctx_action',1,'',dest)}
  }else if(ctx.kind==='development'){
   const p=byId(db,'development_plan',id);if(!p)return missing();out.title=p.title;const goals=rows(db,'SELECT * FROM development_goal WHERE plan_id=?',[id]),active=goals.filter(x=>x.state==='open');fact('Цели',goals.length);fact('Открытые',active.length);if(p.state==='active')check('ctx_goal',active.length,'',active.map(g=>link(g.title,'development',{id})).slice(0,1));
@@ -138,7 +139,7 @@ export function analyzeContext(db,day,ctx){
   const targets=periodTargets(db,x,day);check('ctx_roi_period',targets.filter(targetNeedsAttention).length,'',targets.filter(targetNeedsAttention).map(t=>link(t.from+' — '+t.to,'roi',{id:x.id,targetId:t.id})));check('roi_deviations',targets.filter(t=>!t.cancel&&t.shortfall&&!t.currentReview).length,'',dest);
  }else if(ctx.kind==='analytics'){
   if(ctx.report){out.title=ctx.report.title;out.scope=ctx.report.scope;out.facts=ctx.report.facts;out.notices.push(...ctx.report.notices);notice('Локальный срез отображённого отчёта. Числовые факты не отправляются в облако.');if(ctx.report.metrics)out.metrics=ctx.report.metrics;for(const x of ctx.report.checks||[])if(Object.hasOwn(ASSISTANT_RULES,x.id))check(x.id,x.count,'',x.links||[]);check('ctx_metric_review',out.facts.length,'Проверьте определения и основания выбранного отчёта.',ctx.report.links||[]);return out}
-  if(ctx.page==='home'){out.available=false;notice('Нет корректного отображённого среза. Уточните фильтры дашборда.');return out}
+  if(ctx.reportExpected){out.title=ctx.page==='home'?'Дашборд':ctx.page==='metrics'?'Дерево метрик':'Аналитика · выбранный отчёт';out.available=false;notice('Нет корректного отображённого среза. Проверьте фильтры и наличие записей. Общая сводка вместо него не подставляется.');return out}if(ctx.page==='home'){out.available=false;notice('Нет корректного отображённого среза. Уточните фильтры дашборда.');return out}
   if(ctx.page==='analytics'&&r.assessmentType&&r.assessmentType!=='audit'&&!ctx.report){out.available=false;notice('Нет подтверждённого отображённого среза этого отчёта. Уточните фильтры и наличие фактов.');return out}
   const from=r.from||'',to=r.to||day;if(from&&!validDate(from)||!validDate(to)||from&&from>to){notice('Некорректный период анализа.');return out}
   const scope={day,from,to,unitId:r.unitId||'',personId:r.personId||''};
@@ -155,3 +156,6 @@ export function analyzeContext(db,day,ctx){
 }
 export function contextLinks(data){return [...data.checks.flatMap(q=>q.links),...(data.metrics||[]).map(m=>m.target)].filter(x=>allowedPages.has(x.page))}
 export function sameContextLink(a,b){return a.page===b.page&&JSON.stringify(a.options)===JSON.stringify(b.options)}
+
+export function helperLabel(ctx){if(['calendar','my_plan','journal'].includes(ctx.page))return 'Обзор центра';if(ctx.kind==='section')return 'Проверить раздел';if(ctx.kind==='person')return 'Проверить сотрудника';if(ctx.kind==='sop')return ctx.revisionId?'Проверить эту редакцию':'Проверить СОП';if(ctx.kind==='analytics')return 'Проверить отчёт';return 'Проверить запись'}
+export function isCurrentTarget(ctx,target){return ctx.kind==='action'&&target.page==='actions'&&target.options?.id===ctx.id&&!target.options?.mode}
