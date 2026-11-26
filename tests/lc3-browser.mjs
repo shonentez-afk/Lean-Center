@@ -356,7 +356,7 @@ try{
  await page.getByRole('button',{name:'Каталог СОП',exact:true}).first().click();await page.getByRole('button',{name:'Открыть',exact:true}).click();
  await page.locator('.library-tabs').getByRole('button',{name:'Оценка СОП',exact:true}).click();
  await page.locator('input[name=stage43_note_1]').waitFor();assert.equal(await page.locator('input[name=stage43_note_1]').inputValue(),'Уточнено в центре');
- await page.getByRole('button',{name:'Корпоративская оценка (20 критериев)',exact:true}).click();
+ await page.getByRole('button',{name:'Корпоративная оценка (20 критериев)',exact:true}).click();
  await choosePerson(page,'Оценщик','Уч оц');
  await page.locator('input[name=eval_place]').fill('Учебное место');
  const saveEval=page.getByRole('button',{name:'Зафиксировать оценку'});assert.equal(await saveEval.isDisabled(),true);
@@ -364,7 +364,7 @@ try{
  assert.equal(await saveEval.isDisabled(),false);await saveEval.click();
  await page.getByText('Оценка СОП сохранена. Ожидает публикации.',{exact:true}).waitFor();
  await page.locator('.library-tabs').getByRole('button',{name:'Оценка СОП',exact:true}).click();
- await page.getByRole('button',{name:'Корпоративская оценка (20 критериев)',exact:true}).click();
+ await page.getByRole('button',{name:'Корпоративная оценка (20 критериев)',exact:true}).click();
  await page.getByText('17/20 · 85%',{exact:true}).waitFor();
  const reportDl=page.waitForEvent('download');await page.getByRole('button',{name:'Скачать XLSX',exact:true}).click();
  const report=await reportDl,rf=path.join(tmp,'evaluation.xlsx');await report.saveAs(rf);
