@@ -8,7 +8,7 @@ async function main(){
  const dataDir=process.env.LC_PILOT_DATA_DIR||'/data/lean-center-pilot';
  if(!path.isAbsolute(dataDir))throw Error('Absolute LC_PILOT_DATA_DIR required');
  const assets=await pilotAssets(path.resolve('dist/LeanCenterCloud'));
- const store=await openPilot({dataDir}),server=createPilotServer({store,users,assets});
+ const store=await openPilot({dataDir}),server=createPilotServer({store,users,assets,aiEnabled:process.env.LC_PILOT_AI==='1'});
  server.on('error',async()=>{await store.close();process.exitCode=1;console.error('Pilot HTTP listen error')});
  server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('LC7.4.2 demo UI and API listening'));
  let stopping=false;

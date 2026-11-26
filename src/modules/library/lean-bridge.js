@@ -12,7 +12,12 @@
  if(aiTest){aiTest.type='button';aiPanel.append(aiTest)}
  if(aiBadge){aiBadge.setAttribute('role','status');aiPanel.append(aiBadge)}
  if(aiModel){aiModel.setAttribute('aria-label','Модель ИИ');aiPanel.append(aiModel)}
- const aiNotice=document.createElement('span');aiNotice.className='lc-ai-notice';aiNotice.textContent='ИИ: Yandex Cloud по команде';aiNotice.title='При запуске функции ИИ необходимые данные текущей задачи отправляются в Yandex Cloud. Используйте только разрешённые организацией данные.';aiPanel.append(aiNotice);bar.append(aiPanel);
+ const aiNotice=document.createElement('span');aiNotice.className='lc-ai-notice';aiNotice.textContent='ИИ: Yandex Cloud по команде';aiNotice.title='При запуске функции ИИ необходимые данные текущей задачи отправляются в Yandex Cloud. Используйте только разрешённые организацией данные.';if(context.cloudPilot===true){
+  const enabled=context.cloudAiEnabled===true;
+  aiNotice.textContent=enabled?'ИИ: Yandex Cloud · только учебные данные':'Внешний ИИ отключён сервером';
+  aiNotice.title=enabled?'При явном запуске ИИ данные текущей задачи отправляются во внешний сервис. Только учебные данные.':'Локальная работа доступна. Для внешнего ИИ требуется разрешение владельца стенда.';
+  if(!enabled){if(aiTest)aiTest.disabled=true;if(aiModel)aiModel.disabled=true}
+ }aiPanel.append(aiNotice);bar.append(aiPanel);
  // Stage43 notifications are fixed inside the iframe, not the outer page.
  // Keep them below the actual sticky toolbar, including wrapped rows.
  function syncToastPosition(){const bottom=bar.getBoundingClientRect().bottom;document.documentElement.style.setProperty('--lc-toast-top',Math.max(12,Math.ceil(bottom)+12)+'px')}

@@ -658,7 +658,7 @@ function launchEditor(ctx){
   bar.append(el('strong',frame.title),note,back,close);host.append(bar,frame);
   editorSession=s;document.body.append(host);showEditor(s);
   s.timeout=setTimeout(()=>{if(!s.loaded){editorStatus(s,'Редактор не подтвердил загрузку. Закройте его и проверьте комплект файлов и ограничения браузера.',true);message('Редактор не подтвердил готовность. Данные не изменены.',true)}},30000);
-  frame.srcdoc=template.replace(marker,()=> 'window.LC_EDITOR_CONTEXT='+JSON.stringify({session,kind:ctx.kind,tab:ctx.editorTab||null,draftKey})+';/* LC_EMBED_CONTEXT */');
+  frame.srcdoc=template.replace(marker,()=> 'window.LC_EDITOR_CONTEXT='+JSON.stringify({session,kind:ctx.kind,tab:ctx.editorTab||null,draftKey,cloudPilot:cloudBuild,cloudAiEnabled:!cloudBuild||cloudAccount?.aiEnabled===true})+';/* LC_EMBED_CONTEXT */');
   message('Загрузка конструктора. Ожидание подтверждения готовности.');
  }catch(e){if(editorSession)disposeEditor(editorSession,true);message(e.message,true)}
 }
@@ -908,7 +908,7 @@ function cloudLogin(){
     const incoming=remote;remote=null;next.replaceBase(incoming)
    }else{next=new Workspace(SQL,remote);remote=null}
    const g=await local.saveWorkspace(accountCache,saved?.generation||0,next.state());
-   cache=accountCache;accountCache=null;generation=g;ws=next;next=null;folder=null;master=false;cloud=transport;cloudAccount=account;
+   cache=accountCache;accountCache=null;generation=g;ws=next;next=null;folder=null;master=false;cloud=transport;cloudAccount=account;window.LC_BUILD.cloudAiEnabled=account.aiEnabled===true;
    cloudState(ws.conflicts.length?'Есть конфликт локальной очереди':ws.pending.length?'Ожидают подтверждения: '+ws.pending.length:'Синхронизировано · '+account.user+(cloudReadonly()?' · только чтение':''),!!ws.conflicts.length);
    render();queueCloudSync(350);
   }catch(e){remote?.close();next?.close();accountCache?.close();notice.textContent='Вход не выполнен: '+e.message;button.disabled=false}

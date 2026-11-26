@@ -19,13 +19,13 @@ const sock=net.createServer();await new Promise(resolve=>sock.listen(0,'127.0.0.
 const base='http://127.0.0.1:'+port;let child,timer,peakRSS=0,exitPromise,logTail='',retries=0;
 const durations=[];
 async function start(){
- child=spawn(process.execPath,['--max-old-space-size=192','server/main.mjs'],{env:{...process.env,PORT:String(port),LC_PILOT_DEMO:'1',LC_PILOT_DATA_DIR:dir,LC_PILOT_USERS:userConfig},stdio:['ignore','pipe','pipe']});
+ child=spawn(process.execPath,['--max-old-space-size=192','server/main.mjs'],{env:{...process.env,PORT:String(port),LC_PILOT_DEMO:'1',LC_PILOT_AI:'1',LC_PILOT_DATA_DIR:dir,LC_PILOT_USERS:userConfig},stdio:['ignore','pipe','pipe']});
  exitPromise=once(child,'exit');child.stdout.on('data',b=>{logTail=(logTail+b).slice(-3000)});child.stderr.on('data',b=>{logTail=(logTail+b).slice(-3000)});
  const sample=async()=>{try{const txt=await fs.readFile('/proc/'+child.pid+'/status','utf8');const k=Number(/VmRSS:\s+(\d+)\s+kB/.exec(txt)?.[1]||0);peakRSS=Math.max(peakRSS,k*1024)}catch{}};
  timer=setInterval(sample,50);
  for(let i=0;i<200;i++){
   if(child.exitCode!==null)throw Error('Server startup failed: '+logTail);
-  try{if((await fetch(base+'/healthz',{signal:AbortSignal.timeout(1000)})).ok)return}catch{}
+  try{const r=await fetch(base+'/healthz',{signal:AbortSignal.timeout(1000)});if(r.ok&&(await r.json()).aiEnabled===true)return}catch{}
   await sleep(100)
  }
  throw Error('Server startup timed out: '+logTail)

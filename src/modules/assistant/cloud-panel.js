@@ -1,6 +1,9 @@
 import {ASSISTANT_RULES} from './context-rules.js';
 import {CENTER_MODEL,CENTER_MODELS,CENTER_PROXY,MAX_CLOUD_RULES,cloudRequest,askCenterCloud,modelLabel} from './cloud.js';
 export function cloudAdvicePanel(cloud,{checks,el,add,btn,pane,openAdvice,contextKind=null,initialModel=CENTER_MODEL,onModel}){
+ if(globalThis.LC_BUILD?.cloudPilot===true&&globalThis.LC_BUILD.cloudAiEnabled!==true){
+  cloud.append(pane('Дополнительно · облачный ИИ',el('p','Внешний ИИ отключён в настройках испытательного сервера. Локальные рекомендации доступны.','muted')));return ()=>{};
+ }
  const state={controller:null,serial:0,model:initialModel};
   let selected=checks.slice(0,MAX_CLOUD_RULES),ids=selected.map(x=>x.id);
   const limit=el('select');limit.name='lc7_cloud_topics';limit.setAttribute('aria-label','Количество тем');for(const n of [...new Set([Math.min(checks.length,MAX_CLOUD_RULES),...([4,2,1].filter(n=>n<Math.min(checks.length,MAX_CLOUD_RULES)))])]){const option=el('option',n===0?'Нет тем':String(n)+' из '+checks.length);option.value=String(n);limit.append(option)}limit.disabled=!ids.length;

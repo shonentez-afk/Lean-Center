@@ -6,12 +6,25 @@ import path from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
 import {openPilot} from '../server/lc74-store.mjs';
 import {createPilotServer,parsePilotUsers,pilotAssets} from '../server/lc74-http.mjs';
+import {CENTER_PROXY} from '../src/modules/assistant/cloud.js';
 const dir=await fs.mkdtemp(path.join(os.tmpdir(),'lc74-cloud-'));
 const tokens=Object.fromEntries(['a','b','viewer'].map(x=>[x,randomBytes(32).toString('hex')]));
 const users=parsePilotUsers('HEX1'+Buffer.from(JSON.stringify(Object.fromEntries(Object.entries(tokens).map(([n,token])=>[n,{token,role:n==='viewer'?'viewer':'editor'}]))),'utf8').toString('hex'));
-const store=await openPilot({dataDir:dir}),assets=await pilotAssets(path.resolve('dist/LeanCenterCloud')),server=createPilotServer({store,users,assets});
+const store=await openPilot({dataDir:dir}),assets=await pilotAssets(path.resolve('dist/LeanCenterCloud')),server=createPilotServer({store,users,assets,aiEnabled:true}),disabledServer=createPilotServer({store,users,assets});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+await new Promise(resolve=>disabledServer.listen(0,'127.0.0.1',resolve));
+const disabledUrl='http://127.0.0.1:'+disabledServer.address().port;
 const url='http://127.0.0.1:'+server.address().port,browser=await chromium.launch({headless:true}),errors=[];
+let mockCalls=0,unexpectedExternal=0;
+// Every external request is intercepted; no real Yandex invocation or charges.
+async function mockAiRoute(route,origin){const r=route.request(),u=r.url();
+ if(u.startsWith(origin+'/'))return route.continue();
+ if(u!==CENTER_PROXY){unexpectedExternal++;return route.abort()}
+ if(r.method()==='OPTIONS')return route.fulfill({status:204,headers:{'access-control-allow-origin':'*','access-control-allow-methods':'POST, OPTIONS','access-control-allow-headers':'content-type'}});
+ mockCalls++;assert.equal(r.method(),'POST');assert.equal(r.headers().authorization,undefined);
+ return route.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:'{"mock":true}'})
+}
+async function probe(target,address){return target.evaluate(async u=>{let violation=false,rejected=false,data=null;const listener=e=>{if(e.effectiveDirective==='connect-src')violation=true};document.addEventListener('securitypolicyviolation',listener);try{const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'omit',redirect:'error',body:'{"synthetic":true}'});data=await r.json()}catch{rejected=true}await new Promise(r=>setTimeout(r,120));document.removeEventListener('securitypolicyviolation',listener);return {violation,rejected,data}},address)}
 const btn=(p,name)=>p.getByRole('button',{name,exact:true});
 const nav=(p,name)=>btn(p,name).first().click();
 const state=(p,re)=>p.locator('[data-lc-cloud-state]').first().filter({hasText:re}).waitFor({timeout:40000});
@@ -20,7 +33,7 @@ async function login(p,name){await p.locator('input[name=pilot_token]').fill(tok
 async function profile(name){
  const ctx=await browser.newContext({acceptDownloads:true}),p=await ctx.newPage();
  p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>d.accept());
- await ctx.route(/^https?:/,r=>r.request().url().startsWith(url+'/')?r.continue():r.abort());
+ await ctx.route(/^https?:/,r=>mockAiRoute(r,url));
  await p.goto(url);await login(p,name);return {ctx,p}
 }
 async function addPerson(p,code){
@@ -37,7 +50,20 @@ const sop={schemaVersion:2,document:{id:'SOP-demo',status:'Draft',number:'DEMO-S
 const raw=JSON.stringify({...sop,integrity:{algorithm:'SHA-256',sha256:createHash('sha256').update(JSON.stringify(sop)).digest('hex')}},null,2);
 try{
  assert.equal((await fetch(url+'/api/v1/snapshot')).status,401);
+ assert.equal((await (await fetch(url+'/healthz')).json()).aiEnabled,true);
+ assert.equal((await (await fetch(disabledUrl+'/healthz')).json()).aiEnabled,false);
+ const disabledCtx=await browser.newContext();await disabledCtx.route(/^https?:/,r=>mockAiRoute(r,disabledUrl));
+ const dp=await disabledCtx.newPage();await dp.goto(disabledUrl);
+ assert.deepEqual(await probe(dp,CENTER_PROXY),{violation:true,rejected:true,data:null});
+ assert.equal(mockCalls,0);
+ await login(dp,'a');await nav(dp,'Помощник центра');await dp.getByText('Внешний ИИ отключён в настройках испытательного сервера. Локальные рекомендации доступны.').waitFor();
+ await disabledCtx.close();
  const a=await profile('a'),b=await profile('b'),v=await profile('viewer');
+ assert.equal(mockCalls,0,'Login must not send AI requests');
+ assert.deepEqual(await probe(a.p,CENTER_PROXY),{violation:false,rejected:false,data:{mock:true}});
+ assert.deepEqual(await probe(a.p,'https://functions.yandexcloud.net/other-function'),{violation:true,rejected:true,data:null});
+ assert.deepEqual(await probe(a.p,'https://example.invalid/'),{violation:true,rejected:true,data:null});
+ assert.equal(mockCalls,1);assert.equal(unexpectedExternal,0);
  await Promise.all([addPerson(a.p,'CLOUD-A'),addPerson(b.p,'CLOUD-B')]);
  await Promise.all([person(a.p,'CLOUD-B').waitFor({timeout:40000}),person(b.p,'CLOUD-A').waitFor({timeout:40000})]);
  await nav(v.p,'Сотрудники');await person(v.p,'CLOUD-A').waitFor({timeout:40000});await person(v.p,'CLOUD-B').waitFor({timeout:40000});
@@ -66,6 +92,12 @@ try{
  await a.p.getByText('Редактор готов',{exact:true}).waitFor();
  assert.equal(await editor.locator('#meta-operation').inputValue(),'Учебная проверка');
  assert.equal(await editor.evaluate(()=>state.steps[0].hasPhoto&&!!state.steps[0].imageData),true);
+ assert.equal(mockCalls,1,'Opening editor must not send AI requests');
+ await editor.getByText('ИИ: Yandex Cloud · только учебные данные',{exact:true}).waitFor();
+ assert.deepEqual(await probe(editor,CENTER_PROXY),{violation:false,rejected:false,data:{mock:true}});
+ assert.deepEqual(await probe(editor,'https://functions.yandexcloud.net/other-function'),{violation:true,rejected:true,data:null});
+ assert.deepEqual(await probe(editor,'https://example.invalid/'),{violation:true,rejected:true,data:null});
+ assert.equal(mockCalls,2);assert.equal(unexpectedExternal,0);
  await editor.locator('[data-step-field=action]').first().fill('Проверить после облачного изменения');
  await editor.locator('[data-step-field=action]').first().blur();
  // Export through the real editor; inspect the produced XLSX with its ExcelJS.
@@ -94,6 +126,6 @@ try{
  await nav(v.p,'Настройки и обмен');assert.equal(await v.p.getByRole('checkbox',{name:/Режим единственного издателя/}).count(),0);
  assert.deepEqual(errors,[]);
  await fs.mkdir('artifacts/lc74',{recursive:true});await v.p.screenshot({path:'artifacts/lc74/cloud-storage.png',fullPage:true});
- await fs.writeFile('artifacts/lc74/cloud-browser.json',JSON.stringify({profiles:3,concurrentCreates:true,offline:true,conflict:true,exactSource:true,editorRoundTrip:true,realXlsx:true,viewerReadOnly:true,logout:true},null,2));
+ await fs.writeFile('artifacts/lc74/cloud-browser.json',JSON.stringify({profiles:3,concurrentCreates:true,offline:true,conflict:true,exactSource:true,editorRoundTrip:true,realXlsx:true,viewerReadOnly:true,logout:true,aiCsp:{defaultBlocked:true,explicitOptIn:true,mainAllowed:true,srcdocAllowed:true,otherFunctionBlocked:true,otherOriginBlocked:true,mockedRequests:mockCalls,unexpectedExternal}},null,2));
  console.log('LC7.4.2 real HTTP browser sync and editor PASS')
-}finally{await browser.close();await new Promise(resolve=>server.close(resolve));await store.close();await fs.rm(dir,{recursive:true,force:true})}
+}finally{await browser.close();await Promise.all([new Promise(resolve=>server.close(resolve)),new Promise(resolve=>disabledServer.close(resolve))]);await store.close();await fs.rm(dir,{recursive:true,force:true})}
