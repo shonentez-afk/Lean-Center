@@ -54,7 +54,7 @@ function setText(p,text){
 const fmt=s=>s?String(s).split('-').reverse().join('.'):'________________';
 export function orderPayment(order){
  const parts=[];if(order.instructor_amount!==null)parts.push('инструкторам — '+order.instructor_amount+' руб. на руки');if(order.trainer_amount!==null)parts.push('внутренним тренерам — '+order.trainer_amount+' руб. на руки');
- return parts.length?'Установить ежемесячную доплату: '+parts.join('; ')+' с '+fmt(order.supplement_from)+'.':'Доплата настоящим приказом не устанавливается.'
+ const current=order.order_on>='2025-01-29'&&(order.instructor_amount===null||order.instructor_amount===5000)&&(order.trainer_amount===null||order.trainer_amount===7000);return parts.length?'Установить ежемесячную доплату: '+parts.join('; ')+' с '+fmt(order.supplement_from)+'.'+(current?' Условие выплаты: за календарный месяц выполнено не менее двух задач инструктором или трёх задач Внутренним тренером согласно действующему стандарту; основание — ходатайство (приложение 16), решение руководителя.':''):'Доплата настоящим приказом не устанавливается.'
 }
 export async function fillOrderTemplate(bytes,order,members,{registered=false}={}){
  const entries=await readZip(bytes);invariant(!entries.some(e=>/vbaProject|embeddings\/|_xmlsignatures\//i.test(e.name)),'Используйте чистый DOCX-образец без макросов, вложений и подписи');

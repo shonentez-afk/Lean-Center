@@ -10,8 +10,8 @@ const kinds={new:'Вновь принят',transfer:'Переведён'};
 const form=id=>STANDARD_FORMS.find(x=>x.id===id);
 const show=(d)=>d?.kind==='internship'?'internship':'programs';
 export function standardWorkflowScreen(page,c,h,route){
- const {ws,el,btn,pane,tableOf,go,run,fieldInput,downloadBytes}=c,db=ws.working;
- const {day,n,stack,row,grid,msg,action,goLocal,back,select,simple,ref,date,num,note,f,person,save,table,exportButton,saveWorkbook,nullable}=h;
+ const {ws,el,btn,pane,tableOf,go,run,fieldInput,downloadBytes,readContent}=c,db=ws.working;
+ const {day,n,stack,row,grid,msg,action,goLocal,back,select,simple,ref,date,num,note,f,person,save,event,table,exportButton,saveWorkbook,nullable}=h;
  const exportForm=(label,id,fields,lines,name)=>btn(label,()=>run(async()=>saveWorkbook(name,standardWorkbook(ExcelJS,form(id),{fields,rows:lines})),{save:false}));
  const after=id=>goLocal({id});
  const name=id=>n('person',id);
@@ -27,6 +27,23 @@ export function standardWorkflowScreen(page,c,h,route){
     pane('Проверки знаний по стандарту 03',msg('ОТ: протокол по окончании программы. Стажировка: базовые операции, практический чек-лист и отметка об освоении. Адаптация: основные операции, теория по четырём профессиональным блокам, комиссия и обратная связь. Завершение комплекта не является допуском к работе.'),row(btn('Банк вопросов',()=>go('knowledge_bank')),btn('Практические оценки',()=>go('practical',{personId:x.trainee_id})),btn('Матрица компетенций',()=>go('skills',{personId:x.trainee_id})))));
   }
   if(route.mode==='new'){
+   const trainee=person('prep_new_trainee','Обучаемый',route.personId||'',{}),manager=person('prep_new_manager','Руководитель'),category=simple('prep_new_category',kinds,'new'),why=note('prep_new_note'),controls={},shiftBox=el('div',undefined,'stack'),shifts=[],bounds=msg('');
+   const programs=rows(db,"SELECT * FROM training_program WHERE state='active' AND standard_kind IN('adaptation','safety','internship') ORDER BY title,version_no");
+   let serial=0;
+   function addShift(){const i=++serial,d=date('prep_new_shift_date_'+i,''),s=ref('work_shift','prep_new_shift_id_'+i),line=grid(f('Дата смены',d),f('Смена',s)),v={d,s,line};shifts.push(v);line.append(btn('Удалить',()=>{shifts.splice(shifts.indexOf(v),1);line.remove()}));shiftBox.append(line)}
+   for(const k of ['adaptation','safety','internship']){const start=date('prep_new_'+k+'_start'),due=date('prep_new_'+k+'_due',''),program=select('prep_new_'+k+'_program',programs.filter(p=>p.standard_kind===k).map(p=>[p.id,p.title+' · v'+p.version_no+' · '+n('profession',p.profession_id)])),mentor=person('prep_new_'+k+'_mentor',k==='internship'?'Наставник стажировки':k==='safety'?'Ответственный за программу ОТ':'Наставник адаптации','',{allowed:['mentor','instructor'],at:()=>start.value});controls[k]={start,due,program,mentor}}
+   const ad=controls.adaptation;
+   function sync(reset=false){if(!ad.start.value)return;try{const b=adaptationBounds(ad.start.value,category.value);ad.due.min=b.min;ad.due.max=b.max;if(reset||!ad.due.value||ad.due.value<b.min||ad.due.value>b.max)ad.due.value=b.min;bounds.textContent='Допустимый срок завершения адаптации: '+b.min+' — '+b.max;for(const k of ['safety','internship']){controls[k].start.min=ad.start.value;controls[k].start.max=ad.due.value;controls[k].due.min=ad.start.value;controls[k].due.max=ad.due.value}}catch(e){bounds.textContent=e.message}}
+   ad.start.onchange=category.onchange=()=>sync(true);ad.due.onchange=()=>sync(false);sync();addShift();addShift();
+   const panels=Object.entries(controls).map(([k,v])=>pane(PROGRAM_DOCS[k].title,f('Активная версия шаблона',v.program),grid(v.mentor.element,f('Начало',v.start),f('Окончание',v.due)),...(k==='adaptation'?[bounds]:[])));
+   const create=action('Оформить три документа одновременно',()=>run(async()=>{
+    const shared={trainee_id:trainee.value,manager_id:manager.value,reason:why.value},events=Object.entries(controls).map(([k,v])=>event('training_enrollment',{...shared,program_id:v.program.value,mentor_id:v.mentor.value,start_on:v.start.value,due_on:v.due.value}));
+    const e=event('twi_preparation',{trainee_id:trainee.value,manager_id:manager.value,category:category.value,adaptation_id:events[0].entity_id,safety_id:events[1].entity_id,internship_id:events[2].entity_id,shifts:shifts.map(x=>({date:x.d.value,shift_id:x.s.value})),note:why.value});
+    await ws.applyContentEvents([...events,e],readContent);goLocal({id:e.entity_id});return 'Запись сохранена. Ожидает публикации базы.'
+   },{retainForm:true}));
+   return stack(pane('Новая программа подготовки',back(),msg('Сначала подготовьте три активных шаблона по профессии. Здесь все три персональных документа создаются одной операцией, с проверкой сроков и общих СОП.'),templates(),grid(trainee.element,manager.element,f('Категория',category)),f('Основание',why)),...panels,pane('План смен стажировки',shiftBox,btn('Добавить смену',addShift)),create)
+  }
+  if(route.mode==='link'){
    const candidate=person('prep_trainee','Обучаемый',route.personId||'',{onChange:()=>refresh()}),manager=person('prep_manager','Руководитель'),category=simple('prep_category',kinds,'new'),why=note('prep_note'),picks={},shiftBox=el('div',undefined,'stack'),shifts=[],bounds=msg('');
    for(const k of ['adaptation','safety','internship'])picks[k]=select('prep_'+k,[]);
    const enrollments=rows(db,"SELECT e.*,p.title,p.standard_kind,p.version_no FROM training_enrollment e JOIN training_program p ON p.id=e.program_id WHERE e.state<>'cancelled' AND p.standard_kind IS NOT NULL ORDER BY e.start_on DESC");
@@ -38,7 +55,7 @@ export function standardWorkflowScreen(page,c,h,route){
    return pane('Новый комплект подготовки',back(),msg('Сначала создайте три шаблона и назначьте три персональных документа на одного сотрудника. Затем свяжите их до создания общих инструктажей. Срок стажировки и ОТ входят в период адаптации.'),templates(),grid(candidate.element,manager.element,f('Категория',category)),...Object.entries(picks).map(([k,v])=>f(PROGRAM_DOCS[k].title,v)),bounds,pane('План смен стажировки',shiftBox,btn('Добавить смену',addShift)),f('Основание подготовки',why),save('Связать три документа','twi_preparation',()=>({trainee_id:candidate.value,manager_id:manager.value,category:category.value,adaptation_id:picks.adaptation.value,safety_id:picks.safety.value,internship_id:picks.internship.value,shifts:shifts.map(x=>({date:x.d.value,shift_id:x.s.value})),note:why.value}),null,after))
   }
   const who=person('prep_filter','Сотрудник',route.personId||'',{optional:true,onChange:id=>goLocal({personId:id})});
-  return stack(pane('Подготовка сотрудников · приложения 2, 3, 4, 17',msg('Один комплект состоит из плана адаптации, программы ОТ и программы стажировки. Используются существующие шаблоны, назначения и факты. Данные сотрудника берутся из справочника.'),templates(),row(action('Создать комплект подготовки',()=>goLocal({mode:'new',personId:who.value})),btn('План ввода в профессию',()=>go('programs',{standardKind:'entry'}))),who.element,table(['Сотрудник','Категория','Период','Смен','Состояние',''],all.map(x=>[name(x.trainee_id),kinds[x.category],x.documents[0].start_on+' — '+x.documents[0].due_on,x.shifts.length,preparationState(x),btn('Открыть',()=>goLocal({id:x.id}))]))))
+  return stack(pane('Подготовка сотрудников · приложения 2, 3, 4, 17',msg('Один комплект состоит из плана адаптации, программы ОТ и программы стажировки. Используются существующие шаблоны, назначения и факты. Данные сотрудника берутся из справочника.'),templates(),row(action('Создать комплект подготовки',()=>goLocal({mode:'new',personId:who.value})),btn('Связать готовые документы',()=>goLocal({mode:'link',personId:who.value})),btn('План ввода в профессию',()=>go('programs',{standardKind:'entry'}))),who.element,table(['Сотрудник','Категория','Период','Смен','Состояние',''],all.map(x=>[name(x.trainee_id),kinds[x.category],x.documents[0].start_on+' — '+x.documents[0].due_on,x.shifts.length,preparationState(x),btn('Открыть',()=>goLocal({id:x.id}))]))))
  }
  function bank(){
   const all=bankRows(db),selected=all.find(x=>x.id===route.id),latest=selected&&all.find(x=>x.profession_id===selected.profession_id),title=x=>x?.profession_id?n('profession',x.profession_id):'Общий перечень';
