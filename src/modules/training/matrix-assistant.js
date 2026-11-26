@@ -1,3 +1,4 @@
+import {documentTitle} from '../library/revision-title.js';
 // LC4.4 matrix tools. No replacement of the assessment or permission engine.
 import {rows,one,invariant} from '../../core/db.js';
 import {matrixKey,columnChoices,matrixFromRecord} from './matrix-view.js';
@@ -6,7 +7,7 @@ export const columnIdentity=c=>c.document_id?c.skill_id+':'+c.document_id:c.skil
 export function matrixCatalog(db,unit='',workplace='',category=''){
  const ops=new Map(rows(db,'SELECT o.id,o.workplace_id,o.equipment_id,w.name workplace,e.name equipment FROM operation o LEFT JOIN workplace w ON w.id=o.workplace_id LEFT JOIN equipment e ON e.id=o.equipment_id').map(x=>[x.id,x]));
  const skills=new Map(rows(db,'SELECT s.id,c.name category FROM skill s JOIN skill_category c ON c.id=s.category_id').map(x=>[x.id,x.category]));
- const docs=new Map(rows(db,'SELECT id,code,title FROM document').map(x=>[x.id,x]));
+ const docs=new Map(rows(db,'SELECT id,code,title FROM document').map(x=>[x.id,{...x,title:documentTitle(db,x.id)}]));
  return columnChoices(db,unit,workplace,category).map(c=>({...c,workplace:ops.get(c.operation_id)?.workplace||'Без рабочего места',equipment:ops.get(c.operation_id)?.equipment||'Без оборудования',category:skills.get(c.skill_id)||'Операции по СОП',code:docs.get(c.document_id)?.code||'',documentTitle:docs.get(c.document_id)?.title||''}));
 }
 export function profileRequirements(db,day,scaleId){

@@ -1,3 +1,4 @@
+import {REVISION_TITLE_SQL} from '../library/revision-title.js';
 // Employee dossier: read-only projections of existing authoritative records.
 import {auditDetails,actionRows,actionStatus,actionPeople} from '../training/audit-domain.js';
 import {weightedHistory} from '../library/sop-assessment-review.js';
@@ -15,7 +16,7 @@ const goAssignment=(r,tab)=>r.assignment_id?link('twi',{id:r.assignment_id,tab})
 export function employeeRelations(db,id){
  const groups={matrices:[],training:[],assessments:[],mentoring:[],documents:[],development:[],history:[]};
  const query=sql=>rows(db,sql,[id]);
- const revision=rid=>one(db,'SELECT d.id document_id,d.code,d.title,r.version_no FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=?',[rid]);
+ const revision=rid=>one(db,`SELECT d.id document_id,d.code,${REVISION_TITLE_SQL} title,r.version_no FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=?`,[rid]);
  const revLabel=rid=>{const r=rid&&revision(rid);return r?r.code+' · '+r.title+' · v'+r.version_no:'—'};
  const ref=(t,id)=>id?one(db,'SELECT * FROM '+t+' WHERE id=?',[id])?.name||'—':'—';
  const person=id=>id?one(db,'SELECT display_name FROM person WHERE id=?',[id])?.display_name||'—':'—';
@@ -53,7 +54,7 @@ export function employeeRelations(db,id){
   groups.mentoring.push(item(r,'Аудит 1-го уровня · '+revLabel(r.standard_revision_id),roles(r,id,['mentor_id','auditor_id','trainee_id']),r.observed_at,r.state,link('audit',{auditId:r.id}),s?'Да '+s.yes+' / '+s.observed+'; отклонений '+s.no+' · '+(r.summary||''):r.summary||''));
   if(r.state==='final'&&(r.mentor_id===id||r.auditor_id===id))for(const q of a?.questions||[])if(q.response==='no')groups.mentoring.push(item({id:q.response_id},'Замечание · '+q.question,roles(r,id,['mentor_id','auditor_id']),r.observed_at,'registered',link('audit',{auditId:r.id}),q.recommendation||q.note||''))
  }
- for(const r of query('SELECT r.*,d.code,d.title FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.author_id=?1 OR EXISTS(SELECT 1 FROM document_approval a WHERE a.revision_id=r.id AND a.actor_id=?1) ORDER BY d.code,r.version_no DESC')){
+ for(const r of query(`SELECT r.*,d.code,${REVISION_TITLE_SQL} title FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.author_id=?1 OR EXISTS(SELECT 1 FROM document_approval a WHERE a.revision_id=r.id AND a.actor_id=?1) ORDER BY d.code,r.version_no DESC`)){
   const role=[r.author_id===id?'Автор':'',one(db,'SELECT id FROM document_approval WHERE revision_id=? AND actor_id=?',[r.id,id])?'Согласование':''].filter(Boolean).join(' · ');
   groups.documents.push(item(r,r.code+' · '+r.title+' · v'+r.version_no,role,r.created_at,r.state,docLink(r.document_id,r.id)))
  }
@@ -71,7 +72,7 @@ export function employeeRelations(db,id){
 // Old Stage43 JSON contains stable IDs inside detached originals, not in the
 // stored projection. Read only on request; never guess identities from names.
 export async function employeeSourceLinks(db,id,readContent,onProgress=()=>{}){
- const sources=[...rows(db,'SELECT r.id,r.document_id,d.code,d.title,r.version_no,r.created_at,r.state,r.payload_json data FROM document_revision r JOIN document d ON d.id=r.document_id').map(x=>({...x,kind:'sop'})),...rows(db,'SELECT id,title,observed_at created_at,state,context_json data FROM frv_study').map(x=>({...x,kind:'frv'}))];
+ const sources=[...rows(db,`SELECT r.id,r.document_id,d.code,${REVISION_TITLE_SQL} title,r.version_no,r.created_at,r.state,r.payload_json data FROM document_revision r JOIN document d ON d.id=r.document_id`).map(x=>({...x,kind:'sop'})),...rows(db,'SELECT id,title,observed_at created_at,state,context_json data FROM frv_study').map(x=>({...x,kind:'frv'}))];
  const result=[],errors=[];let count=0;
  for(const r of sources){try{
   const source=parse(r.data).source;if(!source){errors.push(r.title+' · нет ссылки на оригинал');continue}

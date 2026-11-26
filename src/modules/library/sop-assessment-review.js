@@ -1,8 +1,9 @@
+import {REVISION_TITLE_SQL} from './revision-title.js';
 // Independent corporate binary evaluations and historical weighted snapshots.
 import {rows,one,canonical} from '../../core/db.js';
 import {weightedResult} from './stage43-checklist.js';
 import {evaluationResult,sopCriteria} from './sop-review.js';
-const query=`SELECT e.*,d.id document_id,d.code,d.title,d.operation_id,r.version_no revision_no,r.state revision_state,v.version_no method_version,o.unit_id FROM sop_evaluation e JOIN document_revision r ON r.id=e.revision_id JOIN document d ON d.id=r.document_id JOIN checklist_version v ON v.id=e.method_id LEFT JOIN operation o ON o.id=d.operation_id`;
+const query=`SELECT e.*,d.id document_id,d.code,${REVISION_TITLE_SQL} title,d.operation_id,r.version_no revision_no,r.state revision_state,v.version_no method_version,o.unit_id FROM sop_evaluation e JOIN document_revision r ON r.id=e.revision_id JOIN document d ON d.id=r.document_id JOIN checklist_version v ON v.id=e.method_id LEFT JOIN operation o ON o.id=d.operation_id`;
 export function corporateEvaluations(db){
  return rows(db,query+' ORDER BY e.evaluated_on DESC,e.recorded_at DESC,e.id').map(e=>({...e,date:e.evaluated_on,score:evaluationResult(rows(db,'SELECT value FROM sop_evaluation_response WHERE evaluation_id=?',[e.id]),sopCriteria(db,e.method_id).length)}))
 }
@@ -10,7 +11,7 @@ export function corporateAnswers(db,id){
  return rows(db,'SELECT c.id,c.position,c.question,r.value,r.note FROM sop_evaluation_response r JOIN checklist_criterion c ON c.id=r.criterion_id WHERE r.evaluation_id=? ORDER BY c.position',[id]);
 }
 export function weightedHistory(db,revisionId=null){
- const sql=`SELECT e.id event_id,e.entity_id,e.occurred_at,e.payload_json,r.id revision_id,r.version_no revision_no,d.id document_id,d.code,d.title,d.operation_id,o.unit_id FROM change_event e JOIN sop_stage43_checklist c ON c.id=e.entity_id JOIN document_revision r ON r.id=c.revision_id JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=d.operation_id WHERE e.entity_type='sop_stage43_checklist'`;
+ const sql=`SELECT e.id event_id,e.entity_id,e.occurred_at,e.payload_json,r.id revision_id,r.version_no revision_no,d.id document_id,d.code,${REVISION_TITLE_SQL} title,d.operation_id,o.unit_id FROM change_event e JOIN sop_stage43_checklist c ON c.id=e.entity_id JOIN document_revision r ON r.id=c.revision_id JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=d.operation_id WHERE e.entity_type='sop_stage43_checklist'`;
  return rows(db,sql+(revisionId?' AND r.id=?':'')+' ORDER BY e.occurred_at DESC,e.id',revisionId?[revisionId]:[]).map(e=>{const p=JSON.parse(e.payload_json);return {...e,id:e.event_id,date:e.occurred_at.slice(0,10),actor_id:p.actor_id,source_sha256:p.source.sha256,questions:p.rows,score:weightedResult(p.rows),methodKey:canonical(p.rows.map(q=>[q.id,q.req,q.weight]))}});
 }
 export function sopCriterionSource(db,kind,id,criterionId){

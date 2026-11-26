@@ -1,3 +1,4 @@
+import {REVISION_TITLE_SQL} from '../library/revision-title.js';
 // Corporate appendix 6: roster rows, ordered SOP columns and dated totals.
 // Blank/unconfirmed is not a zero. Planning never grants a qualification.
 import {rows,one,canonical,invariant} from '../../core/db.js';
@@ -16,7 +17,7 @@ export function matrixRoster(db,day,unit='',shift='',profession=''){
 export function columnChoices(db,unit='',workplace='',category=''){
  const units=new Set(unit?rows(db,'WITH RECURSIVE scope(id) AS (SELECT ? UNION SELECT u.id FROM org_unit u JOIN scope s ON u.parent_id=s.id) SELECT id FROM scope',[unit]).map(x=>x.id):[]);
  const ops=new Map(rows(db,'SELECT * FROM operation WHERE archived=0').filter(o=>(!unit||units.has(o.unit_id))&&(!workplace||o.workplace_id===workplace)).map(o=>[o.id,o]));
- const docs=rows(db,"SELECT d.id,d.code,d.title,d.operation_id FROM document d JOIN document_revision r ON r.document_id=d.id WHERE d.kind='sop' AND d.archived=0 AND r.state='effective' ORDER BY d.code,d.title").filter(d=>ops.has(d.operation_id));
+ const docs=rows(db,`SELECT d.id,d.code,${REVISION_TITLE_SQL} title,d.operation_id FROM document d JOIN document_revision r ON r.document_id=d.id WHERE d.kind='sop' AND d.archived=0 AND r.state='effective' ORDER BY d.code,title`).filter(d=>ops.has(d.operation_id));
  const skills=rows(db,'SELECT s.*,c.name category FROM skill s JOIN skill_category c ON c.id=s.category_id WHERE s.archived=0 AND c.archived=0 ORDER BY c.name,s.name');
  const out=[];
  for(const d of docs){

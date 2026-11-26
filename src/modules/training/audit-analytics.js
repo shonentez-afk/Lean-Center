@@ -1,8 +1,9 @@
+import {REVISION_TITLE_SQL} from '../library/revision-title.js';
 import {rows} from '../../core/db.js';
 import {scoreQuestions,actionRows,actionStatus} from './audit-domain.js';
 export const pctText=v=>v===null?'—':(Math.round(v*10)/10).toLocaleString('ru-RU')+'%';
 export function auditRegistry(db){
- return rows(db,`SELECT a.*,v.version_no,c.code method_code,s.passed,s.observed,s.recorded,s.expected,s.critical_failures,s.score_pct,d.code sop_code,d.title sop_title,o.unit_id,t.shift_id FROM audit_session a JOIN checklist_version v ON v.id=a.version_id JOIN checklist c ON c.id=v.checklist_id LEFT JOIN v_audit_scores s ON s.id=a.id LEFT JOIN document_revision r ON r.id=a.standard_revision_id LEFT JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=a.operation_id LEFT JOIN training_assignment t ON t.id=a.assignment_id WHERE c.code='TWI_L1_RC1' ORDER BY a.observed_at DESC,a.id`);
+ return rows(db,`SELECT a.*,v.version_no,c.code method_code,s.passed,s.observed,s.recorded,s.expected,s.critical_failures,s.score_pct,d.code sop_code,${REVISION_TITLE_SQL} sop_title,o.unit_id,t.shift_id FROM audit_session a JOIN checklist_version v ON v.id=a.version_id JOIN checklist c ON c.id=v.checklist_id LEFT JOIN v_audit_scores s ON s.id=a.id LEFT JOIN document_revision r ON r.id=a.standard_revision_id LEFT JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=a.operation_id LEFT JOIN training_assignment t ON t.id=a.assignment_id WHERE c.code='TWI_L1_RC1' ORDER BY a.observed_at DESC,a.id`);
 }
 export function summarizeAudits(db,{versionId,from='',to='',mentorId='',unitId='',shiftId=''}={}){
  const all=auditRegistry(db).filter(a=>a.state==='final'&&a.version_id===versionId&&(!from||a.observed_at.slice(0,10)>=from)&&(!to||a.observed_at.slice(0,10)<=to)&&(!mentorId||a.mentor_id===mentorId)&&(!unitId||a.unit_id===unitId)&&(!shiftId||a.shift_id===shiftId));

@@ -1,3 +1,4 @@
+import {REVISION_TITLE_SQL} from '../library/revision-title.js';
 // LC5: one audit, explicit decisions and independently verified corrective actions.
 import {rows,one,invariant,isId} from '../../core/db.js';
 import {sopCriterionSource,sopEvidence,sopEffect} from '../library/sop-assessment-review.js';
@@ -48,7 +49,7 @@ export function actionSource(db,kind,id,criterionId=null){
  if(criterionId)return null;
  if(kind==='assignment'){const a=one(db,"SELECT * FROM training_assignment WHERE id=? AND state<>'cancelled' AND source_sha256 IS NOT NULL",[id]);return a?{kind,id,label:'Назначение обучения · '+a.assigned_on,subject_id:a.trainee_id,assignment_id:id,revision_id:a.sop_revision_id}:null}
 
- if(kind==='document_revision'){const x=one(db,'SELECT r.id,r.version_no,d.code,d.title FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=?',[id]);return x?{kind,id,label:'СОП · '+x.code+' · '+x.title+' · v'+x.version_no,revision_id:id}:null}
+ if(kind==='document_revision'){const x=one(db,`SELECT r.id,r.version_no,d.code,${REVISION_TITLE_SQL} title FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=?`,[id]);return x?{kind,id,label:'СОП · '+x.code+' · '+x.title+' · v'+x.version_no,revision_id:id}:null}
  if(kind==='frv_study'){const x=one(db,'SELECT id,title,state FROM frv_study WHERE id=?',[id]);return x?{kind,id,label:'ФРВ · '+x.title,study_id:id}:null}
  if(kind==='development_goal'){const x=one(db,'SELECT g.*,p.person_id FROM development_goal g JOIN development_plan p ON p.id=g.plan_id WHERE g.id=?',[id]);return x?{kind,id,label:'Цель развития · '+x.title,subject_id:x.person_id,goal_id:id}:null}
  return null

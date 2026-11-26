@@ -669,7 +669,7 @@ function libraryScreen(main,kind){
     if(libraryRevisionSelected)p.append(btn('Все версии СОП',()=>{libraryRevisionSelected=null;draw()}),el('p','Открыта редакция по связи из другого раздела.','muted'));
     for(const revision of versions.filter(x=>!libraryRevisionSelected||x.id===libraryRevisionSelected)){
      const data=JSON.parse(revision.payload_json),c=libraryContext(kind,v.id,revision.id),section=el('div',undefined,'library-version');section.dataset.revisionId=revision.id;
-     const header=add(el('div',undefined,'row'),el('strong','Версия '+revision.version_no+' · '+documentTitle(ws.working,v.id,revision.id)),el('span',revisionLabels[revision.state]||revision.state,'pill'),el('span',revision.created_at.slice(0,10),'muted'));
+     const header=add(el('div',undefined,'row'),el('strong','Версия '+revision.version_no),el('span',documentTitle(ws.working,v.id,revision.id)),el('span',revisionLabels[revision.state]||revision.state,'pill'),el('span',revision.created_at.slice(0,10),'muted'));
      section.append(header,el('p',sourceSummary(data),'muted'),el('p','Пересмотр: '+(revision.review_due||'дата не задана')+' · '+(revision.print_format==='portrait'?'А3 книжный':revision.print_format==='landscape'?'А3 альбомный':'формат не выбран')+' · Рабочее место: '+(revision.workplace_name||'не определено'),revision.review_due&&revision.review_due<today()&&revision.state==='effective'?'bad':'muted'),sourceDetails(data));
      const tabs=el('div',undefined,'library-tabs'),body=el('div',undefined,'library-tab-body');
      const steps=()=>tableOf(['№','Действие','Сек','Ключевые моменты','Почему важно'],data.projection.steps.map((s,i)=>[i+1,s.action,s.seconds,s.key_points.join('\n'),s.reason]));
