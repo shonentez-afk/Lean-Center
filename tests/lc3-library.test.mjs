@@ -116,6 +116,7 @@ test('Employee snapshots stay in immutable original, validate against printed fi
  const text=await pack();assert((await inspectSource(text,'sop')).source.sha256);raw.constructor.meta.approverName='Другое имя';await assert.rejects(inspectSource(await pack(),'sop'),/не соответствует/);
 });
 
+import {weightedHistory,sopCriterionSource} from '../src/modules/library/sop-assessment-review.js';
 import {stage43Checklist,weightedResult,stage43Checks} from '../src/modules/library/stage43-checklist.js';
 test('Stage43 checklist automatically projected, edited independently, guarded by exact source and preserved on backup',async()=>{
  const w=fresh(),{op,p}=masters(w),initial=await sop(),raw=JSON.parse(initial.text);
@@ -132,7 +133,7 @@ test('Stage43 checklist automatically projected, edited independently, guarded b
  assert.equal(JSON.parse(one(w.working,'SELECT payload_json FROM document_revision WHERE id=?',[d.id]).payload_json).source.sha256,s.source.sha256);
  const next={...payload,rows:changed.map((x,i)=>i===0?{...x,score:1}:i===1?{...x,comment:'Комментарий без оценки'}:x)};
  await w.applyContentEvents([event(w,'sop_stage43_checklist',e.entity_id,next)],readFrom(s));
- assert.equal(stage43Checks(w.working,d.id)[0].rev,2);
+ assert.equal(stage43Checks(w.working,d.id)[0].rev,2);const snapshots=weightedHistory(w.working,d.id);assert.equal(snapshots.length,2);assert.equal(snapshots.find(x=>x.id===e.id).questions[0].score,.7);assert.equal(sopCriterionSource(w.working,'weighted_sop',e.id,'1').weighted_position,1);assert.equal(sopCriterionSource(w.working,'weighted_sop',e.id,'2'),null);
  assert.equal(weightedResult(JSON.parse(stage43Checks(w.working,d.id)[0].rows_json)).seed,12,'A note must not confirm a seed score');
  await assert.rejects(w.applyContentEvents([event(w,'sop_stage43_checklist',null,payload)],readFrom(s)),/уже сохранён/);
  const backupData=await backup(w),restored=await restore(SQL,backupData,readFrom(s));assert.equal(stage43Checks(restored.working,d.id)[0].rev,2);restored.close();
