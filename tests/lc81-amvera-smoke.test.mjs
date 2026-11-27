@@ -84,3 +84,32 @@ test('pinned protected Amvera recipe: new storage, persistent state, offline bac
   const refusal=spawnSync(process.execPath,['server/lc81-maintenance.mjs','restore-new',backup,restored],{env:{...env,LC81_QA:'1'},encoding:'utf8',timeout:30000});assert.notEqual(refusal.status,0);
  }finally{try{await stop()}finally{await fs.rm(root,{recursive:true,force:true})}}
 });
+
+test('Amvera may reformat only the pinned QA deployment recipe; semantic changes remain denied',async()=>{
+ const file='amvera.yml',original=await fs.readFile(file),identity=cloudIdentity();
+ // Simulate a platform editor: no comment, CRLF, different indentation,
+ // changed key order and quoting of plain strings.
+ const formatted=[
+  'run:', '    persistenceMount: "/data"', '    containerPort: 8080',
+  '    scriptName: server/lc81-main.mjs # QA', 'meta:',
+  '    toolchain:', '        version: 22', "        name: 'npm'",
+  '    environment: node','build:',
+  '    additionalCommands: node tools/build_folder.mjs --cloud',''
+ ].join('\r\n');
+ try{
+  await fs.writeFile(file,formatted);
+  assert.deepEqual(cloudIdentity(),identity);
+  const variations=[
+   formatted.replace('server/lc81-main.mjs','server/main.mjs'),
+   formatted.replace('8080','9090'),formatted.replace('"/data"','"/tmp"'),
+   formatted.replace('--cloud','--cloud && echo unsafe'),
+   formatted.replace('version: 22','version: 20'),
+   formatted.replace('containerPort: 8080','containerPort: 8080\r\n    containerPort: 8080'),
+   formatted.replace('environment: node','environment: &e node'),
+   formatted+'extra: value\r\n',
+   formatted.replace('    environment: node','      environment: node')
+  ];
+  for(const text of variations){await fs.writeFile(file,text);assert.throws(()=>cloudIdentity(),/Cloud source changed: amvera.yml/)}
+ }finally{await fs.writeFile(file,original)}
+ assert.deepEqual(cloudIdentity(),identity);
+});

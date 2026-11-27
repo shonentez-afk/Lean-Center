@@ -1,6 +1,50 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+const gitBlob=bytes=>createHash('sha1').update(Buffer.from('blob '+bytes.length+'\0')).update(bytes).digest('hex');
+// Amvera may reserialize its root YAML when the user saves Configuration.
+// Only this exact, restricted LC8.1 recipe can be accepted in another
+// formatting. This is deliberately NOT a general YAML parser: reject aliases,
+// tags, duplicate/unknown fields, sequences, complex scalars and other modes.
+const qaRecipePath='deploy/lc81-amvera/amvera.yml';
+const qaFields=new Map([
+ ['meta.environment','node'],['meta.toolchain.name','npm'],['meta.toolchain.version',22],
+ ['build.additionalCommands','node tools/build_folder.mjs --cloud'],
+ ['run.scriptName','server/lc81-main.mjs'],['run.containerPort',8080],['run.persistenceMount','/data']
+]);
+const qaBlocks=new Set(['meta','meta.toolchain','build','run']);
+function qaRecipe(bytes){
+ const stack=[{indent:-1,key:'',childIndent:0}],seen=new Set();
+ for(let line of new TextDecoder('utf-8',{fatal:true}).decode(bytes).split(/\r?\n/)){
+  // The seven approved values contain no # characters. Inline comments
+  // are allowed only after whitespace. Anything ambiguous fails closed.
+  if(/^\s*(?:#.*)?$/.test(line))continue;
+  line=line.replace(/ +#.*$/,'').replace(/ +$/,'');
+  const m=/^( *)([A-Za-z][A-Za-z0-9]*):(?: +(.*))?$/.exec(line);
+  if(!m)return false;
+  const indent=m[1].length;while(stack.length>1&&indent<=stack.at(-1).indent)stack.pop();
+  const parent=stack.at(-1);
+  if(indent<=parent.indent||parent.childIndent!==undefined&&parent.childIndent!==indent)return false;
+  parent.childIndent=indent;
+  const key=parent.key?parent.key+'.'+m[2]:m[2];
+  if(seen.has(key))return false;seen.add(key);
+  if(m[3]===undefined){
+   if(!qaBlocks.has(key))return false;
+   stack.push({indent,key,childIndent:undefined});continue;
+  }
+  if(!qaFields.has(key))return false;
+  const expected=qaFields.get(key),raw=m[3];
+  if(typeof expected==='number'){if(raw!==String(expected))return false}
+  else if(raw!==expected&&raw!=="'"+expected+"'"&&raw!=='"'+expected+'"')return false;
+ }
+ return seen.size===qaFields.size+qaBlocks.size&&[...qaFields.keys(),...qaBlocks].every(k=>seen.has(k));
+}
+function formattedQaRecipe(root,bytes,expectedSha){
+ try{
+  const canonical=fs.readFileSync(path.join(root,qaRecipePath));
+  return gitBlob(canonical)===expectedSha&&qaRecipe(canonical)&&qaRecipe(bytes);
+ }catch{return false}
+}
 // A metadata-only child pins the actual source commit, allowing exact
 // diagnostics when Amvera builds without a .git directory.
 export function cloudIdentity(root=process.cwd()){
@@ -13,6 +57,13 @@ export function cloudIdentity(root=process.cwd()){
  for(const dir of ['src','server','db','tools'])walk(dir);
  actual.push('package.json','package-lock.json','amvera.yml','docs/DEPLOY_NETWORK_RU.md','baselines/sop-stage43/releases/stage43-sop-print-formats-20261125.html','baselines/sop-stage43/src/vendor/exceljs.min.js','baselines/sop-stage43/src/vendor/ExcelJS_LICENSE.txt');
  actual.sort();if(actual.length!==expected.size||actual.some(file=>!expected.has(file)))throw Error('Cloud source set changed');
- const hash=createHash('sha256');for(const file of actual){const bytes=fs.readFileSync(path.join(root,file));const sha=createHash('sha1').update(Buffer.from('blob '+bytes.length+'\0')).update(bytes).digest('hex');if(sha!==expected.get(file))throw Error('Cloud source changed: '+file);hash.update(file+'\0'+sha+'\n')}
+ const hash=createHash('sha256');for(const file of actual){
+  const bytes=fs.readFileSync(path.join(root,file)),sha=gitBlob(bytes),pinned=expected.get(file);
+  if(sha!==pinned){
+   if(file!=='amvera.yml'||!formattedQaRecipe(root,bytes,pinned))throw Error('Cloud source changed: '+file+' (expected '+pinned+', actual '+sha+')');
+   console.log('LC8.1 Amvera recipe: approved equivalent YAML formatting; canonical '+pinned+', actual '+sha);
+  }
+  hash.update(file+'\0'+pinned+'\n');
+ }
  return {sourceCommit:pin.sourceCommit,sourceFingerprint:hash.digest('hex')};
 }
