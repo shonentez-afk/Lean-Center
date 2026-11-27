@@ -541,6 +541,18 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.notEqual(ma.availability,'restricted');assert(ma.value>0);
   const detailMetrics=store.metricEvidence(manager.id,1,'metrics.read',scope,'training_assigned',0);
   assert.equal(detailMetrics.total,ma.value);assert(detailMetrics.items.every(q=>q.route?.type==='training'));
+  // The graph click and its evidence use the intersection of the displayed
+  // month and the selected period, not the whole calendar month.
+  assert(overview.cohortMonths.some(q=>q.assignments>0));
+  for(const month of overview.cohortMonths){
+   const monthFrom=month.id+'-01',monthTo=new Date(Date.UTC(Number(month.id.slice(0,4)),Number(month.id.slice(5,7)),0)).toISOString().slice(0,10);
+   const monthly={...scope,from:monthFrom>scope.from?monthFrom:scope.from,to:monthTo<scope.to?monthTo:scope.to};
+   for(const [id,count] of [['training_assigned',month.assignments],['training_completed',month.completed]]){
+    const evidence=store.metricEvidence(manager.id,1,'analytics.read',monthly,id,0);
+    assert.equal(evidence.value,count,id+' '+month.id);
+    assert(evidence.items.every(q=>q.route?.type==='training'));
+   }
+  }
   assert.notEqual(overview.metrics.find(m=>m.id==='sop_evaluations').availability,'restricted');
 
   assert(overview.currencies.some(x=>x.currency==='RUB'&&x.net===35000));
@@ -753,6 +765,45 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.throws(()=>store.subjectReport(otherEditor.id,1,{...reportScope,kind:'audit',method_id:rc.id}));
   const exportReport=await store.exportSubject(manager.id,1,{...reportScope,kind:'audit',method_id:rc.id});
   assert(exportReport.bytes.length>1000);assert.match(exportReport.filename,/\.xlsx$/);
+  // Known non-empty facts from the same transactional fixture, independent
+  // of whether the report panel happened to render.
+  const sourceRow=(report,id)=>report.tables.flatMap(t=>t.items).find(r=>r.route?.id===id);
+  assert.deepEqual(sourceRow(reports.audit,recordedAudit.id).cells.slice(-2),[19,20]);
+  assert(sourceRow(reports.practical,practical.id),'Missing actual practical assessment');
+  assert(sourceRow(reports.preparation,bundle.id),'Missing preparation record');
+  assert(sourceRow(reports.twi_effect,newTraining.id),'Missing completed assignment');
+  assert.equal(sourceRow(reports.sop,evaluation.id).cells.at(-1),95);
+  assert(reports.effect.tables.find(t=>t.title==='Деньги по валютам').items.some(r=>r.cells[0]==='RUB'&&r.cells.at(-1)===350),'Confirmed monetary fact differs');
+  assert(sourceRow(reports.actions,economicTask.id)||reports.actions.tables.some(t=>t.items.length>0),'Missing action records');
+  // Exercise all eleven reports on a 365-day synthetic slice and load every
+  // generated workbook. Compare sheet titles, headers and every data cell
+  // with the report's returned projection, including null versus zero.
+  // This is export parity, not an independent LC7 numerical comparison.
+  const yearFrom=new Date(Date.parse(today+'T00:00:00Z')-364*86400000).toISOString().slice(0,10);
+  const X=excelJS(),normalize=v=>v===null||v===undefined||v===''?null:v;
+  for(const [kind,short] of Object.entries(reports)){
+   const request={...short.scope,from:yearFrom};
+   const report=store.subjectReport(manager.id,1,request);
+   const file=await store.exportSubject(manager.id,1,request),book=new X.Workbook();
+   await book.xlsx.load(Buffer.from(file.bytes));
+   assert.equal(book.worksheets.length,report.tables.length+1,kind);
+   const info=book.getWorksheet('Основания');
+   assert(info);assert.equal(info.getCell('A3').value,'Период');
+   assert.equal(info.getCell('B3').value,yearFrom);assert.equal(info.getCell('C3').value,today);
+   for(const [index,table] of report.tables.entries()){
+    const sheet=book.worksheets[index+1];
+    assert.equal(sheet.getRow(1).cellCount,table.headers.length,kind+' headers');
+    for(const [col,header] of table.headers.entries())assert.equal(sheet.getCell(1,col+1).value,header,kind+' header');
+    for(const [row,item] of table.items.entries())for(const [col,cell] of item.cells.entries()){
+     assert.equal(normalize(sheet.getCell(row+2,col+1).value),normalize(cell),kind+' '+table.title+' row '+(row+1)+' col '+(col+1));
+    }
+   }
+   assert.match(file.filename,/\.xlsx$/);
+   if(kind==='frv'&&yearFrom<='2026-01-20'&&today>='2026-01-20'){
+    const measured=sourceRow(report,frv.id);
+    assert(measured,'Missing historical FRV source');assert.equal(measured.cells[4],12);
+   }
+  }
   const method=builtinRC1Method(),raw={schemaVersion:3,audits:[{id:'QA-RC1-ARCHIVE-001',date:today,instructor:{name:'Исторический инструктор'},trainer:{name:'Исторический ВТ'},trainee:{name:''},job:{name:'Историческая операция'},checklistVersion:method.id,responses:{[method.keys[0]]:{value:0.5,note:'Исходная оценка'},[method.keys[1]]:{value:0,note:''}},improvementComment:'Архивный факт'}],correctiveActions:[{id:'QA-HIST-ACTION',problem:'Историческое отклонение'}],auditCycles:[],auditChangeLog:[],mobileImportLog:[]};
   const before=store.historyList(manager.id,1,0).total;
   const preview=await store.previewHistory(manager.id,1,{raw,offset:0});
