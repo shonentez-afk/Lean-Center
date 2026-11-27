@@ -25,10 +25,10 @@ try{
  const createPerson=async(unit,code,name)=>(await store.changeDirectory(admin.id,1,{type:'person',operation:'create',id:null,expected_revision:0,fields:{unit_id:unit,employee_code:code,display_name:name}})).id;
  const p1=await createPerson(a,'BROWSER-A','Учебный управляющий'),p2=await createPerson(b,'BROWSER-B','Учебный сотрудник Б');
  const am=await ref('role_assignment',{person_id:p1,role_id:MANAGER_ROLE,valid_from:day,valid_to:null}),readerRole=await ref('business_role',{code:'QA-READER',name:'Чтение участка'}),ar=await ref('role_assignment',{person_id:p2,role_id:readerRole,valid_from:day,valid_to:null});
- await store.setPolicy(admin.id,{role_id:readerRole,revision:0,permissions:['person.read_directory','org.read']});
+ await store.setPolicy(admin.id,{role_id:readerRole,revision:0,permissions:['person.read_directory','org.read','audit.read','audit.detail','audit.history.read','forms.read','plan.read']});
  const manager=await store.createAccount(admin.id,{person_id:p1,login:'manager',password:managerPassword,generate:false}),reader=await store.createAccount(admin.id,{person_id:p2,login:'reader',password:readerPassword,generate:false});
  await store.grant(admin.id,{account_id:manager.id,assignment_id:am,scope:{kind:'unit_tree',unit_id:site},valid_to:null});
- await store.grant(admin.id,{account_id:reader.id,assignment_id:ar,scope:{kind:'unit_tree',unit_id:b},valid_to:null});
+ const readerGrant=await store.grant(admin.id,{account_id:reader.id,assignment_id:ar,scope:{kind:'unit_tree',unit_id:b},valid_to:null});
  proxy=https.createServer({key:await fs.readFile(key),cert:await fs.readFile(cert)},(req,res)=>{
   const upstream=http.request({hostname:'127.0.0.1',port:server.address().port,path:req.url,method:req.method,headers:req.headers},r=>{res.writeHead(r.statusCode,r.headers);r.pipe(res)});
   upstream.on('error',()=>{res.writeHead(502);res.end()});req.pipe(upstream);
@@ -268,6 +268,26 @@ try{
  assert.equal(await r.p.locator('#nav [data-action="sop.constructor"]').count(),0);
  assert(await r.p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'mobile page overflow');
  const blocked=await r.p.evaluate(async()=>{const x=await fetch('/api/lc81/admin');return x.status});assert.equal(blocked,403);
+ // QA-01: names of rights alone are insufficient to expose a workspace.
+ assert.equal(await r.p.locator('#nav [data-action="audit.history.read"]').count(),0);
+ assert.equal(await r.p.locator('#nav [data-action="forms.read"]').count(),0);
+ assert.equal(await r.p.locator('#nav [data-action="plan.read"]').count(),1);
+ // QA-04: inject one failed read, then open a working section. This tests
+ // banner lifecycle without weakening the real server's policy decisions.
+ const failUrl='**/api/lc81/resources?action=org.read';
+ await r.p.route(failUrl,route=>route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({error:'QA: отказ предыдущего раздела'})}),{times:1});
+ const goReader=async(p,k)=>{if(await p.locator('#menu').isVisible()&&await p.locator('#menu').getAttribute('aria-expanded')!=='true')await button(p,'Меню').click();const nav=p.locator('#nav [data-action="'+k+'"]'),group=nav.locator('xpath=ancestor::details');if(await group.count()&&!await group.evaluate(e=>e.open))await group.locator('summary').click();await nav.click()};
+ await goReader(r.p,'org.read');await r.p.locator('#status.error').filter({hasText:'QA: отказ предыдущего раздела'}).waitFor();
+ await goReader(r.p,'person.read_directory');await r.p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();await r.p.locator('#status.error').waitFor({state:'detached'});
+ // QA-03: no navigation/reload is needed to invalidate already shown data.
+ const second=await r.ctx.newPage();second.on('pageerror',e=>errors.push(e.message));await second.goto(url);
+ await second.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();
+ await store.revoke(admin.id,readerGrant.id);
+ for(const p of [r.p,second]){
+  await p.bringToFront();await p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor({state:'detached',timeout:20000});
+  await p.getByText('Вам пока не назначены права на рабочие разделы.',{exact:false}).waitFor();
+ }
+ await second.close();
  const aa=await profile('admin',adminPassword,{width:1440,height:900});
  await aa.p.getByRole('heading',{name:'Пользователи и права доступа',exact:true}).waitFor();
  assert(await aa.p.locator('#nav [data-action=admin]').count());
@@ -283,7 +303,9 @@ try{
  assert.equal(await r.p.locator('#workspace').isVisible(),false);
  assert.deepEqual(errors,[]);
  await fs.mkdir('artifacts',{recursive:true});
+ await m.p.bringToFront();await m.p.locator('html:not(.lc81-access-check)').waitFor();
  await m.p.screenshot({path:'artifacts/lc81-manager.png',fullPage:true});
+ await aa.p.bringToFront();await aa.p.locator('html:not(.lc81-access-check)').waitFor();
  await aa.p.screenshot({path:'artifacts/lc81-admin.png',fullPage:true});
  console.log('LC8.1 HTTPS browser: corporate shell, scoped UI edits, dirty guard, mobile and revocation PASS');
 }finally{

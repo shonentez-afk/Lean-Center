@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-store.mjs';
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
+import {workspaceActions} from './workspace-access.mjs';
 import {siteClock,normalizeZone,SITE_ZONE_KEY} from './site-clock.mjs';
 import {changeOwnPassword,resetAccountPassword,renameAccount,grantStatus,endRole,endEmployment} from './admin-commands.mjs';
 import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource} from './read-policy.mjs';
@@ -74,6 +75,20 @@ function requireAdmin(db,id,revision=undefined){const a=account(db,id);must(a?.b
 function sanitized(db,a){
  const p=a.person_id&&activePerson(db,a.person_id);
  return {id:a.id,person_id:a.person_id,login:a.login,state:a.state,display_name:p?.display_name||(a.bootstrap===1?'Администратор':'Сотрудник недоступен'),admin:a.bootstrap===1,credential_revision:a.credential_revision,permissions:a.state==='active'&&account(db,a.id)?permissionsFor(db,a):[]};
+}
+// A change in effective grants is significant even when their permission
+// union stays the same (e.g. one of two units is revoked). The scope epoch
+// includes changes to organizational/assigned resource relationships.
+function sessionView(db,a,withWorkspace=true){
+ const view=sanitized(db,a);
+ if(!withWorkspace)return view;
+ const d=day(db),sec=security(db,a.id),effective=sec.grants.filter(g=>grantStatus(db,g,d,config(db).site)==='effective').sort((x,y)=>x.id.localeCompare(y.id)).map(g=>[g.id,g.assignment_id,g.employment_id,g.policy_revision,g.scope,g.valid_from,g.valid_to]);
+ const restricted=effective.some(g=>g[4].kind!=='unit_tree'||g[4].unit_id!==config(db).site);
+ const assigned=effective.some(g=>g[4].kind==='assigned');
+ const types=restricted?['org_unit','person_assignment','person','operation','role_assignment',...(assigned?['training_assignment','training_enrollment','action_item','schedule_event']:[])]:[];
+ const epoch=types.length?one(db,'SELECT count(*) n FROM change_event WHERE entity_type IN ('+types.map(()=>'?').join(',')+')',types).n:0;
+ const stamp=createHash('sha256').update(JSON.stringify([a.id,a.credential_revision,d,view.permissions,effective,epoch])).digest('hex');
+ return {...view,workspace_actions:workspaceActions(db,trainingAccess(db,a,d),a.bootstrap===1),access_stamp:stamp};
 }
 function auditView(db){return rows(db,"SELECT a.id,a.actor_account_id,a.action,a.target_id,a.occurred_at,m.value reason FROM lc81_audit a LEFT JOIN lc81_meta m ON m.key='reason:'||a.target_id ORDER BY a.occurred_at DESC,a.id LIMIT 100")}
 function security(db,accountId){
@@ -320,9 +335,9 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   authenticate(login,password){return read(db=>{
    const name=normalizeLogin(login);const a=name&&one(db,'SELECT * FROM lc81_account WHERE login=?',[name]);
    const ok=verifyPassword(password,a?.password_hash);
-   return ok&&account(db,a.id)?sanitized(db,a):null;
+   return ok&&account(db,a.id)?sessionView(db,a):null;
   })},
-  session(id,revision){return read(db=>{const a=account(db,id);return a&&a.credential_revision===revision?sanitized(db,a):null})},
+  session(id,revision,withWorkspace=true){return read(db=>{const a=account(db,id);return a&&a.credential_revision===revision?sessionView(db,a,withWorkspace):null})},
   adminData(actor,revision){return read(db=>{
    requireAdmin(db,actor,revision);
    return {clock:siteClock(db),accounts:rows(db,'SELECT * FROM lc81_account ORDER BY login').map(a=>({...sanitized(db,a),employment_active:a.bootstrap===1||employment(db,a.person_id,day(db)).length===1})),

@@ -16,6 +16,7 @@ import {evaluationAccess} from './sop-evaluation-commands.mjs';
 import {programResource,personWorkResource,scheduleResource,trainingAssignmentResource,assessmentResource,auditResource,selfResource,enrollmentResource,preparationResource,developmentResource,taskResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
 import {civilPayload} from './site-clock.mjs';
+import {personalPlanWorkspace,reportScope} from './workspace-scope.mjs';
 const must=(x,s,m)=>{if(!x)throw new PilotError(s,m)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
 const validDate=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
@@ -137,7 +138,7 @@ export function changeSchedule(db,a,f){
 export function calendarWorkspace(db,a,{mode,from,to}){
  must(['calendar','plan'].includes(mode)&&validDate(from)&&validDate(to)&&from<=to&&Date.parse(to)-Date.parse(from)<=366*86400000,400,'Выберите период не более года');
  const personal=mode==='plan',self=personal?a.personId:null;
- if(personal){const r=self&&personWorkResource(db,[self],a.day);must(r&&allowed(a,'plan.read',self,{...r,self}),403,'Личный план доступен только связанному сотруднику')}
+ if(personal){must(personalPlanWorkspace(db,a),403,'Личный план доступен только связанному сотруднику')}
  else must(has(a,'calendar.read'),403,'Календарь недоступен');
  const items=[],add=(x,r,people)=>{
   if(!x.date||x.date>to||x.date<from&&!(personal&&x.pending&&x.date<a.day))return;
@@ -209,7 +210,7 @@ const scopePermissions=['center.read','analytics.read','metrics.read'];
 const scopes=(db,a,k)=>rows(db,'SELECT id,name FROM org_unit WHERE archived=0 ORDER BY name,id').filter(u=>a.read('org.read',u.id)&&allowed(a,k,u.id,unitResource(u.id)));
 export function centerOptions(db,a,k){
  must(scopePermissions.includes(k)&&has(a,k),403,'Раздел недоступен');
- const root=programResource(db),units=scopes(db,a,k),all=!!root&&allowed(a,k,root.units[0],root);
+ const {units,all}=reportScope(db,a,k);
  must(all||units.length,403,'Нет области аналитики');
  return {day:a.day,units,all,default_unit:all?'':units[0].id};
 }

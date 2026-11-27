@@ -5,11 +5,12 @@ import {one,rows,uuid,isId,canonical,meta,applyEvent} from '../../src/core/db.js
 import {rc1Plan,rc1Mapping,rc1Annulment,personMatch,verifyRC1Event} from '../../src/modules/training/rc1-import.js';
 import {programResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
+import {historyWorkspace} from './workspace-scope.mjs';
 const must=(x,s,m)=>{if(!x)throw new PilotError(s,m)};
 const exact=(x,k)=>x&&typeof x==='object'&&!Array.isArray(x)&&Object.keys(x).length===k.length&&k.every(y=>Object.hasOwn(x,y));
 const secret=randomBytes(32),hash=x=>createHash('sha256').update(canonical(x)).digest('hex');
 const site=(db,a,k)=>{const r=programResource(db);return !!r&&a.scope(k,r.units[0],r)};
-const permitted=(db,a)=>site(db,a,'audit.history.read')&&site(db,a,'audit.read')&&site(db,a,'audit.detail');
+const permitted=historyWorkspace;
 export function isHistoricalRC1(db,id){
  if(!isId(id))return false;
  return !!one(db,"SELECT m.target_id FROM legacy_mapping m JOIN audit_session a ON a.id=m.target_id WHERE m.source_system='TWI_RC1' AND m.source_entity='audit' AND m.target_entity='audit_session' AND m.target_id=? AND a.legacy_context_json IS NOT NULL",[id]);

@@ -34,7 +34,7 @@ async function harness(t,serverOptions={}){
   const m=method||(body!==undefined?'POST':'GET');
   if(m==='POST'){headers['Content-Type']='application/json';if(csrf){headers.Origin=otherOrigin||origin;headers['X-LC81-Request']='1'}}
   const r=await fetch(base+route,{method:m,headers,...(body!==undefined?{body:JSON.stringify(body)}:{})});
-  return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie'),cache:r.headers.get('cache-control')};
+  return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie'),cache:r.headers.get('cache-control'),retryAfter:r.headers.get('retry-after')};
  }
  async function login(login,password){
   const r=await request('/api/lc81/login',{body:{login,password}});
@@ -51,6 +51,7 @@ test('first admin, explicit existing roles, scoped views, blocking and restart',
  const h=await harness(t);
  assert.equal((await h.request('/api/lc81/session')).status,401);
  const a=await h.login('admin',h.adminPassword),ac=a.cookie;
+ const health=await h.request('/healthz');assert.equal(health.status,200);assert.equal(health.data.mode,'LC8.1-QA');assert.match(health.data.sourceCommit,/^[a-f0-9]{40}$/);
  assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,98);
  assert.equal((await h.request('/api/lc81/mobile-audit/options',{cookie:ac})).status,403);
  assert.equal((await h.request('/api/lc81/history/preview',{cookie:ac,body:{raw:{schemaVersion:3,audits:[]},offset:0}})).status,403);
@@ -147,7 +148,7 @@ test('login rate limit and CSRF checks apply before authentication',async t=>{
  const h=await harness(t);
  assert.equal((await h.request('/api/lc81/login',{body:{login:'admin',password:h.adminPassword},csrf:false})).status,403);
  for(let i=0;i<6;i++)assert.equal((await h.request('/api/lc81/login',{body:{login:'admin',password:secret()}})).status,401);
- assert.equal((await h.request('/api/lc81/login',{body:{login:'admin',password:h.adminPassword}})).status,429);
+ const blocked=await h.request('/api/lc81/login',{body:{login:'admin',password:h.adminPassword}});assert.equal(blocked.status,429);assert(Number(blocked.retryAfter)>0&&Number(blocked.retryAfter)<=300);
 });
 
 test('scoped directory write through HTTP: no self escalation or cross-unit change',async t=>{
@@ -273,4 +274,56 @@ test('site clock is explicit, immutable and preserves civil event offsets',async
  assert.equal((await h.request('/api/lc81/admin/clock',{cookie:ac,body:{zone:'UTC',confirmed:true}})).status,409);
  await h.stop();await assert.rejects(openSecureQA({dataDir:h.dataDir,siteTimeZone:'UTC'}),/Часовой пояс/);
  await h.start();assert.equal((await h.admin((await h.login('admin',h.adminPassword)).cookie)).clock.offset_minutes,420);
+});
+
+test('QA-01/03: workspace scopes and changed grant identity, not permission union',async t=>{
+ const h=await harness(t),admin=await h.login('admin',h.adminPassword),ac=admin.cookie,d=await h.admin(ac);
+ const ref=async(type,payload)=>(await h.post(ac,'reference',{type,payload})).id;
+ const u1=await ref('org_unit',{code:'NAV-A',name:'Учебный А',kind:'Участок',parent_id:d.site}),u2=await ref('org_unit',{code:'NAV-B',name:'Учебный Б',kind:'Участок',parent_id:d.site});
+ const person=async(code,u)=>(await h.request('/api/lc81/directory/change',{cookie:ac,body:{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:code,display_name:code,unit_id:u}}})).data.id;
+ const id=await person('NAV-COACH',u1),other=await person('NAV-AUDITOR',u2),role=await ref('business_role',{code:'NAV-ROLE',name:'Учебная роль'});
+ const assignment=await ref('role_assignment',{person_id:id,role_id:role,valid_from:day,valid_to:null}),assignment2=await ref('role_assignment',{person_id:other,role_id:role,valid_from:day,valid_to:null});
+ const rights=['person.read_basic','org.read','training.read','training.detail','plan.read','audit.read','audit.detail','audit.history.read','forms.read','analytics.read'];
+ await h.post(ac,'policy',{role_id:role,revision:0,permissions:rights});
+ const pw=secret(),pw2=secret(),coach=await h.post(ac,'account',{person_id:id,login:'nav-coach',password:pw,generate:false}),auditor=await h.post(ac,'account',{person_id:other,login:'nav-auditor',password:pw2,generate:false});
+ const issue=(account,assignment,scope)=>h.post(ac,'grant',{account_id:account,assignment_id:assignment,scope,valid_to:null});
+ await issue(coach.id,assignment,{kind:'assigned'});await issue(auditor.id,assignment2,{kind:'unit_tree',unit_id:u2});
+ const c=await h.login('nav-coach',pw),a=await h.login('nav-auditor',pw2);
+ const session=async cookie=>(await h.request('/api/lc81/session',{cookie})).data.user;
+ const plan='/api/lc81/calendar/view?mode=plan&from='+day+'&to='+day;
+ assert(c.user.permissions.includes('plan.read'));assert(!c.user.workspace_actions.includes('plan.read'));
+ assert.equal((await h.request(plan,{cookie:c.cookie})).status,403);
+ for(const k of ['audit.history.read','forms.read'])assert(!a.user.workspace_actions.includes(k));
+ assert.equal((await h.request('/api/lc81/history/options',{cookie:a.cookie})).status,403);
+ assert.equal((await h.request('/api/lc81/forms',{cookie:a.cookie})).status,403);
+ assert(a.user.workspace_actions.includes('analytics.read'));assert(a.user.workspace_actions.includes('plan.read'));
+ const own=await issue(coach.id,assignment,{kind:'self'}),fresh=await session(c.cookie);
+ assert(fresh.workspace_actions.includes('plan.read'));assert.notEqual(fresh.access_stamp,c.user.access_stamp);
+ assert.equal((await h.request(plan,{cookie:c.cookie})).status,200);
+ await h.post(ac,'revoke',{id:own.id});const after=await session(c.cookie);
+ assert.deepEqual(after.permissions,fresh.permissions);assert.notEqual(after.access_stamp,fresh.access_stamp);assert(!after.workspace_actions.includes('plan.read'));
+ const full=await issue(auditor.id,assignment2,{kind:'unit_tree',unit_id:d.site});
+ const wide=await session(a.cookie);assert(wide.workspace_actions.includes('audit.history.read')&&wide.workspace_actions.includes('forms.read'));
+ assert.equal((await h.request('/api/lc81/history/options',{cookie:a.cookie})).status,200);
+ assert.equal((await h.request('/api/lc81/forms',{cookie:a.cookie})).status,200);
+ await h.post(ac,'revoke',{id:full.id});const narrow=await session(a.cookie);
+ assert.deepEqual(narrow.permissions,wide.permissions);assert.notEqual(narrow.access_stamp,wide.access_stamp);
+ assert(!narrow.workspace_actions.includes('forms.read')&&!narrow.workspace_actions.includes('audit.history.read'));
+});
+test('QA-02: 32 distinct valid employees behind the same peer and password change',async t=>{
+ const h=await harness(t),admin=await h.login('admin',h.adminPassword),ac=admin.cookie,d=await h.admin(ac);
+ const accounts=[];
+ // Use the same protected store and full HTTP login path, not a mock.
+ for(let i=0;i<32;i++){
+  const id=(await h.request('/api/lc81/directory/change',{cookie:ac,body:{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:'SHIFT-'+i,display_name:'Учебный '+i,unit_id:d.site}}})).data.id;
+  const login='shift-'+i,password=secret();await h.post(ac,'account',{person_id:id,login,password,generate:false});accounts.push({login,password});
+ }
+ let last;
+ for(const a of accounts)last=await h.login(a.login,a.password);
+ assert(last.user.id);const password=secret();
+ const changed=await h.request('/api/lc81/password/change',{cookie:last.cookie,body:{current_password:accounts.at(-1).password,new_password:password}});assert.equal(changed.status,200);
+ await h.login(accounts.at(-1).login,password);
+ // The peer budget still counts failures; rotating login names cannot bypass.
+ for(let i=0;i<30;i++)assert.equal((await h.request('/api/lc81/login',{body:{login:'invalid-'+i,password:secret()}})).status,401);
+ const blocked=await h.request('/api/lc81/login',{body:{login:'shift-0',password:accounts[0].password}});assert.equal(blocked.status,429);assert(Number(blocked.retryAfter)>0);
 });

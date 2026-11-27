@@ -17,3 +17,8 @@
 /* Protected centre workspaces, using the same corporate tokens. */
 .lc81-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:12px 0}.lc81-cal-weekday{text-align:center;font-size:12px;color:var(--muted)}.lc81-calendar .lc81-cal-day{min-width:0;min-height:62px;padding:6px;display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;overflow:hidden}.lc81-cal-day small{font-size:11px;color:var(--muted);overflow-wrap:anywhere}.lc81-cal-day[data-today="1"]{border:2px solid var(--brand,#c72026)}.lc81-cal-day[data-late="1"]{border-bottom:3px solid var(--warn)}.lc81-chart{height:300px;min-width:0;width:100%}.lc81-kpi{display:block;font-size:22px;margin:8px 0}.lc81-grid .lc81-kpi{overflow-wrap:anywhere}.lc81-calendar+.tablewrap{margin-top:10px}
 @media(max-width:600px){.lc81-calendar{gap:2px}.lc81-calendar .lc81-cal-day{min-height:48px;padding:3px;font-size:12px}.lc81-cal-day small{font-size:9px}.lc81-chart{height:240px}}
+
+/* Retain dirty forms on transient network loss, but never show an unchecked view. */
+.lc81-access-check #workspace,.lc81-access-check #nav,.lc81-access-check #identity,.lc81-access-check .lc81-library-host,.lc81-access-check dialog{visibility:hidden!important;pointer-events:none!important}
+#access-check-notice{padding:12px;border:1px solid var(--line);background:var(--surface,#fff);color:var(--text,#242e40);margin:12px 0}
+#access-check-notice[hidden]{display:none}

@@ -7,6 +7,8 @@ import {askCenterCloud,CENTER_MODELS} from '../../src/modules/assistant/cloud.js
 import {PilotError} from '../lc74-store.mjs';
 import {normalizeLogin,tokenDigest} from './credentials.mjs';
 const COOKIE='__Host-lc81',SESSION_MS=8*60*60*1000,MAX_SESSIONS=256;
+const sourceCommit=JSON.parse(await fs.readFile(new URL('../../tools/cloud-source.json',import.meta.url),'utf8')).sourceCommit;
+if(!/^[a-f0-9]{40}$/.test(sourceCommit))throw Error('Missing LC8.1 source identity');
 const must=(ok,status,msg)=>{if(!ok)throw new PilotError(status,msg)};
 const publicFiles=new Map(await Promise.all([
  ['/', './portal.html','text/html; charset=utf-8'],
@@ -51,26 +53,35 @@ function rawCookie(req){
 const cookie=(s,maxAge)=>COOKIE+'='+s+'; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age='+maxAge;
 export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFetcher=globalThis.fetch}){
  const u=new URL(origin);must(u.protocol==='https:'&&u.origin===origin,503,'Требуется точный HTTPS origin');
- const sessions=new Map(),attempts=new Map();let active=0,loginBusy=0,libraryBusy=0,cloudBusy=0;
+ const sessions=new Map(),attempts=new Map(),pendingChecks=new Map();let active=0,loginBusy=0,libraryBusy=0,cloudBusy=0;
  const prune=now=>{for(const [k,v] of sessions)if(v.expires<=now)sessions.delete(k);for(const [k,v] of attempts)if(v.until<=now)attempts.delete(k)};
- const getSession=req=>{
+ const getSession=(req,withWorkspace=false)=>{
   const raw=rawCookie(req),key=raw&&tokenDigest(raw),s=key&&sessions.get(key);
   must(s&&s.expires>Date.now(),401,'Необходим вход');
-  const a=store.session(s.accountId,s.revision);if(!a){sessions.delete(key);throw new PilotError(401,'Сеанс завершён')}
+  const a=store.session(s.accountId,s.revision,withWorkspace);if(!a){sessions.delete(key);throw new PilotError(401,'Сеанс завершён')}
   return {a,key};
  };
- const limiter=(name,ip)=>{
+ // Failed authentication budgets, not successful shift logins. Keep the
+ // original thresholds and five-minute window. IP is the actual peer;
+ // untrusted Forwarded/X-Forwarded-For headers cannot bypass the limit.
+ const limitKeys=(kind,name,ip)=>[kind+':login:'+name,'auth:network:'+ip,'auth:global'];
+ const limited=(keys)=>{
   const now=Date.now();prune(now);
-  const ks=['login:'+name,'network:'+ip,'global'];const limits=[6,30,60];
-  for(let i=0;i<ks.length;i++)must((attempts.get(ks[i])?.count||0)<limits[i],429,'Слишком много попыток; повторите позже');
-  must(attempts.size<4096,429,'Слишком много попыток');
-  for(const k of ks){const old=attempts.get(k);attempts.set(k,{count:(old?.count||0)+1,until:old?.until||now+300000})}
+  const limits=[6,30,60];
+  let retry=0;
+  for(let i=0;i<keys.length;i++){const x=attempts.get(keys[i]);if((x?.count||0)+(pendingChecks.get(keys[i])||0)>=limits[i])retry=Math.max(retry,x?Math.max(1,Math.ceil((x.until-now)/1000)):1)}
+  if(attempts.size+keys.filter(k=>!attempts.has(k)).length>4096)retry=Math.max(retry,Math.max(1,Math.ceil((Math.min(...[...attempts.values()].map(x=>x.until))-now)/1000)));
+  if(retry){const e=new PilotError(429,'Слишком много неудачных попыток; повторите через '+retry+' сек.');e.retryAfter=retry;throw e}
  };
+ const reserve=keys=>{for(const k of keys)pendingChecks.set(k,(pendingChecks.get(k)||0)+1)};
+ const release=keys=>{for(const k of keys){const n=(pendingChecks.get(k)||1)-1;if(n)pendingChecks.set(k,n);else pendingChecks.delete(k)}};
+ const failed=keys=>{const now=Date.now();for(const k of keys){const x=attempts.get(k);attempts.set(k,{count:(x?.count||0)+1,until:x?.until||now+300000})}};
+
  const server=http.createServer(async(req,res)=>{
   if(active>=24){reply(res,429,{error:'Сервер занят'});return}active++;
   try{
    const url=new URL(req.url,'http://localhost'),p=url.pathname;
-   if(req.method==='GET'&&p==='/healthz'){reply(res,store.healthy?200:503,{ok:store.healthy,mode:'LC8.1-QA',complete:false});return}
+   if(req.method==='GET'&&p==='/healthz'){reply(res,store.healthy?200:503,{ok:store.healthy,mode:'LC8.1-QA',complete:false,sourceCommit});return}
    if(req.method==='GET'&&publicFiles.has(p)){const f=publicFiles.get(p);reply(res,200,f.bytes,f.type);return}
    // No legacy bearer authentication, full snapshot, source download or generic event package.
    must(!p.startsWith('/api/v1/'),404,'Маршрут недоступен в LC8.1');
@@ -80,21 +91,25 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
     const name=normalizeLogin(b.login)||'invalid';
     must(loginBusy<1,429,'Вход занят');loginBusy++;
     try{
-     limiter(name,req.socket.remoteAddress||'unknown');
-     const a=store.authenticate(b.login,b.password);must(a,401,'Неверный логин или пароль');
+     const keys=limitKeys('login',name,req.socket.remoteAddress||'unknown');limited(keys);
+     const a=store.authenticate(b.login,b.password);if(!a){failed(keys);throw new PilotError(401,'Неверный логин или пароль')}
      const old=rawCookie(req);if(old)sessions.delete(tokenDigest(old));
      prune(Date.now());must(sessions.size<MAX_SESSIONS,429,'Слишком много активных сеансов');
      const raw=randomBytes(32).toString('hex');sessions.set(tokenDigest(raw),{accountId:a.id,revision:a.credential_revision,expires:Date.now()+SESSION_MS});
      reply(res,200,{user:a},undefined,{'Set-Cookie':cookie(raw,SESSION_MS/1000)});return;
     }finally{loginBusy--}
    }
-   const {a,key}=getSession(req);
-   if(req.method==='GET'&&p==='/api/lc81/session'){reply(res,200,{user:a,mode:'LC8.1-QA'});return}
+   const {a,key}=getSession(req,p==='/api/lc81/session');
+   if(req.method==='GET'&&p==='/api/lc81/session'){reply(res,200,{user:a,mode:'LC8.1-QA',sourceCommit});return}
    if(req.method==='POST'&&p==='/api/lc81/logout'){sessions.delete(key);reply(res,200,{ok:true},undefined,{'Set-Cookie':cookie('',0)});return}
    if(req.method==='POST'&&p==='/api/lc81/password/change'){
     const f=await body(req);must(keys(f,['current_password','new_password']),400,'Неверные поля пароля');
-    limiter('password:'+a.id,req.socket.remoteAddress||'unknown');
-    const result=await store.changePassword(a.id,a.credential_revision,f);sessions.delete(key);
+    const keys=limitKeys('password',a.id,req.socket.remoteAddress||'unknown');limited(keys);
+    // Password changes are serialized by the checkpoint writer. Reserve a
+    // slot before awaiting verification and charge only a failed secret.
+    reserve(keys);
+    let result;try{result=await store.changePassword(a.id,a.credential_revision,f)}catch(e){if(e instanceof PilotError&&e.status===403)failed(keys);throw e}finally{release(keys)}
+    sessions.delete(key);
     reply(res,200,result,undefined,{'Set-Cookie':cookie('',0)});return;
    }
    if(req.method==='POST'&&['/api/lc81/admin/password-reset','/api/lc81/admin/login-change','/api/lc81/admin/role-end','/api/lc81/admin/employment-end','/api/lc81/admin/clock'].includes(p)){
@@ -276,7 +291,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
    }
    throw new PilotError(404,'Маршрут не найден');
   }catch(e){
-   if(!res.headersSent&&!res.destroyed)reply(res,e instanceof PilotError?e.status:503,{error:e instanceof PilotError?e.message:'Операция не подтверждена'});
+   if(!res.headersSent&&!res.destroyed)reply(res,e instanceof PilotError?e.status:503,{error:e instanceof PilotError?e.message:'Операция не подтверждена'},undefined,e.retryAfter?{'Retry-After':String(e.retryAfter)}:{});
    else if(!res.destroyed)res.destroy();
   }finally{active--}
  });

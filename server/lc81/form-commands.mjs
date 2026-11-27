@@ -21,6 +21,7 @@ import {trainingDetail} from './training-commands.mjs';
 import {matrixDetail} from './matrix-commands.mjs';
 import {assessmentDetail} from './competency-commands.mjs';
 import {PilotError} from '../lc74-store.mjs';
+import {formsWorkspace} from './workspace-scope.mjs';
 const must=(x,s,m)=>{if(!x)throw new PilotError(s,m)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
 const allowed=(a,k,id,r)=>!!r&&a.scope(k,id,r);
@@ -40,7 +41,7 @@ export function excelJS(){
 }
 const forms=STANDARD_FORMS.map(({id,title,notes,page})=>({id,title,notes,page,format:id===15?'DOCX':'XLSX'}));
 export function formsCatalog(db,a){
- const r=programResource(db);must(r&&allowed(a,'forms.read',r.units[0],r),403,'Бланки недоступны');
+ must(formsWorkspace(db,a),403,'Бланки недоступны');
  return {version:'03',forms,batch_types:a.personId&&a.permissions.includes('forms.export')?Object.entries(recordTypes).filter(([kind,t])=>kind!=='preparation_pack'&&a.permissions.includes(t.read)&&a.permissions.includes(t.detail)&&(!programFormKinds.has(kind)||programFormsAvailable(db,a))).map(([kind,t])=>({kind,read:t.read,appendix:t.appendix})):[]};
 }
 function blank(db,form){
