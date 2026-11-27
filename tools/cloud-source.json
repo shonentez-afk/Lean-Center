@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "84c97f52d4a10b4836086e0d492ee4d71060d6d7",
+  "sourceCommit": "f60b81572109425df89a0c279a5543289750dec1",
   "files": [
     {
       "path": "amvera.yml",
@@ -151,7 +151,7 @@
     },
     {
       "path": "server/lc81/form-commands.mjs",
-      "sha": "8f4dce7df9aac108f5a5cb9283c710d12d747067"
+      "sha": "fd70b3365de0364485da99e35dcba6fe298ffa4c"
     },
     {
       "path": "server/lc81/http.mjs",
@@ -203,11 +203,15 @@
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "828e1a6cfc2ca0ed4f3662c26248ae569f3cd118"
+      "sha": "c69a3759a5cff140411a4a6cc9f67306c6b28675"
     },
     {
       "path": "server/lc81/program-commands.mjs",
       "sha": "31d352395a9a69b7a1761d5cc898808eb5998047"
+    },
+    {
+      "path": "server/lc81/program-form-commands.mjs",
+      "sha": "7f7004863df38f2d26ad94fdc0fa339b7746cd8c"
     },
     {
       "path": "server/lc81/quality-commands.mjs",
@@ -231,7 +235,7 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "5813d726a60dbda2872bed6bc0b325b3ad9f41d9"
+      "sha": "aae012b7e7c92086c2034d64c0b2c84324555219"
     },
     {
       "path": "server/lc81/training-commands.mjs",
@@ -239,7 +243,7 @@
     },
     {
       "path": "server/lc81/training-ui.js",
-      "sha": "3035bd9490ce3ad02cfff9502ca88c3441253a9b"
+      "sha": "f56f85d7d4e8151498bd6051abb7195b9c24a30d"
     },
     {
       "path": "server/main.mjs",
