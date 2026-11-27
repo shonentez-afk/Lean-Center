@@ -594,11 +594,11 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const sopList=store.sopEvaluationWorkspace(manager.id,1,{kind:'sop_evaluation',from:today,to:today,q:'',method:null,offset:0});
   assert(sopList.items.some(x=>x.id===evaluation.id));assert(store.personCard(manager.id,1,x.f.actor).sections.some(s=>s.action==='sop.evaluation.read'&&s.items.some(x=>x.id===evaluation.id)));
   const sopTaskInput={source:{kind:'sop_evaluation',id:evaluation.id,criterion_id:sopMethod.criteria[0].id},title:'Устранение отклонения СОП',owner_id:x.f.trainee,due_on:due,kind:'corrective',priority:'normal'};
-  const sopTask=await store.createTask(manager.id,1,sopTaskInput);
+  const sopCorrectiveTask=await store.createTask(manager.id,1,sopTaskInput);
   await assert.rejects(store.createTask(manager.id,1,sopTaskInput),/уже есть/);
-  assert(store.sopEvaluationDetail(manager.id,1,'sop_evaluation',evaluation.id).tasks.some(x=>x.id===sopTask.id));
-  const completedSop=await store.implementOwnTask(worker.id,1,{id:sopTask.id,expected_revision:sopTask.rev,result:'Учебная коррекция'});
-  await assert.rejects(store.changeTask(manager.id,1,{id:sopTask.id,expected_revision:completedSop.rev,command:'verify',fields:{outcome:'effective',evidence:'Не подтверждено повторной оценкой',audit_id:null,assessment_id:null,sop_evaluation_id:null,weighted_event_id:null}}),/Эффект не подтверждён/);
+  assert(store.sopEvaluationDetail(manager.id,1,'sop_evaluation',evaluation.id).tasks.some(x=>x.id===sopCorrectiveTask.id));
+  const completedSop=await store.implementOwnTask(worker.id,1,{id:sopCorrectiveTask.id,expected_revision:sopCorrectiveTask.rev,result:'Учебная коррекция'});
+  await assert.rejects(store.changeTask(manager.id,1,{id:sopCorrectiveTask.id,expected_revision:completedSop.rev,command:'verify',fields:{outcome:'effective',evidence:'Не подтверждено повторной оценкой',audit_id:null,assessment_id:null,sop_evaluation_id:null,weighted_event_id:null}}),/Эффект не подтверждён/);
   const metric=store.metricEvidence(manager.id,1,'metrics.read',scope,'sop_evaluations',0);
   assert(metric.items.some(q=>q.route?.type==='sop_evaluation'&&q.route.id===evaluation.id));
   const pack=await store.exportForm(manager.id,1,{kind:'preparation_pack',appendix:null,id:bundle.id});
