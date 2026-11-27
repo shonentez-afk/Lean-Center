@@ -1,9 +1,9 @@
 {
-  "sourceCommit": "bafcd00b6c2bd1eb649f714e3202e81f6d12654f",
+  "sourceCommit": "0aa89af785e3006346751fbb2d23370b9dd442ae",
   "files": [
     {
       "path": "amvera.yml",
-      "sha": "2f5cf62f4061ad28b0ddfd12c82a00f5163a2004"
+      "sha": "d88b6ba0307b86588fb87f6051a1a95013632771"
     },
     {
       "path": "baselines/sop-stage43/releases/stage43-sop-print-formats-20261125.html",
