@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "0aa89af785e3006346751fbb2d23370b9dd442ae",
+  "sourceCommit": "dd98d42eb8ddb1cd321612e5cc9d6d1233d13668",
   "files": [
     {
       "path": "amvera.yml",
@@ -687,7 +687,7 @@
     },
     {
       "path": "tools/cloud-identity.mjs",
-      "sha": "78c50a452a6f1f7158ab832b9ca333b1a374023a"
+      "sha": "dd0bf37c6578d31ad17395f62c9452e9d5bcbda4"
     },
     {
       "path": "tools/import_sop_baseline.py",
