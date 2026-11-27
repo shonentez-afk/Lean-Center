@@ -32,3 +32,19 @@
 .lc81-ai-confirm{width:min(760px,calc(100% - 24px));max-height:90vh;overflow:auto;padding:20px;border:1px solid var(--line);border-radius:var(--radius);color:var(--text);background:var(--surface,#fff)}
 .lc81-ai-confirm::backdrop{background:rgba(0,0,0,.55)}.lc81-ai-confirm .row{justify-content:flex-end;margin-top:12px;flex-wrap:wrap}
 .lc81-ai-payload{white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow:auto;padding:12px;background:var(--surface-alt);border:1px solid var(--line);font-size:12px}
+
+/* LC8.1-PARITY: readable linked cards, compact corporate chrome. */
+.lc81-card-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:8px 0;border-bottom:1px solid var(--line);margin:8px 0 12px}
+.lc81-card-tabs button{font-size:13px;padding:7px 10px}
+.lc81-card-tabs button.active{border-color:var(--brand,#c72026);color:var(--brand,#c72026);font-weight:600;background:var(--surface-alt)}
+.lc81-number-link,.lc81-kpi-link{color:inherit;text-decoration:underline;text-underline-offset:3px;background:transparent;border:0;text-align:left;cursor:pointer}
+.lc81-number-link{padding:3px 6px;min-height:0}
+.lc81-overview-cell{display:block;min-width:42px;text-align:center;padding:6px;border:1px solid var(--line);color:#242e40;background:var(--surface-alt)}
+.lc81-overview-cell[data-level="1"]{background:#d9e2f3}.lc81-overview-cell[data-level="2"]{background:#ffff00}.lc81-overview-cell[data-level="3"]{background:#ffd966}.lc81-overview-cell[data-level="4"]{background:#ff7c80}
+.lc81-overview-cell.lc81-gap{border-bottom:3px solid var(--warn)}
+.lc81-notice{padding:5px 9px;margin-bottom:8px;font-size:12px}
+#page-heading{padding-block:4px;margin-block:0 10px}
+#page-heading h1{margin-block:0}
+#status{margin-bottom:8px}
+@media(min-width:761px){.main{padding-top:12px}.corp-header{min-height:54px;padding-block:6px}}
+@media(max-width:760px){.corp-header{padding:6px 10px;gap:5px}.header-meta{gap:4px;flex-wrap:wrap}.header-meta .version{font-size:11px}.lc81-login-name{max-width:145px;font-size:12px}.header-meta button{padding:5px 8px;min-height:30px;font-size:12px}.main{padding-top:7px}.lc81-notice{font-size:11px;margin-bottom:5px}#page-heading{margin-bottom:6px}.lc81-card-tabs button{font-size:12px;padding:6px 8px}}

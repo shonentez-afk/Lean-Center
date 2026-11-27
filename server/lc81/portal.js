@@ -39,7 +39,7 @@ function refreshIndicator(){
 const note=(text,bad=false)=>{statusVersion++;const s=$('status');s.hidden=!text;s.textContent=text;s.className='status'+(bad?' error':'');refreshIndicator()};
 async function api(url,data,signal){
  const generation=authGeneration;
- const options={cache:'no-store',credentials:'same-origin',...(signal?{signal}:{})},write=data!==undefined&&!['login','logout','library/open','tasks/options','matrix/suggest','roi/twi-preview','import/inspect','import/preview','mobile-audit/preview','mobile-audit/receipt','assistant/context','assistant/preview','assistant/cloud','editor/ai','history/preview','analytics/report'].includes(url);
+ const options={cache:'no-store',credentials:'same-origin',...(signal?{signal}:{})},write=data!==undefined&&!['login','logout','library/open','tasks/options','matrix/suggest','matrix/overview','roi/twi-preview','import/inspect','import/preview','mobile-audit/preview','mobile-audit/receipt','assistant/context','assistant/preview','assistant/cloud','editor/ai','history/preview','analytics/report'].includes(url);
  if(data!==undefined)Object.assign(options,{method:'POST',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:JSON.stringify(data)});
  if(write){saving=true;saveFailed=false;refreshIndicator()}
  try{

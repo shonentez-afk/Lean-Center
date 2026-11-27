@@ -175,7 +175,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   return row.childElementCount?row:'Только чтение';
  }
  function detailButton(r,action,title){
-  const d=el('div'),out=el('div'),id=r.revision_id||r.id;
+  const d=el('div'),out=el('div'),id=action==='frv.read_summary'?r.id:r.revision_id;
   const btn=button(title,async()=>{
    if(out.childElementCount){out.replaceChildren();return}
    const {data}=await api('library/detail?action='+encodeURIComponent(action)+'&id='+encodeURIComponent(id));

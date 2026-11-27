@@ -127,7 +127,7 @@ export function matrixOverview(db,a,f,canCard){
 export function profileOptions(db,a){
  must(siteRight(db,a,'requirement.read')&&a.permissions.includes('skill.read'),403,'Профили профессий недоступны');
  const professions=refOptions(db,a,'profession','profession.read'),scales=scaleFor(db).filter(s=>a.read('scale.read',s.id)&&JSON.stringify(rows(db,'SELECT value FROM rating_level WHERE scale_id=? ORDER BY value',[s.id]).map(x=>x.value))==='[1,2,3,4]');
- return {day:a.day,professions,scales,can_edit:!!a.personId&&siteRight(db,a,'requirement.create')&&siteRight(db,a,'requirement.close')};
+ return {day:a.day,professions,scales,levels:LEVEL_TEXT,can_edit:!!a.personId&&siteRight(db,a,'requirement.create')&&siteRight(db,a,'requirement.close')};
 }
 export function professionProfile(db,a,professionId,scaleId,effective){
  const o=profileOptions(db,a);

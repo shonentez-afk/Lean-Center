@@ -150,7 +150,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   if(!discard())return;
   const d=await api('matrix/detail?id='+encodeURIComponent(id)),n=panel(d.code+' · '+d.title+' · v'+d.version_no,el('p','Срез '+d.base_on+' · факт '+d.day+' · цель '+d.target_on+' · пустая ячейка: нет сопоставимого факта.','muted'));
   const headings=['Сотрудник','Должность',...d.columns.map(c=>c.title),'Исходный','Факт','Цель','Потребность'];
-  const rows=d.roster.map((r,i)=>[r.name,r.position,...d.cells[i].map(x=>{const cell=el('div',x.actual??'—','lc81-matrix-cell');if(x.actual!==null)cell.dataset.level=String(x.actual);cell.title='Срез: '+(x.base??'—')+' · Цель: '+(x.target??'—')+' · Потребность: '+(x.need??'—')+' · '+x.reason+' · '+x.admission;return cell}),d.byPerson[i].base,d.byPerson[i].actual,d.byPerson[i].target,d.byPerson[i].need]);
+  const detail=el('div'),rows=d.roster.map((r,i)=>[r.can_card?button(r.name,()=>card(detail,r.person_id)):r.name,r.position,...d.cells[i].map(x=>{const cell=el('div',x.actual??'—','lc81-matrix-cell');if(x.actual!==null)cell.dataset.level=String(x.actual);cell.title='Срез: '+(x.base??'—')+' · Цель: '+(x.target??'—')+' · Потребность: '+(x.need??'—')+' · '+x.reason+' · '+x.admission;return cell}),d.byPerson[i].base,d.byPerson[i].actual,d.byPerson[i].target,d.byPerson[i].need]);
   rows.push(['ИТОГО','',...d.bySkill.map(x=>x.actual),d.totals.base,d.totals.actual,d.totals.target,d.totals.need]);n.append(table(headings,rows));
   n.append(el('p',Object.entries(d.levels).map(([k,v])=>k+' — '+v).join(' · ')+' · Цели без факта: '+d.totals.unknown,'muted'));
   if(d.can_develop){
@@ -160,7 +160,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   }
   if(d.can_revise)n.append(button('Создать новую версию матрицы',()=>matrixEditor(host,d),'primary'));
   if(d.can_retire)n.append(groups('Закрыть матрицу',[input('reason','Причина')],'Закрыть',async f=>{await api('matrix/retire',{id:d.id,expected_revision:d.rev,reason:value(f,'reason')});note('Матрица закрыта');await render()}));
-  appendExports(n,d);n.append(assistant({type:'matrix',id}));setContent(host,n);
+  appendExports(n,d);n.append(detail,assistant({type:'matrix',id}));setContent(host,n);
  }
  async function generalMatrix(host){
   if(!discard())return;
@@ -196,15 +196,15 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   n.append(el('p','Профиль использует действующий реестр требований. При изменении прежний период закрывается предыдущим днём. Для изменения существующего требования выберите дату не раньше завтра.'),profession,scale,effective,button('Открыть профиль',async()=>{
    if(!discard())return;
    const read=()=>({profession_id:profession.querySelector('select').value,scale_id:scale.querySelector('select').value,effective:effective.querySelector('input').value});
-   const query=read(),d=await api('matrix/profile?'+new URLSearchParams(query)),grid=el('div'),search=input('profile_search','Поиск навыка','search',false),bulk=optional('profile_bulk','Уровень для видимых навыков',Object.entries(LEVEL_TEXT)),entries=new Map(d.items.map(x=>[x.id,{level:x.level,criticality:x.criticality,dirty:false}]));
+   const query=read(),d=await api('matrix/profile?'+new URLSearchParams(query)),grid=el('div'),search=input('profile_search','Поиск навыка','search',false),bulk=optional('profile_bulk','Уровень для видимых навыков',Object.entries(o.levels)),entries=new Map(d.items.map(x=>[x.id,{level:x.level,criticality:x.criticality,dirty:false}]));
    const shown=()=>d.items.filter(x=>[x.name,x.category].join(' ').toLocaleLowerCase('ru-RU').includes(search.querySelector('input').value.trim().toLocaleLowerCase('ru-RU')));
    let holder;
    function draw(){
     const groups=new Map();for(const x of shown()){if(!groups.has(x.category))groups.set(x.category,[]);groups.get(x.category).push(x)}
     grid.replaceChildren(...[...groups].map(([category,items])=>panel(category,table(['Навык','Целевой уровень','Критичность','Прежнее требование'],items.map(x=>{
-     const v=entries.get(x.id),level=optional('level_'+x.id,'Уровень',Object.entries(LEVEL_TEXT)),critical=select('critical_'+x.id,'Критичность',Object.entries(criticalityNames));
+     const v=entries.get(x.id),level=optional('level_'+x.id,'Уровень',Object.entries(o.levels)),critical=select('critical_'+x.id,'Критичность',Object.entries(criticalityNames));
      level.querySelector('select').value=v.level??'';critical.querySelector('select').value=v.criticality;
-     for(const f of [level,critical]){f.querySelector('select').disabled=!x.editable;f.querySelector('select').addEventListener('change',()=>{v.level=level.querySelector('select').value?Number(level.querySelector('select').value):null;v.criticality=critical.querySelector('select').value;v.dirty=true;holder.lcResetForm?.();holder.dataset.profileDirty='1'})}
+     for(const f of [level,critical]){f.querySelector('select').disabled=!x.editable;f.querySelector('select').addEventListener('change',()=>{v.level=level.querySelector('select').value?Number(level.querySelector('select').value):null;v.criticality=critical.querySelector('select').value;v.dirty=true;holder.dataset.profileDirty='1'})}
      return [x.name,level,critical,x.level===null?'Нет':x.level+' · с '+x.valid_from+(x.scale_id!==d.scale_id?' · другая шкала':'')];
     })))));
    }

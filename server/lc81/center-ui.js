@@ -22,9 +22,9 @@ export function createCenterUI({api,run,button,panel,table,el,input,select,form,
  const bounds=m=>({from:m+'-01',to:iso(new Date(Date.UTC(Number(m.slice(0,4)),Number(m.slice(5,7)),0)))});
  const query=(p,params)=>p+'?'+new URLSearchParams(params);
  const save=async(path,data,message)=>{await api(path,data);note(message);await render()};
- async function scheduleEditor(host){
+ async function scheduleEditor(host,initialType='audit'){
   if(!discard())return;
-  const type=pick('type','Вид планового события',Object.entries(scheduleNames),'audit'),out=el('div');
+  const type=pick('type','Вид планового события',Object.entries(scheduleNames),initialType),out=el('div');
   const choose=button('Выбрать вид',async()=>{
    if(!discard())return;const t=type.querySelector('select').value,d=await api(query('calendar/options',{type:t}));
    if(!d.sources.length){out.replaceChildren(empty('Нет доступных источников для планирования. Проверьте назначение обучения и роли.'));return}
@@ -62,8 +62,8 @@ export function createCenterUI({api,run,button,panel,table,el,input,select,form,
   async function draw(){
    const period=personal?{from:from.querySelector('input').value,to:to.querySelector('input').value}:bounds(month.querySelector('input').value);
    const d=await api(query('calendar/view',{mode,...period,...(personId?{person_id:personId}:{})})),sub=el('div'),list=el('div');
-   const open=d.items.filter(x=>x.pending),late=d.items.filter(x=>x.overdue),n=panel(personal?(personId?'План работы сотрудника':'Мой план работы'):(personId?'Календарь сотрудника · ':'Календарь · ')+period.from.slice(0,7),el('p','Дата центра '+d.day+' (UTC) · '+d.items.length+' событий · открыто '+open.length+' · просрочено '+late.length));
-   if(d.can_plan)n.append(button('Запланировать аудит / оценку',()=>scheduleEditor(sub),'primary'));
+   const open=d.items.filter(x=>x.pending),late=d.items.filter(x=>x.overdue),n=panel(personal?(personId?'План работы сотрудника':'Мой план работы'):(personId?'Календарь сотрудника · ':'Календарь · ')+period.from.slice(0,7),el('p','Дата центра '+d.day+' · '+d.items.length+' событий · открыто '+open.length+' · просрочено '+late.length));
+   if(d.can_plan){const commands=el('div',undefined,'row');commands.append(button('Запланировать аудит',()=>scheduleEditor(sub,'audit'),'primary'),button('Запланировать оценку',()=>scheduleEditor(sub,'practical')),button('Запланировать самооценку',()=>scheduleEditor(sub,'self_eval')));n.append(commands)}
    if(personal){
     const filter=pick('filter','Показать',[['open','Открытые и просроченные'],['all','Все события'],['late','Только просроченные']],'open');
     const show=()=>{const f=filter.querySelector('select').value;list.replaceChildren(agenda(f==='open'?open:f==='late'?late:d.items,sub))};
@@ -92,7 +92,7 @@ export function createCenterUI({api,run,button,panel,table,el,input,select,form,
  // Manual dates stay manual; relative periods follow the enterprise day.
  let reportSelection=null,pendingMetric=null;
  const resetReports=()=>{reportSelection=null;pendingMetric=null};
- const focusMetric=(id,scope)=>{pendingMetric={id,scope};reportSelection={...scope,preset:'custom'}};
+ const focusMetric=(id,scope)=>{pendingMetric={id,scope};const prior=reportSelection;reportSelection={...scope,preset:prior&&prior.from===scope.from&&prior.to===scope.to&&prior.unit_id===scope.unit_id?prior.preset:'custom'}};
  const presetBounds=(day,preset)=>{
   const month=Number(day.slice(5,7)),start=preset==='year'?1:preset==='quarter'?Math.floor((month-1)/3)*3+1:month;
   return {from:day.slice(0,4)+'-'+String(start).padStart(2,'0')+'-01',to:day};
@@ -174,7 +174,7 @@ export function createCenterUI({api,run,button,panel,table,el,input,select,form,
    }
   }
   const choosePreset=key=>async()=>{if(!discard())return;preset=key;const b=presetBounds(d.day,key);from.querySelector('input').value=b.from;to.querySelector('input').value=b.to;await draw()};
-  for(const field of [unit,from,to])field.querySelector('input,select').addEventListener('change',()=>{if(field!==unit)preset='custom';drawSerial++;out.replaceChildren(empty('Фильтры изменены. Нажмите «Обновить» для общего обзора.'));saveSelection()});
+  for(const field of [unit,from,to])field.querySelector('input,select').addEventListener('change',()=>{if(!discard()){const saved=reportSelection;if(saved){unit.querySelector('select').value=saved.unit_id;from.querySelector('input').value=saved.from;to.querySelector('input').value=saved.to}return}if(field!==unit)preset='custom';drawSerial++;out.replaceChildren(empty('Фильтры изменены. Нажмите «Обновить» для общего обзора.'));saveSelection()});
   root.append(panel('Область и период',el('p','Единая область для дашборда, аналитики, подробных отчётов и дерева показателей.','muted'),unit,from,to,button('Месяц',choosePreset('month')),button('Квартал',choosePreset('quarter')),button('Год',choosePreset('year')),button('Обновить',async()=>{if(discard())await draw()},'primary')),out);
   await draw();return root;
  }

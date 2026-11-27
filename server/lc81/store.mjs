@@ -731,7 +731,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   matrixInfo(actor,revision,unit=null,baseOn=null,filters={}){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return matrixInfo(db,a,unit,baseOn??a.day,filters)})},
   saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
   retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
-  matrixDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...matrixDetail(db,a,id),forms:documentLinks(db,a,id,["matrix"])}})},
+  matrixDetail(actor,revision,id){return read(db=>{const user=checkedAccount(db,actor,revision),d=day(db),a=trainingAccess(db,user,d),v=matrixDetail(db,a,id);return {...v,roster:v.roster.map(row=>({...row,can_card:cardAllowed(db,user,row.person_id,d)})),forms:documentLinks(db,a,id,["matrix"])}})},
   personCard(actor,revision,id){return read(db=>{
    const a=checkedAccount(db,actor,revision),d=day(db),access=trainingAccess(db,a,d),v=libraryAccess(db,a,d);
    must(cardAllowed(db,a,id,d),404,'Карточка сотрудника недоступна');
@@ -846,8 +846,8 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
      const o=subjectOptions(db,access);
      canEffect=o.reports.some(r=>r.id==='twi_effect')&&subjectOptions(db,access,'twi_effect').revisions.some(r=>r.id===id);
     }
-    const rev=history?projectView(db,a,'sop.read_history',history.data,d):entry.data;
     const pub=effective?projectView(db,a,'sop.read_effective',effective.data,d):null;
+    const rev=history?projectView(db,a,'sop.read_history',history.data,d):(pub||entry.data);
     return {day:d,revision:rev,versions,measured,evaluations:sopEvaluationsForRevision(db,access,id),can_evaluation:access.permissions.includes('sop.evaluation.read')&&!!history,can_effectiveness:canEffect,can_public:!!effective&&v.allows('sop.read_public','sop.read_effective',id),can_steps:!!v.read('sop.read_steps',id),can_twi:!!pub?.can_twi,can_linked_frv:!!pub?.can_linked_frv};
    });
   },
