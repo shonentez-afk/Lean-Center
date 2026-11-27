@@ -104,11 +104,11 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
    if(req.method==='POST'&&p==='/api/lc81/logout'){sessions.delete(key);reply(res,200,{ok:true},undefined,{'Set-Cookie':cookie('',0)});return}
    if(req.method==='POST'&&p==='/api/lc81/password/change'){
     const f=await body(req);must(keys(f,['current_password','new_password']),400,'Неверные поля пароля');
-    const keys=limitKeys('password',a.id,req.socket.remoteAddress||'unknown');limited(keys);
+    const budgetKeys=limitKeys('password',a.id,req.socket.remoteAddress||'unknown');limited(budgetKeys);
     // Password changes are serialized by the checkpoint writer. Reserve a
     // slot before awaiting verification and charge only a failed secret.
-    reserve(keys);
-    let result;try{result=await store.changePassword(a.id,a.credential_revision,f)}catch(e){if(e instanceof PilotError&&e.status===403)failed(keys);throw e}finally{release(keys)}
+    reserve(budgetKeys);
+    let result;try{result=await store.changePassword(a.id,a.credential_revision,f)}catch(e){if(e instanceof PilotError&&e.status===403)failed(budgetKeys);throw e}finally{release(budgetKeys)}
     sessions.delete(key);
     reply(res,200,result,undefined,{'Set-Cookie':cookie('',0)});return;
    }
