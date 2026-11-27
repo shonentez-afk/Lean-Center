@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "187a9e4be86102a8f5fd6568c84f8868d5547096",
+  "sourceCommit": "dcbf9010b546bde87413aba0a49fcf69d67edcbb",
   "files": [
     {
       "path": "amvera.yml",
@@ -119,7 +119,7 @@
     },
     {
       "path": "server/lc81/competency-commands.mjs",
-      "sha": "080923d11f3640097d6be563fac4df8c7b0a6ac8"
+      "sha": "95c6988df5afb9ac43e1809bcf37b90b9e4bc584"
     },
     {
       "path": "server/lc81/credentials.mjs",
