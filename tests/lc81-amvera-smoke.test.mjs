@@ -106,7 +106,7 @@ test('pinned protected Amvera recipe: new storage, persistent state, offline bac
   const options={bundleFile:upload,expectedSha:sha,dataDir:imported,password:newPassword,siteTimeZone:'UTC'};
   await assert.rejects(restoreUploadedQA({...options,dataDir:wrong,expectedSha:'0'.repeat(64)}),/Контрольная сумма/);
   await assert.rejects(fs.stat(wrong),{code:'ENOENT'});
-  const importEnv={LC81_IMPORT_FILE:upload,LC81_IMPORT_SHA256:sha,LC81_BOOTSTRAP_ADMIN_PASSWORD:newPassword,LC81_INIT:'0'};
+  const importEnv={LC81_IMPORT_FILE:upload,LC81_IMPORT_SHA256:sha,LC_BOOTSTRAP_ADMIN_PASSWORD:newPassword,LC81_INIT:'0'};
   client=await start(imported,false,importEnv,newPassword);
   const importedData=await admin(client);
   assert(importedData.units.some(x=>x.id===id));assert(importedData.accounts.some(x=>x.id===workerId&&x.login==='import-worker'));
