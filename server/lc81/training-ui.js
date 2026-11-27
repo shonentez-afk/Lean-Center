@@ -123,7 +123,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const d=await api('person/card?id='+encodeURIComponent(id)),n=panel('Карточка сотрудника · '+d.person.display_name,el('p',[d.person.employee_code,d.person.unit,d.person.position].filter(Boolean).join(' · ')));
   for(const s of d.sections){
    const details=el('details');details.append(el('summary',s.title+' · '+s.items.length));
-   const labels={code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',people:'Сотрудников',skills:'Навыков'};
+   const labels={code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',people:'Сотрудников',skills:'Навыков'};
    const keys=Object.keys(labels).filter(k=>s.items.some(r=>Object.hasOwn(r,k))),sub=el('div');
    const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):'']);
    details.append(table([...keys.map(k=>labels[k]),'Действия'],rows),sub);n.append(details);
@@ -131,5 +131,30 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   if(!d.sections.length)n.append(el('p','Нет связанных записей, доступных вашей учётной записи.'));
   setContent(host,n);
  }
- return {training,matrices,card};
+ function mentor(kind,items,info){
+  const names={credential:'Документы о подготовке наставников',appointment:'Приказы о назначении',authorization:'Полномочия по операциям'};
+  const roles={instructor:'Инструктор',mentor:'Наставник',internal_trainer:'Внутренний тренер'},types={certificate:'Сертификат',attendance:'Свидетельство'};
+  const host=el('div'),n=panel(names[kind]),status=r=>r.revoked_at?'Отозван':kind==='authorization'?(r.valid_now?'Действует':'Не действует на текущую дату'):'Зарегистрирован';
+  const headers=kind==='credential'?['Сотрудник','Вид','Роль','Выдан','Действует до']:kind==='appointment'?['Сотрудник','Роль','Дата приказа','С','По']:['Сотрудник','Операция','С','По'];
+  n.append(items.length?table([...headers,'Состояние','Действия'],items.map(r=>[
+   ...(kind==='credential'?[r.person_name,types[r.kind]||r.kind,roles[r.role]||r.role,r.issued_on,r.valid_until]:kind==='appointment'?[r.person_name,roles[r.role]||r.role,r.order_on,r.valid_from,r.valid_to]:[r.person_name,r.operation_name,r.valid_from,r.valid_to]),
+   status(r),r.can_revoke?button('Отозвать',()=>{if(!discard())return;host.replaceChildren(panel('Отзыв записи',form([input('reason','Основание отзыва')],'Подтвердить отзыв',async f=>{await api('mentor/change',{kind,command:'revoke',id:r.id,expected_revision:r.rev,fields:{reason:value(f,'reason')}});note('Отзыв зарегистрирован');await render()})))}):'Только чтение'])):empty());
+  if(info){
+   const pick=(k,l,arr)=>select(k,l,[['','Выберите'],...arr]),people=opts(info.people,'display_name'),signers=opts(info.signers,'display_name'),optionalDate=(k,l)=>input(k,l,'date',false);
+   let controls,keys,optionalKeys;
+   if(kind==='credential'){
+    controls=[pick('person_id','Сотрудник',people),pick('kind','Вид документа',Object.entries(types)),pick('role','Роль',Object.entries(roles)),input('number','Номер'),input('issuer','Кем выдан'),dt('issued_on','Дата выдачи',info.day),optionalDate('valid_until','Действует до'),input('evidence','Реквизиты подтверждающего документа')];
+    keys=['person_id','kind','role','number','issuer','issued_on','valid_until','evidence'];optionalKeys=['valid_until'];
+   }else if(kind==='appointment'){
+    controls=[pick('credential_id','Сертификат',opts(info.credentials,'label')),input('order_number','Номер приказа'),dt('order_on','Дата приказа',info.day),pick('approved_by','Кто подписал бумажный приказ',signers),dt('valid_from','Действует с',info.day),optionalDate('valid_to','Действует до'),dt('acknowledged_on','Дата ознакомления',info.day),input('evidence','Реквизиты подписанного приказа')];
+    keys=['credential_id','order_number','order_on','approved_by','valid_from','valid_to','acknowledged_on','evidence'];optionalKeys=['valid_to'];
+   }else{
+    controls=[pick('appointment_id','Действующий приказ',opts(info.appointments,'label')),pick('operation_id','Операция',info.operations.map(r=>[r.id,r.code+' · '+r.name])),dt('valid_from','Действует с',info.day),optionalDate('valid_to','Действует до')];
+    keys=['appointment_id','operation_id','valid_from','valid_to'];optionalKeys=['valid_to'];
+   }
+   n.append(button(kind==='authorization'?'Оформить полномочие':'Зарегистрировать документ',()=>{if(!discard())return;host.replaceChildren(panel(kind==='authorization'?'Право обучать по операции':'Фактический документ (не электронная подпись)',form(controls,'Сохранить',async f=>{const fields=Object.fromEntries(keys.map(k=>[k,optionalKeys.includes(k)?value(f,k)||null:value(f,k)]));await api('mentor/change',{kind,command:'register',id:null,expected_revision:0,fields});note('Запись подтверждена сервером');await render()})))},'primary'));
+  }
+  n.append(host);return n;
+ }
+ return {training,matrices,card,mentor};
 }

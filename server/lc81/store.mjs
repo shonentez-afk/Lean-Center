@@ -12,6 +12,7 @@ import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop} from './training-commands.mjs';
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
+import {mentorOptions,changeMentor,mentorView} from './mentor-commands.mjs';
 import {requestDigest,getReceipt,addReceipt} from './library-receipts.mjs';
 import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,inspectLibraryText,saveLibrary,passportLibrary,finalizeLibrary,detailDescriptor,projectLibraryDetail,libraryReadAction} from './library-commands.mjs';
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
@@ -101,6 +102,7 @@ function projectView(db,a,action,data,d){
   const access=trainingAccess(db,a,d),resource=trainingAssignmentResource(db,data.id,d);
   return {...data,trainee_name:one(db,'SELECT display_name FROM person WHERE id=?',[data.trainee_id])?.display_name||'',operation_name:one(db,'SELECT name FROM operation WHERE id=?',[data.operation_id])?.name||'',can_detail:access.allows('training.detail',data.id,resource),can_sop:access.allows('training.read_sop',data.id,resource)};
  }
+ if(['credential.read','appointment.read','authorization.read'].includes(action))return mentorView(db,trainingAccess(db,a,d),action.split('.')[0],data);
  if(action==='matrix.read'){
   const m=one(db,'SELECT * FROM competency_matrix WHERE id=?',[data.id]),r=matrixResource(db,m.unit_id,JSON.parse(m.roster_json),JSON.parse(m.columns_json),d,m.base_on);
   return {...data,can_detail:trainingAccess(db,a,d).allows('matrix.detail',data.id,r)};
@@ -383,6 +385,8 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   changeTraining(actor,revision,input){return mutate(db=>changeTraining(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   trainingDetail(actor,revision,id){return read(db=>trainingDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
   trainingSop(actor,revision,id){return read(db=>trainingSop(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
+  changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   matrixInfo(actor,revision,unit=null,baseOn=null){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return matrixInfo(db,a,unit,baseOn??a.day)})},
   saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},

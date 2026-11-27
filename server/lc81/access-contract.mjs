@@ -19,6 +19,7 @@ export const RESOURCE_TABLES=Object.freeze({
  "preparation.read":"twi_preparation",
  "credential.read":"mentor_credential",
  "appointment.read":"mentor_appointment",
+ "authorization.read":"mentor_authorization",
  "development.read":"development_plan",
  "audit.read":"audit_session",
  "supplement.read":"twi_supplement",
@@ -35,7 +36,7 @@ export const DIRECTORIES=Object.freeze({
 });
 export const DIRECTORY_COMMANDS=Object.freeze(Object.values(DIRECTORIES).flatMap(d=>[d.create,d.update,d.archive].filter(Boolean)));
 export const LIBRARY_COMMANDS=Object.freeze(['sop.create','sop.edit_draft','sop.revise','sop.passport','sop.from_frv','frv.create','frv.edit_draft','frv.finalize']);
-export const TRAINING_COMMANDS=Object.freeze(['training.create','training.approve_responsible','training.approve_head','training.reschedule','training.cancel','training.stage','training.verify','training.practical','training.qualify','training.admit','matrix.create','matrix.retire']);
+export const TRAINING_COMMANDS=Object.freeze(['training.create','training.approve_responsible','training.approve_head','training.reschedule','training.cancel','training.stage','training.verify','training.practical','training.qualify','training.admit','matrix.create','matrix.retire','credential.register','credential.revoke','appointment.register','appointment.revoke','authorization.register','authorization.revoke']);
 export const COMMAND_ACTIONS=Object.freeze(['task.implement_own',...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS]);
 export const DETAIL_ACTIONS=Object.freeze(['sop.read_photo','sop.read_twi','sop.read_linked_frv','frv.read_summary','training.detail','training.read_sop','matrix.detail','person.read_card']);
 export const PERMISSIONS=Object.freeze([...READ_ACTIONS,...COMMAND_ACTIONS,...DETAIL_ACTIONS]);

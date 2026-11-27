@@ -62,6 +62,25 @@ try{
  await m.p.getByRole('row').filter({has:m.p.getByRole('cell',{name:'BROWSER-C',exact:true})}).getByRole('button',{name:'Изменить',exact:true}).click();
  await m.p.locator('.lc81-editor input[name=display_name]').fill('Учебный исправленный');
  await button(m.p,'Сохранить').click();await m.p.getByRole('cell',{name:'Учебный исправленный',exact:true}).waitFor();
+ // Register and revoke a real document through the protected HTTPS forms.
+ const mentorNav=m.p.locator('#nav [data-action="credential.read"]'),mentorGroup=m.p.locator('#nav details').filter({has:mentorNav});
+ if(!await mentorGroup.evaluate(e=>e.open))await mentorGroup.locator('summary').click();
+ await mentorNav.click();
+ await button(m.p,'Зарегистрировать документ').click();
+ await m.p.locator('#content select[name=person_id]').selectOption(p2);
+ await m.p.locator('#content select[name=kind]').selectOption('certificate');
+ await m.p.locator('#content select[name=role]').selectOption('instructor');
+ await m.p.locator('#content input[name=number]').fill('QA-BROWSER-CERT');
+ await m.p.locator('#content input[name=issuer]').fill('Учебный центр');
+ await m.p.locator('#content input[name=evidence]').fill('Учебный сертификат');
+ await button(m.p,'Сохранить').click();
+ await m.p.getByRole('cell',{name:'Зарегистрирован',exact:true}).waitFor();
+ assert.equal(store.listResources(manager.id,'credential.read').length,1);
+ await button(m.p,'Отозвать').click();
+ await m.p.locator('#content input[name=reason]').fill('Учебный отзыв');
+ await button(m.p,'Подтвердить отзыв').click();
+ await m.p.getByRole('cell',{name:'Отозван',exact:true}).waitFor();
+ assert(store.listResources(manager.id,'credential.read')[0].revoked_at);
  // Real pinned Stage43 working copy in a sandboxed HTTPS iframe.
  const op=(await store.changeDirectory(admin.id,1,{type:'operation',operation:'create',id:null,expected_revision:0,fields:{unit_id:a,equipment_id:null,workplace_id:null,code:'QA-EDIT-SOP',name:'Учебная операция',criticality:'normal'}})).id;
  const source=await makeSop('Учебный шаг с фото');

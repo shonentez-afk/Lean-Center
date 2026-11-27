@@ -80,6 +80,19 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.throws(()=>store.adminData(manager.id),/администратора/);
   const ms=store.session(manager.id,1);assert(ms);
   assert(ms.permissions.includes('person.create'));
+  const mentorCmd=(kind,fields,id=null,rev=0)=>({kind,command:id?'revoke':'register',id,expected_revision:rev,fields});
+  const mentorDay=new Date().toISOString().slice(0,10);
+  const certificateFields={person_id:x.f.mentor,kind:'certificate',role:'instructor',number:'LC81-REGISTERED',issuer:'Учебный центр',issued_on:mentorDay,valid_until:null,evidence:'Синтетический сертификат'};
+  assert(store.mentorOptions(manager.id,1,'credential').people.some(p=>p.id===x.f.mentor));
+  await assert.rejects(store.changeMentor(admin.id,1,mentorCmd('credential',certificateFields)),/команда|недоступна/i);
+  await assert.rejects(store.changeMentor(manager.id,1,mentorCmd('credential',{...certificateFields,registered_by:x.f.mentor})),/реквизиты/);
+  await assert.rejects(store.changeMentor(manager.id,1,mentorCmd('credential',{...certificateFields,person_id:x.f.actor})),/Самоназначение/);
+  const registered=await store.changeMentor(manager.id,1,mentorCmd('credential',certificateFields));
+  const registeredOrder=await store.changeMentor(manager.id,1,mentorCmd('appointment',{credential_id:registered.id,order_number:'LC81-REGISTERED-ORDER',order_on:mentorDay,approved_by:x.f.actor,valid_from:mentorDay,valid_to:null,acknowledged_on:mentorDay,evidence:'Синтетический приказ'}));
+  assert(store.listResources(manager.id,'appointment.read').some(r=>r.id===registeredOrder.id&&r.can_revoke));
+  await assert.rejects(store.changeMentor(manager.id,1,mentorCmd('authorization',{appointment_id:registeredOrder.id,operation_id:x.f.operation,valid_from:mentorDay,valid_to:null})),/пересекающееся/);
+  await assert.rejects(store.changeMentor(manager.id,1,mentorCmd('credential',{reason:'Исправление'},registered.id,registered.rev+1)),/изменена/);
+
   const command=(type,operation,id,expected_revision,fields)=>({type,operation,id,expected_revision,fields});
   const person=await store.changeDirectory(manager.id,1,command('person','create',null,0,{employee_code:'LC81-NEW',display_name:'Новый учебный сотрудник',unit_id:x.unitB}));
   assert.equal(store.readResource(manager.id,'person.read_directory',person.id).unit,'Учебный участок Б');
@@ -91,6 +104,15 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const equipment=await store.changeDirectory(manager.id,1,command('equipment','create',null,0,{unit_id:x.unitB,code:'LC81-EQ',name:'Учебное оборудование'}));
   const workplace=await store.changeDirectory(manager.id,1,command('workplace','create',null,0,{unit_id:x.unitB,code:'LC81-WP',name:'Учебное рабочее место'}));
   const operation=await store.changeDirectory(manager.id,1,command('operation','create',null,0,{unit_id:x.unitB,code:'LC81-OP',name:'Учебная операция',equipment_id:equipment.id,workplace_id:workplace.id,criticality:'normal'}));
+  const mentorAuthorization=await store.changeMentor(manager.id,1,mentorCmd('authorization',{appointment_id:registeredOrder.id,operation_id:operation.id,valid_from:mentorDay,valid_to:null}));
+  assert.equal(store.listResources(manager.id,'authorization.read').find(r=>r.id===mentorAuthorization.id).valid_now,true);
+  assert(store.personCard(manager.id,1,x.f.mentor).sections.find(s=>s.action==='authorization.read').items.some(r=>r.id===mentorAuthorization.id));
+  await store.changeMentor(manager.id,1,mentorCmd('appointment',{reason:'Синтетический отзыв'},registeredOrder.id,registeredOrder.rev));
+  assert.equal(store.listResources(manager.id,'authorization.read').find(r=>r.id===mentorAuthorization.id).valid_now,false);
+  await store.changeMentor(manager.id,1,mentorCmd('authorization',{reason:'Синтетический отзыв'},mentorAuthorization.id,mentorAuthorization.rev));
+  await store.changeMentor(manager.id,1,mentorCmd('credential',{reason:'Синтетический отзыв'},registered.id,registered.rev));
+  assert(store.listResources(manager.id,'credential.read').find(r=>r.id===registered.id).revoked_at);
+  assert(store.listResources(manager.id,'authorization.read').find(r=>r.id===x.f.auth).valid_now);
   await assert.rejects(store.changeDirectory(manager.id,1,command('equipment','archive',equipment.id,equipment.rev,null)),/проверку/);
   await assert.rejects(store.changeDirectory(manager.id,1,command('operation','update',operation.id,operation.rev,{unit_id:x.f.unit,code:'LC81-OP',name:'Перенос',equipment_id:null,workplace_id:null,criticality:'normal'})),/Перенос/);
   await assert.rejects(store.changeDirectory(manager.id,1,command('business_role','create',null,0,{code:'ADMIN',name:'Подмена'})),/недоступен/);
@@ -147,8 +169,10 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const editorRole=(await store.createReference(admin.id,'business_role',{code:'LC81-OTHER-EDITOR',name:'Редактор другого участка'})).id;
   const editorAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.personB,role_id:editorRole,valid_from:'2020-01-01',valid_to:null})).id;
   const otherEditor=await store.createAccount(admin.id,{person_id:x.personB,login:'other-editor',password:password(),generate:false});
-  await store.setPolicy(admin.id,{role_id:editorRole,revision:0,permissions:['operation.read','sop.read_history','sop.create','sop.edit_draft','sop.revise','frv.read','sop.from_frv']});
+  await store.setPolicy(admin.id,{role_id:editorRole,revision:0,permissions:['operation.read','sop.read_history','sop.create','sop.edit_draft','sop.revise','frv.read','sop.from_frv','credential.read','credential.register','person.read_basic']});
   await store.grant(admin.id,{account_id:otherEditor.id,assignment_id:editorAssignment,scope:{kind:'unit_tree',unit_id:x.unitB},valid_to:null});
+  await assert.rejects(store.changeMentor(otherEditor.id,1,mentorCmd('credential',certificateFields)),/Самоназначение|недоступны|область/);
+  assert(!store.mentorOptions(otherEditor.id,1,'credential').people.some(p=>p.id===x.f.mentor));
   await assert.rejects(store.openLibrary(otherEditor.id,1,createContext),/Операция недоступна/);
   await assert.rejects(store.openLibrary(otherEditor.id,1,saveContext),/Операция недоступна/);
   await assert.rejects(store.saveLibrary(otherEditor.id,1,req(createContext,0,'Чужой СОП','LC81-DENIED',null,draftSource.text)),/Операция недоступна/);

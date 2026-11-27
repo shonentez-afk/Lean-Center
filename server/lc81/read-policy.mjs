@@ -29,6 +29,21 @@ function unitsFor(db,person,day){
 // credentials, personal assessments, or attachment bytes in these projections.
 // Composite resources must include every affected unit and current participant.
 // The callers are server-only command handlers, never request-provided attributes.
+export function personWorkResource(db,people,day,dates=[],operationIds=[]){
+ const units=[];
+ for(const id of new Set(people)){
+  if(!activePerson(db,id))return null;
+  for(const on of new Set([day,...dates])){
+   if(!validDay(on))return null;
+   const u=unitsFor(db,id,on);if(u.length!==1)return null;units.push(...u);
+  }
+ }
+ for(const id of new Set(operationIds)){
+  const o=one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[id]);
+  if(!o||!lineage(db,o.unit_id))return null;units.push(o.unit_id);
+ }
+ return units.length?{data:{},self:null,units:[...new Set(units)],assigned:[]}:null;
+}
 export function trainingResource(db,operationId,people,day,extraDay=null){
  const op=one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[operationId]);
  if(!op||!lineage(db,op.unit_id)||!Array.isArray(people)||!people.length)return null;
@@ -154,10 +169,16 @@ function resolve(db,action,id,day){
   const data={id:r.id,trainee_id:r.trainee_id,category:r.category,created_at:r.created_at,adaptation:programs[0].state,safety:programs[1].state,internship:programs[2].state};
   return {data,self:r.trainee_id,units:unitsFor(db,r.trainee_id,day),assigned:programs.some(p=>p.state==='active')?[r.manager_id]:[]};
  }
+ if(action==='authorization.read'){
+  const r=one(db,'SELECT id,person_id,operation_id,valid_from,valid_to,revoked_at,rev FROM mentor_authorization WHERE id=?',[id]);
+  if(!r)return null;
+  const resource=personWorkResource(db,[r.person_id],day,[r.valid_from],[r.operation_id]);
+  return resource?{...resource,data:r,self:r.person_id}:null;
+ }
  if(action==='credential.read'||action==='appointment.read'||action==='development.read'||action==='supplement.read'){
   const sql={
-   'credential.read':'SELECT id,person_id,kind,role,issued_on,valid_until,revoked_at FROM mentor_credential WHERE id=?',
-   'appointment.read':'SELECT id,person_id,role,order_on,valid_from,valid_to,revoked_at FROM mentor_appointment WHERE id=?',
+   'credential.read':'SELECT id,person_id,kind,role,issued_on,valid_until,revoked_at,rev FROM mentor_credential WHERE id=?',
+   'appointment.read':'SELECT id,person_id,role,order_on,valid_from,valid_to,revoked_at,rev FROM mentor_appointment WHERE id=?',
    'development.read':'SELECT id,person_id,title,start_on,due_on,state FROM development_plan WHERE id=?',
    'supplement.read':'SELECT id,person_id,role,month,state FROM twi_supplement WHERE id=?'
   }[action];
@@ -264,7 +285,7 @@ export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
 }
 
 export function canUseTrainingResource(db,security,accountId,action,id,day,resource){
- const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read'];
+ const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read'];
  return !!resource&&allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,action,resource);
 }
 export function bootstrapTrainingScope(db,site,resource){

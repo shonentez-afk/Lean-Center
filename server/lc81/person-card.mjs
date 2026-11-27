@@ -9,6 +9,7 @@ const sections=[
  ['preparation.read','twi_preparation','trainee_id','Комплекты подготовки'],
  ['credential.read','mentor_credential','person_id','Подготовка наставника'],
  ['appointment.read','mentor_appointment','person_id','Приказы'],
+ ['authorization.read','mentor_authorization','person_id','Полномочия по операциям'],
  ['development.read','development_plan','person_id','Планы развития'],
  ['supplement.read','twi_supplement','person_id','Доплаты'],
  ['task.read','action_item','owner_id','Задачи и мероприятия'],
@@ -20,7 +21,7 @@ export function personCard(db,a,id,canRead){
  const result=[];
  for(const [action,table,key,title] of sections){
   if(!a.permissions.includes(action))continue;
-  const items=rows(db,'SELECT id FROM '+table+' WHERE '+key+'=? ORDER BY id',[id]).flatMap(({id})=>{const v=a.read(action,id);return v?[action==='training.read'?{...v.data,can_detail:a.allows('training.detail',id,trainingAssignmentResource(db,id,a.day))}:v.data]:[]});
+  const items=rows(db,'SELECT id FROM '+table+' WHERE '+key+'=? ORDER BY id',[id]).flatMap(({id})=>{const v=a.read(action,id);return v?[action==='training.read'?{...v.data,can_detail:a.allows('training.detail',id,trainingAssignmentResource(db,id,a.day))}:action==='authorization.read'?{...v.data,operation_name:a.read('operation.read',v.data.operation_id)?.data.name??null}:v.data]:[]});
   if(items.length)result.push({action,title,items});
  }
  if(a.permissions.includes('matrix.read')){
