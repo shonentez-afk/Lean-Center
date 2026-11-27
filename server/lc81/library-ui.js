@@ -17,16 +17,35 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   const raw=JSON.parse(text),ctx=s.open.context,kind=ctx.kind;
   if(kind==='sop'&&(!raw.constructor||!Array.isArray(raw.constructor.steps))||kind==='frv'&&(!raw.study||!Array.isArray(raw.cycles)))throw Error('Неверный формат исходного файла');
   s.frame&&(s.frame.hidden=true);s.preview.hidden=false;s.preview.replaceChildren();s.note.textContent='Подтвердите сохранение черновика';s.source=text;s.attempted=null;
+  const unbound=ctx.command==='create'&&ctx.operation_id===null,opts=s.open.options||{},operations=opts.operations||[],units=opts.operation_units||[];
   const title=s.open.title|| (kind==='sop'?raw.constructor.meta?.operation:raw.study.operationId)||'';
   const titleInput=input('library_title','Название');titleInput.querySelector('input').value=title;
   const codeInput=input('library_code','Код документа');codeInput.querySelector('input').value=s.open.code||(kind==='sop'&&raw.document?.number!=='Черновик'?raw.document?.number||'':'');
   const dateInput=input('library_observed','Фактическая дата наблюдения','date');dateInput.querySelector('input').value=s.open.observed_at||'';
   const fields=[titleInput,...(kind==='sop'&&ctx.command==='create'?[codeInput]:[]),...(kind==='frv'?[dateInput]:[])];
+  if(unbound){
+   const binding=select('library_operation','Операция для сохранения',[['','— Выберите —'],...operations.map(x=>[x.id,x.code+' · '+x.name]),...(units.length?[['new','+ Создать новую операцию']]:[])]);
+   const newFields=el('div',undefined,'lc81-form'),unit=select('library_unit','Подразделение',[['','— Выберите —'],...units.map(x=>[x.id,x.name])]),opCode=input('library_operation_code','Код новой операции'),opName=input('library_operation_name','Название новой операции');
+   opName.querySelector('input').value=title;
+   if(units.length===1)unit.querySelector('select').value=units[0].id;
+   newFields.append(unit,opCode,opName);
+   const chooser=binding.querySelector('select');
+   if(!operations.length&&units.length)chooser.value='new';
+   const sync=()=>{const creating=chooser.value==='new';newFields.hidden=!creating;for(const control of newFields.querySelectorAll('input,select'))control.disabled=!creating};
+   chooser.addEventListener('change',sync);sync();
+   fields.unshift(binding,newFields);
+  }
   const saveLabel=ctx.command==='create'?'Сохранить новый черновик':ctx.command==='revise'?'Создать новую редакцию':'Сохранить изменения черновика';
   const f=form(fields,saveLabel,async f=>{
-   const req=s.attempted??{request_id:crypto.randomUUID(),context:ctx,expected_revision:s.open.expected_revision,title:value(f,'library_title'),code:kind==='sop'&&ctx.command==='create'?value(f,'library_code'):null,observed_at:kind==='frv'?value(f,'library_observed'):null,text:s.source};
+   let req=s.attempted;
+   if(!req){
+    const choice=unbound?value(f,'library_operation'):null;
+    if(unbound&&!choice)throw Error('Выберите операцию или создайте новую при наличии права');
+    req={request_id:crypto.randomUUID(),context:unbound&&choice!=='new'?{...ctx,operation_id:choice}:ctx,expected_revision:s.open.expected_revision,title:value(f,'library_title'),code:kind==='sop'&&ctx.command==='create'?value(f,'library_code'):null,observed_at:kind==='frv'?value(f,'library_observed'):null,text:s.source,...(unbound&&choice==='new'?{new_operation:{unit_id:value(f,'library_unit'),code:value(f,'library_operation_code'),name:value(f,'library_operation_name')}}:{})};
+   }
    s.attempted=req;
-   for(const control of f.querySelectorAll('input'))control.disabled=true;
+   const controls=[...f.querySelectorAll('input,select')],disabled=controls.map(control=>control.disabled);
+   for(const control of controls)control.disabled=true;
    back.disabled=true;status.textContent='Сохранение на сервере…';refresh();
    try{
     const result=await api('library/save',req);
@@ -37,7 +56,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
     const ambiguous=!e.status||e.status>=500;
     if(ambiguous){status.textContent='Подтверждение не получено. Повторите тот же запрос, не создавайте новый документ. Поля зафиксированы.'}
     else{
-     s.attempted=null;for(const control of f.querySelectorAll('input'))control.disabled=false;
+     s.attempted=null;controls.forEach((control,i)=>{control.disabled=disabled[i]});
      back.disabled=!s.frame;status.textContent=e.message;
     }
     refresh();throw e;
@@ -47,7 +66,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   back.disabled=!s.frame;
   const status=el('p','Ожидается подтверждение. Исходный статус Stage43 не является согласованием.','muted');
   const summary=kind==='sop'?'Шагов: '+raw.constructor.steps.length+' · Фото: '+Object.keys(raw.photoAssets||{}).length:'Циклов: '+raw.cycles.length;
-  s.preview.append(panel('Проверка исходного файла',el('p',summary),el('p','Операция: '+s.open.operation.name),ctx.origin_id?el('p','Проект из подтверждённого исходного ФРВ. Связь сохранится с черновиком.','muted'):el('span'),status,f,back));
+  s.preview.append(panel('Проверка исходного файла',el('p',summary),el('p',unbound?'Перед сохранением свяжите черновик с реальной операцией.':'Операция: '+s.open.operation.name),unbound&&!operations.length&&!units.length?el('p','Пока нет доступных операций. Попросите управляющего центром добавить операцию. Рабочая копия не сохраняется без связи.','muted'):el('span'),ctx.origin_id?el('p','Проект из подтверждённого исходного ФРВ. Связь сохранится с черновиком.','muted'):el('span'),status,f,back));
   refresh();
  }
  async function launch(ctx,tab=null,importText=null){
@@ -87,9 +106,10 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
  }
  function createPanel(kind,info){
   const n=panel(kind==='sop'?'Новый СОП':'Новое исследование ФРВ',el('p',kind==='sop'?'Проект сохраняется как черновик. Официальное согласование и ввод в действие — отдельно.':'Черновик виден автору и уполномоченным сотрудникам. После завершения итоговые замеры доступны предприятию. Не помещайте личные сведения в название и общие поля.','muted'));
-  if(!info.operations.length){n.append(el('p','Нет доступных действующих операций предприятия. Обратитесь к администратору справочника.','muted'));return n}
-  const op=select('create_operation','Операция',[['','— Выберите операцию —'],...info.operations.map(x=>[x.id,x.code+' · '+x.name])]);
-  const make=()=>{const id=op.querySelector('select').value;if(!id)throw Error('Выберите операцию');return context(kind,'create',id)};
+  if(!info.can_prepare){n.append(el('p','Создание документов недоступно.','muted'));return n}
+  if(!info.operations.length)n.append(el('p',info.operation_units.length?'Справочник операций пока пуст. Начните работу в редакторе; при сохранении можно создать первую операцию.':'Справочник операций пока пуст. Начните работу в редакторе; для сохранения потребуется операция, созданная управляющим или администратором.','muted'));
+  const op=select('create_operation','Операция (можно выбрать при сохранении)',[['','— Выбрать позднее —'],...info.operations.map(x=>[x.id,x.code+' · '+x.name])]);
+  const make=()=>context(kind,'create',op.querySelector('select').value||null);
   const row=el('div',undefined,'row');row.append(button('Открыть конструктор',()=>launch(make()),'primary'),importButton(make));n.append(op,row);return n;
  }
  function editActions(r,kind){

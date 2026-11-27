@@ -13,6 +13,8 @@ const clean=(s,max)=>typeof s==='string'&&s.trim().length>0&&s.length<=max;
 const date=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
 export const CONTEXT_FIELDS=Object.freeze(['kind','command','id','revision_id','operation_id','origin_id','origin_revision']);
 export const libraryReadAction=kind=>kind==='sop'?'sop.read_history':'frv.read';
+// An unbound working copy is not a persisted document or authorization to write.
+export const unboundLibraryContext=input=>exact(input,CONTEXT_FIELDS)&&['sop','frv'].includes(input.kind)&&input.command==='create'&&['id','revision_id','operation_id','origin_id','origin_revision'].every(k=>input[k]===null);
 const sourceOf=(row,field)=>{const p=JSON.parse(row[field]);return {source:validateRef(p.source),projection:p.projection}};
 const opName=(db,id)=>one(db,'SELECT o.name,u.name unit FROM operation o JOIN org_unit u ON u.id=o.unit_id WHERE o.id=? AND o.archived=0 AND u.archived=0',[id]);
 export function resolveLibraryContext(db,input,{read,allows,permissions,readScope,fullAllows=allows}){

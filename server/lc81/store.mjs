@@ -26,7 +26,7 @@ import {qualityOptions,installMentorMethod,createAudit,createSelf,voidAudit,qual
 import {workflowView,orderOptions,registerOrder,orderDetail,supplementOptions,createSupplement,supplementDetail,changeSupplement} from './mentor-workflows.mjs';
 import {programView,programOptions,saveProgram,retireProgram,programDetail,enrollmentOptions,createEnrollment,changeEnrollment,enrollmentDetail,preparationOptions,createPreparation,preparationDetail,preparationFactOptions,recordPreparationFact} from './program-commands.mjs';
 import {requestDigest,getReceipt,addReceipt} from './library-receipts.mjs';
-import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,inspectLibraryText,saveLibrary,passportLibrary,finalizeLibrary,detailDescriptor,projectLibraryDetail,libraryReadAction} from './library-commands.mjs';
+import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,inspectLibraryText,saveLibrary,passportLibrary,finalizeLibrary,detailDescriptor,projectLibraryDetail,libraryReadAction,unboundLibraryContext} from './library-commands.mjs';
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
@@ -121,6 +121,22 @@ function libraryAccess(db,a,d){
  const fullAllows=(action,anchor,id)=>(LIBRARY_COMMANDS.includes(action)||DETAIL_ACTIONS.includes(action))&&!!readFor(db,a,anchor,id,d)&&(a.bootstrap===1?action!=='frv.finalize':canUseLibrary(db,security(db,a.id),a.id,action,anchor,id,d));
  const read=(action,id)=>readFor(db,a,action,id,d)||shared.read(action,id);
  return {read,fullAllows,allows:(action,anchor,id)=>action==='sop.read_public'?anchor==='sop.read_effective'&&!!read(anchor,id):fullAllows(action,anchor,id)||shared.allows(action,anchor,id),readScope:(kind,id)=>shared.readScope(kind,id)||(a.bootstrap===1?!!readManagerProjection(db,config(db).site,'operation.read',id,d):canReadLibraryAtOperation(db,security(db,a.id),a.id,kind,id,d)),permissions:[...new Set([...permissionsFor(db,a),...(shared.enabled?SHARED_LIBRARY_READS:[])])]};
+}
+// Start with real, server-authorized choices even on a newly initialized site.
+function libraryOptions(db,a,kind,d){
+ const access=libraryAccess(db,a,d);
+ must(access.permissions.includes(libraryReadAction(kind)),404,'Раздел недоступен');
+ const can_prepare=a.bootstrap===1||!!a.person_id;
+ return {can_prepare,operations:rows(db,'SELECT id FROM operation WHERE archived=0 ORDER BY name').flatMap(({id})=>{
+  const r=access.read('operation.read',id);
+  return r&&access.readScope(kind,id)&&access.allows(kind+'.create','operation.read',id)?[{id,name:r.data.name,code:r.data.code}]:[];
+ }),operation_units:rows(db,'SELECT id FROM org_unit WHERE archived=0 ORDER BY name').flatMap(({id})=>{
+  const r=readFor(db,a,'org.read',id,d);
+  return can_prepare&&r&&directoryAllowed(db,a,'operation.create','org.read',id,d)?[{id,name:r.data.name}]:[];
+ }),day:d};
+}
+function libraryPeople(db,a,d){
+ return directoryPeople(db,d).filter(p=>p.id===a.person_id||readFor(db,a,'person.read_directory',p.id,d)).map(({id,employee_code,display_name,position,unit})=>({id,employee_code,display_name,position,unit,roles:[]}));
 }
 function trainingAccess(db,a,d){
  const clock=siteClock(db);d=clock.day;
@@ -590,15 +606,15 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   libraryInfo(actor,kind){
    return read(db=>{
     const a=account(db,actor);must(a&&['sop','frv'].includes(kind),404,'Раздел недоступен');
-    const access=libraryAccess(db,a,day(db));
-    must(access.permissions.includes(libraryReadAction(kind)),404,'Раздел недоступен');
-    return {operations:rows(db,'SELECT id FROM operation WHERE archived=0 ORDER BY name').flatMap(({id})=>{
-     const r=access.read('operation.read',id);
-     return r&&access.readScope(kind,id)&&access.allows(kind+'.create','operation.read',id)?[{id,name:r.data.name,code:r.data.code}]:[];
-    }),day:day(db)};
+    return libraryOptions(db,a,kind,day(db));
    });
   },
   async openLibrary(actor,revision,input){
+   if(unboundLibraryContext(input))return read(db=>{
+    const a=checkedAccount(db,actor,revision),d=day(db),options=libraryOptions(db,a,input.kind,d);
+    must(options.can_prepare,403,'Редактор недоступен');
+    return {context:input,expected_revision:0,title:'',code:'',observed_at:'',operation:{name:'',unit:''},people:libraryPeople(db,a,d),text:null,options};
+   });
    const ctx=read(db=>resolveCtx(db,actor,revision,input));
    let text;try{text=await sourceForEditor(ctx,readFile)}catch(e){if(e instanceof PilotError)throw e;throw new PilotError(422,'Не удалось подготовить проверенный исходник: '+String(e.message||'ошибка').split('\n')[0].slice(0,180))}
    return read(db=>{
@@ -606,12 +622,14 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     must(contextStamp(next)===contextStamp(ctx),409,'Документ изменился при открытии');
     const a=checkedAccount(db,actor,revision),d=day(db);
     // Only visible directory entries. Omit protected role names and unrelated personnel.
-    const people=directoryPeople(db,d).filter(p=>p.id===a.person_id||readFor(db,a,'person.read_directory',p.id,d)).map(({id,employee_code,display_name,position,unit})=>({id,employee_code,display_name,position,unit,roles:[]}));
+    const people=libraryPeople(db,a,d);
     return {context:ctx.input,expected_revision:ctx.expected,title:ctx.title,code:ctx.code,observed_at:ctx.observed_at,operation:ctx.operation,people,text};
    });
   },
   async saveLibrary(actor,revision,request){
-   must(keys(request,['request_id','context','expected_revision','title','code','observed_at','text'])&&typeof request.text==='string'&&Buffer.byteLength(request.text,'utf8')<=MAX_CONTENT,400,'Неверные поля сохранения');
+   const combined=Object.hasOwn(request||{},'new_operation');
+   must(keys(request,['request_id','context','expected_revision','title','code','observed_at','text',...(combined?['new_operation']:[])])&&typeof request.text==='string'&&Buffer.byteLength(request.text,'utf8')<=MAX_CONTENT,400,'Неверные поля сохранения');
+   if(combined)must(unboundLibraryContext(request.context)&&request.expected_revision===0&&keys(request.new_operation,['unit_id','code','name'])&&Object.values(request.new_operation).every(x=>typeof x==='string'),400,'Неверная новая операция');
    const digest=requestDigest(request);
    const priorResult=db=>{
     const a=checkedAccount(db,actor,revision),prior=getReceipt(db,actor,request.request_id,digest);
@@ -621,6 +639,26 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     return {...prior,duplicate:true};
    };
    const prior=read(priorResult);if(prior)return prior;
+   // Combined operation + draft is one transaction. The operation command
+   // uses the same scoped directory rights and domain validation as before.
+   if(combined){
+    const {new_operation, ...plain}=request;
+    read(db=>{
+     const a=checkedAccount(db,actor,revision),options=libraryOptions(db,a,plain.context.kind,day(db));
+     must(options.operation_units.some(u=>u.id===new_operation.unit_id),403,'Нет права создавать операцию в этом подразделении');
+    });
+    const inspected=await inspectLibraryText(plain.context.kind,plain.text);
+    let replay=false;
+    return mutate(db=>{
+     const existing=priorResult(db);if(existing){replay=true;return existing}
+     const a=checkedAccount(db,actor,revision),d=day(db),options=libraryOptions(db,a,plain.context.kind,d);
+     must(options.operation_units.some(u=>u.id===new_operation.unit_id),403,'Нет права создавать операцию в этом подразделении');
+     const created=applyDirectoryCommand(db,{type:'operation',operation:'create',id:null,expected_revision:0,fields:{...new_operation,equipment_id:null,workplace_id:null,criticality:'normal'}},{day:d,at:at(),site:config(db).site,read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchor,id)=>directoryAllowed(db,a,action,anchor,id,d),audit:(action,target)=>audit(db,actor,action,target)});
+     const linked={...plain,context:{...plain.context,operation_id:created.id}},ctx=resolveCtx(db,actor,revision,linked.context);
+     const result=saveLibrary(db,linked,ctx,inspected,{at:at(),audit:(action,target)=>audit(db,actor,action,target)});
+     addReceipt(db,actor,request.request_id,digest,result,at());return result;
+    },candidate=>replay?undefined:persistSource(candidate,inspected.source,request.text));
+   }
    const ctx=read(db=>resolveCtx(db,actor,revision,request.context));
    must(request.expected_revision===ctx.expected,409,'Документ изменился. Откройте актуальную редакцию.');
    // Revalidate the actual measured source when creating a draft from FRV.
