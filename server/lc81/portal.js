@@ -178,16 +178,16 @@ function adminPanel(d){
   select('account_id','Пользователь',[['','— Выберите пользователя —'],...usableAccounts.map(a=>[a.id,a.display_name+' · '+a.login])]),
   select('role_id','Рабочая роль',[['','— Выберите роль —'],...options(roleOptions)]),
   select('scope','Где действует доступ',[['self','Только собственные записи'],['assigned','Назначенное обучение'],['unit_tree','Подразделение и его дочерние подразделения']]),
-  select('unit_id','Подразделение',options(d.units)),input('valid_to','До (необязательно)','date',false),check('confirmed','Подтверждаю выбранную роль и область доступа')
+  select('unit_id','Подразделение',[['','— Выберите подразделение —'],...options(d.units)]),input('valid_to','До (необязательно)','date',false),check('confirmed','Подтверждаю выбранную роль и область доступа')
  ],'Назначить доступ',async f=>{
   if(!f.elements.confirmed.checked)throw Error('Подтвердите роль и область доступа');
   await post('access',{account_id:value(f,'account_id'),role_id:value(f,'role_id'),scope:value(f,'scope')==='unit_tree'?{kind:'unit_tree',unit_id:value(f,'unit_id')}:{kind:value(f,'scope')},valid_to:value(f,'valid_to')||null},'Роль и доступ назначены');
  });
- const roleField=grantForm.elements.role_id,scopeField=grantForm.elements.scope,unitField=grantForm.elements.unit_id;
+ const roleField=grantForm.elements.role_id,scopeField=grantForm.elements.scope,unitField=grantForm.elements.unit_id;let wasManager=false;
  const updateScope=()=>{
   const manager=roleField.value===d.protectedRoles[1];
-  scopeField.disabled=manager;if(manager){scopeField.value='unit_tree';unitField.value=d.site}
-  unitField.disabled=manager||scopeField.value!=='unit_tree';
+  scopeField.disabled=manager;if(manager){scopeField.value='unit_tree';unitField.value=d.site}else if(wasManager){scopeField.value='self';unitField.value=''}
+  wasManager=manager;unitField.disabled=manager||scopeField.value!=='unit_tree';
  };
  roleField.addEventListener('change',updateScope);scopeField.addEventListener('change',updateScope);updateScope();grantForm.lcResetForm?.();
  const grants=table(['Пользователь','Роль','Область','Период','Версия прав','Состояние доступа','Действие'],d.grants.map(g=>[accounts.get(g.account_id),roles.get(g.role_id),g.scope.kind==='unit_tree'?units.get(g.scope.unit_id):g.scope.kind==='self'?'Своё':'Назначенное обучение',g.valid_from+' — '+(g.valid_to||'без срока'),g.policy_revision,grantLabels[g.status]||'Проверить',g.state==='active'?button('Отозвать',async()=>{if(discard()&&confirm('Немедленно отозвать этот доступ?'))await post('revoke',{id:g.id},'Доступ отозван')}):'—']));
@@ -218,17 +218,17 @@ function adminPanel(d){
  };
  const cards=el('div',undefined,'lc81-start-grid');
  cards.append(
-  statusCard('1. Предприятие и календарь',(root?.name||'Предприятие')+' · '+d.units.length+' подразделений (включая предприятие). Часовой пояс: '+d.clock.zone,d.clock.configured&&root?.code!=='LC81-QA',[button('Настроить предприятие',openPage('admin.enterprise'))]),
+  statusCard('1. Предприятие и календарь',(root?.name||'Предприятие')+' · '+d.units.length+' подразделений (включая предприятие). Часовой пояс: '+d.clock.zone,d.clock.configured&&(root?.code!=='LC81-QA'||root?.name!=='Учебное предприятие'),[button('Настроить предприятие',openPage('admin.enterprise'))]),
   statusCard('2. Сотрудники','В справочнике: '+d.people.length+'. Добавьте сотрудников вручную или импортируйте XLSX.',d.people.length>0,[button('Справочник сотрудников',openPage('person.read_directory')),button('Импорт сотрудников',openPage('import.view'))]),
   statusCard('3. Рабочие пользователи','Учётных записей сотрудников: '+d.accounts.filter(a=>!a.admin).length+'. '+(activeManager?'Доступ управляющего действует.':'Назначьте управляющего, чтобы открыть рабочие разделы центра.'),activeManager,[button('Создать управляющего',goManager,'primary'),button('Пользователи',openPage('admin.users')),button('Назначить доступ',openPage('admin.access'))]),
-  statusCard('4. Начать работу','Операции, СОП и ФРВ можно создавать по мере заполнения центра. Не нужно заранее заполнять все справочники.',false,[button('Конструктор СОП',openPage('sop.constructor'),'primary'),button('ФРВ',openPage('frv.read')),button('Операции',openPage('operation.read'))])
+  statusCard('4. Начать работу','Операций: '+d.setup.operations+' · СОП: '+d.setup.sop+' · ФРВ: '+d.setup.frv+'. Можно начать без заполнения всех справочников.',d.setup.operations>0||d.setup.sop>0||d.setup.frv>0,[button('Конструктор СОП',openPage('sop.constructor'),'primary'),button('ФРВ',openPage('frv.read')),button('Операции',openPage('operation.read'))])
  );
- const guide=panel('Настройка центра',el('p',activeManager?'Предприятие готово к началу работы. Настройки можно изменять через меню администрирования.':'Добро пожаловать в Центр TWI. Настройте предприятие и создайте рабочий аккаунт управляющего — система сама свяжет сотрудника, роль и доступ.'),cards,el('p','Системный администратор отвечает за пользователей и права. Производственные решения выполняются под рабочими учётными записями.','muted'));
+ const guide=panel('Настройка центра',el('p',activeManager?'Доступ управляющего настроен. Откройте нужный рабочий раздел или продолжите настройки предприятия.':'Добро пожаловать в Центр TWI. Настройте предприятие и создайте рабочий аккаунт управляющего — система сама свяжет сотрудника, роль и доступ.'),cards,el('p','Системный администратор отвечает за пользователей и права. Производственные решения выполняются под рабочими учётными записями.','muted'));
  const storage=panel('Хранение и восстановление',el('p','Резервная копия выполняется только администратором сервера на остановленном экземпляре в отдельную новую папку. Копия содержит закрытые учётные записи, права и исходники; её нельзя передавать в браузер или хранить в общей папке.'),el('pre','LC81_QA=1 node server/lc81-maintenance.mjs backup /abs/source /abs/new-backup\nLC81_QA=1 node server/lc81-maintenance.mjs restore-new /abs/new-backup /abs/new-restored'),el('p','Восстановление не перезаписывает исходное хранилище. Сначала проверьте копию в изолированном QA; только после приёмки переключайте размещение. Рабочий Amvera этим экраном не изменяется.'));
  const auditPanel=panel('Журнал управления доступом',table(['Время (UTC)','Кто','Действие','Цель','Основание'],d.audit.map(a=>[a.occurred_at,accounts.get(a.actor_account_id)||a.actor_account_id,a.action,a.target_id,a.reason])));
  const [personRef,unitRef,employmentRef,roleRef,assignmentRef]=[...grid.children];
- if(page==='admin.enterprise')return [panel('Данные предприятия',el('p',root?.name||'Предприятие'),el('p','Измените название и код корневого предприятия в справочнике структуры. Дочерние подразделения создаются там же.'),button('Структура предприятия',openPage('org.read'),'primary'),button('Справочник сотрудников',openPage('person.read_directory')),button('Импорт XLSX',openPage('import.view'))),clock,panel('Справочники',unitRef,personRef,employmentRef)];
- if(page==='admin.users')return [panel('Создание пользователя',el('p','Выберите существующего сотрудника или создайте нового. Для управляющего роль и доступ назначаются автоматически после вашего подтверждения.'),userForm),panel('Пользователи',accountTable,accountEditor)];
+ if(page==='admin.enterprise')return [panel('Данные предприятия',el('p',root?.name||'Предприятие'),el('p','Измените название и код корневого предприятия в справочнике структуры. Дочерние подразделения создаются там же.'),button('Структура предприятия',openPage('org.read'),'primary'),button('Справочник сотрудников',openPage('person.read_directory')),button('Импорт XLSX',openPage('import.view'))),clock,panel('ИИ и интеграции',el('p','ИИ конструктора: '+(d.integrations?.editor_ai?'Включён':'Отключён')),el('p','Помощник центра: '+(d.integrations?.center_ai?'Включён':'Отключён')),el('p','ИИ конструктора и помощник центра включаются отдельно в настройках размещения. Внешняя отправка содержимого СОП требует разрешения организации и подтверждения запроса. При отключении ИИ ручная работа сохраняется.','muted')),panel('Справочники',unitRef,personRef,employmentRef)];
+ if(page==='admin.users')return [panel('Создание пользователя',el('p','Выберите существующего сотрудника или создайте нового. Для управляющего роль и доступ назначаются автоматически после вашего подтверждения. Если существующий сотрудник не отображается, проверьте его кадровое назначение или уже созданную учётную запись.'),userForm),panel('Пользователи',accountTable,accountEditor)];
  if(page==='admin.roles')return [panel('Роли и права',el('p','Роль — набор разрешённых действий. Выберите роль, чтобы настроить права. Системные роли защищены. Изменение прав требует подтверждения доступа в разделе «Назначения и доступ».'),roleRef,...policyForms),button('Справочник ролей',openPage('role.read'))];
  if(page==='admin.access')return [panel('Назначение доступа',el('p','Выберите пользователя, рабочую роль и область. Система создаст недостающее назначение роли и подтвердит доступ одной операцией. Роль без настроенных прав здесь не появляется.'),grantForm),panel('Действующие и завершённые доступы',grants),peopleHistory, panel('Дополнительные кадровые назначения',assignmentRef,employmentRef)];
  if(page==='admin.storage')return [storage,auditPanel];
@@ -413,7 +413,7 @@ function buildNav(){
  for(const [name,keys] of navGroups){
   const list=keys.flatMap(k=>pageActions[k]||[]).filter(a=>available.has(a)&&!selected.includes(a));
   if(!list.length)continue;
-  const group=el('details',undefined,'nav-section');group.open=list.includes(page)||['Ежедневная работа','Люди и компетенции','Управление центром'].includes(name);group.append(el('summary',name,'navgroup'));
+  const group=el('details',undefined,'nav-section');group.open=list.includes(page)||!user.admin&&['Ежедневная работа','Люди и компетенции','Управление центром'].includes(name);group.append(el('summary',name,'navgroup'));
   for(const act of list){selected.push(act);group.append(navButton(act,available))}
   nav.append(group);
  }

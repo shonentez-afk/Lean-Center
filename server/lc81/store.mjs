@@ -399,7 +399,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   session(id,revision,withWorkspace=true){return read(db=>{const a=account(db,id);return a&&a.credential_revision===revision?sessionView(db,a,withWorkspace):null})},
   adminData(actor,revision){return read(db=>{
    requireAdmin(db,actor,revision);
-   return {clock:siteClock(db),accounts:rows(db,'SELECT * FROM lc81_account ORDER BY login').map(a=>({...sanitized(db,a),employment_active:a.bootstrap===1||employment(db,a.person_id,day(db)).length===1})),
+   return {clock:siteClock(db),setup:{operations:one(db,'SELECT count(*) n FROM operation WHERE archived=0').n,sop:one(db,"SELECT count(*) n FROM document WHERE archived=0 AND kind='sop'").n,frv:one(db,"SELECT count(*) n FROM frv_study WHERE state<>'archived'").n},accounts:rows(db,'SELECT * FROM lc81_account ORDER BY login').map(a=>({...sanitized(db,a),employment_active:a.bootstrap===1||employment(db,a.person_id,day(db)).length===1})),
     people:rows(db,'SELECT id,display_name,employee_code FROM person WHERE archived=0 ORDER BY display_name'),
     units:rows(db,'SELECT id,parent_id,name,code FROM org_unit WHERE archived=0 ORDER BY name'),
     roles:rows(db,'SELECT id,code,name FROM business_role WHERE archived=0 ORDER BY name'),

@@ -35,7 +35,8 @@ try{
  });
  await new Promise(resolve=>proxy.listen(0,'127.0.0.1',resolve));
  const url='https://127.0.0.1:'+proxy.address().port;
- server=createSecureQAServer({store,origin:url});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const editorCalls=[];
+ server=createSecureQAServer({store,origin:url,editorAiEnabled:true,cloudFetcher:async(url,options)=>{editorCalls.push({url,payload:JSON.parse(options.body)});return new Response(JSON.stringify({choices:[{message:{content:'OK'}}]}),{status:200})}});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  browser=await chromium.launch({headless:true});const errors=[];
  const button=(p,name)=>p.getByRole('button',{name,exact:true}),indicator=(p,kind)=>p.locator('#save-indicator[data-kind="'+kind+'"]');
  async function profile(login,password,viewport){
@@ -292,12 +293,29 @@ try{
  }
  await second.close();
  const aa=await profile('admin',adminPassword,{width:1440,height:900});
- await aa.p.getByRole('heading',{name:'Пользователи и права доступа',exact:true}).waitFor();
+ await aa.p.getByRole('heading',{name:'Начало работы',exact:true}).waitFor();
  assert(await aa.p.locator('#nav [data-action=admin]').count());
- await aa.p.getByRole('heading',{name:'Кадровая история и роли',exact:true}).waitFor();
- await aa.p.getByRole('heading',{name:'Календарь предприятия',exact:true}).waitFor();
- await aa.p.getByRole('heading',{name:'Хранение и восстановление',exact:true}).waitFor();
  await aa.p.getByRole('heading',{name:'Настройка центра',exact:true}).waitFor();
+ for(const [key,title] of [['admin.enterprise','Календарь предприятия'],['admin.access','Кадровая история и роли'],['admin.storage','Хранение и восстановление'],['admin.roles','Роли и права']]){
+  await aa.p.locator('#nav [data-action="'+key+'"]').click();
+  await aa.p.locator('#content').getByRole('heading',{name:title,exact:true}).waitFor();
+ }
+ await aa.p.locator('#nav [data-action=admin]').click();
+ await aa.p.locator('#content').getByRole('button',{name:'Создать управляющего',exact:true}).click();
+ const firstForm=aa.p.locator('#content form').first();
+ await firstForm.locator('[name=employee_code]').fill('QA-UI-MANAGER');
+ await firstForm.locator('[name=display_name]').fill('Управляющий из мастера');
+ await firstForm.locator('[name=login]').fill('qa-ui-manager');
+ assert.equal(await firstForm.locator('[name=access_mode]').inputValue(),'manager');
+ await firstForm.locator('[name=generate]').uncheck();
+ await firstForm.locator('[name=password]').fill(managerPassword);
+ await firstForm.locator('[name=password_confirm]').fill(managerPassword);
+ await firstForm.locator('[name=confirmed]').check();
+ await button(aa.p,'Создать пользователя').click();
+ await aa.p.getByRole('cell',{name:'qa-ui-manager',exact:true}).waitFor();
+ const wizardManager=store.authenticate('qa-ui-manager',managerPassword);
+ assert(wizardManager?.workspace_actions.includes('center.read'));assert(!wizardManager.admin);
+ await aa.p.locator('#nav [data-action="admin.roles"]').click();
  await button(aa.p,'Справочник ролей').click();
  await button(aa.p,'Создать роль').click();
  await aa.p.locator('.lc81-editor input[name=code]').fill('QA-UI-ROLE');
@@ -313,6 +331,18 @@ try{
  const blankFrame=await aa.p.locator('#lc81-editor-frame').elementHandle(),blankEditor=await blankFrame.contentFrame();
  await blankEditor.locator('#lc-editor-status').filter({hasText:'Рабочая копия готова'}).waitFor({timeout:40000});
  assert.equal(await blankEditor.locator('#meta-operation').inputValue(),'');
+ // The accepted health button is unchanged. All provider calls are mocked;
+ // no external service is contacted by CI or by the opaque iframe.
+ await blankEditor.locator('#aiTestBtn').click();
+ await blankEditor.locator('#aiConnectivityBadge').filter({hasText:'AI: доступен'}).waitFor();
+ assert.equal(editorCalls.length,1);assert.equal(editorCalls[0].payload.task,'healthcheck');
+ const ask=()=>blankEditor.evaluate(async()=>{try{return {text:await aiAsk('Учебное правило','Учебный текст',{task:'edit_action',model:'yandexgpt-lite',temperature:.2,maxTokens:400})}}catch(e){return {error:e.message}}});
+ let pending=ask();
+ const consent=aa.p.getByRole('dialog',{name:'Подтверждение запроса ИИ'});
+ await consent.waitFor();assert((await consent.textContent()).includes('Учебный текст'));assert.equal(editorCalls.length,1);
+ await consent.getByRole('button',{name:'Отмена',exact:true}).click();assert.match((await pending).error,/отменена/);assert.equal(editorCalls.length,1);
+ pending=ask();await consent.waitFor();await consent.getByRole('button',{name:'Отправить запрос',exact:true}).click();
+ assert.equal((await pending).text,'OK');assert.equal(editorCalls.length,2);assert.equal(editorCalls[1].payload.task,'edit_action');
  // Close the blank working copy via an explicit confirmed action.
  // Existing profile() installs a dismiss handler, so remove it for this one confirmation.
  aa.p.removeAllListeners('dialog');

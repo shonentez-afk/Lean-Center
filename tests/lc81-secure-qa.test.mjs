@@ -405,3 +405,56 @@ test('first start: open unbound SOP/FRV, create first real operation atomically,
  assert.equal(frv.status,200,JSON.stringify(frv.data));
  assert.equal((await read(ac,'operation.read')).data.items.length,2);
 });
+
+test('friendly first-run provision and role access are atomic and admin-only',async t=>{
+ const h=await harness(t),admin=await h.login('admin',h.adminPassword),ac=admin.cookie,d=await h.admin(ac);
+ const make=(code,login,manager)=>({person_id:null,new_person:{employee_code:code,display_name:'Учебный '+code,unit_id:d.site},login,password:secret(),generate:false,manager});
+ const managerReq=make('START-MANAGER','start-manager',true);
+ const created=await h.post(ac,'provision',managerReq);
+ const m=await h.login(managerReq.login,managerReq.password);
+ assert.equal(m.user.id,created.id);assert(!m.user.admin);assert(m.user.workspace_actions.includes('center.read'));assert(m.user.permissions.includes('operation.create'));
+ assert((await h.admin(ac)).grants.some(g=>g.account_id===created.id&&g.role_id===MANAGER_ROLE&&g.status==='effective'&&g.scope.unit_id===d.site));
+ const duplicate=make('NO-PARTIAL',managerReq.login,false);
+ assert.equal((await h.request('/api/lc81/admin/provision',{cookie:ac,body:duplicate})).status,409);
+ assert(!(await h.admin(ac)).people.some(p=>p.employee_code==='NO-PARTIAL'));
+ assert.equal((await h.request('/api/lc81/admin/provision',{cookie:m.cookie,body:make('FORGED-USER','forged-user',true)})).status,403);
+ const workerReq=make('START-WORKER','start-worker',false),worker=await h.post(ac,'provision',workerReq),w=await h.login(workerReq.login,workerReq.password);
+ assert.deepEqual(w.user.permissions,[]);assert(w.user.workspace_actions.includes('sop.constructor'));
+ const access={account_id:worker.id,role_id:MANAGER_ROLE,scope:{kind:'self'},valid_to:null};
+ assert.equal((await h.request('/api/lc81/admin/access',{cookie:ac,body:access})).status,422);
+ assert(!(await h.admin(ac)).assignments.some(x=>x.person_id===worker.person_id&&x.role_id===MANAGER_ROLE),'failed access must not leave an assignment');
+ assert.equal((await h.request('/api/lc81/admin/access',{cookie:m.cookie,body:{...access,scope:{kind:'unit_tree',unit_id:d.site}}})).status,403);
+ const effective=await h.post(ac,'access',{...access,scope:{kind:'unit_tree',unit_id:d.site}});
+ const d2=await h.admin(ac);assert(d2.assignments.some(x=>x.id===effective.assignment_id&&x.person_id===worker.person_id));
+ assert(d2.grants.some(g=>g.id===effective.id&&g.status==='effective'));
+ assert.equal((await h.request('/api/lc81/admin/access',{cookie:ac,body:{...access,scope:{kind:'unit_tree',unit_id:d.site}}})).status,409);
+ assert((await h.request('/api/lc81/session',{cookie:w.cookie})).data.user.workspace_actions.includes('center.read'));
+});
+test('Stage43 AI: explicit separate opt-in, exact confirmation, fixed destination and live editor scope',async t=>{
+ const calls=[],h=await harness(t,{editorAiEnabled:true,cloudFetcher:async(url,options)=>{
+  calls.push({url,body:JSON.parse(options.body),options});
+  return new Response(JSON.stringify({choices:[{message:{content:'OK'}}]}),{status:200,headers:{'Content-Type':'application/json'}});
+ }});
+ const a=await h.login('admin',h.adminPassword),cookie=a.cookie;
+ const ctx={kind:'sop',command:'create',id:null,revision_id:null,operation_id:null,origin_id:null,origin_revision:null};
+ const payload={model:'yandexgpt-lite',messages:[{role:'system',content:'Ответь только словом OK.'},{role:'user',content:'Проверка соединения.'}],temperature:0,max_tokens:10,task:'healthcheck'};
+ const packet={context:ctx,payload,confirmed:true},route='/api/lc81/editor/ai';
+ assert.equal((await h.request(route,{body:packet})).status,401);
+ assert.equal((await h.request(route,{cookie,body:packet,csrf:false})).status,403);
+ assert.equal((await h.request(route,{cookie,body:{...packet,confirmed:false}})).status,400);
+ assert.equal((await h.request(route,{cookie,body:{...packet,payload:{...payload,url:'https://example.invalid'}}})).status,400);
+ assert.equal((await h.request(route,{cookie,body:{...packet,payload:{...payload,messages:[payload.messages[0],{role:'user',content:'Не проверка'}]}}})).status,400);
+ assert.equal((await h.request(route,{cookie,body:{...packet,context:{...ctx,operation_id:randomUUID()}}})).status,403);
+ assert.equal(calls.length,0);
+ const open=await h.request('/api/lc81/library/open',{cookie,body:ctx});assert.equal(open.data.editor_ai_enabled,true);
+ const ok=await h.request(route,{cookie,body:packet});assert.equal(ok.status,200,JSON.stringify(ok.data));assert.equal(JSON.parse(ok.data.text).choices[0].message.content,'OK');
+ const edit={...payload,messages:[{role:'system',content:'Учебное правило'},{role:'user',content:'Учебный текст'}],task:'edit_action',temperature:.2,max_tokens:400};
+ assert.equal((await h.request(route,{cookie,body:{...packet,payload:edit}})).status,200);
+ assert.equal(calls.length,2);
+ assert.deepEqual(calls[1].body,edit);assert.equal(calls[1].url,'https://functions.yandexcloud.net/d4ehdpoue3sve6s0f92b');
+ assert.equal(calls[1].options.redirect,'error');assert.equal(calls[1].options.credentials,'omit');assert(!Object.hasOwn(calls[1].options.headers,'Cookie'));
+ const disabled=await harness(t,{cloudAiEnabled:true,cloudFetcher:async()=>{throw Error('must not fetch')}});
+ const b=await disabled.login('admin',disabled.adminPassword);
+ assert.equal((await disabled.request(route,{cookie:b.cookie,body:packet})).status,403);
+ assert.equal((await disabled.request('/api/lc81/library/open',{cookie:b.cookie,body:ctx})).data.editor_ai_enabled,false);
+});

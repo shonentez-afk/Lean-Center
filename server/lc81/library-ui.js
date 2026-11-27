@@ -16,11 +16,13 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   if(active!==s||!s.loaded||!Number.isSafeInteger(m.request)||m.request<1)return;
   const send=extra=>{if(active===s&&s.frame)s.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:s.session,type:'ai-response',request:m.request,...extra},'*')};
   if(s.open.editor_ai_enabled!==true){send({error:'Внешний ИИ конструктора отключён администратором'});return}
-  if(s.ai){send({error:'Дождитесь ответа предыдущего запроса ИИ'});return}
-  const p=m.payload;
-  if(!p||typeof p!=='object'||!Array.isArray(p.messages)||p.messages.length!==2||p.messages.some(x=>typeof x?.content!=='string')||new TextEncoder().encode(JSON.stringify(p)).length>384*1024){send({error:'Неверный или слишком большой запрос ИИ'});return}
+  if(s.ai||!s.preview.hidden){send({error:'Дождитесь ответа предыдущего запроса ИИ или вернитесь в редактор'});return}
+  const p=m.payload;let encoded;
+  try{encoded=JSON.stringify(p)}catch{}
+  if(!p||typeof p!=='object'||!Array.isArray(p.messages)||p.messages.length!==2||p.messages.some(x=>typeof x?.content!=='string')||typeof encoded!=='string'||new TextEncoder().encode(encoded).length>384*1024){send({error:'Неверный или слишком большой запрос ИИ'});return}
   const state={request:m.request,controller:new AbortController(),dialog:null};s.ai=state;
-  const finish=extra=>{if(s.ai!==state)return;s.ai=null;state.dialog?.remove();send(extra)};
+  const finish=extra=>{if(s.ai!==state)return;s.ai=null;state.dialog?.remove();s.cancelAI.hidden=true;send(extra)};
+  s.cancelAI.onclick=()=>{state.controller.abort();if(state.dialog?.open)state.dialog.close();finish({error:'Запрос ИИ отменён'})};s.cancelAI.hidden=false;
   const go=async()=>{
    try{
     const result=await api('editor/ai',{context:s.open.context,payload:p,confirmed:true},state.controller.signal);
@@ -43,6 +45,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
  }
  function showPreview(s,text){
   if(active!==s)return;
+  if(s.ai)throw Error('Дождитесь ответа ИИ или отмените запрос перед сохранением');
   const raw=JSON.parse(text),ctx=s.open.context,kind=ctx.kind;
   if(kind==='sop'&&(!raw.constructor||!Array.isArray(raw.constructor.steps))||kind==='frv'&&(!raw.study||!Array.isArray(raw.cycles)))throw Error('Неверный формат исходного файла');
   s.frame&&(s.frame.hidden=true);s.preview.hidden=false;s.preview.replaceChildren();s.note.textContent='Подтвердите сохранение черновика';s.source=text;s.attempted=null;
@@ -106,6 +109,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   const session=crypto.randomUUID(),s={session,host,preview,note:label,frame:null,open:opened,loaded:false,loading:false,source:null,attempted:null,timeout:null};
   active=s;
   bar.append(el('strong',ctx.kind==='frv'?'Редактор ФРВ':tab==='twi'?'План инструктажа TWI':tab==='frv'?'ФРВ по СОП':'Конструктор СОП'),label,button('Закрыть редактор',()=>close()));
+  s.cancelAI=el('button','Отменить запрос ИИ');s.cancelAI.type='button';s.cancelAI.hidden=true;bar.append(s.cancelAI);
   host.append(bar);document.body.append(host);document.body.classList.add('editor-active');document.querySelector('main')?.setAttribute('inert','');
   if(importText!==null){
    try{showPreview(s,importText)}catch(e){clear();throw e}
@@ -124,7 +128,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   }else if(m.type==='loaded'&&s.loading){
    clearTimeout(s.timeout);s.loaded=true;s.loading=false;s.note.textContent='Редактор готов · рабочая копия в памяти';s.open.text=null;refresh();
   }else if(m.type==='ai-request'&&s.loaded&&!s.attempted){void requestEditorAI(s,m)
-  }else if(m.type==='ai-cancel'&&s.ai?.request===m.request){const pending=s.ai;s.ai=null;pending.controller.abort();if(pending.dialog?.open)pending.dialog.close();pending.dialog?.remove()
+  }else if(m.type==='ai-cancel'&&s.ai?.request===m.request){const pending=s.ai;s.ai=null;s.cancelAI.hidden=true;pending.controller.abort();if(pending.dialog?.open)pending.dialog.close();pending.dialog?.remove()
   }else if(m.type==='source'&&s.loaded&&!s.attempted){
    if(m.kind!==s.open.context.kind||typeof m.text!=='string'||new TextEncoder().encode(m.text).length>max){reply(s,'Неверный исходный файл или превышен лимит 30 МБ');return}
    try{showPreview(s,m.text);reply(s,'Подтвердите сохранение в каталоге')}catch(e){reply(s,e.message);note(e.message,true)}
