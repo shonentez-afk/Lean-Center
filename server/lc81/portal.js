@@ -424,6 +424,9 @@ async function openLinked(host,r){
  }
  return trainingUI.openRecord(host,r.type,r.id);
 }
+const assistantSections=Object.freeze({
+ 'person.read_basic':['person'],'person.read_directory':['person'],'mentoring.view':['person'],'training.read':['training'],'instruction.view':['training'],'journal.view':['training'],'retraining.view':['training'],'matrix.read':['matrix'],'program.read':['program'],'internship.view':['enrollment','program'],'training.enrollment.read':['enrollment'],'preparation.read':['preparation'],'audit.read':['audit'],'self.read':['self'],'assessment.read':['assessment'],'development.read':['development'],'task.read':['task'],'sop.read_effective':['sop'],'sop.read_history':['sop'],'sop.read_steps':['sop'],'sop.read_twi':['sop'],'sop.read_linked_frv':['sop'],'sop.constructor':['sop'],'frv.read':['frv'],'sop.evaluation.read':['sop_evaluation','weighted_sop'],'roi.read':['roi'],'plan.read':['training','enrollment','task','development'],'calendar.read':['training','audit','self','assessment']
+});
 function buildNav(){
  const nav=$('nav');nav.replaceChildren();const available=new Set((user.workspace_actions||[]).filter(k=>k==='admin'&&user.admin||Object.hasOwn(actions,k)));
  const selected=[];
@@ -442,7 +445,7 @@ function buildNav(){
  for(const act of available)if(!selected.includes(act)){selected.push(act);nav.append(navButton(act,available))}
  if(!available.has(page))page=user.admin?'admin':available.has('person.read_directory')?'person.read_directory':available.has('sop.constructor')?'sop.constructor':selected[0]||'';
  const current=nav.querySelector('[data-action="'+page+'"]');if(current){current.classList.add('active');current.setAttribute('aria-current','page');if(current.closest('details'))current.closest('details').open=true}
- const head=$('page-heading'),left=el('div');left.append(el('div',groupFor(page),'eyebrow'),el('h1',titleFor(page)));head.replaceChildren(left,el('span','Подтверждение сервером','pill'));
+ const head=$('page-heading'),left=el('div');left.append(el('div',groupFor(page),'eyebrow'),el('h1',titleFor(page)));const tools=el('div',undefined,'row');if(user.permissions.includes('assistant.read')&&assistantSections[page])tools.append(button('ИИ-помощник раздела',()=>assistantUI.section(assistantSections[page])));tools.append(el('span','Подтверждение сервером','pill'));head.replaceChildren(left,tools);
 }
 function navButton(act,available){
  const n=button(titleFor(act),async()=>{if(!discard())return;page=act;$('nav').classList.remove('lc53-menu-open');$('menu').setAttribute('aria-expanded','false');await render()},'nav');

@@ -139,7 +139,7 @@ export function createCenterUI({api,button,panel,table,el,input,select,form,valu
      header.append(panel('Связи показателей · не единый рейтинг',table(['От','К','Тип связи'],data.relations.map(r=>{const a=by.get(r.from),b=by.get(r.to);return [a.availability==='restricted'?a.label:button(a.label,()=>show(a.id)),b.availability==='restricted'?b.label:button(b.label,()=>show(b.id)),r.label]}))));
     }
    }
-   header.append(assistant({type:'report',kind,scope:s,group:'all'},'Проверить этот отчёт'),evidence,sub);out.replaceChildren(header);
+   header.append(assistant({type:'report',kind,scope:s,group:'all'},'ИИ-помощник отчёта'),evidence,sub);out.replaceChildren(header);
   }
   root.append(panel('Область и период',unit,from,to,button('Месяц',async()=>{if(!discard())return;from.querySelector('input').value=d.day.slice(0,7)+'-01';to.querySelector('input').value=d.day;await draw()}),button('Год',async()=>{if(!discard())return;from.querySelector('input').value=d.day.slice(0,4)+'-01-01';to.querySelector('input').value=d.day;await draw()}),button('Обновить',async()=>{if(discard())await draw()},'primary')),out);
   await draw();return root;

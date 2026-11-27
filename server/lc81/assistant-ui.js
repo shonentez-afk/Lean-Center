@@ -39,7 +39,7 @@ export function createAssistantUI({api,button,panel,table,el,input,select,note,o
   root.append(cloud);return root;
  }
  async function dialog(context){
-  const d=await api('assistant/context',context),trigger=document.activeElement,dialog=el('dialog',undefined,'lc72-context-dialog');dialog.setAttribute('aria-label','Контекстный помощник');const head=el('div',undefined,'lc72-context-head');head.append(el('h2','Проверка сохранённой записи'),plainButton('Закрыть помощник',()=>dialog.close()));
+  const d=await api('assistant/context',context),trigger=document.activeElement,dialog=el('dialog',undefined,'lc72-context-dialog');dialog.setAttribute('aria-label','Контекстный помощник');const head=el('div',undefined,'lc72-context-head');head.append(el('h2','ИИ-помощник · проверка записи'),plainButton('Закрыть помощник',()=>dialog.close()));
   const content=el('div',undefined,'lc72-context-body');
   const follow=async route=>{
    if(route.type===context.type&&route.id===context.id){dialog.close();return}
@@ -49,12 +49,12 @@ export function createAssistantUI({api,button,panel,table,el,input,select,note,o
   dialog.addEventListener('close',()=>{result.lcAssistantAbort?.();dialog.remove();if(trigger?.isConnected)trigger.focus()},{once:true});dialog.showModal();
  }
  const hostForLinks=()=>document.getElementById('content');
- function contextButton(context,label='Проверить запись'){
+ function contextButton(context,label='ИИ-помощник · проверить запись'){
   return permitted()?button(label,()=>dialog(context)):el('span');
  }
  async function workspace(){
   const d=await api('assistant/options'),root=panel('ИИ-помощник',el('p','Локальные рекомендации из тех же защищённых расчётов, что дашборд и аналитика. Свободный чат и автоматическое изменение данных не предусмотрены.')),out=el('div'),source=el('div');
-  if(!d.reports.length){root.append(el('p','Нет разрешённых отчётов. Откройте помощника в доступной карточке.'));return root}
+  if(!d.reports.length){root.append(el('p','Нет доступных сводных отчётов. Помощник доступен в рабочих разделах для разрешённых записей.'));return root}
   const names={'center.read':'Оперативный обзор','analytics.read':'Аналитика','metrics.read':'Дерево показателей'},kind=select('assistant_report','Отчёт',d.reports.map(x=>[x.kind,names[x.kind]])),unit=select('assistant_unit','Подразделение',[]),group=select('assistant_group','Направление',d.groups),from=input('assistant_from','С даты','date'),to=input('assistant_to','По дату','date');
   from.querySelector('input').value=d.day.slice(0,7)+'-01';to.querySelector('input').value=d.day;
   const setUnits=()=>{const x=d.reports.find(r=>r.kind===fieldValue(kind));options(unit,[...(x.all?[['','Всё предприятие']]:[]),...x.units.map(u=>[u.id,u.name])],x.default_unit);out.replaceChildren();source.replaceChildren()};
@@ -62,5 +62,24 @@ export function createAssistantUI({api,button,panel,table,el,input,select,note,o
   async function load(){const context={type:'report',kind:fieldValue(kind),scope:{unit_id:fieldValue(unit),from:fieldValue(from),to:fieldValue(to)},group:fieldValue(group)},result=await api('assistant/context',context);source.replaceChildren();out.replaceChildren(renderData(result,context,out,route=>openLinked(source,route)))}
   root.append(kind,unit,group,from,to,button('Проверить выбранную область',load,'primary'),out,source);await load();return root;
  }
- return {workspace,contextButton};
+ async function section(kindList){
+  const d=el('dialog',undefined,'lc72-context-dialog');d.setAttribute('aria-label','ИИ-помощник раздела');
+  const head=el('div',undefined,'lc72-context-head'),body=el('div',undefined,'lc72-context-body');
+  head.append(el('h2','ИИ-помощник раздела'),plainButton('Закрыть помощник',()=>d.close()));
+  const labels={person:'Сотрудники',training:'Обучение',matrix:'Матрицы',enrollment:'Персональные программы',program:'Шаблоны программ',preparation:'Подготовка',audit:'Аудиты',self:'Самооценка',assessment:'Оценки',development:'Планы развития',task:'Мероприятия',sop:'СОП',frv:'ФРВ',roi:'Экономический эффект',sop_evaluation:'Оценка СОП',weighted_sop:'Взвешенная оценка СОП'};
+  const kind=select('assistant_kind','Источник',kindList.map(k=>[k,labels[k]||k])),output=el('div'),records=select('assistant_record','Запись',[]);let serial=0;
+  const inspect=button('Проверить выбранную запись',async()=>{const id=fieldValue(records),k=fieldValue(kind);if(!id)return;d.close();await dialog({type:k,id})},'primary');inspect.disabled=true;
+  async function load(){
+   const request=++serial,k=fieldValue(kind);inspect.disabled=true;output.replaceChildren(el('p','Проверяем доступные записи…'));options(records,[]);
+   const result=await api('assistant/records?kind='+encodeURIComponent(k));
+   if(request!==serial||!d.isConnected)return;
+   options(records,result.items.map(x=>[x.id,x.label]));inspect.disabled=!result.items.length;
+   output.replaceChildren(el('p',result.items.length?(result.more?'Первые 100 доступных записей. Другие можно проверить непосредственно из карточки.':'Доступные записи: '+result.items.length):'Нет записей, доступных для анализа. Создайте или откройте рабочую запись в пределах своих прав.'));
+  }
+  kind.querySelector('select').addEventListener('change',()=>{void load().catch(e=>{if(d.isConnected)output.replaceChildren(el('p',e.message,'warn'))})});
+  body.append(el('p','Локальная проверка доступных сохранённых записей. ИИ не меняет данные и не принимает решения.'),kind,records,output,inspect);
+  d.append(head,body);document.body.append(d);d.addEventListener('close',()=>d.remove(),{once:true});d.showModal();
+  try{await load()}catch(e){if(d.isConnected)output.replaceChildren(el('p',e.message,'warn'))}
+ }
+ return {workspace,contextButton,section};
 }
