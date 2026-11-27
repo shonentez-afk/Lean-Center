@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+          # The protected editor imports esbuild at runtime.
           test "$(node -p 'process.arch')" = x64
           mkdir -p .runtime
           install -m 0755 "$(command -v node)" .runtime/node
