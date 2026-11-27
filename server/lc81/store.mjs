@@ -15,7 +15,7 @@ import {changeOwnPassword,resetAccountPassword,renameAccount,grantStatus,endRole
 import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource} from './read-policy.mjs';
 import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,SITE_REFERENCE_TYPES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop} from './training-commands.mjs';
-import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix} from './matrix-commands.mjs';
+import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix,matrixOverviewOptions,matrixOverview,profileOptions,professionProfile,saveProfessionProfile} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
 import {calendarWorkspace,calendarOptions,calendarDetail,createSchedule,changeSchedule,scheduleView,centerOptions,centerWorkspace,metricEvidence} from './center-commands.mjs';
 import {roiOptions,roiView,roiDetail,createRoi,changeRoi,roiMeasureContext,measureRoi,roiTwiOptions,previewRoiTwi} from './roi-commands.mjs';
@@ -723,6 +723,11 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   competencyChange(actor,revision,input){return mutate(db=>competencyChange(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   assessmentDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...assessmentDetail(db,a,id),forms:documentLinks(db,a,id,["practical"])}})},
   suggestMatrix(actor,revision,input){return read(db=>suggestMatrix(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  matrixOverviewOptions(actor,revision){return read(db=>matrixOverviewOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  matrixOverview(actor,revision,f){return read(db=>{const a=checkedAccount(db,actor,revision),d=day(db);return matrixOverview(db,trainingAccess(db,a,d),f,id=>cardAllowed(db,a,id,d))})},
+  profileOptions(actor,revision){return read(db=>profileOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  professionProfile(actor,revision,profession,scale,effective){return read(db=>professionProfile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),profession,scale,effective))},
+  saveProfessionProfile(actor,revision,f){return mutate(db=>saveProfessionProfile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   matrixInfo(actor,revision,unit=null,baseOn=null,filters={}){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return matrixInfo(db,a,unit,baseOn??a.day,filters)})},
   saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
   retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},

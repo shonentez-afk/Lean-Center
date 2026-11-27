@@ -162,9 +162,72 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   if(d.can_retire)n.append(groups('Закрыть матрицу',[input('reason','Причина')],'Закрыть',async f=>{await api('matrix/retire',{id:d.id,expected_revision:d.rev,reason:value(f,'reason')});note('Матрица закрыта');await render()}));
   appendExports(n,d);n.append(assistant({type:'matrix',id}));setContent(host,n);
  }
+ async function generalMatrix(host){
+  if(!discard())return;
+  const d=await api('matrix/overview-options'),n=panel('Общая матрица всех навыков'),out=el('div'),detail=el('div');
+  const unit=select('unit_id','Подразделение',[...(d.all?[['','Все подразделения']]:[]),...opts(d.units)]);unit.querySelector('select').value=d.default_unit;
+  const fields={unit_id:unit,profession_id:optional('profession_id','Профессия',opts(d.professions)),shift_id:optional('shift_id','Смена',opts(d.shifts)),category_id:optional('category_id','Категория',opts(d.categories)),workplace_id:optional('workplace_id','Рабочее место',opts(d.workplaces)),q:input('q','Поиск сотрудника','search',false)};
+  const gaps=check('gaps','Только сотрудники с выявленными разрывами'),transpose=check('transpose','Навыки строками');
+  let pp=0,sp=0;
+  async function draw(){
+   const request={...Object.fromEntries(Object.entries(fields).map(([k,f])=>[k,f.querySelector('input,select').value])),gaps:gaps.querySelector('input').checked,person_page:pp,skill_page:sp};
+   const x=await api('matrix/overview',request);pp=x.person_page;sp=x.skill_page;
+   const cell=(i,j)=>{
+    const z=x.cells[i][j];if(z.restricted)return el('span','Недоступно','muted');
+    const label=(z.actual??'—')+(z.target===null?'':' / '+z.target),v=z.assessment_id?button(label,()=>openLinked(detail,{type:'assessment',id:z.assessment_id})):el('span',label);
+    v.classList.add('lc81-overview-cell');if(z.gap)v.classList.add('lc81-gap');if(z.actual!==null)v.dataset.level=String(z.actual);
+    v.title=z.reason+(z.admission?' · '+z.admission:'');return v;
+   };
+   const person=p=>p.can_card?button(p.name,()=>card(detail,p.id)):p.name;
+   const trans=transpose.querySelector('input').checked,headers=trans?['Навык',...x.people.map(p=>p.name)]:['Сотрудник',...x.skills.map(s=>s.name)],lines=trans?x.skills.map((s,j)=>[s.name,...x.people.map((p,i)=>cell(i,j))]):x.people.map((p,i)=>[person(p),...x.skills.map((s,j)=>cell(i,j))]);
+   const pageButtons=el('div',undefined,'row');
+   const prevP=button('← Сотрудники',()=>{pp--;return draw()}),nextP=button('Сотрудники →',()=>{pp++;return draw()}),prevS=button('← Навыки',()=>{sp--;return draw()}),nextS=button('Навыки →',()=>{sp++;return draw()});
+   prevP.disabled=pp===0;nextP.disabled=(pp+1)*40>=x.person_count;prevS.disabled=sp===0;nextS.disabled=(sp+1)*20>=x.skill_count;
+   pageButtons.append(prevP,nextP,prevS,nextS);
+   out.replaceChildren(el('p','Срез '+x.day+' · доступно сотрудников: '+x.person_count+' · навыков: '+x.skill_count+' · факт / цель. Не оценено ≠ 0.','muted'),x.people.length&&x.skills.length?table(headers,lines):empty(),pageButtons);
+  }
+  n.append(el('p','Фактические уровни и действующие требования из единой базы. Ограниченные источники не считаются нулями. Допуск проверяется отдельно.'),...Object.values(fields),gaps,transpose,button('Обновить матрицу',async()=>{if(discard()){pp=sp=0;detail.replaceChildren();await draw()}},'primary'),out,detail);
+  setContent(host,n);await draw();
+ }
+ async function professionProfiles(host){
+  if(!discard())return;const o=await api('matrix/profile-options'),n=panel('Профили компетенций профессий'),out=el('div');
+  const profession=pick('profile_profession','Профессия',opts(o.professions)),scale=pick('profile_scale','Корпоративная шкала 1–4',opts(o.scales));
+  const next=new Date(Date.parse(o.day+'T00:00:00Z')+86400000).toISOString().slice(0,10),effective=dt('profile_effective','Действует с',next);
+  n.append(el('p','Профиль использует действующий реестр требований. При изменении прежний период закрывается предыдущим днём. Для изменения существующего требования выберите дату не раньше завтра.'),profession,scale,effective,button('Открыть профиль',async()=>{
+   if(!discard())return;
+   const read=()=>({profession_id:profession.querySelector('select').value,scale_id:scale.querySelector('select').value,effective:effective.querySelector('input').value});
+   const query=read(),d=await api('matrix/profile?'+new URLSearchParams(query)),grid=el('div'),search=input('profile_search','Поиск навыка','search',false),bulk=optional('profile_bulk','Уровень для видимых навыков',Object.entries(LEVEL_TEXT)),entries=new Map(d.items.map(x=>[x.id,{level:x.level,criticality:x.criticality,dirty:false}]));
+   const shown=()=>d.items.filter(x=>[x.name,x.category].join(' ').toLocaleLowerCase('ru-RU').includes(search.querySelector('input').value.trim().toLocaleLowerCase('ru-RU')));
+   let holder;
+   function draw(){
+    const groups=new Map();for(const x of shown()){if(!groups.has(x.category))groups.set(x.category,[]);groups.get(x.category).push(x)}
+    grid.replaceChildren(...[...groups].map(([category,items])=>panel(category,table(['Навык','Целевой уровень','Критичность','Прежнее требование'],items.map(x=>{
+     const v=entries.get(x.id),level=optional('level_'+x.id,'Уровень',Object.entries(LEVEL_TEXT)),critical=select('critical_'+x.id,'Критичность',Object.entries(criticalityNames));
+     level.querySelector('select').value=v.level??'';critical.querySelector('select').value=v.criticality;
+     for(const f of [level,critical]){f.querySelector('select').disabled=!x.editable;f.querySelector('select').addEventListener('change',()=>{v.level=level.querySelector('select').value?Number(level.querySelector('select').value):null;v.criticality=critical.querySelector('select').value;v.dirty=true;holder.lcResetForm?.();holder.dataset.profileDirty='1'})}
+     return [x.name,level,critical,x.level===null?'Нет':x.level+' · с '+x.valid_from+(x.scale_id!==d.scale_id?' · другая шкала':'')];
+    })))));
+   }
+   holder=form([search,...(d.can_edit?[bulk,button('Применить уровень к видимым',()=>{const v=bulk.querySelector('select').value;if(!confirm('Применить уровень ко всем видимым редактируемым навыкам?'))return;for(const x of shown().filter(x=>x.editable)){const z=entries.get(x.id);z.level=v?Number(v):null;z.dirty=true}holder.dataset.profileDirty='1';draw()})]:[]),grid], 'Сохранить профиль',async()=>{
+    if(JSON.stringify(query)!==JSON.stringify(read()))throw Error('Параметры изменились, откройте профиль заново');
+    const selected=d.items.filter(x=>entries.get(x.id).dirty).map(x=>{const v=entries.get(x.id);return {skill_id:x.id,level:v.level,criticality:v.criticality,expected_id:x.expected_id,expected_rev:x.expected_rev}});
+    if(!selected.length)throw Error('Нет изменений требований');if(selected.length>150)throw Error('Сохраните не более 150 навыков за раз');
+    if(!confirm('Сохранить изменения '+selected.length+' навыков с сохранением прежних периодов?'))return;
+    const r=await api('matrix/profile',{...query,entries:selected});delete holder.dataset.profileDirty;holder.lcResetForm?.();note('Сохранено событий требований: '+r.changed);await render();
+   });
+   // The form's normal dirty guard is augmented by edits to its paged/grouped
+   // inputs; filtering never discards draft values.
+   const wasDirty=holder.lcIsDirty?.bind(holder);holder.lcIsDirty=()=>holder.dataset.profileDirty==='1'||!!wasDirty?.();
+   if(!d.can_edit)holder.querySelector('button[type=submit],button:not([type])')?.setAttribute('disabled','');
+   search.querySelector('input').addEventListener('input',draw);out.replaceChildren(holder);draw();holder.lcResetForm?.();
+  },'primary'),out);
+  setContent(host,n);
+ }
  function matrices(items,user){
   const host=el('div'),n=panel('Матрицы компетенций');
   if(user.person_id&&user.permissions.includes('matrix.create'))n.append(button('Создать матрицу',()=>matrixEditor(host),'primary'));
+  if(['skill.read','requirement.read','assessment.read','assessment.detail'].every(k=>user.permissions.includes(k)))n.append(button('Общая матрица всех навыков',()=>generalMatrix(host)));
+  if(user.permissions.includes('requirement.read'))n.append(button('Профили профессий',()=>professionProfiles(host)));
   n.append(items.length?table(['Код','Название','Версия','Срез','Цель','Сотрудников','Навыков','Состояние','Действия'],items.map(r=>[r.code,r.title,r.version_no,r.base_on,r.target_on,r.people,r.skills,state[r.state]||r.state,r.can_detail?button('Открыть матрицу',()=>matrix(host,r.id)):'Только чтение'])):empty(),host);return n;
  }
  async function card(host,id){

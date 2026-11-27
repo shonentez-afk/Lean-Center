@@ -1,8 +1,10 @@
 // Existing corporate matrix calculation, no manually assigned scores.
 import {one,rows,uuid,isId,applyEvent} from '../../src/core/db.js';
 import {matrixRoster,columnChoices,matrixBaseline,matrixProjection,matrixFromRecord,LEVEL_TEXT} from '../../src/modules/training/matrix-view.js';
-import {autoMatrix} from '../../src/modules/training/matrix-assistant.js';
-import {matrixResource} from './read-policy.mjs';
+import {autoMatrix,profileEdits} from '../../src/modules/training/matrix-assistant.js';
+import {matrixData} from '../../src/modules/training/domain.js';
+import {competencyChange} from './competency-commands.mjs';
+import {matrixResource,programResource,requirementResource,assessmentResource,trainingAssignmentResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
 const must=(ok,status,msg)=>{if(!ok)throw new PilotError(status,msg)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
@@ -76,4 +78,78 @@ export function matrixDetail(db,a,id){
  totals:p.total,byPerson:m.roster.map(r=>p.byPerson.get(r.person_id)),bySkill:m.columns.map(c=>p.bySkill.get(c.skill_id)),
  can_develop:!!a.personId&&m.state==='active'&&a.allows('development.from_matrix',m.id,resource),
  can_revise:!!a.personId&&m.state==='active'&&a.allows('matrix.create',m.id,resource),can_retire:!!a.personId&&m.state==='active'&&a.allows('matrix.retire',m.id,resource)};
+}
+
+
+// General matrix is a live projection of the original LC7 matrixData.
+// Do not use partial/hidden evidence as zero or fabricate a qualification.
+const siteRight=(db,a,k)=>{const r=programResource(db);return !!r&&a.scope(k,r.units[0],r)};
+const refOptions=(db,a,table,action)=>rows(db,'SELECT id FROM '+table+' WHERE archived=0 ORDER BY name,id').flatMap(x=>{const r=a.read(action,x.id);return r?[{id:x.id,name:r.data.name}]:[]});
+export function matrixOverviewOptions(db,a){
+ must(['matrix.read','skill.read','requirement.read','assessment.read','assessment.detail'].every(k=>a.permissions.includes(k)),403,'Для общей матрицы необходим доступ к требованиям и оценкам');
+ const units=refOptions(db,a,'org_unit','org.read').filter(u=>a.scope('matrix.read',u.id,unitResource(u.id)));
+ const all=siteRight(db,a,'matrix.read');
+ must(all||units.length,403,'Нет области общей матрицы');
+ return {day:a.day,units,all,default_unit:all?'':units[0].id,professions:refOptions(db,a,'profession','profession.read'),shifts:refOptions(db,a,'work_shift','shift.read'),categories:refOptions(db,a,'skill_category','category.read'),workplaces:refOptions(db,a,'workplace','workplace.read')};
+}
+export function matrixOverview(db,a,f,canCard){
+ const o=matrixOverviewOptions(db,a),checks={unit_id:o.units,profession_id:o.professions,shift_id:o.shifts,category_id:o.categories,workplace_id:o.workplaces};
+ must(exact(f,[...Object.keys(checks),'q','gaps','person_page','skill_page'])&&typeof f.q==='string'&&f.q.length<=200&&typeof f.gaps==='boolean'&&[f.person_page,f.skill_page].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=10000),400,'Неверные фильтры матрицы');
+ for(const [k,list] of Object.entries(checks))must(typeof f[k]==='string'&&(!f[k]&&(k!=='unit_id'||o.all)||list.some(x=>x.id===f[k])),403,'Фильтр матрицы недоступен');
+ const m=matrixData(db,a.day),q=f.q.trim().toLocaleLowerCase('ru-RU'),op=new Map(rows(db,'SELECT id,workplace_id FROM operation WHERE archived=0').map(x=>[x.id,x.workplace_id]));
+ let people=m.people.flatMap(p=>{
+  const v=readablePerson(a,p.id);
+  if(!v||!p.unit_id||!a.scope('matrix.read',p.id,{...unitResource(p.unit_id),self:p.id})||f.unit_id&&p.unit_id!==f.unit_id||f.profession_id&&p.profession_id!==f.profession_id||f.shift_id&&p.shift_id!==f.shift_id||q&&![v.data.display_name,v.data.employee_code].filter(Boolean).join(' ').toLocaleLowerCase('ru-RU').includes(q))return [];
+  return [{id:p.id,name:v.data.display_name,code:v.data.employee_code??null,can_card:canCard(p.id)}];
+ });
+ const skills=m.skills.filter(s=>a.read('skill.read',s.id)&&(!f.category_id||s.category_id===f.category_id)&&(!f.workplace_id||op.get(s.operation_id)===f.workplace_id));
+ const requirements=new Map(),facts=new Map(),admissions=new Map();
+ const visible=(map,id,fn)=>{if(!map.has(id))map.set(id,!!fn());return map.get(id)};
+ const fullRequirements=siteRight(db,a,'requirement.read');
+ function cell(p,s){
+  const c=m.cells.get(p.id+':'+s.id),goal=c?.goal,fact=c?.fact;
+  if(!c||!fullRequirements||goal&&!visible(requirements,goal.id,()=>a.read('requirement.read',goal.id))||fact&&!visible(facts,fact.session_id,()=>{
+   const r=one(db,'SELECT * FROM assessment_session WHERE id=?',[fact.session_id]),resource=assessmentResource(db,r,a.day);
+   return !!resource&&!!a.read('assessment.read',fact.session_id)&&a.scope('assessment.detail',fact.session_id,resource);
+  }))return {restricted:true};
+  const admission=c.admission?.record,canAdmission=!!admission?.assignment_id&&visible(admissions,admission.assignment_id,()=>{
+   const resource=trainingAssignmentResource(db,admission.assignment_id,a.day);
+   return !!resource&&!!a.read('training.read',admission.assignment_id)&&a.scope('training.detail',admission.assignment_id,resource);
+  });
+  const reason=!fact?'Нет оценки':!c.valid?'Нет действующей числовой оценки':!c.same?'Другая шкала':!c.revisionCurrent?'Прежняя редакция СОП':c.gap?'Ниже требования':goal?'Требование покрыто':'Нет требования';
+  return {restricted:false,actual:fact?.observation_state==='rated'?fact.level:null,observation:fact?.observation_state??null,target:goal?.required_level??null,gap:c.gap,reason,admission:canAdmission?c.admission.status:null,assessment_id:fact?.session_id??null};
+ }
+ if(f.gaps)people=people.filter(p=>skills.some(s=>cell(p,s).gap===true));
+ const person_page=Math.min(f.person_page,Math.max(0,Math.ceil(people.length/40)-1)),skill_page=Math.min(f.skill_page,Math.max(0,Math.ceil(skills.length/20)-1));
+ const selected=people.slice(person_page*40,person_page*40+40),columns=skills.slice(skill_page*20,skill_page*20+20);
+ return {day:a.day,people:selected,skills:columns.map(s=>({id:s.id,name:s.name,category:s.category})),cells:selected.map(p=>columns.map(s=>cell(p,s))),person_count:people.length,skill_count:skills.length,person_page,skill_page};
+}
+export function profileOptions(db,a){
+ must(siteRight(db,a,'requirement.read')&&a.permissions.includes('skill.read'),403,'Профили профессий недоступны');
+ const professions=refOptions(db,a,'profession','profession.read'),scales=scaleFor(db).filter(s=>a.read('scale.read',s.id)&&JSON.stringify(rows(db,'SELECT value FROM rating_level WHERE scale_id=? ORDER BY value',[s.id]).map(x=>x.value))==='[1,2,3,4]');
+ return {day:a.day,professions,scales,can_edit:!!a.personId&&siteRight(db,a,'requirement.create')&&siteRight(db,a,'requirement.close')};
+}
+export function professionProfile(db,a,professionId,scaleId,effective){
+ const o=profileOptions(db,a);
+ must(o.professions.some(p=>p.id===professionId)&&o.scales.some(s=>s.id===scaleId)&&date(effective)&&effective>=a.day,400,'Выберите профессию, корпоративную шкалу и дату');
+ const requirements=rows(db,'SELECT * FROM role_requirement WHERE profession_id=? AND valid_from<=? AND coalesce(valid_to,\'9999-12-31\')>=?',[professionId,effective,effective]),map=new Map(requirements.map(x=>[x.skill_id,x]));
+ const items=rows(db,'SELECT s.id,s.name,c.name category FROM skill s JOIN skill_category c ON c.id=s.category_id WHERE s.archived=0 AND c.archived=0 ORDER BY c.name,s.name,s.id').flatMap(s=>{
+  if(!a.read('skill.read',s.id))return [];
+  const old=map.get(s.id);
+  if(old&&!a.read('requirement.read',old.id))return [];
+  const resource=requirementResource(db,{skill_id:s.id});
+  const editable=!!resource&&o.can_edit&&a.scope('requirement.create',s.id,resource)&&(!old||a.scope('requirement.close',old.id,resource));
+  return [{...s,editable,level:old?.required_level??null,criticality:old?.criticality||'normal',scale_id:old?.scale_id??null,valid_from:old?.valid_from??null,expected_id:old?.id??null,expected_rev:old?.rev??0}];
+ });
+ return {...o,profession_id:professionId,scale_id:scaleId,effective,items};
+}
+export function saveProfessionProfile(db,a,f){
+ must(exact(f,['profession_id','scale_id','effective','entries'])&&Array.isArray(f.entries)&&f.entries.length>0&&f.entries.length<=150&&new Set(f.entries.map(e=>e.skill_id)).size===f.entries.length&&f.entries.every(e=>exact(e,['skill_id','level','criticality','expected_id','expected_rev'])&&isId(e.skill_id)&&(e.level===null||[1,2,3,4].includes(e.level))&&['normal','important','critical'].includes(e.criticality)&&(e.expected_id===null||isId(e.expected_id))&&Number.isSafeInteger(e.expected_rev)),400,'Некорректный профиль');
+ const p=professionProfile(db,a,f.profession_id,f.scale_id,f.effective);must(p.can_edit,403,'Изменение профиля недоступно');
+ for(const e of f.entries){const old=p.items.find(x=>x.id===e.skill_id);must(old?.editable,403,'Навык недоступен');must(old.expected_id===e.expected_id&&old.expected_rev===e.expected_rev,409,'Профиль изменён другим пользователем')}
+ let changes;try{changes=profileEdits(db,{professionId:f.profession_id,scaleId:f.scale_id,effective:f.effective,entries:f.entries})}catch(e){throw new PilotError(422,String(e.message||'Проверьте даты профиля').slice(0,250))}
+ // The enclosing store mutation is atomic and each old command checks its
+ // exact permission and domain revision. No score or admission is written.
+ const items=changes.map(x=>x.old?competencyChange(db,a,{command:'requirement.close',fields:{id:x.old.id,rev:x.old.rev,valid_to:x.payload.valid_to}}):competencyChange(db,a,{command:'requirement.create',fields:x.payload}));
+ return {changed:items.length,items};
 }

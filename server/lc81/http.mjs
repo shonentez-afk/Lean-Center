@@ -261,6 +261,11 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='POST'&&p==='/api/lc81/competency/change'){reply(res,200,await store.competencyChange(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/assessment/detail'){reply(res,200,store.assessmentDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/matrix/suggest'){reply(res,200,store.suggestMatrix(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/matrix/overview-options'){reply(res,200,store.matrixOverviewOptions(a.id,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/matrix/overview'){reply(res,200,store.matrixOverview(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/matrix/profile-options'){reply(res,200,store.profileOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/matrix/profile'){reply(res,200,store.professionProfile(a.id,a.credential_revision,url.searchParams.get('profession_id'),url.searchParams.get('scale_id'),url.searchParams.get('effective')));return}
+   if(req.method==='POST'&&p==='/api/lc81/matrix/profile'){reply(res,200,await store.saveProfessionProfile(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/matrix/info'){reply(res,200,store.matrixInfo(a.id,a.credential_revision,url.searchParams.get('unit_id'),url.searchParams.get('base_on'),Object.fromEntries(['shift_id','profession_id','workplace_id','category_id'].map(k=>[k,url.searchParams.get(k)]))));return}
    if(req.method==='GET'&&p==='/api/lc81/matrix/detail'){reply(res,200,store.matrixDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/matrix/save'){reply(res,200,await store.saveMatrix(a.id,a.credential_revision,await body(req,2*1024*1024)));return}
