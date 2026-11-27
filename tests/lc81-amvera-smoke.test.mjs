@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import {spawn,spawnSync} from 'node:child_process';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,randomUUID,createHash} from 'node:crypto';
+import {restoreUploadedQA} from '../server/lc81/store.mjs';
 import {cloudIdentity} from '../tools/cloud-identity.mjs';
 const origin='https://qa.example.invalid';
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
@@ -35,9 +36,9 @@ test('pinned protected Amvera recipe: new storage, persistent state, offline bac
    assert.equal(result.code,0,'protected server must close gracefully');
   }finally{clearTimeout(timer)}
  }
- async function start(dir,init=false){
+ async function start(dir,init=false,extraEnv={},loginPassword=password){
   const port=await freePort(),url='http://127.0.0.1:'+port;
-  const child=spawn(process.execPath,['server/lc81-main.mjs'],{env:{...env,PORT:String(port),LC81_QA:'1',LC81_DATA_DIR:dir,LC81_ORIGIN:origin,...(init?{LC81_INIT:'1',LC_BOOTSTRAP_ADMIN_PASSWORD:password,LC81_SITE_TIME_ZONE:'UTC'}:{})},stdio:['ignore','ignore','ignore']});
+  const child=spawn(process.execPath,['server/lc81-main.mjs'],{env:{...env,PORT:String(port),LC81_QA:'1',LC81_DATA_DIR:dir,LC81_ORIGIN:origin,...(init?{LC81_INIT:'1',LC_BOOTSTRAP_ADMIN_PASSWORD:password,LC81_SITE_TIME_ZONE:'UTC'}:{}),...extraEnv},stdio:['ignore','ignore','ignore']});
   const done=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',(code,signal)=>resolve({code,signal}))});
   // Avoid unhandled rejection while polling startup.
   done.catch(()=>{});
@@ -57,8 +58,8 @@ test('pinned protected Amvera recipe: new storage, persistent state, offline bac
   }
   assert.equal((await req('/api/lc81/session')).status,401);
   assert.equal((await req('/api/v1/snapshot')).status,404);
-  assert.equal((await req('/api/lc81/login',null,{login:'admin',password},false)).status,403);
-  const r=await req('/api/lc81/login',null,{login:'admin',password});assert.equal(r.status,200);
+  assert.equal((await req('/api/lc81/login',null,{login:'admin',password:loginPassword},false)).status,403);
+  const r=await req('/api/lc81/login',null,{login:'admin',password:loginPassword});assert.equal(r.status,200);
   const cookie=r.headers.get('set-cookie');assert.match(cookie,/; Secure; HttpOnly; SameSite=Strict/);
   const session=await req('/api/lc81/session',cookie.split(';')[0]);assert.equal(session.status,200);assert.equal((await session.json()).user.admin,true);
   return {req,cookie:cookie.split(';')[0]};
@@ -75,6 +76,14 @@ test('pinned protected Amvera recipe: new storage, persistent state, offline bac
   const a=await admin(client);
   const created=await client.req('/api/lc81/admin/reference',client.cookie,{type:'org_unit',payload:{code:'QA-DEPLOY-PERSIST',name:'QA persistence witness',kind:'Участок',parent_id:a.site}});
   assert.equal(created.status,200);const id=(await created.json()).id;assert(id);
+  const workerPassword=randomBytes(24).toString('base64url');
+  const worker=await client.req('/api/lc81/admin/provision',client.cookie,{person_id:null,new_person:{employee_code:'QA-IMPORT-WORKER',display_name:'QA import employee',unit_id:a.site},login:'import-worker',password:workerPassword,generate:false,manager:false});
+  assert.equal(worker.status,200);
+  const workerId=(await worker.json()).id;
+  const payload={schemaVersion:2,document:{id:randomUUID(),number:'Черновик',status:'Черновик',version:1},constructor:{schemaVersion:4,meta:{operation:'QA upload'},steps:[{id:1,action:'Шаг',keyMoments:['КМ'],reason:'Причина',durationSeconds:10,hasPhoto:false}],twi:{enabled:false}},photoAssets:{}};
+  const text=JSON.stringify({...payload,integrity:{algorithm:'SHA-256',sha256:createHash('sha256').update(JSON.stringify(payload)).digest('hex')}});
+  const draft=await client.req('/api/lc81/library/save',client.cookie,{request_id:randomUUID(),context:{kind:'sop',command:'create',id:null,revision_id:null,operation_id:null,origin_id:null,origin_revision:null},expected_revision:0,title:'QA uploaded draft',code:'QA-UPLOAD-SOP',observed_at:null,text,new_operation:{unit_id:a.site,code:'QA-UPLOAD-OP',name:'QA upload'}});
+  assert.equal(draft.status,200);
   await stop();
   // Reopen without initial secret or LC81_INIT.
   client=await start(dataDir);assert((await admin(client)).units.some(x=>x.id===id&&x.code==='QA-DEPLOY-PERSIST'));await stop();
@@ -82,6 +91,35 @@ test('pinned protected Amvera recipe: new storage, persistent state, offline bac
   client=await start(restored);assert((await admin(client)).units.some(x=>x.id===id&&x.code==='QA-DEPLOY-PERSIST'));await stop();
   // Restore cannot overwrite an existing directory.
   const refusal=spawnSync(process.execPath,['server/lc81-maintenance.mjs','restore-new',backup,restored],{env:{...env,LC81_QA:'1'},encoding:'utf8',timeout:30000});assert.notEqual(refusal.status,0);
+  // Real startup using one private upload, with a new administrator secret.
+  const upload=path.join(root,'upload.json'),imported=path.join(root,'imported'),wrong=path.join(root,'wrong');
+  const checkpoint=await fs.readFile(path.join(backup,'secure.lc81')),marker=await fs.readFile(path.join(backup,'initialized'),'utf8');
+  const documents={};
+  for(const name of await fs.readdir(path.join(backup,'documents')))documents[name.slice(0,-5)]=(await fs.readFile(path.join(backup,'documents',name))).toString('base64');
+  assert.equal(Object.keys(documents).length,1);
+  const bytes=Buffer.from(JSON.stringify({format:'LC81-QA-UPLOAD-1',checkpoint:checkpoint.toString('base64'),marker,documents}));
+  const sha=createHash('sha256').update(bytes).digest('hex'),newPassword=randomBytes(24).toString('base64url');
+  await fs.writeFile(upload,bytes);
+  const options={bundleFile:upload,expectedSha:sha,dataDir:imported,password:newPassword,siteTimeZone:'UTC'};
+  await assert.rejects(restoreUploadedQA({...options,dataDir:wrong,expectedSha:'0'.repeat(64)}),/Контрольная сумма/);
+  await assert.rejects(fs.stat(wrong),{code:'ENOENT'});
+  const importEnv={LC81_IMPORT_FILE:upload,LC81_IMPORT_SHA256:sha,LC81_BOOTSTRAP_ADMIN_PASSWORD:newPassword,LC81_INIT:'0'};
+  client=await start(imported,false,importEnv,newPassword);
+  const importedData=await admin(client);
+  assert(importedData.units.some(x=>x.id===id));assert(importedData.accounts.some(x=>x.id===workerId&&x.login==='import-worker'));
+  assert.equal(importedData.setup.sop,1);
+  assert.equal((await client.req('/api/lc81/login',null,{login:'admin',password})).status,401);
+  assert.equal((await client.req('/api/lc81/login',null,{login:'import-worker',password:workerPassword})).status,401);
+  await stop();
+  const after=await fs.readFile(path.join(imported,'secure.lc81'));
+  assert((await fs.readFile(path.join(backup,'secure.lc81'))).equals(checkpoint));
+  assert((await fs.readFile(upload)).equals(bytes));
+  for(const name of Object.keys(documents))assert.equal((await fs.readFile(path.join(imported,'documents',name+'.json'))).toString('base64'),documents[name]);
+  // Leftover upload flags must not reset credentials or replace data.
+  client=await start(imported,false,{LC81_IMPORT_FILE:upload,LC81_IMPORT_SHA256:sha},newPassword);await stop();
+  assert((await fs.readFile(path.join(imported,'secure.lc81'))).equals(after));
+  await assert.rejects(restoreUploadedQA(options),{code:'EEXIST'});
+  assert((await fs.readFile(path.join(imported,'secure.lc81'))).equals(after));
  }finally{try{await stop()}finally{await fs.rm(root,{recursive:true,force:true})}}
 });
 

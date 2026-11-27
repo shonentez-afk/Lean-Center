@@ -327,7 +327,7 @@ export async function restoreUploadedQA({bundleFile,expectedSha,dataDir,password
  const {SQL}=await pilotSql(),db=unpackBytes(SQL,uploadBytes(pkg.checkpoint,MAX+MAGIC.length+65));
  try{
   must(pkg.marker===meta(db,'database_id')+'\n',400,'Маркер загруженной базы не совпадает');
-  must(!siteTimeZone||siteClock(db).configured&&siteClock(db).zone===normalizeZone(siteTimeZone),409,'Часовой пояс уже хранится в базе; настройте его явно через администратора');
+  must(!siteTimeZone||siteClock(db).configured&&normalizeZone(siteClock(db).zone)===normalizeZone(siteTimeZone),409,'Часовой пояс уже хранится в базе; настройте его явно через администратора');
   const refs=refsForDb(db),names=Object.keys(pkg.documents);
   must(names.length===refs.length&&names.every(uploadSha)&&refs.every(r=>Object.hasOwn(pkg.documents,r.sha256)),400,'Набор загруженных документов не совпадает');
   const documents=new Map();let total=0;
