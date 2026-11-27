@@ -66,6 +66,14 @@ export function preparationResource(db,b,day){
  if(!manager||rr.some(r=>!r))return null;
  return {data:{},self:b.trainee_id,units:[...new Set([...manager.units,...rr.flatMap(r=>r.units)])],assigned:records.some(n=>n.state==='active')?[b.manager_id,records[2].mentor_id,records[2].manager_id]:[]};
 }
+export function orderResource(db,o,day){
+ const members=rows(db,'SELECT person_id,acknowledged_on FROM mentor_appointment WHERE order_id=?',[o.id]);
+ return members.length?personWorkResource(db,[o.approved_by,...members.map(m=>m.person_id)],day,[o.order_on,o.valid_from,...members.map(m=>m.acknowledged_on)]):null;
+}
+export function supplementResource(db,n,day,tasks=[]){
+ const r=personWorkResource(db,[n.person_id,n.manager_id],day,tasks.map(t=>t.done_on));
+ return r?{...r,self:n.person_id,assigned:n.state==='draft'?[n.manager_id]:[]}:null;
+}
 export function trainingResource(db,operationId,people,day,extraDay=null){
  const op=one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[operationId]);
  if(!op||!lineage(db,op.unit_id)||!Array.isArray(people)||!people.length)return null;
@@ -206,12 +214,19 @@ function resolve(db,action,id,day){
   const resource=personWorkResource(db,[r.person_id],day,[r.valid_from],[r.operation_id]);
   return resource?{...resource,data:r,self:r.person_id}:null;
  }
- if(action==='credential.read'||action==='appointment.read'||action==='development.read'||action==='supplement.read'){
+ if(action==='order.read'){
+  const o=one(db,'SELECT * FROM mentor_order WHERE id=?',[id]),r=o&&orderResource(db,o,day);
+  return r?{...r,data:{id:o.id,order_number:o.order_number,order_on:o.order_on,organization:o.organization,valid_from:o.valid_from,valid_to:o.valid_to,members:one(db,'SELECT count(*) n FROM mentor_appointment WHERE order_id=?',[id]).n}}:null;
+ }
+ if(action==='supplement.read'){
+  const n=one(db,'SELECT * FROM twi_supplement WHERE id=?',[id]),r=n&&supplementResource(db,n,day,JSON.parse(n.tasks_json));
+  return r?{...r,data:{id:n.id,person_id:n.person_id,role:n.role,month:n.month,state:n.state,rev:n.rev}}:null;
+ }
+ if(action==='credential.read'||action==='appointment.read'||action==='development.read'){
   const sql={
    'credential.read':'SELECT id,person_id,kind,role,issued_on,valid_until,revoked_at,rev FROM mentor_credential WHERE id=?',
    'appointment.read':'SELECT id,person_id,role,order_on,valid_from,valid_to,revoked_at,rev FROM mentor_appointment WHERE id=?',
-   'development.read':'SELECT id,person_id,title,start_on,due_on,state FROM development_plan WHERE id=?',
-   'supplement.read':'SELECT id,person_id,role,month,state FROM twi_supplement WHERE id=?'
+   'development.read':'SELECT id,person_id,title,start_on,due_on,state FROM development_plan WHERE id=?'
   }[action];
   const r=one(db,sql,[id]);if(!r||!activePerson(db,r.person_id))return null;
   return {data:r,self:r.person_id,units:unitsFor(db,r.person_id,day),assigned:[]};
@@ -275,7 +290,7 @@ function decide(db,security,accountId,action,resourceId,day,resourceAction=actio
   if(!role||assignment?.person_id!==account.person_id||assignment.role_id!==role.id||!activePeriod(assignment,day))continue;
   const policy=unique(security.policies,x=>x?.role_id===role.id);
   if(!policy||!Number.isSafeInteger(policy.revision)||policy.revision<1||grant.policy_revision!==policy.revision||!Array.isArray(policy.permissions)||!policy.permissions.includes(action))continue;
-  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result','preparation.shift'].includes(x)),'matrix.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
+  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result','preparation.shift','supplement.create','supplement.revise','supplement.decide'].includes(x)),'matrix.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
  }
  return null;
 }
@@ -316,7 +331,7 @@ export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
 }
 
 export function canUseTrainingResource(db,security,accountId,action,id,day,resource){
- const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail'];
+ const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail'];
  return !!resource&&allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,action,resource);
 }
 export function bootstrapTrainingScope(db,site,resource){

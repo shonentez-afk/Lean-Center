@@ -9,6 +9,7 @@ import {prepareSnapshot,readSnapshot,openDb,one,rows,uuid,meta} from '../src/cor
 import {openPilot,copyPilotCheckpoint,PILOT_STATE} from '../server/lc74-store.mjs';
 import {openSecureQA} from '../server/lc81/store.mjs';
 import {migratePilotCopy,copySecureCheckpoint} from '../server/lc81/maintenance.mjs';
+import {QUESTION_BANK_V03} from '../src/modules/training/question-bank-v03.js';
 import {READ_ACTIONS,PERMISSIONS} from '../server/lc81/access-contract.mjs';
 import {readManagerProjection} from '../server/lc81/read-policy.mjs';
 const password=()=>randomBytes(24).toString('base64url');
@@ -25,6 +26,14 @@ async function synthetic(t){
  const managerAssignment=w.edit('role_assignment',null,{person_id:f.actor,role_id:managerRole,valid_from:'2020-01-01',valid_to:null});
  const workerRole=one(w.working,"SELECT id FROM business_role WHERE code='TRAINEE'").id,workerAssignment=one(w.working,'SELECT id FROM role_assignment WHERE person_id=? AND role_id=?',[f.trainee,workerRole]).id;
  const matrixScale=w.edit('rating_scale',null,{name:'Производственная компетенция (1–4)',version_no:'1',levels:'1: Обучен\n2: Выполняет работу самостоятельно\n3: Выполняет работу мастерски\n4: Инструктор-наставник'});
+ const category=one(w.working,'SELECT category_id FROM skill WHERE id=?',[f.skill]).category_id;
+ const generalSkill=w.edit('skill',null,{category_id:category,operation_id:null,name:'Учебный общий навык'});
+ const position=w.edit('position',null,{code:'QA-INSTR-POS',name:'Учебная должность инструктора'});
+ const old=one(w.working,'SELECT * FROM person_assignment WHERE person_id=?',[f.mentor]);
+ const fields={person_id:old.person_id,unit_id:old.unit_id,profession_id:old.profession_id,position_id:old.position_id,shift_id:old.shift_id,shift_code:old.shift_code,valid_from:old.valid_from,valid_to:'2025-12-31'};
+ w.edit('person_assignment',old.id,fields);
+ w.edit('person_assignment',null,{...fields,position_id:position,valid_from:'2026-01-01',valid_to:null});
+ const bank=(await f.save('twi_knowledge_bank',{profession_id:f.profession,author_id:f.actor,reviewed_on:'2026-01-20',previous_id:null,note:'Учебный банк',blocks:QUESTION_BANK_V03.blocks})).entity_id;
  const assignment=await f.addAssignment();
  const task=async owner=>(await f.save('action_item',{response_id:null,title:'Учебное мероприятие',owner_id:owner,subject_id:null,due_on:'2027-01-31',kind:'corrective',priority:'normal'})).entity_id;
  const ownTask=await task(f.trainee),otherTask=await task(personB);
@@ -34,7 +43,7 @@ async function synthetic(t){
  const source=path.join(root,'legacy-copy'),target=path.join(root,'secure-copy');
  await copyPilotCheckpoint({SQL,snapshot,readSource:f.readContent,target:source});
  const sourceHash=sha(await fs.readFile(path.join(source,PILOT_STATE)));
- return {root,source,target,sourceHash,snapshot,site,unitB,personB,adminRole,managerRole,managerAssignment,workerRole,workerAssignment,assignment,ownTask,otherTask,revision,matrixScale,f};
+ return {root,source,target,sourceHash,snapshot,site,unitB,personB,adminRole,managerRole,managerAssignment,workerRole,workerAssignment,assignment,ownTask,otherTask,revision,matrixScale,generalSkill,category,bank,f};
 }
 test('migration keeps all existing v17 records and referenced sources, reuses role IDs and copies authenticated state',async t=>{
  const x=await synthetic(t),pass=password();
@@ -90,6 +99,23 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const registered=await store.changeMentor(manager.id,1,mentorCmd('credential',certificateFields));
   const registeredOrder=await store.changeMentor(manager.id,1,mentorCmd('appointment',{credential_id:registered.id,order_number:'LC81-REGISTERED-ORDER',order_on:mentorDay,approved_by:x.f.actor,valid_from:mentorDay,valid_to:null,acknowledged_on:mentorDay,evidence:'Синтетический приказ'}));
   assert(store.listResources(manager.id,'appointment.read').some(r=>r.id===registeredOrder.id&&r.can_revoke));
+  const groupInput={order_number:'LC81-GROUP',order_on:mentorDay,organization:'Учебное предприятие',city:'Учебный город',approved_by:x.f.actor,valid_from:mentorDay,valid_to:null,supplement_from:mentorDay,instructor_amount:5000,trainer_amount:7000,evidence:'Синтетический подписанный приказ',members:[{credential_id:x.f.certificate,acknowledged_on:mentorDay}]};
+  assert(store.orderOptions(manager.id,1).certs.some(c=>c.id===x.f.certificate));
+  const groupOrder=await store.registerOrder(manager.id,1,groupInput);
+  assert.equal(store.orderDetail(manager.id,1,groupOrder.id).members.length,1);
+  assert.equal(store.orderDetail(manager.id,1,groupOrder.id).members[0].position_name,'Учебная должность инструктора');
+  await assert.rejects(store.registerOrder(manager.id,1,groupInput),/уже зарегистрирован/);
+  const suppFields={person_id:x.f.mentor,manager_id:x.f.actor,role:'instructor',month:mentorDay.slice(0,7),tasks:[{code:'sop',done_on:mentorDay,evidence:'Синтетический факт СОП'}]};
+  const supp=await store.createSupplement(manager.id,1,suppFields);
+  assert.equal(store.supplementDetail(manager.id,1,supp.id).status.eligible,false);
+  const sc=(command,fields,rev=supp.rev)=>store.changeSupplement(manager.id,1,{id:supp.id,expected_revision:rev,command,fields});
+  await assert.rejects(sc('approve',{note:'Недостаточно задач'}),/минимальный/);
+  const revisedSupp=await sc('revise',{tasks:[...suppFields.tasks,{code:'instruction',done_on:mentorDay,evidence:'Синтетический факт обучения'}]});
+  assert.equal(store.supplementDetail(manager.id,1,supp.id).status.amount,5000);
+  await assert.rejects(sc('approve',{note:'Устаревшая версия'}),/изменено/);
+  await sc('approve',{note:'Факты подтверждены'},revisedSupp.rev);
+  assert.equal(store.supplementDetail(manager.id,1,supp.id).state,'approved');
+  assert(store.personCard(manager.id,1,x.f.mentor).sections.some(s=>s.action==='supplement.read'&&s.items.some(r=>r.id===supp.id&&r.can_detail)));
   await assert.rejects(store.changeMentor(manager.id,1,mentorCmd('authorization',{appointment_id:registeredOrder.id,operation_id:x.f.operation,valid_from:mentorDay,valid_to:null})),/пересекающееся/);
   await assert.rejects(store.changeMentor(manager.id,1,mentorCmd('credential',{reason:'Исправление'},registered.id,registered.rev+1)),/изменена/);
 
@@ -201,7 +227,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const aData=store.adminData(admin.id),instructorRole=aData.roles.find(r=>r.code==='INSTRUCTOR').id;
   const instructorAssignment=aData.assignments.find(r=>r.person_id===x.f.mentor&&r.role_id===instructorRole).id;
   const instructor=await store.createAccount(admin.id,{person_id:x.f.mentor,login:'secure-instructor',password:password(),generate:false});
-  await store.setPolicy(admin.id,{role_id:instructorRole,revision:0,permissions:['training.read','training.detail','training.stage','training.read_sop','training.enrollment.read','training.enrollment.detail','training.enrollment.result']});
+  await store.setPolicy(admin.id,{role_id:instructorRole,revision:0,permissions:['training.read','training.detail','training.stage','training.read_sop','training.enrollment.read','training.enrollment.detail','training.enrollment.result','preparation.read','preparation.detail','preparation.shift']});
   await store.grant(admin.id,{account_id:instructor.id,assignment_id:instructorAssignment,scope:{kind:'assigned'},valid_to:null});
   const headRole=(await store.createReference(admin.id,'business_role',{code:'QA-HEAD-LC81',name:'Руководитель обучения QA'})).id;
   const headAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.f.other,role_id:headRole,valid_from:'2020-01-01',valid_to:null})).id;
@@ -288,10 +314,42 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(store.enrollmentDetail(manager.id,1,ad.id).tasks.find(t=>t.sop).link,null);
   assert(store.enrollmentDetail(manager.id,1,jd.id).tasks.find(t=>t.sop).link);
   await assert.rejects(store.createPreparation(manager.id,1,prep),/уже связан/);
+  const prepFact=(actor,kind,data,expected_fact_id=null,fact_on=today)=>store.recordPreparationFact(actor,1,{id:bundle.id,kind,fact_on,expected_fact_id,data});
+  const shiftFact={shift_id:x.f.shift,result:'completed',minutes:480,note:'Синтетическая смена'};
+  await assert.rejects(prepFact(worker.id,'shift',shiftFact),/полномочий/);
+  await assert.rejects(prepFact(manager.id,'shift',shiftFact,null,tomorrow),/Неверный факт/);
+  const actualShift=await prepFact(instructor.id,'shift',shiftFact);
+  assert.equal(store.preparationDetail(manager.id,1,bundle.id).completed_shifts,1);
+  await assert.rejects(prepFact(instructor.id,'shift',shiftFact),/изменён/);
+  const correction=await prepFact(instructor.id,'shift',{...shiftFact,result:'incomplete'},actualShift.id);
+  assert.equal(store.preparationDetail(manager.id,1,bundle.id).completed_shifts,0);
+  await prepFact(manager.id,'shift',shiftFact,correction.id);
+  const protocol={result:'pass',reference:'Учебный протокол',feedback:'Фактический результат'};
+  await assert.rejects(prepFact(manager.id,'internship',protocol),/Сначала зарегистрируйте|двух фактически/);
+  await assert.rejects(prepFact(manager.id,'safety',protocol),/Сначала зарегистрируйте/);
+  const safetyTask=store.enrollmentDetail(manager.id,1,sd.id).tasks[0];
+  await store.changeEnrollment(manager.id,1,{id:sd.id,expected_revision:sd.rev,command:'result',fields:{task_id:safetyTask.id,held_on:today,result:'completed',minutes:60,evidence:'Учебная тема ОТ'}});
+  await prepFact(manager.id,'safety',protocol);
+  assert.equal(store.preparationDetail(manager.id,1,bundle.id).safety_current,true);
+  const optionsPrep=store.preparationFactOptions(manager.id,1,bundle.id,today),bank=optionsPrep.banks.find(b=>b.id===x.bank);
+  assert(bank);
+  await prepFact(manager.id,'questions',{bank_id:bank.id,blocks:bank.blocks.map(b=>({block:b.id,question_ids:[b.questions[0].id]})),note:'Выданы вопросы'});
+  assert.equal(store.preparationDetail(manager.id,1,bundle.id).questions_issued,true);
+  await assert.rejects(prepFact(manager.id,'commission',{members:{manager:x.f.actor,mentor:x.f.mentor,trainer:x.f.other,agent:x.personB,hr:x.personB},theory:[],conclusion:'basic',reference:'Комиссия',feedback:'Итог'}),/пять участников|сертификат|актуальные/);
+  const safetyDetail=store.enrollmentDetail(manager.id,1,sd.id);
+  await store.changeEnrollment(manager.id,1,{id:sd.id,expected_revision:safetyDetail.rev,command:'finish',fields:{conclusion:'basic',feedback:'Протокол подтверждён'}});
+  assert.equal(store.enrollmentDetail(manager.id,1,sd.id).state,'completed');
   const qualified=store.trainingDetail(manager.id,1,newTraining.id);assert.equal(qualified.qualification.level,2);assert.equal(qualified.admission,'Допуск зарегистрирован');
   // Matrix constructor uses the actual assessment; the second employee is
   // deliberately unassessed, so their cell must be null, never zero.
   const matrixRequest={code:'QA-LC81-MATRIX',title:'Учебная матрица',unit_id:x.f.unit,scale_id:x.matrixScale,base_on:today,target_on:due,person_ids:[x.f.trainee,x.f.other],columns:[{skill_id:x.f.skill,document_id:x.f.doc.entity_id}],previous_id:null,previous_rev:0};
+  const filtered=store.matrixInfo(manager.id,1,x.f.unit,today,{shift_id:x.f.shift,profession_id:x.f.profession,category_id:x.category,workplace_id:null});
+  assert(filtered.columns.some(c=>c.skill_id===x.generalSkill&&c.document_id===null));
+  assert(filtered.roster.some(p=>p.person_id===x.f.trainee));
+  const mixed=await store.saveMatrix(manager.id,1,{...matrixRequest,code:'QA-LC81-MIXED',shift_id:x.f.shift,profession_id:x.f.profession,category_id:x.category,workplace_id:null,person_ids:[x.f.other,x.f.trainee],columns:[{skill_id:x.generalSkill,document_id:null},...matrixRequest.columns]});
+  const mixedView=store.matrixDetail(manager.id,1,mixed.id);
+  assert.equal(mixedView.shift_id,x.f.shift);assert.equal(mixedView.columns[0].skill_id,x.generalSkill);assert.equal(mixedView.roster[0].person_id,x.f.other);assert.equal(mixedView.cells[1][0].actual,null);assert.equal(mixedView.cells[1][1].actual,2);
+  await assert.rejects(store.saveMatrix(manager.id,1,{...matrixRequest,code:'QA-MALFORMED-SKILL',columns:[{skill_id:x.f.skill,document_id:null}]}),/недоступны/);
   const createdMatrix=await store.saveMatrix(manager.id,1,matrixRequest);
   const matrix=store.matrixDetail(manager.id,1,createdMatrix.id);assert.equal(matrix.cells[0][0].base,2);assert.equal(matrix.cells[0][0].actual,2);assert.equal(matrix.cells[1][0].actual,null);
   assert.throws(()=>store.matrixDetail(worker.id,1,createdMatrix.id),/недоступна/);

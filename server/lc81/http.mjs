@@ -119,6 +119,13 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='POST'&&p==='/api/lc81/preparation/fact'){reply(res,200,await store.recordPreparationFact(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/preparation/detail'){reply(res,200,store.preparationDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/preparation/create'){reply(res,200,await store.createPreparation(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/order/options'){reply(res,200,store.orderOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/order/detail'){reply(res,200,store.orderDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/order/register'){reply(res,200,await store.registerOrder(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/supplement/options'){reply(res,200,store.supplementOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/supplement/detail'){reply(res,200,store.supplementDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/supplement/create'){reply(res,200,await store.createSupplement(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/supplement/change'){reply(res,200,await store.changeSupplement(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/mentor/options'){reply(res,200,store.mentorOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='POST'&&p==='/api/lc81/mentor/change'){reply(res,200,await store.changeMentor(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/matrix/info'){reply(res,200,store.matrixInfo(a.id,a.credential_revision,url.searchParams.get('unit_id'),url.searchParams.get('base_on'),Object.fromEntries(['shift_id','profession_id','workplace_id','category_id'].map(k=>[k,url.searchParams.get(k)]))));return}

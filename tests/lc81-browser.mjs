@@ -94,6 +94,13 @@ try{
  await button(m.p,'Открыть шаблон').click();
  await m.p.getByRole('cell',{name:'Учебная тема',exact:true}).waitFor();
  assert.equal(store.listResources(manager.id,'program.read').length,1);
+ const matrixNav=m.p.locator('#nav [data-action="matrix.read"]'),matrixGroup=m.p.locator('#nav details').filter({has:m.p.locator('[data-action="matrix.read"]')});
+ if(!await matrixGroup.evaluate(e=>e.open))await matrixGroup.locator('summary').click();
+ await matrixNav.click();await button(m.p,'Создать матрицу').click();
+ await m.p.locator('#content select[name=shift_id]').waitFor();
+ await m.p.locator('#content select[name=profession_id]').waitFor();
+ await m.p.locator('#content select[name=category_id]').waitFor();
+ await m.p.locator('#content select[name=workplace_id]').waitFor();
  // Real pinned Stage43 working copy in a sandboxed HTTPS iframe.
  const op=(await store.changeDirectory(admin.id,1,{type:'operation',operation:'create',id:null,expected_revision:0,fields:{unit_id:a,equipment_id:null,workplace_id:null,code:'QA-EDIT-SOP',name:'Учебная операция',criticality:'normal'}})).id;
  const source=await makeSop('Учебный шаг с фото');

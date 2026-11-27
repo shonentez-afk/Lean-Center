@@ -149,7 +149,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    const details=el('details');details.append(el('summary',s.title+' · '+s.items.length));
    const labels={code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',people:'Сотрудников',skills:'Навыков'};
    const keys=Object.keys(labels).filter(k=>s.items.some(r=>Object.hasOwn(r,k))),sub=el('div');
-   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):'']);
+   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):'']);
    details.append(table([...keys.map(k=>labels[k]),'Действия'],rows),sub);n.append(details);
   }
   if(!d.sections.length)n.append(el('p','Нет связанных записей, доступных вашей учётной записи.'));
@@ -324,5 +324,63 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   else n.append(items.length?table(['Сотрудник','Категория','Адаптация','ОТ','Стажировка','Действия'],items.map(r=>[r.trainee_name,r.category==='new'?'Новый сотрудник':'Перевод',state[r.adaptation]||r.adaptation,state[r.safety]||r.safety,state[r.internship]||r.internship,r.can_detail?button('Открыть комплект',()=>preparationCard(host,r.id)):'—'])):empty());
   n.append(host);return n;
  }
- return {training,matrices,card,mentor,programPanel};
+ const mentorRoles={instructor:'Инструктор',mentor:'Наставник',internal_trainer:'Внутренний тренер'};
+ const supplementStates={draft:'Черновик',approved:'Согласовано',declined:'Отклонено'};
+ async function orderEditor(host){
+  if(!discard())return;const d=await api('order/options'),list=el('div'),members=[];let i=0;
+  if(!d.certs.length){setContent(host,panel('Групповой приказ',el('p','Нужны сотрудники с действующим сертификатом и указанной должностью в справочнике.')));return}
+  function add(){
+   if(members.length>=200)throw Error('Не более 200 участников');
+   const k='m'+(++i)+'_',row=el('fieldset'),m={k,row};
+   row.append(el('legend','Назначаемый сотрудник'),pick(k+'credential_id','Сертификат',opts(d.certs,'label')),dt(k+'acknowledged_on','Дата ознакомления',d.day),button('Удалить',()=>{members.splice(members.indexOf(m),1);row.remove()}));members.push(m);list.append(row);
+  }
+  add();
+  const money=(k,l)=>{const x=num(k,l,0,10000000,'');x.querySelector('input').required=false;return x};
+  const f=form([input('organization','Организация'),input('city','Город'),input('order_number','Номер приказа'),dt('order_on','Дата приказа',d.day),pick('approved_by','Подписант бумажного приказа',opts(d.people)),dt('valid_from','Действует с',d.day),input('valid_to','Действует по','date',false),money('instructor_amount','Доплата инструктору, руб. (по приказу)'),money('trainer_amount','Доплата ВТ, руб. (по приказу)'),input('supplement_from','Начало доплаты','date',false),input('evidence','Реквизиты подписанного приказа'),list,button('Добавить участника',add)],'Зарегистрировать приказ',async f=>{
+   if(!members.length)throw Error('Добавьте участников приказа');
+   const amount=k=>value(f,k)===''?null:Number(value(f,k));
+   const data=Object.fromEntries(['organization','city','order_number','order_on','approved_by','valid_from','valid_to','supplement_from','evidence'].map(k=>[k,value(f,k)||null]));
+   await api('order/register',{...data,instructor_amount:amount('instructor_amount'),trainer_amount:amount('trainer_amount'),members:members.map(({k})=>({credential_id:value(f,k+'credential_id'),acknowledged_on:value(f,k+'acknowledged_on')}))});note('Приказ и связанные назначения зарегистрированы');await render();
+  });
+  setContent(host,panel('Групповой приказ · регистрация подписанного документа',f));
+ }
+ async function orderCard(host,id){
+  if(!discard())return;const d=await api('order/detail?id='+encodeURIComponent(id));
+  const n=panel('Приказ № '+d.order_number+' от '+d.order_on,el('p',d.organization+' · '+d.city+' · подписант '+d.approved_name),el('p','Действует '+d.valid_from+' — '+(d.valid_to||'без срока')+' · '+d.evidence),el('p','По приказу: инструктор '+(d.instructor_amount??'не установлено')+' руб. · ВТ '+(d.trainer_amount??'не установлено')+' руб. · с '+(d.supplement_from||'—')),table(['Сотрудник','Должность','Роль','Ознакомление','Состояние'],d.members.map(m=>[m.person_name,m.position_name,mentorRoles[m.role]||m.role,m.acknowledged_on,m.revoked_at?'Отозвано':'Зарегистрировано'])));
+  setContent(host,n);
+ }
+ function supplementTasksEditor(catalog,previous=[]){
+  const host=el('div'),entries=[];
+  for(const [code,label] of catalog){
+   const old=previous.find(t=>t.code===code),group=el('fieldset'),selected=check('use_'+code,label,!!old),day=dt('day_'+code,'Дата выполнения',old?.done_on||''),evidence=fill(input('evidence_'+code,'Основание / результат'),old?.evidence);
+   const toggle=()=>{const v=selected.querySelector('input').checked;for(const f of [day,evidence]){f.hidden=!v;const inp=f.querySelector('input');inp.disabled=!v;inp.required=v}};
+   selected.querySelector('input').addEventListener('change',toggle);toggle();
+   group.append(selected,day,evidence);host.append(group);entries.push(code);
+  }
+  return {host,tasks:f=>entries.filter(k=>checked(f,'use_'+k)).map(code=>({code,done_on:value(f,'day_'+code),evidence:value(f,'evidence_'+code)}))};
+ }
+ async function supplementEditor(host){
+  if(!discard())return;const d=await api('supplement/options');
+  if(!d.subjects.length){setContent(host,panel('Ходатайство',el('p','Нет доступных сотрудников с зарегистрированным сертификатом инструктора или ВТ.')));return}
+  const role=pick('role','Роль',[['instructor','Инструктор'],['internal_trainer','Внутренний тренер']],'instructor'),tasksHost=el('div');let editor;
+  const rebuild=()=>{editor=supplementTasksEditor(d.tasks[role.querySelector('select').value]||[]);tasksHost.replaceChildren(editor.host)};
+  role.querySelector('select').addEventListener('change',rebuild);rebuild();
+  setContent(host,panel('Ходатайство о доплате · не расчёт зарплаты',form([pick('person_id','Сотрудник',opts(d.subjects)),pick('manager_id','Руководитель',opts(d.people)),role,fill(input('month','Календарный месяц','month'),d.day.slice(0,7)),tasksHost],'Создать ходатайство',async f=>{
+   await api('supplement/create',{person_id:value(f,'person_id'),manager_id:value(f,'manager_id'),role:value(f,'role'),month:value(f,'month'),tasks:editor.tasks(f)});note('Ходатайство зарегистрировано');await render();
+  })));
+ }
+ async function supplementCard(host,id){
+  if(!discard())return;const d=await api('supplement/detail?id='+encodeURIComponent(id)),n=panel('Ходатайство · '+d.month+' · '+(d.person_name||''),el('p',mentorRoles[d.role]+' · '+supplementStates[d.state]+' · руководитель '+(d.manager_name||'')),el('p','Подтверждённых задач: '+d.status.count+' / '+d.status.minimum+' · норматив '+d.status.amount+' руб. · '+(d.status.eligible?'Минимум выполнен':'Минимум не выполнен')),el('p','Согласование ходатайства не означает начисление или выплату зарплаты.','muted'),table(['Задача','Дата','Основание'],d.tasks.map(t=>[d.catalog.find(c=>c[0]===t.code)?.[1]||t.code,t.done_on,t.evidence])));
+  if(d.decision_note)n.append(el('p','Решение: '+d.decision_note));
+  const command=(c,get)=>async f=>{await api('supplement/change',{id:d.id,expected_revision:d.rev,command:c,fields:get(f)});note('Запись подтверждена сервером');await render()};
+  if(d.can_revise){const e=supplementTasksEditor(d.catalog,d.tasks);n.append(groups('Уточнить выполненные задачи',[e.host],'Сохранить задачи',command('revise',f=>({tasks:e.tasks(f)}))))}
+  if(d.can_decide){if(d.status.eligible)n.append(groups('Согласовать',[input('note','Основание решения')],'Согласовать',command('approve',f=>({note:value(f,'note')}))));n.append(groups('Отклонить',[input('note','Основание решения')],'Отклонить',command('decline',f=>({note:value(f,'note')}))))}
+  setContent(host,n);
+ }
+ function mentorWorkflow(page,items,user){
+  const order=page==='order.read',host=el('div'),n=panel(order?'Групповые приказы наставников':'Ходатайства о доплате');
+  if(user.person_id&&user.permissions.includes(order?'order.register':'supplement.create'))n.append(button(order?'Зарегистрировать групповой приказ':'Создать ходатайство',()=>order?orderEditor(host):supplementEditor(host),'primary'));
+  n.append(items.length?order?table(['Номер','Дата','Организация','Участников','Действует с','По','Действия'],items.map(r=>[r.order_number,r.order_on,r.organization,r.members,r.valid_from,r.valid_to,r.can_detail?button('Открыть приказ',()=>orderCard(host,r.id)):'—'])):table(['Сотрудник','Месяц','Роль','Состояние','Действия'],items.map(r=>[r.person_name,r.month,mentorRoles[r.role],supplementStates[r.state],r.can_detail?button('Открыть ходатайство',()=>supplementCard(host,r.id)):'—'])):empty(),host);return n;
+ }
+ return {training,matrices,card,mentor,programPanel,mentorWorkflow};
 }

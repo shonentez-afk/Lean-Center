@@ -13,6 +13,7 @@ import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trai
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
 import {mentorOptions,changeMentor,mentorView} from './mentor-commands.mjs';
+import {workflowView,orderOptions,registerOrder,orderDetail,supplementOptions,createSupplement,supplementDetail,changeSupplement} from './mentor-workflows.mjs';
 import {programView,programOptions,saveProgram,retireProgram,programDetail,enrollmentOptions,createEnrollment,changeEnrollment,enrollmentDetail,preparationOptions,createPreparation,preparationDetail,preparationFactOptions,recordPreparationFact} from './program-commands.mjs';
 import {requestDigest,getReceipt,addReceipt} from './library-receipts.mjs';
 import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,inspectLibraryText,saveLibrary,passportLibrary,finalizeLibrary,detailDescriptor,projectLibraryDetail,libraryReadAction} from './library-commands.mjs';
@@ -104,6 +105,7 @@ function projectView(db,a,action,data,d){
   return {...data,trainee_name:one(db,'SELECT display_name FROM person WHERE id=?',[data.trainee_id])?.display_name||'',operation_name:one(db,'SELECT name FROM operation WHERE id=?',[data.operation_id])?.name||'',can_detail:access.allows('training.detail',data.id,resource),can_sop:access.allows('training.read_sop',data.id,resource)};
  }
  if(['program.read','training.enrollment.read','preparation.read'].includes(action))return programView(db,trainingAccess(db,a,d),action,data);
+ if(['order.read','supplement.read'].includes(action))return workflowView(db,trainingAccess(db,a,d),action,data);
  if(['credential.read','appointment.read','authorization.read'].includes(action))return mentorView(db,trainingAccess(db,a,d),action.split('.')[0],data);
  if(action==='matrix.read'){
   const m=one(db,'SELECT * FROM competency_matrix WHERE id=?',[data.id]),r=matrixResource(db,m.unit_id,JSON.parse(m.roster_json),JSON.parse(m.columns_json),d,m.base_on);
@@ -400,6 +402,13 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   preparationFactOptions(actor,revision,id,on){return read(db=>preparationFactOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id,on))},
   recordPreparationFact(actor,revision,input){return mutate(db=>recordPreparationFact(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   preparationDetail(actor,revision,id){return read(db=>preparationDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  orderOptions(actor,revision){return read(db=>orderOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  registerOrder(actor,revision,input){return mutate(db=>registerOrder(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  orderDetail(actor,revision,id){return read(db=>orderDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  supplementOptions(actor,revision){return read(db=>supplementOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  createSupplement(actor,revision,input){return mutate(db=>createSupplement(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  supplementDetail(actor,revision,id){return read(db=>supplementDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  changeSupplement(actor,revision,input){return mutate(db=>changeSupplement(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
   changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   matrixInfo(actor,revision,unit=null,baseOn=null,filters={}){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return matrixInfo(db,a,unit,baseOn??a.day,filters)})},
