@@ -178,6 +178,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
     const f=await body(req,6*1024*1024),method=p.endsWith('/preview')?'previewMobile':p.endsWith('/commit')?'commitMobile':'receiptMobile';
     reply(res,200,await store[method](a.id,a.credential_revision,f));return;
    }
+   if(req.method==='GET'&&p==='/api/lc81/assistant/records'){reply(res,200,store.assistantRecords(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='GET'&&p==='/api/lc81/assistant/options'){reply(res,200,store.assistantOptions(a.id,a.credential_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/assistant/context'){
     const d=store.assistantContext(a.id,a.credential_revision,await body(req));

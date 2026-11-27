@@ -38,7 +38,7 @@ import {importTypes,importAllowed,inspectDirectoryFile,parseDirectoryFile,planDi
 import {mobileOptions,exportMobile,previewMobile,commitMobile,receiptMobile} from './mobile-audit-commands.mjs';
 import {assertImport,historyOptions,historyList,historyDetail,historyArchive,loadHistoryPlan,historyPreview,buildHistoryEvents,commitHistory} from './rc1-history.mjs';
 import {subjectOptions,subjectReport,subjectWorkbook,frvReportDetail} from './subject-reports.mjs';
-import {assistantOptions,assistantContext,assistantRequest} from './assistant-commands.mjs';
+import {assistantOptions,assistantContext,assistantRequest,assistantRecords} from './assistant-commands.mjs';
 import {formsCatalog,prepareForm,serializeForm,canExportForm} from './form-commands.mjs';
 import {refsForDb,checkContent,MAX_CONTENT,verifyDomainEvents} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
@@ -147,6 +147,10 @@ function trainingAccess(db,a,d){
  allows:(action,id,resource)=>a.bootstrap===1?DETAIL_ACTIONS.includes(action)&&bootstrapTrainingScope(db,config(db).site,resource):canUseTrainingResource(db,security(db,a.id),a.id,action,id,d,resource),
  audit:(action,target)=>audit(db,a.id,action,target),
  actorAccess:(id,revision)=>{const other=account(db,id);return other&&other.credential_revision===revision?trainingAccess(db,other,d):null}};
+}
+function assistantAccess(db,a,d){
+ const shared=sharedLibrary(db,a,config(db).site,d);
+ return {...trainingAccess(db,a,d),sharedRead:(action,id)=>shared.read(action,id)};
 }
 function cardAllowed(db,a,id,d){
  return a.bootstrap===1?!!readManagerProjection(db,config(db).site,'person.read_basic',id,d):canReadPersonCard(db,security(db,a.id),a.id,id,d);
@@ -577,9 +581,10 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   previewMobile(actor,revision,f){return read(db=>previewMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   commitMobile(actor,revision,f){return mutate(db=>commitMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   receiptMobile(actor,revision,f){return read(db=>receiptMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  assistantRecords(actor,revision,kind){return read(db=>{const user=checkedAccount(db,actor,revision),d=day(db);return assistantRecords(db,assistantAccess(db,user,d),kind,id=>cardAllowed(db,user,id,d))})},
   assistantOptions(actor,revision){return read(db=>assistantOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
-  assistantContext(actor,revision,f){return read(db=>{const user=checkedAccount(db,actor,revision),d=day(db);return assistantContext(db,trainingAccess(db,user,d),f,id=>cardAllowed(db,user,id,d))})},
-  assistantRequest(actor,revision,f){return read(db=>{const user=checkedAccount(db,actor,revision),d=day(db);return assistantRequest(db,trainingAccess(db,user,d),f,id=>cardAllowed(db,user,id,d))})},
+  assistantContext(actor,revision,f){return read(db=>{const user=checkedAccount(db,actor,revision),d=day(db);return assistantContext(db,assistantAccess(db,user,d),f,id=>cardAllowed(db,user,id,d))})},
+  assistantRequest(actor,revision,f){return read(db=>{const user=checkedAccount(db,actor,revision),d=day(db);return assistantRequest(db,assistantAccess(db,user,d),f,id=>cardAllowed(db,user,id,d))})},
   qualityOptions(actor,revision,kind){return read(db=>qualityOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind))},
   installMentorMethod(actor,revision,input){return mutate(db=>installMentorMethod(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   createAudit(actor,revision,input){return mutate(db=>createAudit(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},

@@ -1,6 +1,7 @@
 // Protected assistant. Use authorized projections and the existing LC7 rule
 // catalogue, not a raw database dump or client-provided facts. No write methods.
-import {one,isId} from '../../src/core/db.js';
+import {one,rows,isId} from '../../src/core/db.js';
+import {corporateEvaluations,weightedHistory} from '../../src/modules/library/sop-assessment-review.js';
 import {ASSISTANT_RULES} from '../../src/modules/assistant/context-rules.js';
 import {ATTENTION_GROUPS} from '../../src/modules/training/center-attention.js';
 import {cloudRequest,CENTER_MODELS,MAX_CLOUD_RULES} from '../../src/modules/assistant/cloud.js';
@@ -36,7 +37,14 @@ export function assistantOptions(db,a){
  }
  return {day:a.day,reports,groups:Object.entries(ATTENTION_GROUPS)};
 }
+// Public library hints use only already authorized metadata and steps.
+const libraryRead=(a,action,id)=>a.read(action,id)||a.sharedRead?.(action,id)||null;
 function recordResource(db,a,type,id,canCard){
+ if(['sop','frv'].includes(type)){
+  const action=type==='sop'?'sop.read_history':'frv.read',x=libraryRead(a,action,id)?.data;
+  const o=x&&libraryRead(a,'operation.read',x.operation_id)?.data;
+  return o?{...unitResource(o.unit_id),sharedLibrary:!!a.sharedRead?.(action,id)}:null;
+ }
  const source=recordAccess(db,a,type,id);
  if(type==='matrix'){
   const m=one(db,'SELECT * FROM competency_matrix WHERE id=?',[id]);
@@ -44,13 +52,9 @@ function recordResource(db,a,type,id,canCard){
   const r=matrixResource(db,m.unit_id,JSON.parse(m.roster_json),JSON.parse(m.columns_json),a.day,m.base_on);
   return full(a,'matrix.detail',id,r)?r:null;
  }
- if(type==='person')return source&&canCard(id)?source.resource:null;
+ if(type==='person')return source&&canCard(id)?{...source.resource,self:id}:null;
  if(type==='program')return a.read('program.read',id)&&rootAccess(db,a,'program.detail')?programResource(db):null;
  if(!source)return null;
- if(['sop','frv'].includes(type)){
-  const x=a.read(type==='sop'?'sop.read_history':'frv.read',id)?.data,o=x&&a.read('operation.read',x.operation_id)?.data;
-  return o?unitResource(o.unit_id):null;
- }
  if(type==='roi')return programResource(db);
  return source.resource;
 }
@@ -82,7 +86,7 @@ export function assistantContext(db,a,f,canCard){
  }else{
   must(exact(f,['type','id'])&&kinds.includes(f.type)&&isId(f.id),400,'Выберите сохранённую карточку');
   resource=recordResource(db,a,f.type,f.id,canCard);anchor=f.id;
-  must(full(a,'assistant.read',anchor,resource),404,'Контекст записи недоступен');
+  must(resource&&(a.scope('assistant.read',anchor,resource)||resource.sharedLibrary===true),404,'Контекст записи недоступен');
   const id=f.id,links=[{label:'Открыть исходную запись',route:{type:f.type,id}}],on=(key,count)=>check(key,count,links);
   if(f.type==='person'){
    const d=personCard(db,a,id,canCard);out.title='Сотрудник · '+d.person.display_name;
@@ -121,12 +125,12 @@ export function assistantContext(db,a,f,canCard){
   }else if(f.type==='task'){
    const d=taskDetail(db,a,id);out.title=d.title;fact('Состояние',d.state_label);fact('Срок',d.due_on);if(open.includes(d.state)){if(d.due_on<a.day)on('action_overdue',1);on(d.state==='implemented'?'action_verify':'ctx_action',1)}
   }else if(f.type==='sop'){
-   const d=a.read('sop.read_history',id).data;out.title=d.code+' · '+d.title+' · v'+d.version_no;fact('Состояние',d.state);fact('Пересмотр',d.review_due);
+   const d=libraryRead(a,'sop.read_history',id).data;out.title=d.code+' · '+d.title+' · v'+d.version_no;fact('Состояние',d.state);fact('Пересмотр',d.review_due);
    if(d.state!=='effective'||d.document_archived)on('ctx_sop_state',1);
    if(d.state==='effective'&&!d.document_archived&&d.review_due&&d.review_due<a.day)on('sop_overdue',1);
-   const steps=a.read('sop.read_steps',id)?.data.steps;if(Array.isArray(steps))on('ctx_sop_steps',steps.filter(s=>!hasSopKeyMomentsAndReason({action:s.action_text,key_points:s.key_points,reason:s.reason_text})).length);
+   const steps=libraryRead(a,'sop.read_steps',id)?.data.steps;if(Array.isArray(steps))on('ctx_sop_steps',steps.filter(s=>!hasSopKeyMomentsAndReason({action:s.action_text,key_points:s.key_points,reason:s.reason_text})).length);
   }else if(f.type==='frv'){
-   const d=a.read('frv.read',id).data;out.title=d.title;fact('Состояние',d.state);if(d.state==='draft')on('ctx_frv_draft',1);
+   const d=libraryRead(a,'frv.read',id).data;out.title=d.title;fact('Состояние',d.state);if(d.state==='draft')on('ctx_frv_draft',1);
    out.notices.push('Измерения и сопоставимость проверяются в исходном разделе ФРВ. Наблюдение потерь не является экономией.');
   }else if(f.type==='roi'){
    const d=roiDetail(db,a,id);out.title=d.title;fact('Состояние',d.status);fact('Контрольная дата',d.review_due);
@@ -137,10 +141,26 @@ export function assistantContext(db,a,f,canCard){
    fact('Отрицательные вручную подтверждённые критерии',n);out.notices.push('Разберите критерии в карточке оценки. Не объединяйте бинарную и взвешенную методики.');
   }
  }
- out.can_cloud=!!a.personId&&full(a,'assistant.cloud',anchor,resource);
+ out.can_cloud=!!a.personId&&(f.type==='report'?full(a,'assistant.cloud',anchor,resource):!!resource&&a.scope('assistant.cloud',anchor,resource));
  // Stable ordering, generic authored rules and exact source links only.
  const order={urgent:0,review:1,plan:2};out.checks.sort((a,b)=>order[a.priority]-order[b.priority]);
  return out;
+}
+const sectionTables=Object.freeze({person:'person',training:'training_assignment',matrix:'competency_matrix',enrollment:'training_enrollment',program:'training_program',preparation:'twi_preparation',audit:'audit_session',self:'mentor_self_evaluation',assessment:'assessment_session',development:'development_plan',task:'action_item',sop:'document_revision',frv:'frv_study',roi:'economic_effect'});
+export function assistantRecords(db,a,kind,canCard){
+ must(a.permissions.includes('assistant.read')&&kinds.includes(kind),403,'Помощник раздела недоступен');
+ const candidates=Object.hasOwn(sectionTables,kind)?rows(db,'SELECT id FROM '+sectionTables[kind]+' ORDER BY id'):kind==='sop_evaluation'?corporateEvaluations(db):weightedHistory(db);
+ const items=[];let more=false;
+ for(const {id} of candidates){
+  if(!isId(id))continue;
+  let result;
+  try{result=assistantContext(db,a,{type:kind,id},canCard)}
+  catch(e){if(e instanceof PilotError&&(e.status===403||e.status===404))continue;throw e}
+  if(items.length===100){more=true;break}
+  const suffix=result.facts.slice(0,2).map(f=>f.value).filter(Boolean).join(' · ');
+  items.push({id,label:result.title+(suffix?' · '+suffix:'')});
+ }
+ return {kind,items,more};
 }
 export function assistantRequest(db,a,f,canCard){
  must(exact(f,['context','ids','model'])&&Array.isArray(f.ids)&&f.ids.length>0&&f.ids.length<=MAX_CLOUD_RULES&&new Set(f.ids).size===f.ids.length&&Object.hasOwn(CENTER_MODELS,f.model),400,'Выберите до 8 тем и разрешённую модель');
