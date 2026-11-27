@@ -20,7 +20,7 @@ const allowed=(a,k,id,r)=>!!r&&a.allows(k,id,r);
 const site=(db,a,k)=>{const r=programResource(db);return !!r&&allowed(a,k,r.units[0],r)};
 const find=(db,t,id)=>isId(id)?one(db,'SELECT * FROM '+t+' WHERE id=?',[id]):null;
 const join=(r,extra)=>r&&extra?{...r,units:[...new Set([...r.units,...extra.units])]}:null;
-const METHODS=Object.freeze({rc1:{code:AUDIT_CODE,payload:{format:'lean-audit-checklist-v1',title:'Аудит 1-го уровня · RC1',source_sha256:'0'.repeat(64),criteria:RC1_CRITERIA.map(({rc1_id,...q})=>q)}},corporate:{code:AUDIT_STANDARD_CODE,payload:AUDIT_V03},self:{code:SELF_CODE,payload:SELF_V03}});
+const METHODS=Object.freeze({rc1:{code:AUDIT_CODE,payload:{format:'lean-audit-checklist-v1',title:'Аудит 1-го уровня · RC1',source_sha256:createHash('sha256').update(canonical(RC1_CRITERIA)).digest('hex'),criteria:RC1_CRITERIA.map(({rc1_id,...q})=>q)}},corporate:{code:AUDIT_STANDARD_CODE,payload:AUDIT_V03},self:{code:SELF_CODE,payload:SELF_V03}});
 function emit(db,a,t,id,operation,rev,payload,action){
  const e=uuid();try{applyEvent(db,{id:e,entity_type:t,entity_id:id,operation,expected_revision:rev,payload,occurred_at:a.at})}
  catch(err){throw new PilotError(422,'Проверка: '+String(err.message||'ошибка').split('\n')[0].slice(0,300))}

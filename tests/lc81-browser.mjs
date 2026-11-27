@@ -101,6 +101,19 @@ try{
  await m.p.locator('#content select[name=profession_id]').waitFor();
  await m.p.locator('#content select[name=category_id]').waitFor();
  await m.p.locator('#content select[name=workplace_id]').waitFor();
+ // Development plan through the protected workspace.
+ const developmentNav=m.p.locator('#nav [data-action="development.read"]'),developmentGroup=m.p.locator('#nav details').filter({has:m.p.locator('[data-action="development.read"]')});
+ if(!await developmentGroup.evaluate(e=>e.open))await developmentGroup.locator('summary').click();
+ await developmentNav.click();await button(m.p,'Создать план').click();
+ await m.p.locator('#content select[name=person_id]').selectOption(p2);
+ await m.p.locator('#content input[name=title]').fill('Учебный план развития');
+ await m.p.locator('#content input[name=due_on]').fill(day);
+ await button(m.p,'Создать план').last().click();
+ await m.p.getByRole('cell',{name:'Учебный план развития',exact:true}).waitFor();
+ await button(m.p,'Открыть план').click();
+ await m.p.locator('#content input[name=title]').fill('Учебная цель');
+ await button(m.p,'Добавить цель').click();
+ assert.equal(store.listResources(manager.id,'development.read').length,1);
  // Real pinned Stage43 working copy in a sandboxed HTTPS iframe.
  const op=(await store.changeDirectory(admin.id,1,{type:'operation',operation:'create',id:null,expected_revision:0,fields:{unit_id:a,equipment_id:null,workplace_id:null,code:'QA-EDIT-SOP',name:'Учебная операция',criticality:'normal'}})).id;
  const source=await makeSop('Учебный шаг с фото');
