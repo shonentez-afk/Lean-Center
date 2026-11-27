@@ -307,15 +307,21 @@ try{
  const adminNav=aa.p.locator('#nav [data-action=admin]'),adminGroup=adminNav.locator('xpath=ancestor::details');
  if(await adminGroup.count()&&!await adminGroup.evaluate(e=>e.open))await adminGroup.locator('summary').click();
  await adminNav.click();
- await button(aa.p,'Конструктор СОП').click();
+ await aa.p.locator('#content').getByRole('button',{name:'Конструктор СОП',exact:true}).click();
  await aa.p.locator('#content select[name=create_operation]').selectOption('');
  await button(aa.p,'Открыть конструктор').click();
  const blankFrame=await aa.p.locator('#lc81-editor-frame').elementHandle(),blankEditor=await blankFrame.contentFrame();
  await blankEditor.locator('#lc-editor-status').filter({hasText:'Рабочая копия готова'}).waitFor({timeout:40000});
- await blankEditor.locator('#meta-operation').fill('Учебная новая операция');
- await blankEditor.locator('[data-step-field=action]').first().fill('Учебный шаг');
- await blankEditor.locator('[data-step-field=action]').first().blur();
- await blankEditor.locator('#lc-editor-send').click();
+ assert.equal(await blankEditor.locator('#meta-operation').inputValue(),'');
+ // Close the blank working copy via an explicit confirmed action.
+ // Existing profile() installs a dismiss handler, so remove it for this one confirmation.
+ aa.p.removeAllListeners('dialog');
+ aa.p.once('dialog',d=>d.accept());
+ await button(aa.p,'Закрыть редактор').click();
+ await aa.p.locator('#lc81-library-host').waitFor({state:'detached'});
+ aa.p.on('dialog',d=>d.dismiss());
+ const firstSource=await makeSop('Учебный шаг новой операции');
+ await aa.p.locator('#content input[type=file]').setInputFiles({name:'first-sop.json',mimeType:'application/json',buffer:Buffer.from(firstSource.text)});
  await aa.p.getByRole('heading',{name:'Проверка исходного файла'}).waitFor();
  await aa.p.locator('#lc81-library-host select[name=library_operation]').selectOption('new');
  await aa.p.locator('#lc81-library-host select[name=library_unit]').selectOption(site);
