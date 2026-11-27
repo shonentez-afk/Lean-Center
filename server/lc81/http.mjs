@@ -106,6 +106,17 @@ export function createSecureQAServer({store,origin}){
     try{reply(res,200,await store.createTraining(a.id,a.credential_revision,await body(req)));return}finally{libraryBusy--}
    }
    if(req.method==='POST'&&p==='/api/lc81/training/change'){reply(res,200,await store.changeTraining(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/program/options'){reply(res,200,store.programOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/program/detail'){reply(res,200,store.programDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/program/save'){reply(res,200,await store.saveProgram(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/program/retire'){reply(res,200,await store.retireProgram(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/enrollment/options'){reply(res,200,store.enrollmentOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/enrollment/detail'){reply(res,200,store.enrollmentDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/enrollment/create'){reply(res,200,await store.createEnrollment(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/enrollment/change'){reply(res,200,await store.changeEnrollment(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/preparation/options'){reply(res,200,store.preparationOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/preparation/detail'){reply(res,200,store.preparationDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/preparation/create'){reply(res,200,await store.createPreparation(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/mentor/options'){reply(res,200,store.mentorOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='POST'&&p==='/api/lc81/mentor/change'){reply(res,200,await store.changeMentor(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/matrix/info'){reply(res,200,store.matrixInfo(a.id,a.credential_revision,url.searchParams.get('unit_id'),url.searchParams.get('base_on')));return}

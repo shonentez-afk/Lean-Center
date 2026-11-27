@@ -15,6 +15,7 @@ export const RESOURCE_TABLES=Object.freeze({
  "sop.read_history":"document_revision",
  "sop.read_steps":"document_revision",
  "frv.read":"frv_study",
+ "program.read":"training_program",
  "training.enrollment.read":"training_enrollment",
  "preparation.read":"twi_preparation",
  "credential.read":"mentor_credential",
@@ -36,8 +37,8 @@ export const DIRECTORIES=Object.freeze({
 });
 export const DIRECTORY_COMMANDS=Object.freeze(Object.values(DIRECTORIES).flatMap(d=>[d.create,d.update,d.archive].filter(Boolean)));
 export const LIBRARY_COMMANDS=Object.freeze(['sop.create','sop.edit_draft','sop.revise','sop.passport','sop.from_frv','frv.create','frv.edit_draft','frv.finalize']);
-export const TRAINING_COMMANDS=Object.freeze(['training.create','training.approve_responsible','training.approve_head','training.reschedule','training.cancel','training.stage','training.verify','training.practical','training.qualify','training.admit','matrix.create','matrix.retire','credential.register','credential.revoke','appointment.register','appointment.revoke','authorization.register','authorization.revoke']);
+export const TRAINING_COMMANDS=Object.freeze(['training.create','training.approve_responsible','training.approve_head','training.reschedule','training.cancel','training.stage','training.verify','training.practical','training.qualify','training.admit','matrix.create','matrix.retire','credential.register','credential.revoke','appointment.register','appointment.revoke','authorization.register','authorization.revoke','program.create','program.retire','training.enrollment.create','training.enrollment.result','training.enrollment.finish','training.enrollment.cancel','preparation.create']);
 export const COMMAND_ACTIONS=Object.freeze(['task.implement_own',...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS]);
-export const DETAIL_ACTIONS=Object.freeze(['sop.read_photo','sop.read_twi','sop.read_linked_frv','frv.read_summary','training.detail','training.read_sop','matrix.detail','person.read_card']);
+export const DETAIL_ACTIONS=Object.freeze(['sop.read_photo','sop.read_twi','sop.read_linked_frv','frv.read_summary','training.detail','training.read_sop','matrix.detail','person.read_card','program.detail','training.enrollment.detail','preparation.detail']);
 export const PERMISSIONS=Object.freeze([...READ_ACTIONS,...COMMAND_ACTIONS,...DETAIL_ACTIONS]);
 export const REFERENCE_CREATE_TYPES=Object.freeze(['person','org_unit','business_role','role_assignment','person_assignment']);
