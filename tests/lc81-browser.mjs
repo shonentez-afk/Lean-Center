@@ -60,6 +60,13 @@ try{
  await m.p.locator('#nav [data-action="person.read_directory"]').click();
  await m.p.getByRole('cell',{name:'BROWSER-A',exact:true}).waitFor();
  await m.p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();
+ await m.p.locator('#page-heading').getByRole('button',{name:'ИИ-помощник раздела',exact:true}).click();
+ const sectionAI=m.p.getByRole('dialog',{name:'ИИ-помощник раздела'});await sectionAI.waitFor();
+ await sectionAI.locator('[name=assistant_record] option').first().waitFor({state:'attached'});
+ assert((await sectionAI.locator('[name=assistant_record]').textContent()).includes('BROWSER')||await sectionAI.locator('[name=assistant_record] option').count()>=2);
+ await sectionAI.getByRole('button',{name:'Проверить выбранную запись',exact:true}).click();
+ await m.p.getByRole('dialog',{name:'Контекстный помощник'}).waitFor();
+ await m.p.getByRole('dialog',{name:'Контекстный помощник'}).getByRole('button',{name:'Закрыть помощник',exact:true}).click();
  assert.equal(await m.p.locator('#nav [data-action=admin]').count(),0);
  await button(m.p,'Добавить').click();
  await m.p.locator('.lc81-editor input[name=employee_code]').fill('BROWSER-C');
@@ -182,7 +189,7 @@ try{
  await m.p.locator('#content select[name=kind]').selectOption('entry');
  await button(m.p,'Показать записи').click();await m.p.locator('#content input[name=batch_filter]').waitFor();
  await m.p.getByText('Выбрано 0 / 20',{exact:true}).waitFor();
- const roleData=store.adminData(admin.id),instructorRole=roleData.roles.find(r=>r.code==='INSTRUCTOR')?.id||await ref('business_role',{code:'INSTRUCTOR',name:'Инструктор'});
+ const roleData=store.adminData(admin.id),instructorRole=roleData.rolePresets.find(r=>r.key==='instructor'&&r.status==='ready').role_id;
  await ref('role_assignment',{person_id:p2,role_id:instructorRole,valid_from:day,valid_to:null});
  await goSection('calendar.read');await m.p.locator('#content .lc81-calendar').waitFor();
  await button(m.p,'Запланировать аудит / оценку').click();
@@ -197,7 +204,7 @@ try{
  await m.p.getByRole('heading',{name:'Самооценка · Учебный сотрудник Б',exact:true}).waitFor();
  await goSection('plan.read');await m.p.locator('#content').getByRole('heading',{name:'Мой план работы',exact:true}).waitFor();
  await goSection('center.read');await m.p.locator('#content').getByRole('heading',{name:'Оперативный обзор',exact:true}).waitFor();
- await button(m.p,'Проверить этот отчёт').click();await m.p.getByRole('dialog',{name:'Контекстный помощник'}).waitFor();await button(m.p,'Закрыть помощник').click();
+ await button(m.p,'ИИ-помощник отчёта').click();await m.p.getByRole('dialog',{name:'Контекстный помощник'}).waitFor();await button(m.p,'Закрыть помощник').click();
  await goSection('analytics.read');await m.p.locator('#content').getByRole('heading',{name:'Аналитика за период',exact:true}).waitFor();
  await m.p.getByRole('heading',{name:'Расширенные отчёты LC7',exact:true}).waitFor();
  await button(m.p,'Подготовка сотрудников').click();
@@ -316,6 +323,9 @@ try{
  const wizardManager=store.authenticate('qa-ui-manager',managerPassword);
  assert(wizardManager?.workspace_actions.includes('center.read'));assert(!wizardManager.admin);
  await aa.p.locator('#nav [data-action="admin.roles"]').click();
+ await aa.p.getByRole('heading',{name:'Предустановленные роли TWI',exact:true}).waitFor();
+ assert(await aa.p.getByRole('cell',{name:'Внутренний тренер',exact:true}).count()>0);
+ assert(await aa.p.getByRole('cell',{name:'Наставник стажировки',exact:true}).count()>0);
  await button(aa.p,'Справочник ролей').click();
  await button(aa.p,'Создать роль').click();
  await aa.p.locator('.lc81-editor input[name=code]').fill('QA-UI-ROLE');

@@ -458,3 +458,37 @@ test('Stage43 AI: explicit separate opt-in, exact confirmation, fixed destinatio
  assert.equal((await disabled.request(route,{cookie:b.cookie,body:packet})).status,403);
  assert.equal((await disabled.request('/api/lc81/library/open',{cookie:b.cookie,body:ctx})).data.editor_ai_enabled,false);
 });
+
+test('preconfigured role profiles: no automatic grants, personal scope, administrator-only installation and no overwrite',async t=>{
+ const h=await harness(t),admin=await h.login('admin',h.adminPassword),ac=admin.cookie,d=await h.admin(ac);
+ const presets=d.rolePresets,by=key=>presets.find(p=>p.key===key);
+ assert.equal(presets.length,16);assert(presets.every(p=>p.status==='ready'));
+ assert.equal(d.accounts.length,1);assert.equal(d.grants.length,0);assert.equal(d.people.length,0);
+ assert.equal(by('instructor').scope,'assigned');assert(by('instructor').permissions.includes('training.stage'));assert(!by('instructor').permissions.includes('training.admit'));assert(!by('instructor').permissions.includes('audit.create'));
+ assert(by('internal_trainer').permissions.includes('audit.create'));assert(!by('hr').permissions.includes('training.qualify'));assert(!by('director').permissions.some(x=>x.includes('approve')));
+ assert.equal((await h.request('/api/lc81/admin/role-presets',{cookie:ac,body:{confirmed:false}})).status,400);
+ assert.equal((await h.post(ac,'role-presets',{confirmed:true})).created,0);
+ const make=(code,login,key,scopes)=>({person_id:null,new_person:{employee_code:code,display_name:'Учебный '+code,unit_id:d.site},login,password:secret(),generate:false,manager:false,access:{role_id:by(key).role_id,scopes}});
+ const employee=make('PRESET-SELF','preset-self','employee',[{kind:'self'}]);
+ const saved=await h.post(ac,'provision',employee),e=await h.login(employee.login,employee.password);
+ const instructor=make('PRESET-INSTRUCTOR','preset-instructor','instructor',[{kind:'assigned'},{kind:'self'}]);
+ const inst=await h.post(ac,'provision',instructor),i=await h.login(instructor.login,instructor.password);
+ assert(e.user.permissions.includes('assistant.read'));assert(e.user.workspace_actions.includes('assistant.read'));
+ assert(!e.user.permissions.includes('person.read_directory'));assert(i.user.permissions.includes('training.stage'));
+ assert.equal((await h.admin(ac)).grants.filter(g=>g.account_id===inst.id&&g.status==='effective').length,2);
+ const bad=make('PRESET-NO-PARTIAL','preset-bad','instructor',[{kind:'unit_tree',unit_id:d.site}]);
+ assert.equal((await h.request('/api/lc81/admin/provision',{cookie:ac,body:bad})).status,422);
+ assert(!(await h.admin(ac)).people.some(x=>x.employee_code==='PRESET-NO-PARTIAL'));
+ assert.equal((await h.request('/api/lc81/admin/role-presets',{cookie:e.cookie,body:{confirmed:true}})).status,403);
+ const own=await h.request('/api/lc81/assistant/records?kind=person',{cookie:e.cookie});
+ assert.equal(own.status,200,JSON.stringify(own.data));assert.deepEqual(own.data.items.map(x=>x.id),[saved.person_id]);
+ assert.equal((await h.request('/api/lc81/assistant/context',{cookie:e.cookie,body:{type:'person',id:saved.person_id}})).status,200);
+ assert.equal((await h.request('/api/lc81/assistant/context',{cookie:e.cookie,body:{type:'person',id:inst.person_id}})).status,404);
+ assert.equal((await h.request('/api/lc81/assistant/records?kind=person',{cookie:i.cookie})).data.items.length,1);
+ const changed=await h.post(ac,'policy',{role_id:by('employee').role_id,revision:by('employee').revision,permissions:['person.read_basic']});
+ assert.equal((await h.post(ac,'role-presets',{confirmed:true})).created,0);
+ const after=await h.admin(ac);assert.equal(after.rolePresets.find(p=>p.key==='employee').status,'custom');
+ assert.deepEqual(after.policies.find(p=>p.role_id===by('employee').role_id).permissions,['person.read_basic']);
+ assert.equal(after.policies.find(p=>p.role_id===by('employee').role_id).revision,changed.revision);
+ assert.equal((await h.request('/api/lc81/assistant/records?kind=person',{cookie:e.cookie})).status,403);
+});
