@@ -9,7 +9,7 @@ import {centerProjection,personUnit} from '../../src/modules/training/center-ove
 import {centerAttention,scopedAttention} from '../../src/modules/training/center-attention.js';
 import {metricScopeValid,METRIC_RELATIONS,RELATION_LABELS} from '../../src/modules/training/metric-catalog.js';
 import {annualAuditCoverage} from '../../src/modules/training/audit-analytics.js';
-import {effectOverview} from '../../src/modules/effect/domain.js';
+import {effectOverview,effectFacts,twiBasis} from '../../src/modules/effect/domain.js';
 import {programResource,personWorkResource,scheduleResource,trainingAssignmentResource,assessmentResource,auditResource,selfResource,enrollmentResource,preparationResource,developmentResource,taskResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
 const must=(x,s,m)=>{if(!x)throw new PilotError(s,m)};
@@ -47,7 +47,7 @@ export function recordAccess(db,a,type,id){
  case 'sop':return a.read('sop.read_history',id)?{type,id,resource:null}:null;
  case 'frv':return a.read('frv.read',id)?{type,id,resource:null}:null;
  case 'supplement':return a.read('supplement.read',id)&&site(db,a,'supplement.detail')?{type,id,resource:null}:null;
- case 'roi':return a.read('roi.read',id)&&site(db,a,'roi.detail')?{type,id,resource:null}:null;
+ case 'roi':return financialRecordAllowed(db,a,id)?{type,id,resource:null}:null;
  default:return null;
  }
  return detail(a,read,permission,id,r)?{type,id,resource:r}:null;
@@ -162,8 +162,9 @@ export function calendarWorkspace(db,a,{mode,from,to}){
  }
  for(const g of rows(db,"SELECT g.*,p.person_id FROM development_goal g JOIN development_plan p ON p.id=g.plan_id WHERE p.state<>'cancelled' AND g.state<>'cancelled'"))addRecord('development',g.plan_id,g.due_on,g.title,g.person_id,[g.person_id],g.state,g.state==='open','goal:'+g.id);
  for(const x of standardCalendar(db,a.day,{kind:'preparation'})){
+  const b=find(db,'twi_preparation',x.options.id),trainee=name(a,b?.trainee_id);
   const done=['Завершена','Завершено'].includes(x.state);
-  addRecord('preparation',x.options.id,x.date,x.type+' · '+x.title,x.ownerId,x.people,x.state,!done,x.key);
+  addRecord('preparation',x.options.id,x.date,x.type+(trainee?' · '+trainee:''),x.ownerId,x.people,x.state,!done,x.key);
  }
  items.sort((x,y)=>Number(y.overdue)-Number(x.overdue)||x.date.localeCompare(y.date)||x.key.localeCompare(y.key));
  return {day:a.day,from,to,mode,items,can_plan:!!a.personId&&has(a,'calendar.plan')&&has(a,'calendar.read')};
@@ -193,9 +194,38 @@ const PER_SOURCE={
  task:['task.read','task.detail','audit.read','audit.detail','assessment.read','assessment.detail','training.read','training.detail','training.enrollment.read','training.enrollment.detail','development.read','development.detail'],
  roi:['roi.read','roi.detail','task.read','task.detail','audit.read','audit.detail','assessment.read','assessment.detail','training.read','training.detail','training.enrollment.read','training.enrollment.detail','frv.read','frv.read_summary','development.read','development.detail']
 };
+// Financial details are deliberately site-wide in this QA release. A
+// unit-only grant can read the old registry but not amounts or evidence.
+export function financialScope(db,a){
+ return [...PER_SOURCE.roi,'person.read_basic','self.read','self.detail'].every(k=>site(db,a,k));
+}
+export function comparisonAllowed(db,a,scope,c){
+ if(!financialScope(db,a))return false;
+ const source=scope.kind==='assignment'?recordAccess(db,a,'training',scope.source_id):a.read('program.read',scope.source_id)&&site(db,a,'program.detail');
+ if(!source)return false;
+ return [...c.before,...c.after].every(x=>who(a,x.person)&&recordAccess(db,a,scope.kind==='assignment'?'training':'enrollment',x.id)&&(x.assignmentIds||[]).every(id=>recordAccess(db,a,'training',id)));
+}
+export function financialRecordAllowed(db,a,id){
+ if(!financialScope(db,a)||!a.read('roi.read',id))return false;
+ const r=find(db,'economic_effect',id);
+ if(!r||!who(a,r.owner_id))return false;
+ if(r.study_id?!recordAccess(db,a,'frv',r.study_id):!recordAccess(db,a,'task',r.action_id))return false;
+ const actual=JSON.parse(r.actual_json||'null');
+ if(actual&&(!who(a,actual.reviewer_id)||!actual.actions.every(x=>recordAccess(db,a,'task',x.id))))return false;
+ const basis=twiBasis(db,id);
+ if(basis&&(!who(a,basis.p.actor_id)||!comparisonAllowed(db,a,basis.p.scope,basis.p.comparison)))return false;
+ if(!effectFacts(db,id).every(f=>[f.registered_by,f.verifier_id,f.void_by].filter(Boolean).every(p=>who(a,p))))return false;
+ // Period-target reviews may link other work. Do not expose its evidence if
+ // it is outside the explicitly resolved task scope.
+ for(const e of rows(db,"SELECT payload_json FROM change_event WHERE entity_type='economic_effect' AND entity_id=? AND json_extract(payload_json,'$.command') IN('period_target','period_target_cancel','period_review')",[id])){
+  const p=JSON.parse(e.payload_json);if(p.actor_id&&!who(a,p.actor_id)||p.action_id&&!recordAccess(db,a,'task',p.action_id))return false;
+ }
+ return true;
+}
 const groupFor=id=>id.startsWith('prep_')?'preparation':id.startsWith('training_')?'training':id.startsWith('twi_')?'twi':id==='audit_count'?'audit':id==='self_count'?'self':id==='assessment_planned'?'schedule':id.startsWith('practice_')?'practice':id==='skill_coverage'?'skill':id==='sop_review'?'sop':id==='frv_final'?'frv':id.startsWith('actions_')?'task':id.startsWith('effect_')?'roi':null;
 function evidenceLink(db,a,e){
  const o=e.options||{};
+ if(e.page==='audit'&&o.mode==='annual')return recordAccess(db,a,'person',o.personId);
  const pair=({preparation:['preparation',o.id],twi:['training',o.id],audit:['audit',o.auditId],practical:['assessment',o.assessmentId],self_eval:['self',o.id],calendar:['schedule',o.id],person:['person',o.personId],sop:['sop',o.revisionId],frv:['frv',o.studyId],actions:['task',o.id],roi:['roi',o.id],knowledge_bank:['bank',o.id],supplements:['supplement',o.id]})[e.page];
  return pair&&pair[1]?recordAccess(db,a,...pair):null;
 }
@@ -207,7 +237,7 @@ function evidenceOK(db,a,e){
 }
 function safeEvidence(db,a,e){
  const link=evidenceLink(db,a,e);
- return {key:e.key,label:e.label,date:e.date,state:e.state,included:e.included!==false,person:name(a,e.personId),method:e.method||null,reason:e.reason||null,required_level:e.requiredLevel??null,observed_level:e.observedLevel??null,route:routeOf(link)};
+ return {key:e.key,label:e.page==='preparation'&&!name(a,e.personId)?'Комплект подготовки':e.label,date:e.date,state:e.state,included:e.included!==false,person:name(a,e.personId),method:e.method||null,reason:e.reason||null,required_level:e.requiredLevel??null,observed_level:e.observedLevel??null,route:routeOf(link)};
 }
 function buildProjection(db,a,k,scope){
  const options=centerOptions(db,a,k);
@@ -222,6 +252,7 @@ function buildProjection(db,a,k,scope){
  const permitted=m=>{
   const g=groupFor(m.id);if(!g)return false; // SOP evaluation journals are not connected yet.
   if(['twi','skill','roi'].includes(g)&&!full(PER_SOURCE[g]))return false;
+  if(g==='roi'&&(!financialScope(db,a)||!rows(db,'SELECT id FROM economic_effect WHERE (?=\'\' OR unit_id=?)',[scope.unit_id,scope.unit_id]).every(x=>financialRecordAllowed(db,a,x.id))))return false;
   if(!can(PER_SOURCE[g]))return false;
   if(g==='twi'&&!cohortOK)return false;
   return m.evidence.every(e=>evidenceOK(db,a,e));
