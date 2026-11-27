@@ -7,11 +7,40 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
  let active=null;
  function clear(){
   const s=active;active=null;
-  if(s){clearTimeout(s.timeout);s.host.remove();document.body.classList.remove('editor-active');document.querySelector('main')?.removeAttribute('inert')}
+  if(s){clearTimeout(s.timeout);if(s.ai){s.ai.controller.abort();if(s.ai.dialog?.open)s.ai.dialog.close();s.ai.dialog?.remove()}s.host.remove();document.body.classList.remove('editor-active');document.querySelector('main')?.removeAttribute('inert')}
   refresh();
  }
  function close(){if(!active)return true;if(!confirm(active.attempted?'Сохранение могло быть принято сервером. Проверьте каталог после закрытия. Закрыть рабочую копию?':'Закрыть рабочую копию без сохранения в каталог?'))return false;clear();return true}
  function reply(s,message){if(active===s&&s.frame)s.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:s.session,type:'result',message},'*')}
+ async function requestEditorAI(s,m){
+  if(active!==s||!s.loaded||!Number.isSafeInteger(m.request)||m.request<1)return;
+  const send=extra=>{if(active===s&&s.frame)s.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:s.session,type:'ai-response',request:m.request,...extra},'*')};
+  if(s.open.editor_ai_enabled!==true){send({error:'Внешний ИИ конструктора отключён администратором'});return}
+  if(s.ai){send({error:'Дождитесь ответа предыдущего запроса ИИ'});return}
+  const p=m.payload;
+  if(!p||typeof p!=='object'||!Array.isArray(p.messages)||p.messages.length!==2||p.messages.some(x=>typeof x?.content!=='string')||new TextEncoder().encode(JSON.stringify(p)).length>384*1024){send({error:'Неверный или слишком большой запрос ИИ'});return}
+  const state={request:m.request,controller:new AbortController(),dialog:null};s.ai=state;
+  const finish=extra=>{if(s.ai!==state)return;s.ai=null;state.dialog?.remove();send(extra)};
+  const go=async()=>{
+   try{
+    const result=await api('editor/ai',{context:s.open.context,payload:p,confirmed:true},state.controller.signal);
+    finish(result);
+   }catch(e){finish({error:e.name==='AbortError'?'Запрос ИИ отменён':e.message||'Не удалось получить ответ ИИ'})}
+  };
+  // The existing "Проверить AI" sends only fixed non-document test text.
+  // Server independently verifies this exact healthcheck packet.
+  if(p.task==='healthcheck'){await go();return}
+  const d=el('dialog',undefined,'lc81-ai-confirm'),head=el('h2','Отправить запрос в Yandex Cloud?');
+  d.setAttribute('aria-label','Подтверждение запроса ИИ');state.dialog=d;
+  const details=el('details');details.open=true;details.append(el('summary','Точный текст, который будет отправлен'));
+  const preview=el('pre',JSON.stringify(p,null,2));preview.className='lc81-ai-payload';details.append(preview);
+  const actions=el('div',undefined,'row'),yes=el('button','Отправить запрос','primary'),no=el('button','Отмена');
+  yes.type=no.type='button';actions.append(yes,no);
+  let approved=false;yes.onclick=()=>{approved=true;d.close();void go()};no.onclick=()=>d.close();
+  d.addEventListener('close',()=>{d.remove();if(!approved)finish({error:'Отправка запроса ИИ отменена'})},{once:true});
+  d.append(head,el('p','Модель: '+String(p.model)+' · задача: '+String(p.task)),el('p','В запросе могут быть сведения из рабочего документа. Отправляйте только данные, разрешённые вашей организацией. Пароли, персональные и закрытые производственные сведения не должны передаваться внешнему сервису.'),details,actions);
+  document.body.append(d);d.showModal();no.focus();
+ }
  function showPreview(s,text){
   if(active!==s)return;
   const raw=JSON.parse(text),ctx=s.open.context,kind=ctx.kind;
@@ -94,6 +123,8 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
    s.loading=true;s.frame.contentWindow.postMessage({protocol:'lean-editor-v1',session:s.session,type:'load',text:s.open.text,defaults:{operation:s.open.operation.name,unit:s.open.operation.unit,people:s.open.people,theme:'light'}},'*');
   }else if(m.type==='loaded'&&s.loading){
    clearTimeout(s.timeout);s.loaded=true;s.loading=false;s.note.textContent='Редактор готов · рабочая копия в памяти';s.open.text=null;refresh();
+  }else if(m.type==='ai-request'&&s.loaded&&!s.attempted){void requestEditorAI(s,m)
+  }else if(m.type==='ai-cancel'&&s.ai?.request===m.request){const pending=s.ai;s.ai=null;pending.controller.abort();if(pending.dialog?.open)pending.dialog.close();pending.dialog?.remove()
   }else if(m.type==='source'&&s.loaded&&!s.attempted){
    if(m.kind!==s.open.context.kind||typeof m.text!=='string'||new TextEncoder().encode(m.text).length>max){reply(s,'Неверный исходный файл или превышен лимит 30 МБ');return}
    try{showPreview(s,m.text);reply(s,'Подтвердите сохранение в каталоге')}catch(e){reply(s,e.message);note(e.message,true)}

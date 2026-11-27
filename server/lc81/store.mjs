@@ -609,6 +609,13 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     return libraryOptions(db,a,kind,day(db));
    });
   },
+  editorAiAccess(actor,revision,input){
+   return read(db=>{
+    const a=checkedAccount(db,actor,revision);
+    if(unboundLibraryContext(input)){must(libraryOptions(db,a,input.kind,day(db)).can_prepare,403,'Редактор недоступен');return true}
+    resolveCtx(db,actor,revision,input);return true;
+   });
+  },
   async openLibrary(actor,revision,input){
    if(unboundLibraryContext(input))return read(db=>{
     const a=checkedAccount(db,actor,revision),d=day(db),options=libraryOptions(db,a,input.kind,d);

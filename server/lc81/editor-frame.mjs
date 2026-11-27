@@ -7,7 +7,7 @@ import {PilotError} from '../lc74-store.mjs';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 let template=null;
 const marker='window.LC_EDITOR_CONTEXT=null;/* LC_EMBED_CONTEXT */';
-export function editorFrame(session,kind,tab){
+export function editorFrame(session,kind,tab,editorAiEnabled=false){
  if(!isId(session)||!['sop','frv'].includes(kind)||!(tab===null||kind==='sop'&&['twi','frv'].includes(tab)))throw new PilotError(400,'Неверный редактор');
  if(!template){
   const read=p=>fs.readFileSync(root+p,'utf8');
@@ -19,6 +19,6 @@ export function editorFrame(session,kind,tab){
   template=runtime.replace('<script>'+marker+'</script>',()=>'<script>'+memory.replace(/<\/script/gi,'<\\/script')+'</script><script>'+marker+'</script>');
   if(template===runtime)throw Error('Editor memory bootstrap marker missing');
  }
- const context={session,kind,tab,draftKey:null,cloudPilot:true,cloudAiEnabled:false,protectedMemory:true};
+ const context={session,kind,tab,draftKey:null,cloudPilot:true,cloudAiEnabled:editorAiEnabled===true,protectedMemory:true};
  return Buffer.from(template.replace(marker,()=> 'window.LC_EDITOR_CONTEXT='+JSON.stringify(context)+';/* LC_EMBED_CONTEXT */'),'utf8');
 }

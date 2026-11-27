@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {randomBytes} from 'node:crypto';
 import {editorFrame} from './editor-frame.mjs';
+import {askEditorCloud,validateEditorCloud} from './editor-cloud.mjs';
 import {askCenterCloud,CENTER_MODELS} from '../../src/modules/assistant/cloud.js';
 import {PilotError} from '../lc74-store.mjs';
 import {normalizeLogin,tokenDigest} from './credentials.mjs';
@@ -51,10 +52,10 @@ function rawCookie(req){
  return /^[a-f0-9]{64}$/.test(s)?s:null;
 }
 const cookie=(s,maxAge)=>COOKIE+'='+s+'; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age='+maxAge;
-export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFetcher=globalThis.fetch}){
+export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAiEnabled=false,cloudFetcher=globalThis.fetch}){
  const u=new URL(origin);must(u.protocol==='https:'&&u.origin===origin,503,'Требуется точный HTTPS origin');
- const sessions=new Map(),attempts=new Map(),pendingChecks=new Map();let active=0,loginBusy=0,libraryBusy=0,cloudBusy=0;
- const prune=now=>{for(const [k,v] of sessions)if(v.expires<=now)sessions.delete(k);for(const [k,v] of attempts)if(v.until<=now)attempts.delete(k)};
+ const sessions=new Map(),attempts=new Map(),pendingChecks=new Map(),editorBudget=new Map();let active=0,loginBusy=0,libraryBusy=0,cloudBusy=0;
+ const prune=now=>{for(const [k,v] of sessions)if(v.expires<=now)sessions.delete(k);for(const [k,v] of attempts)if(v.until<=now)attempts.delete(k);for(const [k,v] of editorBudget)if(v.until<=now)editorBudget.delete(k)};
  const getSession=(req,withWorkspace=false)=>{
   const raw=rawCookie(req),key=raw&&tokenDigest(raw),s=key&&sessions.get(key);
   must(s&&s.expires>Date.now(),401,'Необходим вход');
@@ -128,7 +129,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
    if(req.method==='GET'&&p==='/editor/frame'){
     const kind=url.searchParams.get('kind'),tab=url.searchParams.get('tab')||null;
     must(['sop','frv'].includes(kind)&&(!!a.person_id||a.permissions.some(x=>x===kind+'.create'||x===kind+'.edit_draft'||kind==='sop'&&x==='sop.revise')),403,'Редактор недоступен');
-    const html=editorFrame(url.searchParams.get('session'),kind,tab);
+    const html=editorFrame(url.searchParams.get('session'),kind,tab,editorAiEnabled===true);
     reply(res,200,html,'text/html; charset=utf-8',{'X-Frame-Options':'SAMEORIGIN','Content-Security-Policy':"sandbox allow-scripts allow-modals; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src data: blob:; object-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'; child-src 'none'"});
     return;
    }
@@ -182,6 +183,22 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
    if(req.method==='POST'&&p==='/api/lc81/assistant/preview'){
     must(cloudAiEnabled===true,403,'Внешний ИИ отключён');
     reply(res,200,{payload:store.assistantRequest(a.id,a.credential_revision,await body(req))});return;
+   }
+   if(req.method==='POST'&&p==='/api/lc81/editor/ai'){
+    must(editorAiEnabled===true,403,'Внешний ИИ конструктора отключён администратором');
+    const f=await body(req,512*1024);must(keys(f,['context','payload','confirmed'])&&f.confirmed===true,400,'Подтвердите отправку запроса ИИ');
+    validateEditorCloud(f.payload);store.editorAiAccess(a.id,a.credential_revision,f.context);
+    must(cloudBusy===0,429,'Облачный помощник занят; повторите запрос');
+    const now=Date.now();prune(now);const budget=editorBudget.get(a.id)||{count:0,until:now+60000};
+    must(budget.count<12&&editorBudget.size<4096,429,'Лимит запросов ИИ; повторите через минуту');
+    budget.count++;editorBudget.set(a.id,budget);cloudBusy++;
+    const controller=new AbortController(),cancel=()=>controller.abort();res.once('close',cancel);
+    try{
+     const result=await askEditorCloud(f.payload,{fetcher:cloudFetcher,signal:controller.signal});
+     if(res.destroyed)return;
+     const fresh=getSession(req);must(fresh.a.id===a.id&&fresh.a.credential_revision===a.credential_revision,401,'Сеанс изменился');
+     store.editorAiAccess(a.id,a.credential_revision,f.context);reply(res,200,result);return;
+    }finally{res.removeListener('close',cancel);cloudBusy--}
    }
    if(req.method==='POST'&&p==='/api/lc81/assistant/cloud'){
     must(cloudAiEnabled===true,403,'Внешний ИИ отключён');
@@ -255,7 +272,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
     try{
      const result=p.endsWith('/open')?await store.openLibrary(a.id,a.credential_revision,await body(req)):await store.saveLibrary(a.id,a.credential_revision,await body(req,2*30*1024*1024+65536));
-     reply(res,200,result);return;
+     reply(res,200,p.endsWith('/open')?{...result,editor_ai_enabled:editorAiEnabled===true}:result);return;
     }finally{libraryBusy--}
    }
    if(req.method==='POST'&&p==='/api/lc81/library/passport'){reply(res,200,await store.passportLibrary(a.id,a.credential_revision,await body(req)));return}

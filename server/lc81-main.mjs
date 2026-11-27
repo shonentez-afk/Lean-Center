@@ -65,7 +65,7 @@ async function main(){
  const store=await openSecureQA({dataDir,initialize,login,password,siteTimeZone});
  phase='HTTP_CREATE';
  let server;
- try{server=createSecureQAServer({store,origin,cloudAiEnabled:env.LC81_CLOUD_AI==='1'});}catch(e){await store.close();throw e}
+ try{server=createSecureQAServer({store,origin,cloudAiEnabled:env.LC81_CLOUD_AI==='1',editorAiEnabled:env.LC81_EDITOR_AI==='1'});}catch(e){await store.close();throw e}
  phase='HTTP_LISTEN';
  server.on('error',async e=>{report(e);try{await store.close()}catch{}process.exitCode=1});
  server.listen(port,'0.0.0.0',()=>console.log('LC8.1 QA authentication and limited projections listening'));

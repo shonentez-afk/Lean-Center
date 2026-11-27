@@ -25,6 +25,9 @@ export function buildEditor(bridge,editorCSS='',{checkout=false}={}){
  // Allow only the existing Stage43 Yandex proxy; no automatic network probe.
  // AI calls are explicit user actions. Keep offline import, photo and export.
  replace("initDocumentManager();pingAI()","initDocumentManager();");
+ // Keep Stage43 prompts, model selection, response processing and health
+ // button unchanged. Protected LC8.1 replaces only this transport.
+ replace("    const controller=new AbortController();\n    const timer=setTimeout(()=>controller.abort(),AI_TIMEOUT_MS);", "    if(window.LC_EDITOR_CONTEXT?.protectedMemory===true){if(typeof window.LC_EDITOR_AI_REQUEST!=='function')throw Error('ИИ конструктора ещё не готов');return window.LC_EDITOR_AI_REQUEST(body)}\n    const controller=new AbortController();\n    const timer=setTimeout(()=>controller.abort(),AI_TIMEOUT_MS);");
  // Preserve extended KM lists through Stage42 normalization/export, but use
  // one native add button and one handler for the full existing 60-KM limit.
  replace("s.keyMoments.map(String).slice(0,3)",`s.keyMoments.map(String).slice(0,${MAX_SOP_KEY_MOMENTS})`);

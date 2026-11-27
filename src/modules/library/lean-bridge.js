@@ -7,7 +7,7 @@
  const send=make('lc-editor-send',kind==='frv'?'Сохранить ФРВ':context.tab==='twi'?'Сохранить план и СОП':context.tab==='frv'?'Сохранить ФРВ и СОП':'Сохранить СОП в каталог'),download=make('lc-editor-download','Скачать JSON'),status=document.createElement('span');status.id='lc-editor-status';status.textContent='Ожидание загрузки…';bar.append(status);document.body.prepend(bar);
  // The old Stage43 header is hidden by the center theme. Move the original
  // controls (and their existing listeners) into the integrated toolbar.
- if(context.protectedMemory===true){download.hidden=true;const warning=document.createElement('span');warning.textContent='Рабочая копия только в памяти. Сохраните в каталог до закрытия. Экспорт и внешний ИИ в защищённом QA пока отключены.';bar.append(warning)}
+ if(context.protectedMemory===true){download.hidden=true;const warning=document.createElement('span');warning.textContent='Рабочая копия только в памяти. Сохраните в каталог до закрытия. Сохранение подтверждается сервером. Выгрузка JSON из защищённой рабочей копии пока отключена.';bar.append(warning)}
  const aiModel=document.getElementById('modelSelector'),aiBadge=document.getElementById('aiConnectivityBadge'),aiTest=document.getElementById('aiTestBtn');
  const aiPanel=document.createElement('div');aiPanel.id='lc-editor-ai';aiPanel.setAttribute('role','group');aiPanel.setAttribute('aria-label','Подключение ИИ');
  if(aiTest){aiTest.type='button';aiPanel.append(aiTest)}
@@ -19,7 +19,7 @@
   aiNotice.title=enabled?'При явном запуске ИИ данные текущей задачи отправляются во внешний сервис. Только учебные данные.':'Локальная работа доступна. Для внешнего ИИ требуется разрешение владельца стенда.';
   if(!enabled){if(aiTest)aiTest.disabled=true;if(aiModel)aiModel.disabled=true}
  }aiPanel.append(aiNotice);bar.append(aiPanel);
- if(context.protectedMemory===true){for(const control of [aiTest,aiModel,document.getElementById('generateBtn')])if(control){control.inert=true;control.title='Недоступно в защищённом QA';control.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation()},true)}}
+ if(context.protectedMemory===true&&context.cloudAiEnabled!==true){for(const control of [aiTest,aiModel,document.getElementById('generateBtn')])if(control){control.inert=true;control.title='Недоступно в защищённом QA';control.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation()},true)}}
  // Stage43 notifications are fixed inside the iframe, not the outer page.
  // Keep them below the actual sticky toolbar, including wrapped rows.
  function syncToastPosition(){const bottom=bar.getBoundingClientRect().bottom;document.documentElement.style.setProperty('--lc-toast-top',Math.max(12,Math.ceil(bottom)+12)+'px')}
@@ -311,5 +311,25 @@
  }
  send.onclick=()=>act(true);download.onclick=()=>act(false);
  window.addEventListener('message',e=>{const m=e.data;if(e.source!==host||m?.protocol!=='lean-editor-v1'||m.session!==session)return;if(m.type==='load')load(m.text,m.defaults);if(m.type==='result')say(String(m.message||''));if(m.type==='theme')applyTheme(m.theme);if(m.type==='directory'){people=Array.isArray(m.people)?m.people:[];applyTheme(m.theme);LCPeoplePicker.refreshPeopleDropdown()}});
+ // The frame remains opaque: all network requests go through the trusted
+ // parent, which verifies the current editor session and shows the exact
+ // outgoing text before non-healthcheck requests. Never pass auth cookies.
+ if(context.protectedMemory===true){
+  let aiSerial=0,pendingAi=null;
+  window.LC_EDITOR_AI_REQUEST=payload=>new Promise((resolve,reject)=>{
+   if(context.cloudAiEnabled!==true){reject(Error('Внешний ИИ конструктора отключён администратором'));return}
+   if(!loaded||pendingAi){reject(Error('ИИ конструктора занят или редактор ещё загружается'));return}
+   const request=++aiSerial,timer=setTimeout(()=>{if(pendingAi?.request===request){pendingAi=null;tell('ai-cancel',{request});reject(Error('Истекло время ожидания запроса ИИ'))}},300000);
+   pendingAi={request,resolve,reject,timer};tell('ai-request',{request,payload});
+  });
+  window.addEventListener('message',e=>{
+   const m=e.data,p=pendingAi;
+   if(e.source!==host||m?.protocol!=='lean-editor-v1'||m.session!==session||m.type!=='ai-response'||!p||m.request!==p.request)return;
+   pendingAi=null;clearTimeout(p.timer);
+   if(m.error){p.reject(Error(String(m.error)));return}
+   if(!Number.isInteger(m.status)||typeof m.text!=='string'){p.reject(Error('Некорректный ответ центра'));return}
+   p.resolve({response:{ok:m.status>=200&&m.status<300,status:m.status},text:m.text});
+  });
+ }
  tell('ready');
 })();
