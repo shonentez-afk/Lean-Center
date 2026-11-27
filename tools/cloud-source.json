@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "47fb74675e14847173f656672621821d1984f624",
+  "sourceCommit": "46d688eb744142b20c64e19b6e2b174cc9aaf843",
   "files": [
     {
       "path": "amvera.yml",
@@ -115,11 +115,15 @@
     },
     {
       "path": "server/lc81/access-contract.mjs",
-      "sha": "a859968f70702d0fa11dde84669d3de9c9d10034"
+      "sha": "eb1656c9c8c22d6b3d2c9d0ec2d34892e14c8c5f"
     },
     {
       "path": "server/lc81/credentials.mjs",
       "sha": "2c2a981c0c55915a5f5cf484fd84af4879bfc04d"
+    },
+    {
+      "path": "server/lc81/development-commands.mjs",
+      "sha": "36c280d111dbbce12dfe30a7c39c3d2286bee74a"
     },
     {
       "path": "server/lc81/directory-commands.mjs",
@@ -135,7 +139,7 @@
     },
     {
       "path": "server/lc81/http.mjs",
-      "sha": "6d7a34d7d785babbd5a977a72553488f366e2467"
+      "sha": "78258b0c36b95ad82ba5d656021ecad80b5a8a71"
     },
     {
       "path": "server/lc81/library-commands.mjs",
@@ -155,7 +159,7 @@
     },
     {
       "path": "server/lc81/matrix-commands.mjs",
-      "sha": "9739dabe31c750b5502064e1a70bd534f89d04e3"
+      "sha": "c84ba4ace9fac67ded340708767317614ecf9fc9"
     },
     {
       "path": "server/lc81/mentor-commands.mjs",
@@ -167,7 +171,7 @@
     },
     {
       "path": "server/lc81/person-card.mjs",
-      "sha": "0fb75b3ca3954cc37351e623f71c11dfbf9a854b"
+      "sha": "09b0628112300463b8756dce5d08b12fde61c57d"
     },
     {
       "path": "server/lc81/portal.css",
@@ -179,15 +183,19 @@
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "9ff3f79bb3a7c059b97f8198df6382f9894cde67"
+      "sha": "50a08d77d168c96803fb0748024a189e744252fe"
     },
     {
       "path": "server/lc81/program-commands.mjs",
       "sha": "31d352395a9a69b7a1761d5cc898808eb5998047"
     },
     {
+      "path": "server/lc81/quality-commands.mjs",
+      "sha": "b39c9fec9bcc78799986db663c73841ab5eb5d59"
+    },
+    {
       "path": "server/lc81/read-policy.mjs",
-      "sha": "31918ee6a2f430a2e57520c20a320e69ade87418"
+      "sha": "cccefc84719f6810b09539061916e10a0fb21feb"
     },
     {
       "path": "server/lc81/security-schema.sql",
@@ -199,15 +207,15 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "44f0c00ad8d9a40bc78399dda51a250eb2fba78d"
+      "sha": "fe5454ce76f9a8ee43bae328d8eabd7e4cff246a"
     },
     {
       "path": "server/lc81/training-commands.mjs",
-      "sha": "59b391b5d0339b15811c87f67857f8101735ce5a"
+      "sha": "56133c778551f74d21ddda2ba647db4e9efad32f"
     },
     {
       "path": "server/lc81/training-ui.js",
-      "sha": "a5ce392084ea7dd752781904d204b0e2ce12f8d6"
+      "sha": "232fc4fb8d5dd48ab2a8c84aeafb6daca2324854"
     },
     {
       "path": "server/main.mjs",
@@ -631,7 +639,7 @@
     },
     {
       "path": "tools/lc81-inventory.mjs",
-      "sha": "18ce4f7cdacbfe6bfc4e63874227e5b7521e1d94"
+      "sha": "e2e32a973a7fa82ff0e73edc5b61118a83b12c23"
     },
     {
       "path": "tools/package_folder.py",
