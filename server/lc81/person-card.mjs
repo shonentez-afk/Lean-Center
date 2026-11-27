@@ -1,6 +1,7 @@
 // Every section is independently authorized using existing projections.
 import {rows,one,isId} from '../../src/core/db.js';
 import {trainingAssignmentResource,matrixResource} from './read-policy.mjs';
+import {competencyView} from './competency-commands.mjs';
 import {developmentView} from './development-commands.mjs';
 import {qualityView} from './quality-commands.mjs';
 import {workflowView} from './mentor-workflows.mjs';
@@ -17,6 +18,8 @@ const sections=[
  ['appointment.read','mentor_appointment','person_id','Приказы'],
  ['authorization.read','mentor_authorization','person_id','Полномочия по операциям'],
  ['development.read','development_plan','person_id','Планы развития'],
+ ['assessment.read','assessment_session','person_id','Оценки компетенций и практики'],
+ ['assessment.read','assessment_session','evaluator_id','Проведённые оценки'],
  ['supplement.read','twi_supplement','person_id','Доплаты'],
  ['task.read','action_item','owner_id','Задачи и мероприятия'],
  ['task.read','action_item','subject_id','Мероприятия по развитию сотрудника'],
@@ -30,7 +33,7 @@ export function personCard(db,a,id,canRead){
  const result=[];
  for(const [action,table,key,title] of sections){
   if(!a.permissions.includes(action))continue;
-  const items=rows(db,'SELECT id FROM '+table+' WHERE '+key+'=? ORDER BY id',[id]).flatMap(({id})=>{const v=a.read(action,id);return v?[action==='training.read'?{...v.data,can_detail:a.allows('training.detail',id,trainingAssignmentResource(db,id,a.day))}:['training.enrollment.read','preparation.read'].includes(action)?programView(db,a,action,v.data):action==='development.read'?developmentView(db,a,action,v.data):['audit.read','self.read','task.read'].includes(action)?qualityView(db,a,action,v.data):action==='supplement.read'?workflowView(db,a,action,v.data):action==='authorization.read'?{...v.data,operation_name:a.read('operation.read',v.data.operation_id)?.data.name??null}:v.data]:[]});
+  const items=rows(db,'SELECT id FROM '+table+' WHERE '+key+'=? ORDER BY id',[id]).flatMap(({id})=>{const v=a.read(action,id);return v?[action==='training.read'?{...v.data,can_detail:a.allows('training.detail',id,trainingAssignmentResource(db,id,a.day))}:['training.enrollment.read','preparation.read'].includes(action)?programView(db,a,action,v.data):action==='assessment.read'?competencyView(db,a,action,v.data):action==='development.read'?developmentView(db,a,action,v.data):['audit.read','self.read','task.read'].includes(action)?qualityView(db,a,action,v.data):action==='supplement.read'?workflowView(db,a,action,v.data):action==='authorization.read'?{...v.data,operation_name:a.read('operation.read',v.data.operation_id)?.data.name??null}:v.data]:[]});
   if(items.length)result.push({action,title,items});
  }
  if(a.permissions.includes('matrix.read')){

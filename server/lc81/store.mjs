@@ -12,6 +12,7 @@ import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop} from './training-commands.mjs';
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
+import {competencyOptions,competencyChange,competencyView,assessmentDetail} from './competency-commands.mjs';
 import {mentorOptions,changeMentor,mentorView} from './mentor-commands.mjs';
 import {developmentOptions,createDevelopment,developmentDetail,changeDevelopment,developmentFromMatrix,bankOptions,bankDetail,saveBank,developmentView} from './development-commands.mjs';
 import {qualityOptions,installMentorMethod,createAudit,createSelf,voidAudit,qualityDetail,taskOptions,createTask,taskDetail,changeTask,qualityView} from './quality-commands.mjs';
@@ -107,6 +108,7 @@ function projectView(db,a,action,data,d){
   return {...data,trainee_name:one(db,'SELECT display_name FROM person WHERE id=?',[data.trainee_id])?.display_name||'',operation_name:one(db,'SELECT name FROM operation WHERE id=?',[data.operation_id])?.name||'',can_detail:access.allows('training.detail',data.id,resource),can_sop:access.allows('training.read_sop',data.id,resource)};
  }
  if(['program.read','training.enrollment.read','preparation.read'].includes(action))return programView(db,trainingAccess(db,a,d),action,data);
+ if(['skill.read','requirement.read','coverage.read','assessment.read'].includes(action))return competencyView(db,trainingAccess(db,a,d),action,data);
  if(['development.read','bank.read'].includes(action))return developmentView(db,trainingAccess(db,a,d),action,data);
  if(['audit.read','self.read'].includes(action))return qualityView(db,trainingAccess(db,a,d),action,data);
  if(['order.read','supplement.read'].includes(action))return workflowView(db,trainingAccess(db,a,d),action,data);
@@ -434,6 +436,9 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   changeTask(actor,revision,input){return mutate(db=>changeTask(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
   changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  competencyOptions(actor,revision,kind,personId=null,skillId=null){return read(db=>competencyOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,personId,skillId))},
+  competencyChange(actor,revision,input){return mutate(db=>competencyChange(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  assessmentDetail(actor,revision,id){return read(db=>assessmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
   matrixInfo(actor,revision,unit=null,baseOn=null,filters={}){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return matrixInfo(db,a,unit,baseOn??a.day,filters)})},
   saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},

@@ -350,6 +350,24 @@ export function applyTrainingEvent(db,e,old){
   const {assignment_rev,...data}=p;store(db,t,{id,...data,recorded_at:e.occurred_at,rev:1});update(db,'training_assignment',a.id,{state:a.state});return
  }
  if(t==='assessment_session'){
+  // LC8.1: a general (non-operational) skill may be evidenced independently
+  // of a SOP. This is an immutable actual observation, not a qualification
+  // or permission to perform an operation.
+  if(p.command==='general_skill'){
+   createOnly(e,old);
+   exact(p,['command','person_id','evaluator_id','skill_id','scale_id','assessed_on','observation_state','level','valid_until','evidence','feedback','previous_assessment_id']);
+   person(db,p.person_id);person(db,p.evaluator_id);noFuture(p.assessed_on,e);
+   const s=active(db,'skill',p.skill_id);active(db,'skill_category',s.category_id);active(db,'rating_scale',p.scale_id);
+   invariant(!s.operation_id&&p.person_id!==p.evaluator_id&&required(p.evidence,2000)&&required(p.feedback,2000),'Общий навык требует отдельного оценщика и подтверждения; операция оценивается через обучение по СОП');
+   invariant(['rated','not_observed','not_applicable'].includes(p.observation_state),'Укажите состояние наблюдения');
+   if(p.observation_state==='rated'){level(db,p.scale_id,p.level);invariant(period(p.assessed_on,p.valid_until),'Некорректный срок оценки')}
+   else invariant(p.level===null&&p.valid_until===null,'Отсутствие наблюдения не является числовой оценкой');
+   const previous=latestQualification(db,p.person_id,p.skill_id);
+   invariant(p.previous_assessment_id===(previous?.session_id??null)&&(!previous||p.assessed_on>=previous.assessed_at.slice(0,10)),'История оценки изменилась либо дата предшествует последней оценке');
+   store(db,t,{id,person_id:p.person_id,evaluator_id:p.evaluator_id,assessed_at:p.assessed_on,state:'draft',assessment_kind:'general_skill',notes:p.evidence,feedback:p.feedback,recorded_at:e.occurred_at,recorded_names_json:canonical(names(db,{trainee:p.person_id,evaluator:p.evaluator_id})),supersedes_id:p.previous_assessment_id,rev:1});
+   store(db,'assessment_item',{id:e.id,session_id:id,skill_id:p.skill_id,scale_id:p.scale_id,level:p.level,observation_state:p.observation_state,valid_until:p.valid_until,evidence_note:p.evidence});
+   db.run("UPDATE assessment_session SET state='confirmed' WHERE id=?",[id]);return
+  }
   createOnly(e,old);
   const a=freshAssignment(db,p);person(db,p.evaluator_id);noFuture(p.assessed_on,e);
   invariant(a.state!=='cancelled'&&a.approval_json&&isCurrentStandard(db,a.sop_revision_id)&&p.evaluator_id!==a.trainee_id&&p.assessed_on>=a.assigned_on&&p.assessed_on>=JSON.parse(a.approval_json).approved_on&&required(p.feedback),'Нужна актуальная согласованная запись, отдельный оценщик и обратная связь');

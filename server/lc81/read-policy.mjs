@@ -74,6 +74,34 @@ export function supplementResource(db,n,day,tasks=[]){
  const r=personWorkResource(db,[n.person_id,n.manager_id],day,tasks.map(t=>t.done_on));
  return r?{...r,self:n.person_id,assigned:n.state==='draft'?[n.manager_id]:[]}:null;
 }
+export function skillResource(db,s){
+ if(!s||s.archived)return null;
+ if(!s.operation_id)return programResource(db);
+ const o=one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[s.operation_id]);
+ return o&&lineage(db,o.unit_id)?{data:{},self:null,units:[o.unit_id],assigned:[]}:null;
+}
+export function requirementResource(db,r){
+ const site=programResource(db),s=r&&one(db,'SELECT * FROM skill WHERE id=?',[r.skill_id]),resource=skillResource(db,s);
+ return site&&resource?{...site,units:[...new Set([...site.units,...resource.units])]}:null;
+}
+export function coverageResource(db,r){
+ if(!r||!lineage(db,r.unit_id))return null;
+ const s=one(db,'SELECT * FROM skill WHERE id=? AND archived=0',[r.skill_id]);
+ if(!s)return null;
+ const o=s.operation_id?one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[s.operation_id]):null;
+ if(s.operation_id&&(!o||!lineage(db,o.unit_id)))return null;
+ return {data:{},self:null,units:[...new Set([r.unit_id,...(o?[o.unit_id]:[])])],assigned:[]};
+}
+export function assessmentResource(db,r,day){
+ if(!r||r.state!=='confirmed'||!r.assessed_at)return null;
+ if(r.assessment_kind==='general_skill'){
+  const items=rows(db,'SELECT s.operation_id FROM assessment_item i JOIN skill s ON s.id=i.skill_id WHERE i.session_id=?',[r.id]);
+  if(items.length!==1||items[0].operation_id!==null||r.operation_id||r.assignment_id||r.standard_revision_id)return null;
+  const x=personWorkResource(db,[r.person_id,r.evaluator_id],day,[r.assessed_at.slice(0,10)]);
+  return x?{...x,self:r.person_id}:null;
+ }
+ return practicalResource(db,r,day);
+}
 export function auditResource(db,a,day){
  if(!a||!a.operation_id||!a.mentor_id||!a.auditor_id||!a.trainee_id||!a.observed_at)return null;
  const r=personWorkResource(db,[a.mentor_id,a.auditor_id,a.trainee_id],day,[a.observed_at.slice(0,10)],[a.operation_id]);
@@ -170,6 +198,22 @@ export function matrixResource(db,unit,roster,columns,day,baseOn){
  return {data:{},self:null,units:[...new Set(units)],assigned:[]};
 }
 function resolve(db,action,id,day){
+ if(action==='skill.read'){
+  const s=one(db,'SELECT * FROM skill WHERE id=?',[id]),r=skillResource(db,s);
+  return r?{...r,data:{id:s.id,name:s.name,category_id:s.category_id,operation_id:s.operation_id,rev:s.rev}}:null;
+ }
+ if(action==='requirement.read'){
+  const x=one(db,'SELECT * FROM role_requirement WHERE id=?',[id]),r=requirementResource(db,x);
+  return r?{...r,data:x}:null;
+ }
+ if(action==='coverage.read'){
+  const x=one(db,'SELECT * FROM coverage_requirement WHERE id=?',[id]),r=coverageResource(db,x);
+  return r?{...r,data:x}:null;
+ }
+ if(action==='assessment.read'){
+  const x=one(db,'SELECT * FROM assessment_session WHERE id=?',[id]),r=assessmentResource(db,x,day);
+  return r?{...r,data:{id:x.id,person_id:x.person_id,assessed_on:x.assessed_at.slice(0,10),kind:x.assessment_kind,state:x.state,rev:x.rev}}:null;
+ }
  if(action==='matrix.read'){
   const m=one(db,'SELECT * FROM competency_matrix WHERE id=?',[id]);if(!m)return null;
   const roster=JSON.parse(m.roster_json),columns=JSON.parse(m.columns_json),resource=matrixResource(db,m.unit_id,roster,columns,day,m.base_on);
@@ -399,7 +443,7 @@ export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
 }
 
 export function canUseTrainingResource(db,security,accountId,action,id,day,resource){
- const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','task.implement_own','bank.read','bank.detail'];
+ const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','task.implement_own','bank.read','bank.detail','skill.read','requirement.read','coverage.read','assessment.read','assessment.detail'];
  return !!resource&&allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,action,resource);
 }
 export function bootstrapTrainingScope(db,site,resource){

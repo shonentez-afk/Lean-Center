@@ -158,9 +158,9 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const d=await api('person/card?id='+encodeURIComponent(id)),n=panel('Карточка сотрудника · '+d.person.display_name,el('p',[d.person.employee_code,d.person.unit,d.person.position].filter(Boolean).join(' · ')));
   for(const s of d.sections){
    const details=el('details');details.append(el('summary',s.title+' · '+s.items.length));
-   const labels={code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',evaluated_on:'Дата оценки',result_note:'Результат',people:'Сотрудников',skills:'Навыков'};
+   const labels={code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',evaluated_on:'Дата оценки',assessed_on:'Дата оценки',result_note:'Результат',people:'Сотрудников',skills:'Навыков'};
    const keys=Object.keys(labels).filter(k=>s.items.some(r=>Object.hasOwn(r,k))),sub=el('div');
-   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):'']);
+   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):s.action==='assessment.read'&&r.can_detail?button('Открыть оценку',()=>assessmentCard(sub,r.id)):'']);
    details.append(table([...keys.map(k=>labels[k]),'Действия'],rows),sub);n.append(details);
   }
   if(!d.sections.length)n.append(el('p','Нет связанных записей, доступных вашей учётной записи.'));
@@ -519,5 +519,74 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   else n.append(table(['Мероприятие','Вид','Исполнитель','Срок','Состояние','Действия'],items.map(r=>[r.title,taskKinds[r.kind],r.owner,r.due_on,taskStates[r.state]||r.state,r.can_detail?button('Открыть мероприятие',()=>taskCard(host,r.id)):r.can_implement?button('Выполнить',()=>setContent(host,panel(r.title,form([input('result','Фактический результат')],'Подтвердить выполнение',async f=>{await api('tasks/implement',{id:r.id,expected_revision:r.rev,result:value(f,'result')});note('Выполнение подтверждено');await render()})))):'—'])));
   n.append(host);return n;
  }
- return {training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel};
+ const competencyStates={rated:'Подтверждённый уровень',not_observed:'Не наблюдалось',not_applicable:'Неприменимо'};
+ const assessmentKinds={general_skill:'Общий навык',practical:'Практическая оценка',qualification:'Квалификация по СОП'};
+ const criticalityNames={normal:'Обычная',important:'Важная',critical:'Критическая'};
+ function levelChoices(scales){return scales.flatMap(s=>s.levels.map(l=>[s.id+'/'+l.value,s.name+' · '+l.value+' — '+l.label]))}
+ const saveCompetency=async(command,fields,message='Запись сохранена')=>{await api('competency/change',{command,fields});note(message);await render()};
+ async function skillEditor(host){
+  if(!discard())return;const d=await api('competency/options?kind=skill'),n=panel('Каталог навыков');
+  if(d.can_category)n.append(groups('Новая категория',[input('name','Название категории')],'Создать категорию',f=>saveCompetency('category.create',{name:value(f,'name')})));
+  if(d.can_general)n.append(groups('Общий навык (без операции)',[pick('category_id','Категория',opts(d.categories)),input('name','Название навыка')],'Создать навык',f=>saveCompetency('skill.create',{category_id:value(f,'category_id'),name:value(f,'name')})));
+  if(d.sops.length)n.append(groups('Создать навыки из действующих СОП',[el('p','Операции без активного навыка. Выберите одну редакцию для каждой операции.'),pick('category_id','Категория',opts(d.categories)),...d.sops.map(r=>check('sop_'+r.id,r.label))],'Создать выбранные навыки',f=>saveCompetency('skill.from_sop',{category_id:value(f,'category_id'),revisions:d.sops.filter(r=>checked(f,'sop_'+r.id)).map(({id,rev})=>({id,rev}))},'Навыки связаны с операциями')));
+  if(!d.can_category&&!d.can_general&&!d.sops.length)n.append(el('p','Нет доступных команд или операций без навыка.'));
+  setContent(host,n);
+ }
+ async function requirementEditor(host){
+  if(!discard())return;const d=await api('competency/options?kind=requirement');
+  if(!d.can_create){setContent(host,panel('Требование к профессии',el('p','Создание общего профиля доступно только в области предприятия.')));return}
+  setContent(host,panel('Требование к профессии',form([pick('profession_id','Профессия',opts(d.professions)),pick('skill_id','Навык',opts(d.skills)),pick('target','Требуемая шкала и уровень',levelChoices(d.scales)),pick('criticality','Критичность',Object.entries(criticalityNames),'normal'),dt('valid_from','Начало действия',d.day),input('valid_to','Окончание (необязательно)','date',false)],'Создать требование',async f=>{
+   const [scale_id,l]=value(f,'target').split('/');
+   await saveCompetency('requirement.create',{profession_id:value(f,'profession_id'),skill_id:value(f,'skill_id'),scale_id,required_level:Number(l),criticality:value(f,'criticality'),valid_from:value(f,'valid_from'),valid_to:value(f,'valid_to')||null});
+  })));
+ }
+ async function coverageEditor(host,previous=null){
+  if(!discard())return;const d=await api('competency/options?kind=coverage');
+  const u=pick('unit_id','Подразделение',opts(d.units),previous?.unit_id||''),s=pick('skill_id','Навык',opts(d.skills),previous?.skill_id||''),shift=optional('shift_code','Смена',d.shifts.map(r=>[r.code,r.name]));
+  if(previous){shift.querySelector('select').value=previous.shift_code;for(const f of [u,s,shift])f.querySelector('select').disabled=true}
+  setContent(host,panel(previous?'Уточнить потребность':'Потребность в покрытии',el('p','Фактическое покрытие рассчитывается по действующим оценкам и, для операционных навыков, допускам.'),form([u,s,shift,num('min_people','Необходимое число сотрудников',0,100000,previous?.min_people??1),pick('target','Шкала и требуемый уровень',levelChoices(d.scales),previous?previous.scale_id+'/'+previous.required_level:'')],'Сохранить потребность',async f=>{
+   const [scale_id,l]=value(f,'target').split('/');await saveCompetency('coverage.save',{id:previous?.id??null,rev:previous?.rev??0,unit_id:previous?.unit_id||value(f,'unit_id'),skill_id:previous?.skill_id||value(f,'skill_id'),shift_code:previous?previous.shift_code:value(f,'shift_code'),min_people:Number(value(f,'min_people')),scale_id,required_level:Number(l)});
+  })));
+ }
+ async function assessmentEditor(host,personId=null){
+  if(!discard())return;const d=await api('competency/options?kind=assessment'),person=pick('person_id','Сотрудник',opts(d.people),personId||''),skill=pick('skill_id','Общий навык',opts(d.skills)),sub=el('div');
+  const load=button('Выбрать сотрудника и навык',async()=>{
+   if(!discard())return;
+   const person_id=person.querySelector('select').value,skill_id=skill.querySelector('select').value;
+   if(!person_id||!skill_id)throw Error('Выберите сотрудника и навык');
+   const x=await api('competency/options?kind=assessment&person_id='+encodeURIComponent(person_id)+'&skill_id='+encodeURIComponent(skill_id));
+   const observation=pick('observation_state','Состояние',Object.entries(competencyStates),'rated'),target=pick('target','Шкала и уровень',levelChoices(x.scales)),scale=pick('scale_id','Шкала',opts(x.scales)),until=input('valid_until','Действует до (необязательно)','date',false);
+   const sync=()=>{const rated=observation.querySelector('select').value==='rated';target.hidden=!rated;target.querySelector('select').disabled=!rated;scale.hidden=rated;scale.querySelector('select').disabled=rated;until.hidden=!rated;until.querySelector('input').disabled=!rated};
+   observation.querySelector('select').addEventListener('change',sync);sync();
+   sub.replaceChildren(panel('Фактическая оценка',el('p',x.previous?'Последняя оценка '+x.previous.day+'. Новая запись сохраняет историю.':'Прежних оценок нет.'),form([dt('assessed_on','Дата оценки',x.day),observation,target,scale,until,input('evidence','Подтверждающее основание'),input('feedback','Обратная связь')],'Зарегистрировать оценку',async f=>{
+    if(person.querySelector('select').value!==person_id||skill.querySelector('select').value!==skill_id)throw Error('Состав изменился. Повторно выберите сотрудника и навык');
+    const observation_state=value(f,'observation_state'),rated=observation_state==='rated',[scale_id,l]=rated?value(f,'target').split('/'):[value(f,'scale_id'),null];
+    await saveCompetency('assessment.general',{person_id,skill_id,scale_id,assessed_on:value(f,'assessed_on'),observation_state,level:rated?Number(l):null,valid_until:rated?value(f,'valid_until')||null:null,evidence:value(f,'evidence'),feedback:value(f,'feedback'),previous_assessment_id:x.previous?.id??null},'Оценка сохранена. Матрица использует подтверждённый факт.');
+   })));
+  });
+  setContent(host,panel('Оценка общего навыка',el('p','Фактическая оценка, не допуск к операции. Операционные навыки подтверждаются через обучение по СОП.'),person,skill,load,sub));
+ }
+ async function assessmentCard(host,id){
+  if(!discard())return;const d=await api('assessment/detail?id='+encodeURIComponent(id)),sub=el('div'),n=panel((assessmentKinds[d.kind]||d.kind)+' · '+(d.person||''),el('p',d.assessed_on+' · оценщик '+(d.evaluator||'—')),table(['Навык','Шкала','Уровень / состояние','Действует до','Основание'],d.items.map(x=>[x.skill,x.scale,x.level??competencyStates[x.observation_state],x.valid_until,x.evidence_note])),el('p',d.feedback||''));
+  if(d.assignment_id)n.append(button('Открыть связанное обучение',()=>assignment(sub,d.assignment_id)),sub);setContent(host,n);
+ }
+ function competencyPanel(page,items,user){
+  const host=el('div'),n=panel({'skill.read':'Каталог навыков','requirement.read':'Требования к профессиям','coverage.read':'Покрытие по участкам и сменам','assessment.read':'Оценки компетенций'}[page]);
+  const can=k=>!!user.person_id&&user.permissions.includes(k);
+  if(page==='skill.read'){
+   if(['skill.category.create','skill.create','skill.from_sop'].some(can))n.append(button('Создать навыки',()=>skillEditor(host),'primary'));
+   n.append(items.length?table(['Навык','Категория','Операция'],items.map(r=>[r.name,r.category,r.operation||'Общий навык'])):empty());
+  }else if(page==='requirement.read'){
+   if(can('requirement.create'))n.append(button('Добавить требование',()=>requirementEditor(host),'primary'));
+   n.append(items.length?table(['Профессия','Навык','Шкала','Уровень','Критичность','Начало','Окончание','Действия'],items.map(r=>[r.profession,r.skill,r.scale,r.required_level,criticalityNames[r.criticality],r.valid_from,r.valid_to,r.can_close?button('Закрыть требование',()=>setContent(host,panel('Закрытие требования',form([dt('valid_to','Последний день действия','')],'Закрыть',f=>saveCompetency('requirement.close',{id:r.id,rev:r.rev,valid_to:value(f,'valid_to')})))):'—'])):empty());
+  }else if(page==='coverage.read'){
+   if(can('coverage.save'))n.append(button('Добавить потребность',()=>coverageEditor(host),'primary'));
+   n.append(items.length?table(['Подразделение','Навык','Смена','Уровень','Требуется','Факт','Дефицит','Действия'],items.map(r=>[r.unit,r.skill,r.shift_code||'Все',r.required_level,r.min_people,r.actual,r.deficit,r.can_edit?button('Изменить',()=>coverageEditor(host,r)):'—'])):empty());
+  }else{
+   if(can('assessment.general'))n.append(button('Оценить общий навык',()=>assessmentEditor(host),'primary'));
+   n.append(items.length?table(['Сотрудник','Дата','Тип оценки','Навык','Оценщик','Действия'],items.map(r=>[r.person_name,r.assessed_on,assessmentKinds[r.kind]||r.kind,r.title,r.evaluator_name,r.can_detail?button('Открыть оценку',()=>assessmentCard(host,r.id)):'—'])):empty());
+  }
+  n.append(host);return n;
+ }
+ return {training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel,competencyPanel};
 }
