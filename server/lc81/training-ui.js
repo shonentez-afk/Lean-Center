@@ -270,9 +270,50 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   });
   setContent(host,panel('Связать документы подготовки',f));
  }
+ const preparationNames={shift:'Факт смены',safety:'Протокол ОТ',internship:'Итог стажировки',questions:'Выдача вопросов',commission:'Заключение комиссии'};
+ const theoryNames={technology:'Технология',quality:'Качество',equipment:'Оборудование',lean:'Бережливое производство'};
+ const resultNames={completed:'Завершена',incomplete:'Не завершена',pass:'Пройдено',fail:'Не пройдено',not_meet:'Не соответствует',basic:'Соответствует базовому уровню',exceeds:'Превосходит базовый уровень'};
+ async function prepFactEditor(host,d,kind){
+  if(!discard())return;
+  const on=dt('fact_on','Фактическая дата',d.day),content=el('div');
+  const load=button('Выбрать дату',async()=>{
+   if(!discard())return;
+   const day=on.querySelector('input').value,optsData=await api('preparation/fact-options?id='+encodeURIComponent(d.id)+'&on='+encodeURIComponent(day));
+   if(!optsData.capabilities[kind]){content.replaceChildren(el('p','На эту дату полномочия недоступны'));return}
+   let fields,get;
+   if(kind==='shift'){
+    fields=[pick('shift_id','Смена',optsData.shifts.map(s=>[s.id,s.code+' · '+s.name])),pick('result','Результат',[['completed','Завершена'],['incomplete','Не завершена']]),num('minutes','Фактически, мин.',1,1440,480),input('note','Основание / комментарий')];
+    get=f=>({shift_id:value(f,'shift_id'),result:value(f,'result'),minutes:Number(value(f,'minutes')),note:value(f,'note')});
+   }else if(kind==='safety'||kind==='internship'){
+    fields=[pick('result','Результат',[['pass','Пройдено'],['fail','Не пройдено']]),input('reference','Реквизиты фактического протокола'),input('feedback','Обратная связь')];
+    get=f=>({result:value(f,'result'),reference:value(f,'reference'),feedback:value(f,'feedback')});
+   }else if(kind==='questions'){
+    const banks=optsData.banks;
+    if(!banks.length){content.replaceChildren(el('p','Нет актуальной зарегистрированной редакции банка вопросов. Сначала актуализируйте банк в исходном контуре.'));return}
+    const bank=pick('bank_id','Редакция банка',banks.map(b=>[b.id,b.label])),questionsHost=el('div');
+    function showQuestions(){
+     const b=banks.find(x=>x.id===bank.querySelector('select').value);questionsHost.replaceChildren();
+     for(const block of b?.blocks||[]){const group=el('fieldset');group.append(el('legend',block.title));for(const q of block.questions)group.append(check('q_'+q.id,q.number+'. '+q.text));questionsHost.append(group)}
+    }
+    bank.querySelector('select').addEventListener('change',showQuestions);
+    fields=[bank,questionsHost,input('note','Основание выдачи')];
+    get=f=>{const b=banks.find(x=>x.id===value(f,'bank_id'));if(!b)throw Error('Выберите редакцию банка');return {bank_id:b.id,blocks:d.theory_blocks.map(id=>({block:id,question_ids:(b.blocks.find(x=>x.id===id)?.questions||[]).filter(q=>checked(f,'q_'+q.id)).map(q=>q.id)})),note:value(f,'note')}};
+   }else{
+    const p=optsData.people.map(x=>[x.id,x.name]),r=d.commission_roles;
+    fields=[el('p','Руководитель: '+(optsData.manager.name||'')+' · наставник: '+(optsData.mentor.name||'')),...['trainer','agent','hr'].map(k=>pick(k,r[k],p)),...d.theory_blocks.flatMap(k=>[pick(k+'_result',theoryNames[k]||k,[['pass','Пройдено'],['fail','Не пройдено']]),input(k+'_note','Основание: '+(theoryNames[k]||k))]),pick('conclusion','Заключение',[['not_meet',resultNames.not_meet],['basic',resultNames.basic],['exceeds',resultNames.exceeds]]),input('reference','Реквизиты подписанного решения'),input('feedback','Рекомендации по развитию')];
+    get=f=>({members:{manager:optsData.manager.id,mentor:optsData.mentor.id,...Object.fromEntries(['trainer','agent','hr'].map(k=>[k,value(f,k)]))},theory:d.theory_blocks.map(k=>({block:k,result:value(f,k+'_result'),note:value(f,k+'_note')})),conclusion:value(f,'conclusion'),reference:value(f,'reference'),feedback:value(f,'feedback')});
+   }
+   content.replaceChildren(form(fields,'Зарегистрировать факт',async f=>{if(on.querySelector('input').value!==day)throw Error('Дата изменена. Снова выберите дату');await api('preparation/fact',{id:d.id,kind,fact_on:day,expected_fact_id:d.last[kind],data:get(f)});note('Факт зарегистрирован сервером');await render()}));
+  });
+  setContent(host,panel(preparationNames[kind]+' · фактическая запись, не электронная подпись',on,load,content));
+ }
  async function preparationCard(host,id){
   if(!discard())return;const d=await api('preparation/detail?id='+encodeURIComponent(id)),sub=el('div');
-  setContent(host,panel('Комплект подготовки · '+(d.trainee||''),el('p',(d.category==='new'?'Новый сотрудник':'Перевод')+' · '+d.status),table(['Документ','Состояние','Действия'],d.documents.map(x=>[kindLabels[x.kind],state[x.state]||x.state,x.id?button('Открыть программу',()=>enrollmentCard(sub,x.id)):'—'])),el('p','Смены стажировки: факт '+d.completed_shifts+' / план '+d.planned_shifts.length),table(['Дата','Смена'],d.planned_shifts.map(s=>[s.date,s.shift])),sub));
+  const n=panel('Комплект подготовки · '+(d.trainee||''),el('p',(d.category==='new'?'Новый сотрудник':'Перевод')+' · '+d.status),table(['Документ','Состояние','Действия'],d.documents.map(x=>[kindLabels[x.kind],state[x.state]||x.state,x.id?button('Открыть программу',()=>enrollmentCard(sub,x.id)):'—'])),el('p','Смены стажировки: факт '+d.completed_shifts+' / план '+d.planned_shifts.length),table(['Дата','Смена'],d.planned_shifts.map(s=>[s.date,s.shift])));
+  n.append(el('p','ОТ: '+(d.safety_current?'Актуальный протокол':'Нет актуального протокола')+' · Стажировка: '+(d.internship_current?'Актуальный итог':'Нет актуального итога')+' · Вопросы: '+(d.questions_issued?'Выданы':'Не выданы')+' · Комиссия: '+(d.commission_current?'Актуальное решение':'Нет актуального решения')));
+  if(d.facts.length)n.append(table(['Этап','Дата','Смена','Мин.','Результат','Реквизиты','Комментарий'],d.facts.map(x=>[preparationNames[x.kind],x.date,x.shift,x.minutes,resultNames[x.result]||x.result,x.reference,x.note])));
+  for(const [kind,label] of Object.entries(preparationNames))if(d.cap[kind])n.append(button(label,()=>prepFactEditor(sub,d,kind),'primary'));
+  n.append(sub);setContent(host,n);
  }
  function programPanel(page,items,user){
   const host=el('div'),n=panel(page==='program.read'?'Шаблоны программ':page==='training.enrollment.read'?'Персональные программы':'Комплекты подготовки');

@@ -115,6 +115,8 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='POST'&&p==='/api/lc81/enrollment/create'){reply(res,200,await store.createEnrollment(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/enrollment/change'){reply(res,200,await store.changeEnrollment(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/preparation/options'){reply(res,200,store.preparationOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/preparation/fact-options'){reply(res,200,store.preparationFactOptions(a.id,a.credential_revision,url.searchParams.get('id'),url.searchParams.get('on')));return}
+   if(req.method==='POST'&&p==='/api/lc81/preparation/fact'){reply(res,200,await store.recordPreparationFact(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/preparation/detail'){reply(res,200,store.preparationDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/preparation/create'){reply(res,200,await store.createPreparation(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/mentor/options'){reply(res,200,store.mentorOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}

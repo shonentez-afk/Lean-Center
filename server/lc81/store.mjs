@@ -13,7 +13,7 @@ import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trai
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
 import {mentorOptions,changeMentor,mentorView} from './mentor-commands.mjs';
-import {programView,programOptions,saveProgram,retireProgram,programDetail,enrollmentOptions,createEnrollment,changeEnrollment,enrollmentDetail,preparationOptions,createPreparation,preparationDetail} from './program-commands.mjs';
+import {programView,programOptions,saveProgram,retireProgram,programDetail,enrollmentOptions,createEnrollment,changeEnrollment,enrollmentDetail,preparationOptions,createPreparation,preparationDetail,preparationFactOptions,recordPreparationFact} from './program-commands.mjs';
 import {requestDigest,getReceipt,addReceipt} from './library-receipts.mjs';
 import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,inspectLibraryText,saveLibrary,passportLibrary,finalizeLibrary,detailDescriptor,projectLibraryDetail,libraryReadAction} from './library-commands.mjs';
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
@@ -397,6 +397,8 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   enrollmentDetail(actor,revision,id){return read(db=>enrollmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
   preparationOptions(actor,revision){return read(db=>preparationOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   createPreparation(actor,revision,input){return mutate(db=>createPreparation(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  preparationFactOptions(actor,revision,id,on){return read(db=>preparationFactOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id,on))},
+  recordPreparationFact(actor,revision,input){return mutate(db=>recordPreparationFact(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   preparationDetail(actor,revision,id){return read(db=>preparationDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
   mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
   changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},

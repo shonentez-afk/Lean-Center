@@ -64,7 +64,7 @@ export function preparationResource(db,b,day){
  if(records.some(n=>!n||n.trainee_id!==b.trainee_id))return null;
  const rr=records.map(n=>enrollmentResource(db,n,day)),manager=personWorkResource(db,[b.manager_id],day,[records[0].start_on]);
  if(!manager||rr.some(r=>!r))return null;
- return {data:{},self:b.trainee_id,units:[...new Set([...manager.units,...rr.flatMap(r=>r.units)])],assigned:records.some(n=>n.state==='active')?[b.manager_id]:[]};
+ return {data:{},self:b.trainee_id,units:[...new Set([...manager.units,...rr.flatMap(r=>r.units)])],assigned:records.some(n=>n.state==='active')?[b.manager_id,records[2].mentor_id,records[2].manager_id]:[]};
 }
 export function trainingResource(db,operationId,people,day,extraDay=null){
  const op=one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[operationId]);
@@ -275,7 +275,7 @@ function decide(db,security,accountId,action,resourceId,day,resourceAction=actio
   if(!role||assignment?.person_id!==account.person_id||assignment.role_id!==role.id||!activePeriod(assignment,day))continue;
   const policy=unique(security.policies,x=>x?.role_id===role.id);
   if(!policy||!Number.isSafeInteger(policy.revision)||policy.revision<1||grant.policy_revision!==policy.revision||!Array.isArray(policy.permissions)||!policy.permissions.includes(action))continue;
-  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result'].includes(x)),'matrix.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
+  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result','preparation.shift'].includes(x)),'matrix.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
  }
  return null;
 }
