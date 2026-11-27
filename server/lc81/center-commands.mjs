@@ -9,7 +9,7 @@ import {centerProjection,personUnit} from '../../src/modules/training/center-ove
 import {centerAttention,scopedAttention} from '../../src/modules/training/center-attention.js';
 import {metricScopeValid,METRIC_RELATIONS,RELATION_LABELS} from '../../src/modules/training/metric-catalog.js';
 import {annualAuditCoverage} from '../../src/modules/training/audit-analytics.js';
-import {effectOverview,effectFacts,twiBasis,effectPending} from '../../src/modules/effect/domain.js';
+import {effectOverview,effectFacts,twiBasis,effectPending,effectStatus} from '../../src/modules/effect/domain.js';
 import {programResource,personWorkResource,scheduleResource,trainingAssignmentResource,assessmentResource,auditResource,selfResource,enrollmentResource,preparationResource,developmentResource,taskResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
 const must=(x,s,m)=>{if(!x)throw new PilotError(s,m)};
@@ -164,7 +164,7 @@ export function calendarWorkspace(db,a,{mode,from,to}){
  for(const x of standardCalendar(db,a.day,{kind:'preparation'})){
   const b=find(db,'twi_preparation',x.options.id),trainee=name(a,b?.trainee_id);
   const done=['Завершена','Завершено'].includes(x.state);
-  addRecord('preparation',x.options.id,x.date,x.type+(trainee?' · '+trainee:''),x.ownerId,x.people,x.state,!done,x.key);
+  addRecord('preparation',x.options.id,x.date,x.type+(trainee?' · '+x.title:''),x.ownerId,x.people,x.state,!done,x.key);
  }
  // Derived deadlines keep the original reference, never duplicate schedules.
  for(const r of rows(db,"SELECT r.id,r.review_due,r.author_id,d.title,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.archived=0 AND o.archived=0 AND r.review_due IS NOT NULL")){
@@ -173,7 +173,7 @@ export function calendarWorkspace(db,a,{mode,from,to}){
  }
  for(const r of rows(db,"SELECT * FROM economic_effect WHERE state='active'")){
   if(!financialRecordAllowed(db,a,r.id))continue;
-  const state=r.reviewed_at?'Расчёт зарегистрирован':'Ожидает проверки';
+  const state=effectStatus(db,r);
   add({anchor:r.id,key:'roi:'+r.id,date:r.review_due,type:'Контроль экономического эффекта',title:r.title,owner:name(a,r.owner_id),state,pending:effectPending(db,r),route:{type:'roi',id:r.id}},unitResource(r.unit_id),[r.owner_id]);
  }
  items.sort((x,y)=>Number(y.overdue)-Number(x.overdue)||x.date.localeCompare(y.date)||x.key.localeCompare(y.key));
@@ -264,13 +264,21 @@ function buildProjection(db,a,k,scope){
   if(['twi','skill','roi'].includes(g)&&!full(PER_SOURCE[g]))return false;
   if(g==='roi'&&(!financialScope(db,a)||!rows(db,'SELECT id FROM economic_effect WHERE (?=\'\' OR unit_id=?)',[scope.unit_id,scope.unit_id]).every(x=>financialRecordAllowed(db,a,x.id))))return false;
   if(!can(PER_SOURCE[g]))return false;
-  if(g==='twi'&&!cohortOK)return false;
+  if(g==='twi'){
+   if(!cohortOK)return false;
+   // Cohort members can depend on subsequent practical and qualification
+   // facts. They are separately protected, not inferred from a roster.
+   for(const e of training.evidence){
+    const id=e.options?.id;
+    if(!rows(db,"SELECT id FROM assessment_session WHERE assignment_id=? AND state='confirmed'",[id]).every(q=>recordAccess(db,a,'assessment',q.id)))return false;
+   }
+  }
   return m.evidence.every(e=>evidenceOK(db,a,e));
  };
  const metrics=p.metrics.map(m=>{
   const ok=permitted(m);
   const {evidence,options,scope:unused,...data}=m;
-  return {...data,value:ok?m.value:null,denominator:ok?m.denominator:null,availability:ok?m.availability:'restricted',evidence:ok?evidence:[]};
+  return {...data,dimensions:ok?m.dimensions:[],value:ok?m.value:null,denominator:ok?m.denominator:null,availability:ok?m.availability:'restricted',evidence:ok?evidence:[]};
  });
  return {options,p,metrics,can,full,scope};
 }

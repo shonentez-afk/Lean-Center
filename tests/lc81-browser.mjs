@@ -139,6 +139,34 @@ try{
  await newSkillForm.locator('select[name=category_id]').selectOption({label:'Учебная категория'});
  await newSkillForm.locator('input[name=name]').fill('Учебный общий навык');await button(m.p,'Создать навык').click();
  await m.p.getByRole('cell',{name:'Учебный общий навык',exact:true}).waitFor();
+ // The protected calendar and report must boot using the new modules.
+ const goSection=async action=>{
+  const nav=m.p.locator('#nav [data-action="'+action+'"]'),group=m.p.locator('#nav details').filter({has:m.p.locator('[data-action="'+action+'"]')});
+  if(!await group.evaluate(e=>e.open))await group.locator('summary').click();
+  await nav.click();
+ };
+ const roleData=store.adminData(admin.id),instructorRole=roleData.roles.find(r=>r.code==='INSTRUCTOR')?.id||await ref('business_role',{code:'INSTRUCTOR',name:'Инструктор'});
+ await ref('role_assignment',{person_id:p2,role_id:instructorRole,valid_from:day,valid_to:null});
+ await goSection('calendar.read');await m.p.locator('#content .lc81-calendar').waitFor();
+ await button(m.p,'Запланировать аудит / оценку').click();
+ await m.p.locator('#content select[name=type]').selectOption('self_eval');
+ await button(m.p,'Выбрать вид').click();
+ await m.p.locator('#content select[name=source_id]').selectOption(p2);
+ await button(m.p,'Выбрать источник').click();
+ await m.p.locator('#content input[name=due_on]').fill(day);
+ await button(m.p,'Запланировать').click();
+ await m.p.getByRole('cell',{name:'Самооценка',exact:true}).waitFor();
+ await button(m.p,'Открыть событие').click();
+ await m.p.getByRole('heading',{name:'Самооценка · Учебный сотрудник Б',exact:true}).waitFor();
+ await goSection('plan.read');await m.p.locator('#content').getByRole('heading',{name:'Мой план работы',exact:true}).waitFor();
+ await goSection('center.read');await m.p.locator('#content').getByRole('heading',{name:'Оперативный обзор',exact:true}).waitFor();
+ await goSection('analytics.read');await m.p.locator('#content').getByRole('heading',{name:'Аналитика за период',exact:true}).waitFor();
+ assert(await m.p.evaluate(()=>typeof globalThis.echarts?.init==='function'));
+ await goSection('metrics.read');await m.p.locator('#content').getByRole('heading',{name:'Дерево показателей',exact:true}).waitFor();
+ const metricRow=m.p.getByRole('row').filter({has:m.p.getByRole('cell',{name:'Назначено обучения',exact:true})});
+ await metricRow.getByRole('button',{name:'Раскрыть расчёт',exact:true}).click();
+ await m.p.locator('#content').getByRole('heading',{name:'Назначено обучения',exact:true}).waitFor();
+ await goSection('roi.read');await m.p.locator('#content').getByRole('heading',{name:'Экономический эффект',exact:true}).waitFor();
  // Real pinned Stage43 working copy in a sandboxed HTTPS iframe.
  const op=(await store.changeDirectory(admin.id,1,{type:'operation',operation:'create',id:null,expected_revision:0,fields:{unit_id:a,equipment_id:null,workplace_id:null,code:'QA-EDIT-SOP',name:'Учебная операция',criticality:'normal'}})).id;
  const source=await makeSop('Учебный шаг с фото');
