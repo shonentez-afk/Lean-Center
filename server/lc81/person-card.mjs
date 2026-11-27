@@ -1,11 +1,14 @@
 // Every section is independently authorized using existing projections.
 import {rows,one,isId} from '../../src/core/db.js';
 import {trainingAssignmentResource,matrixResource} from './read-policy.mjs';
+import {programView} from './program-commands.mjs';
 import {PilotError} from '../lc74-store.mjs';
 const sections=[
  ['training.read','training_assignment','trainee_id','Назначения обучения'],
  ['training.read','training_assignment','mentor_id','Проведение обучения'],
  ['training.enrollment.read','training_enrollment','trainee_id','Персональные программы'],
+ ['training.enrollment.read','training_enrollment','mentor_id','Наставничество в персональных программах'],
+ ['training.enrollment.read','training_enrollment','manager_id','Программы под руководством сотрудника'],
  ['preparation.read','twi_preparation','trainee_id','Комплекты подготовки'],
  ['credential.read','mentor_credential','person_id','Подготовка наставника'],
  ['appointment.read','mentor_appointment','person_id','Приказы'],
@@ -21,7 +24,7 @@ export function personCard(db,a,id,canRead){
  const result=[];
  for(const [action,table,key,title] of sections){
   if(!a.permissions.includes(action))continue;
-  const items=rows(db,'SELECT id FROM '+table+' WHERE '+key+'=? ORDER BY id',[id]).flatMap(({id})=>{const v=a.read(action,id);return v?[action==='training.read'?{...v.data,can_detail:a.allows('training.detail',id,trainingAssignmentResource(db,id,a.day))}:action==='authorization.read'?{...v.data,operation_name:a.read('operation.read',v.data.operation_id)?.data.name??null}:v.data]:[]});
+  const items=rows(db,'SELECT id FROM '+table+' WHERE '+key+'=? ORDER BY id',[id]).flatMap(({id})=>{const v=a.read(action,id);return v?[action==='training.read'?{...v.data,can_detail:a.allows('training.detail',id,trainingAssignmentResource(db,id,a.day))}:['training.enrollment.read','preparation.read'].includes(action)?programView(db,a,action,v.data):action==='authorization.read'?{...v.data,operation_name:a.read('operation.read',v.data.operation_id)?.data.name??null}:v.data]:[]});
   if(items.length)result.push({action,title,items});
  }
  if(a.permissions.includes('matrix.read')){

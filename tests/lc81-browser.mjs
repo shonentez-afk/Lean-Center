@@ -63,7 +63,7 @@ try{
  await m.p.locator('.lc81-editor input[name=display_name]').fill('Учебный исправленный');
  await button(m.p,'Сохранить').click();await m.p.getByRole('cell',{name:'Учебный исправленный',exact:true}).waitFor();
  // Register and revoke a real document through the protected HTTPS forms.
- const mentorNav=m.p.locator('#nav [data-action="credential.read"]'),mentorGroup=m.p.locator('#nav details').filter({has:mentorNav});
+ const mentorNav=m.p.locator('#nav [data-action="credential.read"]'),mentorGroup=m.p.locator('#nav details').filter({has:m.p.locator('[data-action="credential.read"]')});
  if(!await mentorGroup.evaluate(e=>e.open))await mentorGroup.locator('summary').click();
  await mentorNav.click();
  await button(m.p,'Зарегистрировать документ').click();

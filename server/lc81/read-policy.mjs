@@ -132,9 +132,13 @@ function resolve(db,action,id,day){
   return {data,self:null,units:[unit_id],assigned:[]};
  }
  if(action==='training.read'){
-  const r=one(db,'SELECT a.id,a.trainee_id,a.mentor_id,a.operation_id,a.sop_revision_id,a.due_on,a.state,o.unit_id FROM training_assignment a JOIN operation o ON o.id=a.operation_id WHERE a.id=? AND o.archived=0',[id]);
+  const r=one(db,'SELECT a.id,a.trainee_id,a.mentor_id,a.operation_id,a.sop_revision_id,a.due_on,a.state,a.enrollment_id,o.unit_id FROM training_assignment a JOIN operation o ON o.id=a.operation_id WHERE a.id=? AND o.archived=0',[id]);
   if(!r||!lineage(db,r.unit_id)||!activePerson(db,r.trainee_id))return null;
-  const {unit_id,mentor_id,...data}=r;
+  const {unit_id,mentor_id,enrollment_id,...data}=r;
+  if(enrollment_id){
+   const composite=trainingAssignmentResource(db,id,day);if(!composite)return null;
+   return {...composite,data};
+  }
   return {data,self:r.trainee_id,units:[unit_id],participantUnits:unitsFor(db,r.trainee_id,day),assigned:r.state==='planned'||r.state==='in_progress'?[r.trainee_id,mentor_id].filter(Boolean):[]};
  }
  if(action==='task.read'){

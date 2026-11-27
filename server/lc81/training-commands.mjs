@@ -1,10 +1,10 @@
 // Typed protected training commands. The LC4/LC6 domain remains authoritative.
 import {one,rows,isId,uuid,canonical,applyEvent} from '../../src/core/db.js';
 import {activeAuthorizations,practicalMethods,practicalCriteria,admissionStatus,conclusions} from '../../src/modules/training/domain.js';
-import {progressFor,currentStandard,latestVerification,latestAssessment,variants} from '../../src/modules/training/training-facts.js';
+import {progressFor,currentStandard,latestVerification,latestAssessment,variants,sharedTrainingTask,latestTaskAssignment} from '../../src/modules/training/training-facts.js';
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {matchesRoleKind} from '../../src/modules/master-data/role-matching.js';
-import {trainingResource,trainingAssignmentResource} from './read-policy.mjs';
+import {trainingResource,trainingAssignmentResource,enrollmentResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
 const must=(ok,status,message)=>{if(!ok)throw new PilotError(status,message)};
 const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
@@ -62,15 +62,28 @@ export function trainingOptions(db,access,operationId=null){
 }
 export const CREATE_FIELDS=Object.freeze(['operation_id','trainee_id','authorization_id','revision_id','skill_id','scale_id','target_level','assigned_on','due_on','reason','variant','method_config','plan_reviewed']);
 export function resolveTrainingCreate(db,input,access){
- must(exact(input,CREATE_FIELDS)&&access.personId&&isId(input.operation_id)&&isId(input.trainee_id)&&isId(input.authorization_id)&&isId(input.revision_id)&&date(input.assigned_on)&&date(input.due_on)&&input.assigned_on>=access.day&&input.plan_reviewed===true,400,'Заполните назначение и подтверждение плана');
+ const linked=exact(input,[...CREATE_FIELDS,'enrollment_id','program_task_id','enrollment_rev']);
+ must((exact(input,CREATE_FIELDS)||linked)&&access.personId&&isId(input.operation_id)&&isId(input.trainee_id)&&isId(input.authorization_id)&&isId(input.revision_id)&&date(input.assigned_on)&&date(input.due_on)&&input.assigned_on>=access.day&&input.plan_reviewed===true,400,'Заполните назначение и подтверждение плана');
  must(access.read('operation.read',input.operation_id)&&access.read('sop.read_effective',input.revision_id)&&allowedPerson(db,access,input.trainee_id),403,'Данные назначения недоступны');
  const auth=one(db,'SELECT * FROM mentor_authorization WHERE id=? AND operation_id=?',[input.authorization_id,input.operation_id]);
  must(auth&&allowedPerson(db,access,auth.person_id),403,'Инструктор недоступен');
- const resource=trainingResource(db,input.operation_id,[input.trainee_id,auth.person_id],access.day,input.assigned_on);
+ let resource=trainingResource(db,input.operation_id,[input.trainee_id,auth.person_id],access.day,input.assigned_on);
+ let n=null,task=null;
+ if(linked){
+  must(isId(input.enrollment_id)&&typeof input.program_task_id==='string'&&input.program_task_id.length<=100&&Number.isSafeInteger(input.enrollment_rev),400,'Неверная связь с программой');
+  n=one(db,'SELECT * FROM training_enrollment WHERE id=?',[input.enrollment_id]);
+  const er=enrollmentResource(db,n,access.day);
+  must(n&&er&&access.read('training.enrollment.read',n.id)&&access.allows('training.enrollment.detail',n.id,er),403,'Персональная программа недоступна');
+  must(n.rev===input.enrollment_rev&&n.state==='active',409,'Персональная программа изменилась');
+  task=one(db,'SELECT * FROM training_program_task WHERE id=? AND program_id=?',[input.program_task_id,n.program_id]);
+  must(task&&task.sop_revision_id===input.revision_id&&task.skill_id===input.skill_id&&task.scale_id===input.scale_id&&task.target_level===input.target_level&&n.trainee_id===input.trainee_id&&input.assigned_on>=n.start_on&&input.due_on<=n.due_on&&!sharedTrainingTask(db,n.id,task.id)&&!latestTaskAssignment(db,n.id,task.id),422,'Назначение не соответствует заданию персональной программы');
+  if(resource)resource={...resource,units:[...new Set([...resource.units,...er.units])]};
+ }
+
  must(access.allows('training.create',input.operation_id,resource)&&access.allows('training.read',input.operation_id,resource),403,'Назначение выходит за область полномочий');
  const r=sourceRevision(db,input.revision_id);
  must(r.operation_id===input.operation_id,422,'СОП относится к другой операции');
- return {source:r.source,payload:{trainee_id:input.trainee_id,mentor_id:auth.person_id,supervisor_id:null,authorization_id:auth.id,revision_id:r.id,source:r.source,skill_id:input.skill_id,scale_id:input.scale_id,target_level:input.target_level,assigned_by:access.personId,assigned_on:input.assigned_on,due_on:input.due_on,reason:input.reason,variant:input.variant,method_version:'JI-2',method_config:input.method_config,shift_id:null,enrollment_id:null,program_task_id:null,plan_reviewed:true}};
+ return {source:r.source,payload:{trainee_id:input.trainee_id,mentor_id:auth.person_id,supervisor_id:null,authorization_id:auth.id,revision_id:r.id,source:r.source,skill_id:input.skill_id,scale_id:input.scale_id,target_level:input.target_level,assigned_by:access.personId,assigned_on:input.assigned_on,due_on:input.due_on,reason:input.reason,variant:input.variant,method_version:'JI-2',method_config:input.method_config,shift_id:null,enrollment_id:n?.id??null,program_task_id:task?.id??null,plan_reviewed:true}};
 }
 export function createTraining(db,resolved,access){
  const id=uuid();emit(db,access,'training_assignment',id,'create',0,resolved.payload,'training.create');
