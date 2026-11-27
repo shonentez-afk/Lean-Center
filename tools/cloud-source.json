@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "80214b711845f7b21e0e47962e3cec79526860ab",
+  "sourceCommit": "d5c67af4cef491d82d3b6d6ec380bad1fc659a4d",
   "files": [
     {
       "path": "amvera.yml",
@@ -119,7 +119,7 @@
     },
     {
       "path": "server/lc81/center-commands.mjs",
-      "sha": "d71119a5e6b5f586a4e025b37ffa9185faaf0ff0"
+      "sha": "a8c1d6d807943db21d5a4ea279062900039b0bbb"
     },
     {
       "path": "server/lc81/center-ui.js",
