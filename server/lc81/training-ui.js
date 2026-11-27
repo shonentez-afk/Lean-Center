@@ -1,6 +1,6 @@
 // Protected forms and corporate fact tables. All authority, status, scores and
 // actor identities are determined by the server.
-export function createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,downloadForm,assistant,mobilePanel}){
+export function createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,downloadForm,assistant,mobilePanel,personCalendar,twiReport}){
  const opts=(items,field='name')=>items.map(x=>[x.id,x[field]]);
  const empty=()=>el('p','Нет доступных записей','muted');
  const exportLabels={entry:'Приложение 1 · план ввода XLSX',adaptation:'Приложение 2 · адаптация XLSX',safety_program:'Приложение 3 · ОТ XLSX',internship_program:'Приложение 4 · стажировка XLSX',preparation_pack:'Комплект приложений 2–4, 17 ZIP',training_plan:'План / факт XLSX',journal:'Журнал инструктажа XLSX',matrix:'Матрица XLSX',practical:'Чек-лист практики XLSX',bank:'Банк вопросов XLSX',audit:'Выписка аудита XLSX',self:'Самооценка XLSX',order:'Копия приказа DOCX',supplement:'Ходатайство XLSX',preparation:'Структура подготовки XLSX'};
@@ -14,13 +14,14 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const det=el('details');det.append(el('summary',title),form(fields,submit,fn));return det;
  }
  function setContent(host,n){host.replaceChildren(n);host.scrollIntoView({block:'nearest'})}
- async function assignmentEditor(host,link=null,retrain=null){
+ async function assignmentEditor(host,link=null,retrain=null,personId=null){
   const context=link||retrain;
   const root=await api('training/options'),out=el('div'),op=select('operation_id','Операция',[['','— Выберите операцию —'],...opts(root.operations)]);
   if(context){const field=op.querySelector('select');field.value=context.operation_id;field.disabled=true;if(!field.value)throw Error('Операция задания недоступна')}
   const load=button('Выбрать операцию',async()=>{
    const id=op.querySelector('select').value;if(!id)throw Error('Выберите операцию');
    const d=await api('training/options?operation_id='+encodeURIComponent(id));
+   if(personId)d.people=d.people.filter(p=>p.id===personId);
    if(context){
     d.people=d.people.filter(p=>p.id===context.trainee_id);d.revisions=d.revisions.filter(r=>r.id===context.revision_id);d.skills=d.skills.filter(s=>s.id===context.skill_id);d.scales=d.scales.filter(s=>s.id===context.scale_id).map(s=>({...s,levels:s.levels.filter(l=>l.value===context.target_level)}));
    }
@@ -40,7 +41,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
     note('Назначение сохранено. Требуются подтверждения согласующих.');await render();
    }));
   },'primary');
-  setContent(host,panel(link?'Назначение по заданию программы':retrain?'Повторное обучение по новой редакции СОП':'Новое назначение',op,load,out));
+  setContent(host,panel(link?'Назначение по заданию программы':retrain?'Повторное обучение по новой редакции СОП':personId?'Назначение обучения выбранному сотруднику':'Новое назначение',op,load,out));
  }
  async function assignment(host,id,focus='overview'){
   if(!discard())return;
@@ -168,17 +169,54 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
  }
  async function card(host,id){
   if(!discard())return;
-  const d=await api('person/card?id='+encodeURIComponent(id)),n=panel('Карточка сотрудника · '+d.person.display_name,el('p',[d.person.employee_code,d.person.unit,d.person.position].filter(Boolean).join(' · ')));
-  for(const s of d.sections){
-   const details=el('details');details.append(el('summary',s.title+' · '+s.items.length));
-   const labels={unit:'Подразделение',profession:'Профессия',position:'Должность',shift:'Смена',code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',evaluated_on:'Дата оценки',assessed_on:'Дата оценки',result_note:'Результат',people:'Сотрудников',skills:'Навыков'};
-   const keys=Object.keys(labels).filter(k=>s.items.some(r=>Object.hasOwn(r,k))),sub=el('div');
-   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='employment.read'&&r.can_transfer?button('Изменить назначение',()=>employmentEditor(sub,r.id)):s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):['credential.read','appointment.read','authorization.read'].includes(s.action)?button('Открыть запись',()=>openRecord(sub,s.action.split('.')[0],r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):s.action==='assessment.read'&&r.can_detail?button('Открыть оценку',()=>assessmentCard(sub,r.id)):s.action==='sop.evaluation.read'?button('Открыть оценку СОП',()=>sopEvaluationCard(sub,r.kind,r.id)):s.action==='calendar.read'&&r.can_detail?button('Открыть плановое событие',()=>openLinked(sub,{type:'schedule',id:r.id})):s.action==='roi.read'&&r.can_detail?button('Открыть эффект',()=>openLinked(sub,{type:'roi',id:r.id})):'']);
-   details.append(table([...keys.map(k=>labels[k]),'Действия'],rows),sub);n.append(details);
+  const d=await api('person/card?id='+encodeURIComponent(id)),n=panel('Карточка сотрудника · '+d.person.display_name,el('p',[d.person.employee_code,d.person.unit,d.person.position,d.person.shift?'Смена: '+d.person.shift:null,...(d.person.roles||[])].filter(Boolean).join(' · ')));
+  const tabs=el('div',undefined,'lc81-card-tabs row'),body=el('div'),search=input('person_records_search','Поиск связанных записей','search',false),quick=el('div',undefined,'row'),quickHost=el('div');
+  const groups=[
+   ['overview','Обзор',[]],
+   ['matrix','Матрицы',['matrix.read']],
+   ['training','Обучение',['training.read','training.enrollment.read','preparation.read']],
+   ['assessment','Оценки и допуски',['assessment.read','authorization.read']],
+   ['mentoring','Наставничество',['credential.read','appointment.read','supplement.read','audit.read','self.read']],
+   ['effect','Эффективность TWI',[]],
+   ['library','СОП и ФРВ',['sop.read_history','frv.read','sop.evaluation.read']],
+   ['plans','Планы и мероприятия',['development.read','task.read','calendar.read','roi.read']],
+   ['roles','Назначения и роли',['employment.read','role_assignment.read']]
+  ];
+  const sectionFor=g=>d.sections.filter(s=>g[2].includes(s.action));
+  const enabled=g=>g[0]==='overview'||g[0]==='effect'&&d.can_twi_report||sectionFor(g).length>0;
+  let active='overview';
+  const reg=el('div');
+  if(d.can_journal)quick.append(button('Журнал инструктажей сотрудника',async()=>{if(discard())quickHost.replaceChildren(await registerPanel('journal',id))}));
+  if(d.can_retraining)quick.append(button('Переобучение и развитие',async()=>{if(discard())quickHost.replaceChildren(await registerPanel('retraining',id))}));
+  if(d.can_create_training)quick.append(button('Назначить обучение',()=>discard()&&assignmentEditor(quickHost,null,null,id),'primary'));
+  if(d.can_plan)quick.append(button('План сотрудника',async()=>{if(discard())quickHost.replaceChildren(await personCalendar('plan',id))}));
+  if(d.can_calendar)quick.append(button('Календарь сотрудника',async()=>{if(discard())quickHost.replaceChildren(await personCalendar('calendar',id))}));
+  if(d.can_twi_report)quick.append(button('Метрики сотрудника',()=>choose('effect')));
+  function records(s,query){
+   const details=panel(s.title),items=s.items.filter(r=>!query||Object.values(r).filter(v=>typeof v==='string'||typeof v==='number').join(' ').toLocaleLowerCase('ru-RU').includes(query));
+   const labels={unit:'Подразделение',profession:'Профессия',position:'Должность',shift:'Смена',code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',mentor_name:'Инструктор / наставник',sop_label:'Редакция СОП',assigned_on:'Дата назначения',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',evaluated_on:'Дата оценки',assessed_on:'Дата оценки',result_note:'Результат',people:'Сотрудников',skills:'Навыков'};
+   const keys=Object.keys(labels).filter(k=>items.some(r=>Object.hasOwn(r,k))),sub=el('div');
+   const rows=items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='employment.read'&&r.can_transfer?button('Изменить назначение',()=>employmentEditor(sub,r.id)):s.action==='training.read'?(function(){const b=el('div',undefined,'row');if(r.can_detail)b.append(button('Открыть обучение',()=>assignment(sub,r.id)));if(r.can_sop)b.append(button('СОП обучения',()=>openLinked(sub,{type:'sop',id:r.sop_revision_id})));return b.childElementCount?b:'Только чтение'})():s.action==='sop.read_history'?button('Открыть СОП',()=>openLinked(sub,{type:'sop',id:r.revision_id})):s.action==='frv.read'?button('Открыть ФРВ',()=>openLinked(sub,{type:'frv',id:r.id})):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):['credential.read','appointment.read','authorization.read'].includes(s.action)?button('Открыть запись',()=>openRecord(sub,s.action.split('.')[0],r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):s.action==='assessment.read'&&r.can_detail?button('Открыть оценку',()=>assessmentCard(sub,r.id)):s.action==='sop.evaluation.read'?button('Открыть оценку СОП',()=>sopEvaluationCard(sub,r.kind,r.id)):s.action==='calendar.read'&&r.can_detail?button('Открыть плановое событие',()=>openLinked(sub,{type:'schedule',id:r.id})):s.action==='roi.read'&&r.can_detail?button('Открыть эффект',()=>openLinked(sub,{type:'roi',id:r.id})):'']);
+   details.append(items.length?table([...keys.map(k=>labels[k]),'Действия'],rows):empty(),sub);return details;
   }
-  if(!d.sections.length)n.append(el('p','Нет связанных записей, доступных вашей учётной записи.'));
-  const reg=el('div');if(d.can_journal)n.append(button('Журнал инструктажей сотрудника',async()=>{if(discard())reg.replaceChildren(await registerPanel('journal',id))}));if(d.can_retraining)n.append(button('Переобучение и развитие сотрудника',async()=>{if(discard())reg.replaceChildren(await registerPanel('retraining',id))}));n.append(reg);
-  n.append(assistant({type:'person',id}));setContent(host,n);
+  function draw(){
+   const query=search.querySelector('input').value.trim().toLocaleLowerCase('ru-RU'),group=groups.find(g=>g[0]===active);
+   if(active==='effect'){body.replaceChildren(twiReport({person_id:id,day:d.day}));return}
+   if(active==='overview'&&!query){
+    const overview=el('div',undefined,'lc81-grid');for(const g of groups.filter(g=>g[0]!=='overview'&&enabled(g))){const count=sectionFor(g).reduce((n,s)=>n+s.items.length,0);overview.append(panel(g[1],el('p',g[0]==='effect'?'Отчёт по выбранному сотруднику':'Доступных записей: '+count),button('Открыть',()=>choose(g[0]))))}
+    body.replaceChildren(overview);return;
+   }
+   const ss=active==='overview'?d.sections:sectionFor(group);
+   body.replaceChildren(...(ss.length?ss.map(s=>records(s,query)):[empty()]));
+  }
+  function choose(key){
+   if(!discard()||!groups.some(g=>g[0]===key&&enabled(g)))return;
+   active=key;for(const b of tabs.querySelectorAll('button')){b.classList.toggle('active',b.dataset.tab===key);b.setAttribute('aria-pressed',String(b.dataset.tab===key))}
+   search.hidden=key==='effect';draw();
+  }
+  for(const g of groups.filter(enabled)){const b=button(g[1],()=>choose(g[0]),'lc81-card-tab');b.dataset.tab=g[0];b.setAttribute('aria-pressed',String(g[0]===active));b.classList.toggle('active',g[0]===active);tabs.append(b)}
+  search.querySelector('input').addEventListener('input',()=>{if(!body.querySelector('[data-lc-work-form]'))draw()});
+  n.append(quick,quickHost,tabs,search,body,reg,assistant({type:'person',id}));draw();setContent(host,n);
  }
  function mentor(kind,items,info){
   const names={credential:'Документы о подготовке наставников',appointment:'Приказы о назначении',authorization:'Полномочия по операциям'};

@@ -57,12 +57,12 @@ export function createCenterUI({api,run,button,panel,table,el,input,select,form,
  function agenda(items,sub){
   return items.length?table(['Дата','Вид','Содержание','Ответственный','Состояние','Источник'],items.map(x=>[x.date,x.type,x.title,x.owner,(x.overdue?'Просрочено · ':'')+(state[x.state]||x.state),route(sub,x.route)])):empty('В выбранном периоде нет доступных событий');
  }
- async function calendar(mode){
+ async function calendar(mode,personId=null){
   const month=fill(input('month','Месяц','month'),today().slice(0,7)),from=date('from','С даты',today()),to=date('to','По дату',plus(today(),30)),out=el('div'),root=el('div'),personal=mode==='plan';
   async function draw(){
    const period=personal?{from:from.querySelector('input').value,to:to.querySelector('input').value}:bounds(month.querySelector('input').value);
-   const d=await api(query('calendar/view',{mode,...period})),sub=el('div'),list=el('div');
-   const open=d.items.filter(x=>x.pending),late=d.items.filter(x=>x.overdue),n=panel(personal?'Мой план работы':'Календарь · '+period.from.slice(0,7),el('p','Дата центра '+d.day+' (UTC) · '+d.items.length+' событий · открыто '+open.length+' · просрочено '+late.length));
+   const d=await api(query('calendar/view',{mode,...period,...(personId?{person_id:personId}:{})})),sub=el('div'),list=el('div');
+   const open=d.items.filter(x=>x.pending),late=d.items.filter(x=>x.overdue),n=panel(personal?(personId?'План работы сотрудника':'Мой план работы'):(personId?'Календарь сотрудника · ':'Календарь · ')+period.from.slice(0,7),el('p','Дата центра '+d.day+' (UTC) · '+d.items.length+' событий · открыто '+open.length+' · просрочено '+late.length));
    if(d.can_plan)n.append(button('Запланировать аудит / оценку',()=>scheduleEditor(sub),'primary'));
    if(personal){
     const filter=pick('filter','Показать',[['open','Открытые и просроченные'],['all','Все события'],['late','Только просроченные']],'open');

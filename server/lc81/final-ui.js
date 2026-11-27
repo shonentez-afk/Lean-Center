@@ -24,6 +24,14 @@ export function createFinalUI({api,button,panel,table,el,input,select,note,disca
   if(!discard())return;const d=await api(query('analytics/frv',{id})),links=el('div');renderTables(d,host,links);
   host.append(button('Карточка ФРВ',()=>openLinked(links,{type:'frv',id})),links);host.scrollIntoView({block:'nearest'});
  }
+ function twiReport({revision_id='',person_id='',day}){
+  const from=dt('context_from','С даты',day.slice(0,4)+'-01-01'),to=dt('context_to','По дату',day),out=el('div'),links=el('div'),root=el('div');
+  const queryReport=()=>({kind:'twi_effect',from:val(from),to:val(to),unit_id:'',person_id,shift_id:'',operation_id:'',revision_id,program_id:'',method_id:'',self_id:'',role:'all',state:'all',sop_kind:'sop_evaluation'});
+  for(const f of [from,to])f.querySelector('input').addEventListener('change',()=>{out.replaceChildren();links.replaceChildren()});
+  root.append(el('p','Эффективность TWI по этому источнику. Когорта по дате назначения, исходные правила LC7.','muted'),from,to,button('Сформировать отчёт TWI',async()=>{
+   if(!discard())return;const q=queryReport(),r=await api('analytics/report',q);if(JSON.stringify(q)!==JSON.stringify(queryReport()))return;links.replaceChildren();renderTables(r,out,links);
+  },'primary'),out,links);return root;
+ }
  async function analytics(shared){
   const o=await api('analytics/subjects'),root=panel('Расширенные отчёты LC7',el('p','Исходные расчёты, версии методик, фильтры и первичные факты. Полный отчёт доступен только при наличии прав на все необходимые регистры предприятия. Отдельные показатели ограниченной области остаются в общем обзоре.'));
   if(!o.reports.length){root.append(el('p','Нет разрешённых полных отчётов.'));return root}
@@ -105,5 +113,5 @@ export function createFinalUI({api,button,panel,table,el,input,select,note,disca
   }
   root.append(registry,detail);await list();return root;
  }
- return {analytics,frvDetail,history,historyDetail};
+ return {twiReport,analytics,frvDetail,history,historyDetail};
 }

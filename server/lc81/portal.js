@@ -334,7 +334,7 @@ function resourcePanel(items){
  }
  return content;
 }
-libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label)});
+libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),openLinked,twiReport:context=>finalUI.twiReport(context)});
 async function downloadForm(kind,id=null,appendix=null){
  const r=await fetch('/api/lc81/forms/export',{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:JSON.stringify(kind==='batch'?{kind,items:id}:{kind,id,appendix})});
  if(!r.ok){const b=await r.json().catch(()=>({}));throw Object.assign(Error(b.error||'Выгрузка не подтверждена'),{status:r.status})}
@@ -405,7 +405,7 @@ async function importPanel(){
 assistantUI=createAssistantUI({api,button,panel,table,el,input,select,note,openLinked,permitted:()=>!!user?.permissions.includes('assistant.read')});
 mobileUI=createMobileAuditUI({api,button,panel,table,el,input,select,form,value,note,discard});
 finalUI=createFinalUI({api,button,panel,table,el,input,select,note,discard,openLinked});
-trainingUI=createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,downloadForm,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),mobilePanel:()=>mobileUI.panel()});
+trainingUI=createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,downloadForm,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),mobilePanel:()=>mobileUI.panel(),personCalendar:(mode,id)=>centerUI.calendar(mode,id),twiReport:context=>finalUI.twiReport(context)});
 centerUI=createCenterUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),goMetric:async(id,scope,fallback)=>{
  if(!user?.workspace_actions.includes('metrics.read'))return fallback();
  if(!discard())return;centerUI.focusMetric(id,scope);page='metrics.read';await render();
@@ -416,11 +416,12 @@ async function openLinked(host,r){
  if(r.type==='frv_report')return finalUI.frvDetail(host,r.id);
  if(['sop_evaluation','weighted_sop'].includes(r.type))return trainingUI.sopEvaluationCard(host,r.type,r.id);
  if(['schedule','roi'].includes(r.type))return centerUI.open(host,r.type,r.id);
- if(r.type==='sop'||r.type==='frv'){
-  const action=r.type==='sop'?'sop.read_history':'frv.read',result=await api('resources?action='+encodeURIComponent(action));
-  const matches=result.items.filter(x=>(r.type==='sop'?x.revision_id:x.id)===r.id);
+ if(r.type==='sop')return libraryUI.card(host,r.id);
+ if(r.type==='frv'){
+  const action='frv.read',result=await api('resources?action='+encodeURIComponent(action));
+  const matches=result.items.filter(x=>x.id===r.id);
   if(!matches.length)throw Error('Источник больше недоступен');
-  host.replaceChildren(r.type==='sop'?libraryUI.history(matches):libraryUI.frv(matches));host.scrollIntoView({block:'nearest'});return;
+  host.replaceChildren(libraryUI.frv(matches));host.scrollIntoView({block:'nearest'});return;
  }
  if(r.type==='person'&&!user.permissions.includes('person.read_card')){
   const action=user.permissions.includes('person.read_directory')?'person.read_directory':'person.read_basic',result=await api('resources?action='+encodeURIComponent(action)),person=result.items.find(x=>x.id===r.id);

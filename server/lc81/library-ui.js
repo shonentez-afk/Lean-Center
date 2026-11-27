@@ -3,7 +3,7 @@
 const context=(kind,command,operation_id,id=null,revision_id=null,origin_id=null,origin_revision=null)=>({kind,command,id,revision_id,operation_id,origin_id,origin_revision});
 const stateLabel={draft:'Черновик',review:'На согласовании',approved:'Согласован (прежний порядок)',effective:'Действует',superseded:'Заменён',withdrawn:'Выведен',final:'Завершено',archived:'Архив'};
 const max=30*1024*1024;
-export function createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh,render,discard,assistant}){
+export function createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh,render,discard,assistant,openLinked,twiReport}){
  let active=null;
  function clear(){
   const s=active;active=null;
@@ -185,37 +185,67 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   });
   d.append(btn,out);return d;
  }
- function history(items){return panel('Редакции и черновики СОП',el('p','Согласование и утверждение в защищённом режиме появятся после LC8.3.','muted'),items.length?table(['Код','Название','Редакция','Состояние','Формат','Пересмотр','Действия'],items.map(r=>[r.code,r.title,'v'+r.version_no,stateLabel[r.state]||r.state,r.print_format||'—',r.review_due,editActions(r,'sop')])):el('p','Нет доступных записей','empty'))}
+ function history(items){
+  const host=el('div'),action=r=>{const box=el('div');box.append(button('Карточка СОП',()=>card(host,r.revision_id)),editActions(r,'sop'));return box};
+  return panel('Редакции и черновики СОП',el('p','Согласование и утверждение в защищённом режиме появятся после LC8.3.','muted'),items.length?table(['Код','Название','Редакция','Состояние','Формат','Пересмотр','Действия'],items.map(r=>[r.code,r.title,'v'+r.version_no,stateLabel[r.state]||r.state,r.print_format||'—',r.review_due,action(r)])):el('p','Нет доступных записей','empty'),host)}
  function frv(items){return panel('ФРВ',items.length?table(['Название','Дата','Состояние','Действия','Результаты'],items.map(r=>[r.title,r.observed_at,stateLabel[r.state]||r.state,editActions(r,'frv'),r.can_summary?detailButton(r,'frv.read_summary','Замеры'):'—'])):el('p','Нет доступных записей','empty'))}
  function linked(items,action){const key=action==='sop.read_twi'?'can_twi':'can_linked_frv',title=action==='sop.read_twi'?'Планы инструктажа TWI':'ФРВ по действующим СОП';const visible=items.filter(r=>r[key]);return panel(title,visible.length?table(['Код','Название','Редакция','Материал'],visible.map(r=>[r.code,r.title,'v'+r.version_no,detailButton(r,action,'Открыть')])):el('p','Нет доступных материалов','empty'))}
+ // The eight original card areas share one exact server-checked revision.
+ // Historical access alone is not permission to read raw source or photos.
+ async function card(host,id,initial='steps',trail=[]){
+  if(!discard())return;
+  const d=await api('library/card?id='+encodeURIComponent(id)),r=d.revision;
+  const n=panel('Карточка СОП · '+r.code+' · v'+r.version_no,el('h3',r.title),el('p',(stateLabel[r.state]||r.state)+' · '+(r.effective_at?'Введён: '+r.effective_at.slice(0,10):'Редакция '+r.version_no),'muted'));
+  if(trail.length)n.append(button('Назад к редакции v'+trail[trail.length-1].version,()=>card(host,trail[trail.length-1].id,'versions',trail.slice(0,-1))));
+  const tabs=el('div',undefined,'lc81-card-tabs row'),body=el('div'),nested=el('div');let selected=null,serial=0;
+  const keys=[['steps','Шаги',d.can_steps],['passport','Паспорт',true],['versions','Версии',true],['frv','ФРВ',d.can_linked_frv||d.measured.length>0],['twi','План TWI',d.can_twi],['effect','Эффективность TWI',d.can_effectiveness],['evaluation','Оценка СОП',d.can_evaluation],['materials','Материалы',d.can_public||d.measured.length>0]];
+  const fieldNames={branch:'Филиал',department:'Подразделение',workplace:'Рабочее место',operation:'Операция',sopNumber:'Номер',safety:'Безопасность',tools:'Инструменты',material:'Материалы'};
+  const meta=async()=>d.can_public?(await api('library/detail?action=sop.read_public&id='+encodeURIComponent(id))).data:null;
+  const openVersion=x=>card(host,x.revision_id,'passport',[...trail,{id,version:r.version_no}]);
+  const measured=()=>d.measured.length?table(['Исследование','Дата','Состояние','Фактические замеры'],d.measured.map(f=>[f.title,f.observed_at,stateLabel[f.state]||f.state,f.can_summary?detailButton(f,'frv.read_summary','Открыть замеры'):'—'])):el('p','Нет доступных связанных фактических исследований.','muted');
+  const getSteps=async()=> (await api('resources?action=sop.read_steps&id='+encodeURIComponent(id))).data;
+  const photo=(s,can)=>{const cell=el('div');if(can){const b=button('Показать фото',()=>{if(cell.querySelector('img'))return;const im=el('img',undefined,'lc81-image');im.alt='Фото шага '+s.position;im.addEventListener('error',()=>{im.remove();cell.append(el('span','Фото отсутствует','muted'));b.disabled=false},{once:true});im.src='/api/lc81/sop/photo?revision_id='+encodeURIComponent(id)+'&position='+s.position;cell.append(im);b.disabled=true});cell.append(b)}return cell};
+  async function show(key,guard=true){
+   const spec=keys.find(x=>x[0]===key&&x[2]);if(!spec||guard&&!discard())return;
+   selected=key;const request=++serial;for(const b of tabs.querySelectorAll('button')){b.classList.toggle('active',b.dataset.tab===key);b.setAttribute('aria-pressed',String(b.dataset.tab===key))}
+   body.replaceChildren(el('p','Загрузка доступных материалов…','muted'));nested.replaceChildren();
+   const content=panel(spec[1]);
+   if(key==='steps'){
+    const doc=await meta(),steps=await getSteps();
+    if(doc?.description)content.append(el('p',doc.description));
+    content.append(table(['Шаг','Действие','Ключевые моменты','Причина','Секунды','Фото'],steps.steps.map(s=>[s.position,s.action_text,s.key_points.join(' · '),s.reason_text,s.duration_seconds,photo(s,steps.can_read_photo)])));
+   }else if(key==='passport'){
+    const doc=await meta(),fields=[['Код',r.code],['Название',r.title],['Редакция','v'+r.version_no],['Состояние',stateLabel[r.state]||r.state],...Object.entries({created_at:'Создана',effective_at:'Ввод в действие',review_due:'Срок пересмотра',changed_on:'Изменена',print_format:'Формат А3'}).filter(([k])=>Object.hasOwn(r,k)).map(([k,label])=>[label,k==='print_format'?({portrait:'Вертикальный',landscape:'Горизонтальный'}[r[k]]||'—'):r[k]])];
+    if(doc)fields.push(...Object.entries(doc.meta).filter(([,v])=>v).map(([k,v])=>[fieldNames[k]||k,v]));
+    content.append(table(['Реквизит','Значение'],fields),el('p','Согласование и ввод в действие остаются отдельным защищённым процессом LC8.3. Исторический статус не является новым согласованием.','muted'),editActions(r,'sop'));
+   }else if(key==='versions'){
+    content.append(table(['Редакция','Название','Состояние','Введена','Действия'],d.versions.map(v=>['v'+v.version_no,v.title,stateLabel[v.state]||v.state,v.effective_at,v.revision_id===id?'Открыта':button('Открыть редакцию',()=>openVersion(v))])));
+    content.append(el('p','Показаны только редакции, доступные текущей учётной записи.','muted'));
+   }else if(key==='frv'){
+    if(d.can_linked_frv)content.append(detailButton(r,'sop.read_linked_frv','Расчёт ФРВ по шагам'));
+    content.append(el('h3','Связанные исследования с фактическими замерами'),measured());
+   }else if(key==='twi')content.append(detailButton(r,'sop.read_twi','Открыть план TWI'));
+   else if(key==='effect')content.append(twiReport({revision_id:id,day:d.day}));
+   else if(key==='evaluation'){
+    content.append(d.evaluations.length?table(['Дата','Оценщик','Методика','Результат','Действия'],d.evaluations.map(x=>[x.date,x.actor,x.method,x.score===null?'—':(100*x.score).toFixed(1)+'%',button('Открыть оценку',()=>openLinked(nested,{type:x.kind,id:x.id}))])):el('p','Нет доступных оценок этой редакции.','muted'));
+   }else if(key==='materials'){
+    const doc=await meta();if(doc)content.append(table(['Материал','Содержание'],['safety','tools','material','workplace'].filter(k=>doc.meta[k]).map(k=>[fieldNames[k],doc.meta[k]])));
+    if(d.can_steps)content.append(button('Фото и материалы шагов',()=>show('steps')));
+    content.append(el('h3','Исходные исследования'),measured());
+   }
+   if(request!==serial)return;body.replaceChildren(content);
+  }
+  for(const [key,label,allowed] of keys){if(!allowed)continue;const b=button(label,()=>show(key),'lc81-card-tab');b.dataset.tab=key;b.setAttribute('aria-pressed','false');tabs.append(b)}
+  n.append(tabs,body,nested,assistant({type:'sop',id},'ИИ-помощник СОП'));host.replaceChildren(n);
+  await show(keys.some(x=>x[0]===initial&&x[2])?initial:'passport',false);
+  if(host.isConnected)host.scrollIntoView({block:'nearest'});
+ }
  function effective(items){
-  const search=input('sop_filter','Поиск по коду или названию','text',false),host=el('div'),root=panel('Каталог действующих СОП предприятия',el('p','Действующие редакции для ознакомления. Проекты изменений не заменяют действующий документ.','muted'),search,host);
+  const search=input('sop_filter','Поиск по коду или названию','text',false),list=el('div'),host=el('div'),root=panel('Каталог действующих СОП предприятия',el('p','Действующие редакции для ознакомления. Проекты изменений не заменяют действующий документ.','muted'),search,list,host);
   const draw=()=>{
    const q=search.querySelector('input').value.trim().toLocaleLowerCase('ru'),visible=items.filter(r=>(r.code+' '+r.title).toLocaleLowerCase('ru').includes(q));
-   host.replaceChildren(el('p','Показано '+visible.length+' из '+items.length,'muted'));
-   for(const r of visible){
-    const card=el('details');card.append(el('summary',r.code+' · '+r.title+' · v'+r.version_no));
-    const body=el('div'),open=button('Открыть СОП',async()=>{
-     const {data:doc}=await api('library/detail?action=sop.read_public&id='+encodeURIComponent(r.revision_id));
-     const {data:steps}=await api('resources?action=sop.read_steps&id='+encodeURIComponent(r.revision_id));
-     body.replaceChildren();
-     const names={branch:'Филиал',department:'Подразделение',workplace:'Рабочее место',operation:'Операция',sopNumber:'Номер',safety:'Безопасность',tools:'Инструменты',material:'Материалы'};
-     body.append(table(['Реквизит','Значение'],Object.entries(doc.meta).filter(([,v])=>v).map(([k,v])=>[names[k]||k,v])));
-     if(doc.description)body.append(el('p',doc.description));
-     body.append(table(['Шаг','Действие','Ключевые моменты','Причина','Секунды','Фото'],steps.steps.map(s=>{
-      const cell=el('div');
-      if(steps.can_read_photo){const b=button('Показать фото',()=>{if(cell.querySelector('img'))return;const im=el('img',undefined,'lc81-image');im.alt='Фото шага '+s.position;im.addEventListener('error',()=>{im.remove();cell.append(el('span','Фото отсутствует','muted'));b.disabled=false},{once:true});im.src='/api/lc81/sop/photo?revision_id='+encodeURIComponent(r.revision_id)+'&position='+s.position;cell.append(im);b.disabled=true});cell.append(b)}
-      return [s.position,s.action_text,s.key_points.join(' · '),s.reason_text,s.duration_seconds,cell];
-     })));
-     if(r.can_twi)body.append(detailButton(r,'sop.read_twi','План TWI'));
-     if(r.can_linked_frv)body.append(detailButton(r,'sop.read_linked_frv','ФРВ по СОП'));
-    });
-    card.append(open);
-    if(r.can_revise)card.append(button('Предложить новую редакцию',()=>launch(context('sop','revise',r.operation_id,r.document_id,r.revision_id))));
-    card.append(body);host.append(card);
-   }
-   if(!visible.length)host.append(el('p','Нет подходящих СОП','empty'));
+   list.replaceChildren(el('p','Показано '+visible.length+' из '+items.length,'muted'),visible.length?table(['Код','Название','Редакция','Действия'],visible.map(r=>[r.code,r.title,'v'+r.version_no,button('Открыть СОП',()=>card(host,r.revision_id))])):el('p','Нет подходящих СОП','empty'));
   };search.querySelector('input').addEventListener('input',draw);draw();return root;
  }
- return {active:()=>!!active,clear,close,launch,createPanel,history,frv,linked,effective};
+ return {active:()=>!!active,clear,close,launch,createPanel,history,frv,linked,effective,card};
 }
