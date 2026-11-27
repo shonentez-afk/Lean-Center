@@ -400,7 +400,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   preparationDetail(actor,revision,id){return read(db=>preparationDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
   mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
   changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  matrixInfo(actor,revision,unit=null,baseOn=null){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return matrixInfo(db,a,unit,baseOn??a.day)})},
+  matrixInfo(actor,revision,unit=null,baseOn=null,filters={}){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return matrixInfo(db,a,unit,baseOn??a.day,filters)})},
   saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   matrixDetail(actor,revision,id){return read(db=>matrixDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},

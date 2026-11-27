@@ -119,7 +119,7 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='POST'&&p==='/api/lc81/preparation/create'){reply(res,200,await store.createPreparation(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/mentor/options'){reply(res,200,store.mentorOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='POST'&&p==='/api/lc81/mentor/change'){reply(res,200,await store.changeMentor(a.id,a.credential_revision,await body(req)));return}
-   if(req.method==='GET'&&p==='/api/lc81/matrix/info'){reply(res,200,store.matrixInfo(a.id,a.credential_revision,url.searchParams.get('unit_id'),url.searchParams.get('base_on')));return}
+   if(req.method==='GET'&&p==='/api/lc81/matrix/info'){reply(res,200,store.matrixInfo(a.id,a.credential_revision,url.searchParams.get('unit_id'),url.searchParams.get('base_on'),Object.fromEntries(['shift_id','profession_id','workplace_id','category_id'].map(k=>[k,url.searchParams.get(k)]))));return}
    if(req.method==='GET'&&p==='/api/lc81/matrix/detail'){reply(res,200,store.matrixDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/matrix/save'){reply(res,200,await store.saveMatrix(a.id,a.credential_revision,await body(req,2*1024*1024)));return}
    if(req.method==='POST'&&p==='/api/lc81/matrix/retire'){reply(res,200,await store.retireMatrix(a.id,a.credential_revision,await body(req)));return}

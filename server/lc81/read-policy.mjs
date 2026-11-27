@@ -97,6 +97,7 @@ export function matrixResource(db,unit,roster,columns,day,baseOn){
   units.push(...current,...historical);
  }
  for(const col of columns){
+  if(col.document_id===null){if(!one(db,'SELECT s.id FROM skill s JOIN skill_category c ON c.id=s.category_id WHERE s.id=? AND s.archived=0 AND c.archived=0 AND s.operation_id IS NULL',[col.skill_id]))return null;continue}
   const x=one(db,'SELECT s.operation_id,o.unit_id FROM skill s JOIN operation o ON o.id=s.operation_id WHERE s.id=? AND s.archived=0 AND o.archived=0',[col.skill_id]);
   const doc=one(db,"SELECT operation_id FROM document WHERE id=? AND kind='sop'",[col.document_id]);
   if(!x||!doc||doc.operation_id!==x.operation_id||!inside(db,unit,x.unit_id))return null;

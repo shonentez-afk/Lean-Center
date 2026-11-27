@@ -91,20 +91,40 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
  async function matrixEditor(host,previous=null){
   if(!discard())return;
   const info=await api('matrix/info'),unit=select('unit_id','Подразделение',opts(info.units)),base=dt('base_on','Дата исходного среза',previous?.base_on||info.day),out=el('div');
-  if(previous)unit.querySelector('select').value=previous.unit_id;
-  const choose=button('Выбрать состав',async()=>{
-   const u=unit.querySelector('select').value,b=base.querySelector('input').value,d=await api('matrix/info?unit_id='+encodeURIComponent(u)+'&base_on='+encodeURIComponent(b));
+  if(previous){unit.querySelector('select').value=previous.unit_id;unit.querySelector('select').disabled=true}
+  const shift=optional('shift_id','Смена',opts(info.shifts)),profession=optional('profession_id','Профессия',opts(info.professions)),category=optional('category_id','Категория навыков',opts(info.categories)),workplace=optional('workplace_id','Рабочее место',[]);
+  if(previous)shift.querySelector('select').value=previous.shift_id||'';
+  const filterFields=[shift,profession,workplace,category],names=['shift_id','profession_id','workplace_id','category_id'];
+  const filters=()=>Object.fromEntries(filterFields.map((f,i)=>[names[i],f.querySelector('select').value||null]));
+  async function chooseComposition(){
+   if(!discard())return;
+   const u=unit.querySelector('select').value,b=base.querySelector('input').value,q=filters();
+   const params=new URLSearchParams({unit_id:u,base_on:b});for(const [k,v] of Object.entries(q))if(v)params.set(k,v);
+   const d=await api('matrix/info?'+params);
+   const ws=workplace.querySelector('select');ws.replaceChildren();for(const [v,label] of [['','— Все —'],...opts(d.workplaces)]){const o=el('option',label);o.value=v;ws.append(o)}ws.value=q.workplace_id||'';
    const roster=d.roster.map(r=>({key:r.person_id,label:r.name+' · '+r.position})),cols=d.columns.map(r=>({key:r.skill_id+':'+r.document_id,label:r.title+' · '+r.skill}));
-   const picker=(title,items,prefix,selected)=>{const box=el('fieldset');box.append(el('legend',title));for(const r of items){const c=check(prefix+r.key,r.label,selected.has(r.key));box.append(c)}return box};
-   const chosenPeople=new Set(previous?.roster.map(r=>r.person_id)||roster.map(r=>r.key)),chosenCols=new Set(previous?.columns.map(c=>c.skill_id+':'+c.document_id)||cols.map(c=>c.key));
+   // Explicit order is preserved, including when creating a revision.
+   const picker=(title,items,prefix,oldKeys)=>{
+    const box=el('fieldset'),list=el('div'),lookup=new Map(items.map(r=>[r.key,r])),selected=oldKeys?new Set(oldKeys):new Set(items.map(r=>r.key));
+    const ordered=[...(oldKeys||[]).filter(k=>lookup.has(k)),...items.map(r=>r.key).filter(k=>!oldKeys?.includes(k))];
+    box.append(el('legend',title),button('Выбрать все',()=>{for(const c of list.querySelectorAll('input[type=checkbox]')){c.checked=true;c.dispatchEvent(new Event('change',{bubbles:true}))}}),button('Снять все',()=>{for(const c of list.querySelectorAll('input[type=checkbox]')){c.checked=false;c.dispatchEvent(new Event('change',{bubbles:true}))}}),list);
+    for(const k of ordered){const row=el('div'),c=check(prefix+k,lookup.get(k).label,selected.has(k));row.dataset.key=k;row.append(c,button('↑',()=>{if(row.previousElementSibling)list.insertBefore(row,row.previousElementSibling)}),button('↓',()=>{if(row.nextElementSibling)list.insertBefore(row.nextElementSibling,row)}));list.append(row)}
+    return {box,keys:()=>[...list.children].filter(row=>row.querySelector('input').checked).map(row=>row.dataset.key)};
+   };
+   const people=picker('Строки · сотрудники',roster,'p_',previous?.roster.map(r=>r.person_id)),columns=picker('Столбцы · навыки и СОП',cols,'c_',previous?.columns.map(c=>c.skill_id+':'+c.document_id));
    const code=input('code','Код матрицы'),title=input('title','Название');code.querySelector('input').value=previous?.code||'';title.querySelector('input').value=previous?.title||'';if(previous)code.querySelector('input').readOnly=true;
-   if(!roster.length||!cols.length||!d.scales.length){out.replaceChildren(el('p','Нужны сотрудники, операционные навыки с действующими СОП и корпоративная шкала 1–4.'));return}
-   out.replaceChildren(form([code,title,select('scale_id','Шкала',opts(d.scales)),dt('target_on','Целевая дата',previous?.target_on||''),picker('Строки · сотрудники',roster,'p_',chosenPeople),picker('Столбцы · навыки и СОП',cols,'c_',chosenCols)],'Сохранить матрицу',async f=>{
-    await api('matrix/save',{code:value(f,'code'),title:value(f,'title'),unit_id:u,scale_id:value(f,'scale_id'),base_on:b,target_on:value(f,'target_on'),person_ids:roster.filter(r=>checked(f,'p_'+r.key)).map(r=>r.key),columns:d.columns.filter(r=>checked(f,'c_'+r.skill_id+':'+r.document_id)).map(r=>({skill_id:r.skill_id,document_id:r.document_id})),previous_id:previous?.id??null,previous_rev:previous?.rev??0});
+   if(!roster.length||!cols.length||!d.scales.length){out.replaceChildren(el('p','Нужны сотрудники, навыки и корпоративная шкала 1–4. Проверьте фильтры.'));return}
+   const scale=select('scale_id','Шкала',opts(d.scales));if(previous)scale.querySelector('select').value=previous.scale_id;
+   const missing=(previous?.roster.filter(r=>!roster.some(x=>x.key===r.person_id)).length||0)+(previous?.columns.filter(c=>!cols.some(x=>x.key===c.skill_id+':'+c.document_id)).length||0);
+   const warn=el('p',missing?'Часть прежнего состава недоступна в выбранных фильтрах: '+missing+'. Проверьте новый состав перед сохранением.':'Порядок строк и столбцов можно изменить стрелками.','muted');
+   out.replaceChildren(form([warn,code,title,scale,dt('target_on','Целевая дата',previous?.target_on||''),people.box,columns.box],'Сохранить матрицу',async f=>{
+    const current=filters();if(JSON.stringify(current)!==JSON.stringify(q)||unit.querySelector('select').value!==u||base.querySelector('input').value!==b)throw Error('Фильтры изменились. Повторно выберите состав');
+    await api('matrix/save',{code:value(f,'code'),title:value(f,'title'),unit_id:u,scale_id:value(f,'scale_id'),base_on:b,target_on:value(f,'target_on'),...q,person_ids:people.keys(),columns:columns.keys().map(k=>{const r=d.columns.find(x=>x.skill_id+':'+x.document_id===k);return {skill_id:r.skill_id,document_id:r.document_id}}),previous_id:previous?.id??null,previous_rev:previous?.rev??0});
     note('Матрица сохранена · уровни взяты из подтверждённых оценок');await render();
    }));
-  },'primary');
-  setContent(host,panel(previous?'Новая версия матрицы':'Конструктор матрицы',unit,base,choose,out));
+  }
+  unit.querySelector('select').addEventListener('change',()=>{workplace.querySelector('select').value=''});
+  setContent(host,panel(previous?'Новая версия матрицы':'Конструктор матрицы',unit,base,shift,profession,workplace,category,button('Выбрать состав',chooseComposition,'primary'),out));
  }
  async function matrix(host,id){
   if(!discard())return;

@@ -2,9 +2,9 @@
 // links. The LC4/LC6 validators and enrollmentTasks remain authoritative.
 import {one,rows,uuid,isId,foldKey,applyEvent} from '../../src/core/db.js';
 import {programKinds,parts,conclusions} from '../../src/modules/training/domain.js';
-import {PROGRAM_DOCS} from '../../src/modules/training/standard-workflows.js';
+import {PROGRAM_DOCS,bankRows} from '../../src/modules/training/standard-workflows.js';
 import {enrollmentTasks,sharedTrainingTask,latestTaskAssignment} from '../../src/modules/training/training-facts.js';
-import {preparationProgress} from '../../src/modules/training/preparation-results.js';
+import {preparationProgress,THEORY_BLOCKS,COMMISSION_ROLES} from '../../src/modules/training/preparation-results.js';
 import {programResource,enrollmentResource,preparationResource,personWorkResource,trainingAssignmentResource} from './read-policy.mjs';
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {matchesRoleKind} from '../../src/modules/master-data/role-matching.js';
@@ -137,6 +137,56 @@ export function createPreparation(db,a,f){
  must(allowed(a,'preparation.create',f.trainee_id,r)&&allowed(a,'preparation.read',f.trainee_id,r),403,'Комплект выходит за область полномочий');
  return emit(db,a,'twi_preparation',uuid(),'create',0,payload,'preparation.create');
 }
+function factAccess(db,a,b,kind,on=a.day,extra=[]){
+ const ids=[b.adaptation_id,b.safety_id,b.internship_id],ns=ids.map(id=>nRow(db,id)),r=preparationResource(db,b,a.day);
+ if(!r||ns.some(n=>!n||n.state==='cancelled')||!a.personId||a.personId===b.trainee_id)return false;
+ const [ad,s,j]=ns,actors=kind==='shift'?[j.mentor_id,j.manager_id,b.manager_id]:kind==='safety'?[s.manager_id,b.manager_id]:kind==='internship'?[j.manager_id,b.manager_id]:[b.manager_id];
+ if(!actors.includes(a.personId))return false;
+ const people=[b.trainee_id,b.manager_id,...ns.flatMap(n=>[n.mentor_id,n.manager_id]),...extra];
+ const history=personWorkResource(db,people,a.day,[on]);
+ return !!history&&allowed(a,'preparation.'+kind,b.id,{...r,units:[...new Set([...r.units,...history.units])]});
+}
+function eligibleBanks(db,b,on){
+ const n=nRow(db,b.adaptation_id),prof=one(db,"SELECT profession_id FROM person_assignment WHERE person_id=? AND valid_from<=? AND coalesce(valid_to,'9999-12-31')>=? ORDER BY valid_from DESC,id LIMIT 1",[b.trainee_id,n.start_on,n.start_on])?.profession_id??null;
+ const all=bankRows(db).filter(x=>x.reviewed_on<=on&&(x.profession_id===null||x.profession_id===prof)),seen=new Set();
+ return all.filter(x=>{const k=x.profession_id??'';if(seen.has(k))return false;seen.add(k);return true});
+}
+export function preparationFactOptions(db,a,id,on){
+ const b=isId(id)&&one(db,'SELECT * FROM twi_preparation WHERE id=?',[id]);
+ must(b&&a.read('preparation.read',id)&&allowed(a,'preparation.detail',id,preparationResource(db,b,a.day)),404,'Комплект подготовки недоступен');
+ must(date(on)&&on<=a.day,400,'Укажите фактическую дату');
+ const capabilities=Object.fromEntries(['shift','safety','internship','questions','commission'].map(k=>[k,factAccess(db,a,b,k,on)]));
+ const out={capabilities};
+ if(capabilities.shift)out.shifts=rows(db,'SELECT id,code,name FROM work_shift WHERE archived=0 ORDER BY code,id');
+ if(capabilities.questions)out.banks=eligibleBanks(db,b,on).map(x=>({id:x.id,label:(x.profession_id?'По профессии':'Общий')+' · '+x.reviewed_on+' · v'+x.version_no,blocks:x.blocks.filter(v=>THEORY_BLOCKS.includes(v.id))}));
+ if(capabilities.commission){
+  const n=nRow(db,b.adaptation_id);
+  out.manager={id:b.manager_id,name:name(a,b.manager_id)};out.mentor={id:n.mentor_id,name:name(a,n.mentor_id)};
+  out.people=rows(db,'SELECT id,display_name FROM person WHERE archived=0 ORDER BY display_name,id').filter(p=>p.id!==b.trainee_id&&p.id!==b.manager_id&&p.id!==n.mentor_id&&readPerson(a,p.id)&&factAccess(db,a,b,'commission',on,[p.id])).map(p=>({id:p.id,name:p.display_name}));
+ }
+ return out;
+}
+export function recordPreparationFact(db,a,f){
+ const kinds=['shift','safety','internship','questions','commission'];
+ must(exact(f,['id','kind','fact_on','expected_fact_id','data'])&&isId(f.id)&&kinds.includes(f.kind)&&date(f.fact_on)&&f.fact_on<=a.day&&(f.expected_fact_id===null||isId(f.expected_fact_id))&&f.data&&typeof f.data==='object'&&!Array.isArray(f.data),400,'Неверный факт подготовки');
+ const b=one(db,'SELECT * FROM twi_preparation WHERE id=?',[f.id]);
+ must(b&&a.read('preparation.read',b.id)&&allowed(a,'preparation.detail',b.id,preparationResource(db,b,a.day)),404,'Комплект подготовки недоступен');
+ const d=f.data;let extra=[];
+ if(f.kind==='commission'){
+  must(exact(d,['members','theory','conclusion','reference','feedback'])&&exact(d.members,Object.keys(COMMISSION_ROLES))&&Object.values(d.members).every(isId)&&Object.values(d.members).every(id=>readPerson(a,id)),400,'Укажите доступных участников комиссии');
+  extra=Object.values(d.members);
+ }else if(f.kind==='shift'){
+  must(exact(d,['shift_id','result','minutes','note'])&&isId(d.shift_id),400,'Неверный факт смены');
+ }else if(f.kind==='questions'){
+  must(exact(d,['bank_id','blocks','note'])&&isId(d.bank_id)&&eligibleBanks(db,b,f.fact_on).some(x=>x.id===d.bank_id),400,'Редакция банка недоступна');
+ }else must(exact(d,['result','reference','feedback']),400,'Неверный протокол');
+ must(factAccess(db,a,b,f.kind,f.fact_on,extra),403,'Нет полномочий на регистрацию факта');
+ // Immutable facts have their own identity. An optimistic token covers every
+ // previous fact of this kind (including corrections to the same shift).
+ const last=one(db,'SELECT id FROM twi_preparation_fact WHERE preparation_id=? AND kind=? ORDER BY recorded_at DESC,id DESC LIMIT 1',[b.id,f.kind]);
+ must(f.expected_fact_id===(last?.id??null),409,'Факт изменён другим пользователем. Обновите комплект');
+ return emit(db,a,'twi_preparation_fact',uuid(),'create',0,{preparation_id:b.id,kind:f.kind,actor_id:a.personId,fact_on:f.fact_on,data:d},'preparation.'+f.kind);
+}
 export function preparationDetail(db,a,id){
  const b=isId(id)&&one(db,'SELECT * FROM twi_preparation WHERE id=?',[id]);
  must(b&&a.read('preparation.read',id)&&allowed(a,'preparation.detail',id,preparationResource(db,b,a.day)),404,'Комплект подготовки недоступен');
@@ -144,5 +194,8 @@ export function preparationDetail(db,a,id){
   const n=nRow(db,id),v=a.read('training.enrollment.read',id);
   return {kind:['adaptation','safety','internship'][i],state:n.state,id:v&&capEnrollment(db,a,n,'training.enrollment.detail')?id:null};
  });
- return {id:b.id,trainee:name(a,b.trainee_id),category:b.category,status:q.status,documents:docs,planned_shifts:JSON.parse(b.shifts_json).map(x=>({date:x.date,shift:one(db,'SELECT name FROM work_shift WHERE id=?',[x.shift_id])?.name??''})),completed_shifts:q.shifts.filter(x=>x.data.result==='completed').length};
+ const kinds=['shift','safety','internship','questions','commission'],cap=Object.fromEntries(kinds.map(k=>[k,factAccess(db,a,b,k)]));
+ const last=Object.fromEntries(kinds.map(k=>[k,one(db,'SELECT id FROM twi_preparation_fact WHERE preparation_id=? AND kind=? ORDER BY recorded_at DESC,id DESC LIMIT 1',[b.id,k])?.id??null]));
+ const facts=q.facts.map(x=>({kind:x.kind,date:x.fact_on,result:x.data.result??x.data.conclusion??null,reference:x.data.reference??null,note:x.data.feedback??x.data.note??null,minutes:x.kind==='shift'?x.data.minutes:null,shift:x.kind==='shift'?one(db,'SELECT name FROM work_shift WHERE id=?',[x.data.shift_id])?.name??null:null}));
+ return {id:b.id,trainee:name(a,b.trainee_id),category:b.category,status:q.status,documents:docs,planned_shifts:JSON.parse(b.shifts_json).map(x=>({date:x.date,shift:one(db,'SELECT name FROM work_shift WHERE id=?',[x.shift_id])?.name??''})),completed_shifts:q.shifts.filter(x=>x.data.result==='completed').length,day:a.day,cap,last,facts,safety_current:q.safety.current,internship_current:q.internship.current,commission_current:q.current,questions_issued:!!q.questions,theory_blocks:THEORY_BLOCKS,commission_roles:COMMISSION_ROLES};
 }
