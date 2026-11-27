@@ -120,6 +120,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    }
    if(req.method==='GET'&&p==='/api/lc81/admin'){reply(res,200,{...store.adminData(a.id,a.credential_revision),integrations:{editor_ai:editorAiEnabled===true,center_ai:cloudAiEnabled===true}});return}
    if(req.method==='POST'&&p==='/api/lc81/admin/reference'){const b=await body(req);must(keys(b,['type','payload']),400,'Неверные поля');reply(res,200,await store.createReference(a.id,b.type,b.payload,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/role-presets'){reply(res,200,await store.installRolePresets(a.id,await body(req),a.credential_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/provision'){reply(res,200,await store.provisionAccount(a.id,await body(req),a.credential_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/access'){reply(res,200,await store.assignAccess(a.id,await body(req),a.credential_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/account'){reply(res,200,await store.createAccount(a.id,await body(req),a.credential_revision));return}

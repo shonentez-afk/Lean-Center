@@ -8,6 +8,7 @@ import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-st
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
 import {workspaceActions} from './workspace-access.mjs';
+import {rolePresetStatus,installMissingRolePresets} from './role-presets.mjs';
 import {sharedLibrary,SHARED_LIBRARY_READS,SHARED_LIBRARY_WORKSPACES} from './shared-library.mjs';
 import {siteClock,normalizeZone,SITE_ZONE_KEY} from './site-clock.mjs';
 import {changeOwnPassword,resetAccountPassword,renameAccount,grantStatus,endRole,endEmployment} from './admin-commands.mjs';
@@ -334,6 +335,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     current.run('INSERT INTO lc81_policy VALUES(?,1,?)',[manager,JSON.stringify(PERMISSIONS)]);
     const id=uuid();current.run('INSERT INTO lc81_account(id,person_id,login,password_hash,state,bootstrap,created_at) VALUES(?,NULL,?,?,\'active\',1,?)',[id,normalizeLogin(login),hashPassword(password),at()]);
     audit(current,id,seed?'bootstrap.migrated':'bootstrap',id);
+    if(!seed)installMissingRolePresets(current,[admin,manager],payload=>domainCreate(current,'business_role',payload),roleId=>audit(current,id,'role.preset.install',roleId));
    });
    checkPrivate(current);
    if(seed)await copySources(current,dataDir,seed.readSource,write);
@@ -407,7 +409,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     employment:rows(db,'SELECT id,person_id,unit_id,valid_from,valid_to,rev FROM person_assignment ORDER BY valid_from DESC,id'),
     policies:rows(db,'SELECT * FROM lc81_policy').map(p=>({role_id:p.role_id,revision:p.revision,permissions:JSON.parse(p.permissions_json)})),
     grants:rows(db,'SELECT id,account_id,role_id,assignment_id,employment_id,scope_json,policy_revision,state,valid_from,valid_to,revoked_at FROM lc81_grant ORDER BY issued_at DESC,id').map(g=>{const x={...g,scope:JSON.parse(g.scope_json)};return {...x,status:grantStatus(db,x,day(db),config(db).site)}}),
-    actions:PERMISSIONS,audit:auditView(db),site:config(db).site,protectedRoles:[config(db).admin,config(db).manager]};
+    actions:PERMISSIONS,audit:auditView(db),site:config(db).site,protectedRoles:[config(db).admin,config(db).manager],rolePresets:rolePresetStatus(db,[config(db).admin,config(db).manager])};
   })},
   createReference(actor,type,payload,revision){
    return mutate(db=>{
@@ -428,7 +430,9 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   provisionAccount(actor,input,revision){
    return mutate(db=>{
     requireAdmin(db,actor,revision);
-    must(keys(input,['person_id','new_person','login','password','generate','manager'])&&typeof input.manager==='boolean',400,'Неверные поля пользователя');
+    const withAccess=Object.hasOwn(input||{},'access');
+    must(keys(input,['person_id','new_person','login','password','generate','manager',...(withAccess?['access']:[])])&&typeof input.manager==='boolean',400,'Неверные поля пользователя');
+    if(withAccess)must(!input.manager&&keys(input.access,['role_id','scopes'])&&isId(input.access.role_id)&&Array.isArray(input.access.scopes)&&input.access.scopes.length>=1&&input.access.scopes.length<=2,400,'Неверный выбранный доступ');
     let id=input.person_id;
     if(id===null){
      must(keys(input.new_person,['employee_code','display_name','unit_id']),400,'Заполните сотрудника и подразделение');
@@ -441,6 +445,13 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
      // A deliberately selected manager gets the actual existing protected
      // manager policy, not a wildcard or silently upgraded old policy.
      assignAccessRecord(db,actor,{account_id:result.id,role_id:config(db).manager,scope:{kind:'unit_tree',unit_id:config(db).site},valid_to:null},revision);
+    }
+    if(withAccess){
+     const cfg=config(db),p=rolePresetStatus(db,[cfg.admin,cfg.manager]).find(x=>x.role_id===input.access.role_id&&['ready','custom'].includes(x.status));
+     must(p,422,'Выберите действующий рабочий профиль');
+     const scopes=input.access.scopes,valid=scopes.every(s=>s&&typeof s==='object'&&(p.scope==='unit_tree'?keys(s,['kind','unit_id'])&&s.kind==='unit_tree':keys(s,['kind'])&&(s.kind===p.scope||p.scope==='assigned'&&s.kind==='self')));
+     must(valid&&scopes.some(s=>s.kind===p.scope)&&new Set(scopes.map(x=>x.kind)).size===scopes.length,422,'Неверная область рабочего профиля');
+     for(const scope of scopes)assignAccessRecord(db,actor,{account_id:result.id,role_id:p.role_id,scope,valid_to:null},revision);
     }
     return {...result,person_id:id,manager:input.manager};
    });
@@ -481,6 +492,13 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     // without altering any historic domain record or role assignment.
     db.run('UPDATE lc81_account SET credential_revision=credential_revision+1 WHERE bootstrap=0');
     audit(db,actor,'site.clock.configure',config(db).site);return siteClock(db);
+   });
+  },
+  installRolePresets(actor,input,revision){
+   return mutate(db=>{
+    requireAdmin(db,actor,revision);must(keys(input,['confirmed'])&&input.confirmed===true,400,'Подтвердите добавление недостающих ролей');
+    const cfg=config(db),ids=installMissingRolePresets(db,[cfg.admin,cfg.manager],p=>domainCreate(db,'business_role',p),id=>audit(db,actor,'role.preset.install',id));
+    return {created:ids.length};
    });
   },
   setPolicy(actor,input,revision){
