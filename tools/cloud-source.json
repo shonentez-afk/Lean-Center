@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "dcbf9010b546bde87413aba0a49fcf69d67edcbb",
+  "sourceCommit": "006dcaae4df211aa91c51046532c9df99b90978d",
   "files": [
     {
       "path": "amvera.yml",
@@ -219,7 +219,7 @@
     },
     {
       "path": "server/lc81/training-ui.js",
-      "sha": "62d2a25a3a436caad3f9d5196a98b38c748b72fe"
+      "sha": "c061b213a34d95495f7f41d637582c530210c275"
     },
     {
       "path": "server/main.mjs",
