@@ -5,6 +5,7 @@ import {scheduleKind,scheduleLabels,scheduleDisplayState,schedulePending,schedul
 import {standardCalendar} from '../../src/modules/training/standard-overview.js';
 import {actionRows,actionStatus} from '../../src/modules/training/audit-domain.js';
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
+import {matchesRoleKind} from '../../src/modules/master-data/role-matching.js';
 import {centerProjection,personUnit} from '../../src/modules/training/center-overview.js';
 import {centerAttention,scopedAttention} from '../../src/modules/training/center-attention.js';
 import {metricScopeValid,METRIC_RELATIONS,RELATION_LABELS} from '../../src/modules/training/metric-catalog.js';
@@ -89,7 +90,9 @@ export function calendarDetail(db,a,id){
 const makePlan=(type,source,owner,due)=>({kind:type==='audit'?'audit':'assessment',source_type:type==='audit'?'training_assignment':type==='practical'?'practical_assignment':'self_person',source_id:source,owner_id:owner,due_on:due,state:'planned'});
 function planResource(db,a,type,source,owner,due){return scheduleResource(db,makePlan(type,source,owner,due),a.day)}
 const planAllowed=(a,id,r)=>allowed(a,'calendar.plan',id,r)&&allowed(a,'calendar.read',id,r);
-function ownerRole(type,p){return type==='audit'?p.roles.some(r=>r.kind==='internal_trainer'):type==='self_eval'?p.roles.some(r=>['instructor','mentor'].includes(r.kind)):true}
+// Directory kind intentionally groups internal trainers with instructors.
+// Use the same stricter matcher as the original L1 fact registration.
+function ownerRole(type,p){return type==='audit'?p.roles.some(r=>matchesRoleKind(r,'internal_trainer')):type==='self_eval'?p.roles.some(r=>['instructor','mentor'].includes(r.kind)):true}
 export function calendarOptions(db,a,type,sourceId=null){
  must(a.personId&&has(a,'calendar.plan')&&has(a,'calendar.read')&&['audit','practical','self_eval'].includes(type),403,'Планирование недоступно');
  const people=directoryPeople(db,a.day).filter(p=>who(a,p.id)&&ownerRole(type,p)&&planAllowed(a,p.id,personWorkResource(db,[p.id],a.day)));
@@ -107,6 +110,8 @@ export function createSchedule(db,a,f){
  const source=options.sources.find(x=>x.id===f.source_id);
  must(source&&(f.type==='self_eval'?f.owner_id===f.source_id&&f.source_rev===null:options.owners.some(x=>x.id===f.owner_id)),403,'Источник или ответственный недоступен');
  if(f.type!=='self_eval')must(source.rev===f.source_rev,409,'Назначение изменилось');
+ const owner=directoryPeople(db,f.due_on).find(p=>p.id===f.owner_id);
+ must(owner&&ownerRole(f.type,owner),422,'На плановую дату у ответственного нет действующего назначения нужной роли');
  must(planAllowed(a,f.source_id,planResource(db,a,f.type,f.source_id,f.owner_id,f.due_on)),403,'План выходит за область полномочий');
  const p=f.type==='audit'?{assignment_id:f.source_id,owner_id:f.owner_id,due_on:f.due_on}:{command:'plan_assessment',type:f.type,source_id:f.source_id,owner_id:f.owner_id,due_on:f.due_on};
  return emit(db,a,'schedule_event',uuid(),'create',0,p,'calendar.plan');

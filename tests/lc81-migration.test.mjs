@@ -392,7 +392,9 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const observation=auditOpts.assignments.find(x=>x.id===newTraining.id);assert(observation);
   const auditInput={assignment_id:newTraining.id,assignment_rev:observation.rev,method_id:rc.id,session_id:observation.sessions[0].id,observed_on:today,responses:rc.criteria.map((q,i)=>({criterion_id:q.id,value:i===0?0:1,note:i===0?'Учебное отклонение':''})),feedback:'Учебная обратная связь'};
   const auditScheduleOptions=store.calendarOptions(manager.id,1,'audit',newTraining.id);
-  assert(auditScheduleOptions.owners.some(o=>o.id===x.f.actor));
+  assert(auditScheduleOptions.owners.some(o=>o.id===x.f.actor),'Internal trainer grouped as instructor by directory must remain selectable');
+  assert(!auditScheduleOptions.owners.some(o=>[x.f.trainee,x.f.mentor,x.f.other,x.personB].includes(o.id)),'Neither an ordinary mentor/instructor nor the trainee can be substituted for the independent internal trainer');
+  await assert.rejects(store.createSchedule(manager.id,1,{type:'audit',source_id:newTraining.id,source_rev:observation.rev,owner_id:x.f.other,due_on:today}),/ответственный недоступен/);
   const scheduled=await store.createSchedule(manager.id,1,{type:'audit',source_id:newTraining.id,source_rev:observation.rev,owner_id:x.f.actor,due_on:today});
   assert.equal(store.calendarDetail(manager.id,1,scheduled.id).candidates.length,0);
   assert.throws(()=>store.calendarDetail(worker.id,1,scheduled.id),/недоступен/);
