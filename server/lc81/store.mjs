@@ -28,6 +28,7 @@ import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
 import {journalWorkspace,retrainingWorkspace} from './training-registers.mjs';
 import {sopEvaluationWorkspace,sopEvaluationOptions,sopEvaluationDetail,createSopEvaluation,installSopMethod} from './sop-evaluation-commands.mjs';
+import {importTypes,importAllowed,inspectDirectoryFile,parseDirectoryFile,planDirectoryImport,makeImportToken,checkImportToken} from './import-commands.mjs';
 import {formsCatalog,prepareForm,serializeForm,canExportForm} from './form-commands.mjs';
 import {refsForDb,checkContent,MAX_CONTENT,verifyDomainEvents} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
@@ -599,6 +600,34 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   sopEvaluationDetail(actor,revision,kind,id){return read(db=>sopEvaluationDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,id))},
   createSopEvaluation(actor,revision,f){return mutate(db=>createSopEvaluation(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
   installSopMethod(actor,revision,f){return mutate(db=>installSopMethod(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
+  importTypes(actor,revision){return read(db=>({types:importTypes(trainingAccess(db,checkedAccount(db,actor,revision),day())),max_bytes:2*1024*1024}))},
+  async inspectDirectoryFile(actor,revision,f){
+   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day()),f?.type));
+   const data=await inspectDirectoryFile(f);
+   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day()),f?.type));return data;
+  },
+  async previewDirectoryFile(actor,revision,f){
+   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day()),f?.type));
+   const parsed=await parseDirectoryFile(f);
+   return read(db=>{
+    const a=checkedAccount(db,actor,revision),d=day(),access=trainingAccess(db,a,d),copy=openDb(SQL,bytesOf(db),{upgrade:false});
+    try{
+     const result=planDirectoryImport(copy,access,parsed,{day:d,at:at(),site:config(copy).site,read:(action,id)=>readFor(copy,a,action,id,d),allows:(action,anchor,id)=>directoryAllowed(copy,a,action,anchor,id,d),audit:()=>{}});
+     return {...result,token:result.can_commit?makeImportToken(db,access,parsed):null};
+    }finally{copy.close()}
+   });
+  },
+  async commitDirectoryFile(actor,revision,f){
+   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day()),f?.type));
+   const parsed=await parseDirectoryFile(f,true);
+   return mutate(db=>{
+    const a=checkedAccount(db,actor,revision),d=day(),access=trainingAccess(db,a,d);
+    importAllowed(access,parsed.type);checkImportToken(db,access,parsed,f.token);
+    const result=planDirectoryImport(db,access,parsed,{day:d,at:at(),site:config(db).site,read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchor,id)=>directoryAllowed(db,a,action,anchor,id,d),audit:(action,target)=>audit(db,actor,action,target)});
+    must(result.can_commit,409,'Импорт не подтверждён: появились конфликты. Выполните предварительную проверку');
+    return {counts:result.counts};
+   });
+  },
   formsCatalog(actor,revision){return read(db=>formsCatalog(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   exportForm(actor,revision,input){
    let result;

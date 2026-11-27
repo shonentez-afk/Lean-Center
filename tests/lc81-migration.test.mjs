@@ -10,6 +10,7 @@ import {openPilot,copyPilotCheckpoint,PILOT_STATE} from '../server/lc74-store.mj
 import {openSecureQA} from '../server/lc81/store.mjs';
 import {migratePilotCopy,copySecureCheckpoint} from '../server/lc81/maintenance.mjs';
 import {readZip} from '../src/modules/training/local-docx.js';
+import {excelJS} from '../server/lc81/form-commands.mjs';
 import {QUESTION_BANK_V03} from '../src/modules/training/question-bank-v03.js';
 import {READ_ACTIONS,PERMISSIONS} from '../server/lc81/access-contract.mjs';
 import {readManagerProjection} from '../server/lc81/read-policy.mjs';
@@ -620,6 +621,41 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await assert.rejects(store.exportForm(worker.id,1,{kind:'matrix',appendix:null,id:finalMatrix.id}),/недоступна/);
   await assert.rejects(store.exportForm(otherEditor.id,1,{kind:'journal',appendix:null,id:newTraining.id}),/недоступна/);
   await assert.rejects(store.exportForm(admin.id,1,{kind:'order',appendix:null,id:groupOrder.id}),/недоступна/);
+
+  // Import previews are side-effect free and commit requires an unchanged,
+  // signed, account-bound preview of the same file and mapping.
+  {
+   const X=excelJS();
+   const toFile=async records=>{const w=new X.Workbook(),sheet=w.addWorksheet('Импорт');records.forEach(row=>sheet.addRow(row));return Buffer.from(await w.xlsx.writeBuffer()).toString('base64')};
+   const headers=['Табельный номер','ФИО','Код подразделения','Код профессии'];
+   const req={type:'person',file:await toFile([headers,['QA-IMPORT-001','Учебный импорт','QA','QA-NEW-PROF']]),sheet:0,header_row:1};
+   const inspected=await store.inspectDirectoryFile(manager.id,1,req);
+   const mapping=Object.fromEntries(inspected.fields.filter(x=>x.col).map(x=>[x.key,x.col]));
+   assert.equal(mapping.unit_id,3);assert.equal(mapping.profession_id,4);
+   const input={...req,mapping,allow_updates:false};
+   const count=store.listResources(manager.id,'person.read_directory').length;
+   const preview=await store.previewDirectoryFile(manager.id,1,input);
+   assert.equal(preview.counts.create,1);assert(preview.token);
+   assert.equal(store.listResources(manager.id,'person.read_directory').length,count);
+   await assert.rejects(store.previewDirectoryFile(otherEditor.id,1,input));
+   const committed=await store.commitDirectoryFile(manager.id,1,{...input,token:preview.token});
+   assert.equal(committed.counts.create,1);
+   const created=store.listResources(manager.id,'person.read_directory').find(x=>x.employee_code==='QA-IMPORT-001');
+   assert(created);assert.equal(store.listResources(manager.id,'person.read_directory').length,count+1);
+   assert(store.listResources(manager.id,'employment.read').some(q=>q.person_id===created.id&&q.unit_id===x.f.unit&&q.profession_id===profession.id));
+   await assert.rejects(store.commitDirectoryFile(manager.id,1,{...input,token:preview.token}));
+   const duplicates=await store.previewDirectoryFile(manager.id,1,{...input,file:await toFile([headers,['QA-DUP','Первый','QA','QA-NEW-PROF'],['QA-DUP','Второй','QA','QA-NEW-PROF']])});
+   assert(duplicates.counts.error>0);assert.equal(duplicates.token,null);
+   const formula=await store.previewDirectoryFile(manager.id,1,{...input,file:await toFile([headers,['QA-FORMULA',{formula:'1+1',result:2},'QA','QA-NEW-PROF']])});
+   assert(formula.counts.error>0);assert.equal(formula.token,null);
+   const changed={...input,file:await toFile([headers,['QA-IMPORT-001','Учебный импорт изменён','QA','QA-NEW-PROF']])};
+   assert((await store.previewDirectoryFile(manager.id,1,changed)).counts.error>0);
+   const allowed={...changed,allow_updates:true},updated=await store.previewDirectoryFile(manager.id,1,allowed);
+   assert.equal(updated.counts.update,1);assert(updated.token);
+   await store.commitDirectoryFile(manager.id,1,{...allowed,token:updated.token});
+   const movedFile=await store.previewDirectoryFile(manager.id,1,{...allowed,file:await toFile([headers,['QA-IMPORT-001','Учебный импорт изменён','QA-B','QA-NEW-PROF']])});
+   assert(movedFile.counts.error>0);assert.equal(movedFile.token,null);
+  }
   const card=store.personCard(manager.id,1,x.f.trainee);
   assert(card.sections.some(s=>s.action==='employment.read'));
   assert(card.sections.some(s=>s.action==='role_assignment.read'));

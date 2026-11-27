@@ -54,7 +54,7 @@ export function sheetRows(sheet,headerRow,mapping){
  }
  return out;
 }
-function cellText(v,f,key){
+export function cellText(v,f,key){
  if(v===null||v===undefined||v==='')return null;
  if(v instanceof Date){invariant(f.date&&!isNaN(v.getTime()),'Дата в текстовой колонке');return v.toISOString().slice(0,10)}
  if(typeof v==='object'){if(Array.isArray(v.richText))v=v.richText.map(t=>t.text).join('');else throw Error('Формулы, ошибки и ссылки не импортируются; вставьте значения')}

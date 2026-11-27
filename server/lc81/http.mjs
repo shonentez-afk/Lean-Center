@@ -201,6 +201,11 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='GET'&&p==='/api/lc81/sop-evaluation/detail'){reply(res,200,store.sopEvaluationDetail(a.id,a.credential_revision,url.searchParams.get('kind'),url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/sop-evaluation/create'){reply(res,200,await store.createSopEvaluation(a.id,a.credential_revision,await body(req,300000)));return}
    if(req.method==='POST'&&p==='/api/lc81/sop-evaluation/install'){reply(res,200,await store.installSopMethod(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/import/types'){reply(res,200,store.importTypes(a.id,a.credential_revision));return}
+   if(req.method==='POST'&&['/api/lc81/import/inspect','/api/lc81/import/preview','/api/lc81/import/commit'].includes(p)){
+    const f=await body(req,3000000),method=p.endsWith('/inspect')?'inspectDirectoryFile':p.endsWith('/preview')?'previewDirectoryFile':'commitDirectoryFile';
+    reply(res,200,await store[method](a.id,a.credential_revision,f));return;
+   }
    if(req.method==='GET'&&p==='/api/lc81/forms'){reply(res,200,store.formsCatalog(a.id,a.credential_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/forms/export'){const result=await store.exportForm(a.id,a.credential_revision,await body(req));reply(res,200,result.bytes,result.mime,{'Content-Disposition':'attachment; filename="'+result.filename+'"'});return}
    if(req.method==='GET'&&p==='/api/lc81/employment/detail'){reply(res,200,store.employmentDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}

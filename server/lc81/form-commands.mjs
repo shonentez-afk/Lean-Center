@@ -27,7 +27,7 @@ const allowed=(a,k,id,r)=>!!r&&a.scope(k,id,r);
 const name=(a,id)=>a.read('person.read_directory',id)?.data.display_name??a.read('person.read_basic',id)?.data.display_name??'';
 const find=(db,t,id)=>one(db,'SELECT * FROM '+t+' WHERE id=?',[id]);
 let excel;
-function excelJS(){
+export function excelJS(){
  if(!excel){
   // This is the existing pinned ExcelJS browser distribution, not a
   // downloaded script, and not any content uploaded by a user.
