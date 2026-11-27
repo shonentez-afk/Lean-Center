@@ -368,3 +368,40 @@ test('shared library: grantless employees, own drafts, final summaries and HTTP 
  await h.post(ac,'state',{id:A.id,state:'blocked'});assert.equal((await read(A,'sop.read_history')).status,401);assert.equal((await post(A,'open',edit)).status,401);
  assert.equal((await read(B,'sop.read_history',sop.revision_id)).status,404);
 });
+
+test('first start: open unbound SOP/FRV, create first real operation atomically, preserve role and scope controls',async t=>{
+ const h=await harness(t),admin=await h.login('admin',h.adminPassword),ac=admin.cookie,d=await h.admin(ac);
+ const read=(cookie,action)=>h.request('/api/lc81/resources?action='+action,{cookie}),post=(cookie,route,body)=>h.request('/api/lc81/library/'+route,{cookie,body});
+ const ctx=kind=>({kind,command:'create',id:null,revision_id:null,operation_id:null,origin_id:null,origin_revision:null});
+ assert.equal((await read(ac,'operation.read')).data.items.length,0);
+ for(const kind of ['sop','frv']){
+  const open=await post(ac,'open',ctx(kind));assert.equal(open.status,200,JSON.stringify(open.data));assert.equal(open.data.text,null);assert.equal(open.data.options.operations.length,0);assert(open.data.options.operation_units.some(x=>x.id===d.site));
+ }
+ const role=await h.post(ac,'reference',{type:'business_role',payload:{code:'FIRST-ROLE',name:'Новая роль'}});assert((await h.admin(ac)).roles.some(r=>r.id===role.id));
+ const person=async(code)=>{
+  const r=await h.request('/api/lc81/directory/change',{cookie:ac,body:{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:code,display_name:code,unit_id:d.site}}});assert.equal(r.status,200);
+  const password=secret(),id=r.data.id,account=await h.post(ac,'account',{person_id:id,login:code.toLowerCase(),password,generate:false});return {id,account:account.id,...await h.login(code.toLowerCase(),password)};
+ };
+ const worker=await person('FIRST-WORKER'),manager=await person('FIRST-MANAGER');
+ const assignment=await h.post(ac,'reference',{type:'role_assignment',payload:{person_id:manager.id,role_id:MANAGER_ROLE,valid_from:day,valid_to:null}});
+ // Assignment alone cannot grant management.
+ assert.equal((await post(manager.cookie,'open',ctx('sop'))).data.options.operation_units.length,0);
+ await h.post(ac,'grant',{account_id:manager.account,assignment_id:assignment.id,scope:{kind:'unit_tree',unit_id:d.site},valid_to:null});
+ assert((await post(manager.cookie,'open',ctx('sop'))).data.options.operation_units.some(x=>x.id===d.site));
+ const open=await post(worker.cookie,'open',ctx('sop'));assert.equal(open.status,200);assert.equal(open.data.options.operation_units.length,0);
+ const payload={schemaVersion:2,document:{id:randomUUID(),number:'Черновик',status:'Черновик',version:1},constructor:{schemaVersion:4,meta:{operation:'Первая операция'},steps:[{id:1,action:'Шаг',keyMoments:['КМ'],reason:'Причина',durationSeconds:10,hasPhoto:false}],twi:{enabled:false}},photoAssets:{}};
+ const text=JSON.stringify({...payload,integrity:{algorithm:'SHA-256',sha256:createHash('sha256').update(JSON.stringify(payload)).digest('hex')}});
+ const request={request_id:randomUUID(),context:ctx('sop'),expected_revision:0,title:'Первая операция',code:'FIRST-SOP',observed_at:null,text,new_operation:{unit_id:d.site,code:'FIRST-OP',name:'Первая операция'}};
+ assert.equal((await post(worker.cookie,'save',request)).status,403);
+ assert.equal((await post(ac,'save',{...request,code:''})).status,422);
+ assert.equal((await read(ac,'operation.read')).data.items.length,0,'invalid draft must not leave a new operation');
+ const saved=await post(manager.cookie,'save',request);assert.equal(saved.status,200,JSON.stringify(saved.data));
+ assert.equal((await post(manager.cookie,'save',request)).data.duplicate,true);
+ const ops=(await read(ac,'operation.read')).data.items;assert.equal(ops.length,1);assert.equal(ops[0].code,'FIRST-OP');
+ const sop=(await read(ac,'sop.read_history')).data.items.find(x=>x.revision_id===saved.data.revision_id);assert.equal(sop.operation_id,ops[0].id);assert.equal(sop.state,'draft');
+ assert.equal((await h.request('/api/lc81/admin/reference',{cookie:manager.cookie,body:{type:'business_role',payload:{code:'FORGED',name:'Подмена'}}})).status,403);
+ const raw=JSON.stringify({schemaVersion:'FRV-1.3',study:{studyId:'FIRST-FRV',operationId:'Вторая операция'},cycles:[{id:'c1',phase:'baseline',observations:[{id:'o1',actionRaw:'Замер',valueType:'VA',durationSec:12,standardCandidate:true}]}]});
+ const frv=await post(ac,'save',{request_id:randomUUID(),context:ctx('frv'),expected_revision:0,title:'Первое ФРВ',code:null,observed_at:day,text:raw,new_operation:{unit_id:d.site,code:'FIRST-FRV-OP',name:'Вторая операция'}});
+ assert.equal(frv.status,200,JSON.stringify(frv.data));
+ assert.equal((await read(ac,'operation.read')).data.items.length,2);
+});

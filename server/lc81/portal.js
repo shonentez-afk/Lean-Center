@@ -85,10 +85,10 @@ function adminPanel(d){
  const grid=el('div');grid.className='lc81-grid';
  const addRef=(title,type,fields,make)=>panel(title,form(fields,'Добавить',f=>post('reference',{type,payload:make(f)},'Запись сохранена')));
  grid.append(
-  addRef('Учебный сотрудник','person',[input('employee_code','Табельный номер'),input('display_name','ФИО / имя')],f=>({employee_code:value(f,'employee_code'),display_name:value(f,'display_name')})),
+  addRef('Сотрудник','person',[input('employee_code','Табельный номер'),input('display_name','ФИО / имя')],f=>({employee_code:value(f,'employee_code'),display_name:value(f,'display_name')})),
   addRef('Подразделение','org_unit',[input('code','Код'),input('name','Название'),select('parent_id','В составе',options(d.units)),select('kind','Тип',[['Цех','Цех'],['Участок','Участок'],['Служба','Служба'],['Группа','Группа']])],f=>({code:value(f,'code'),name:value(f,'name'),kind:value(f,'kind'),parent_id:value(f,'parent_id')})),
   addRef('Назначение сотрудника','person_assignment',[select('person_id','Сотрудник',options(d.people)),select('unit_id','Подразделение',options(d.units)),input('valid_from','С','date')],f=>({person_id:value(f,'person_id'),unit_id:value(f,'unit_id'),profession_id:null,position_id:null,shift_id:null,shift_code:null,valid_from:value(f,'valid_from'),valid_to:null})),
-  addRef('Роль сотрудников','business_role',[input('code','Код'),input('name','Название')],f=>({code:value(f,'code'),name:value(f,'name')})),
+  addRef('Создать роль сотрудников','business_role',[input('code','Код'),input('name','Название')],f=>({code:value(f,'code'),name:value(f,'name')})),
   addRef('Назначение роли','role_assignment',[select('person_id','Сотрудник',options(d.people)),select('role_id','Роль',options(d.roles.filter(r=>r.id!==d.protectedRoles[0]))),input('valid_from','С','date')],f=>({person_id:value(f,'person_id'),role_id:value(f,'role_id'),valid_from:value(f,'valid_from'),valid_to:null}))
  );
  const userForm=form([select('person_id','Сотрудник',options(d.people.filter(p=>!d.accounts.some(a=>a.person_id===p.id)))),input('login','Рабочая почта или логин'),input('password','Пароль (12–128 байт)','password',false),input('password_confirm','Повторите пароль','password',false),check('generate','Сгенерировать пароль на сервере')],'Создать пользователя',async f=>{
@@ -175,8 +175,12 @@ function adminPanel(d){
   if(!f.elements.confirmed.checked)throw Error('Подтвердите часовой пояс');
   await post('clock',{zone:value(f,'zone').trim(),confirmed:true},'Календарь предприятия закреплён');
  }));
+ for(const field of grid.querySelectorAll('input[type=date][name=valid_from]'))field.value=d.clock.day;
+ for(const f of grid.querySelectorAll('form'))f.lcResetForm?.();
+ const openPage=act=>async()=>{if(!discard())return;page=act;await render()};
+ const guide=panel('Настройка центра',el('p','Сотрудников: '+d.people.length+' · подразделений: '+d.units.length+' · ролей: '+d.roles.length+' · учётных записей сотрудников: '+d.accounts.filter(a=>!a.admin).length+' · действующих доступов: '+d.grants.filter(g=>g.status==='effective').length),el('p','Если база новая, заполните реальные справочники или импортируйте сотрудников. Для управляющего: кадровое назначение → назначение роли → учётная запись → подтверждение доступа ко всему предприятию. Роль без подтверждённого доступа не открывает рабочие разделы.'),button('Структура предприятия',openPage('org.read')),button('Справочник сотрудников',openPage('person.read_directory')),button('Операции',openPage('operation.read')),button('Справочник ролей',openPage('role.read')),button('Конструктор СОП',openPage('sop.constructor')));
  const storage=panel('Хранение и восстановление',el('p','Резервная копия выполняется только администратором сервера на остановленном экземпляре в отдельную новую папку. Копия содержит закрытые учётные записи, права и исходники; её нельзя передавать в браузер или хранить в общей папке.'),el('pre','LC81_QA=1 node server/lc81-maintenance.mjs backup /abs/source /abs/new-backup\nLC81_QA=1 node server/lc81-maintenance.mjs restore-new /abs/new-backup /abs/new-restored'),el('p','Восстановление не перезаписывает исходное хранилище. Сначала проверьте копию в изолированном QA; только после приёмки переключайте размещение. Рабочий Amvera этим экраном не изменяется.'));
- return [panel('Пользователи',accountTable,accountEditor,userForm),panel('Права в существующих ролях',...policyForms),panel('Подтверждённые назначения доступа',grantForm,grants),peopleHistory,panel('Административные справочники',grid),clock,storage,panel('Журнал управления доступом',table(['Время (UTC)','Кто','Действие','Цель','Основание'],d.audit.map(a=>[a.occurred_at,accounts.get(a.actor_account_id)||a.actor_account_id,a.action,a.target_id,a.reason])))];
+ return [guide,panel('Административные справочники',grid),panel('Пользователи',accountTable,accountEditor,userForm),panel('Права в существующих ролях',...policyForms),panel('Подтверждённые назначения доступа',grantForm,grants),peopleHistory,clock,storage,panel('Журнал управления доступом',table(['Время (UTC)','Кто','Действие','Цель','Основание'],d.audit.map(a=>[a.occurred_at,accounts.get(a.actor_account_id)||a.actor_account_id,a.action,a.target_id,a.reason])))];
 }
 
 function directoryPanel(info,items){
@@ -195,6 +199,15 @@ function directoryPanel(info,items){
   f.append(button('Отмена',()=>{if(discard())close()}));
   editor.replaceChildren(panel(creating?'Новая запись':'Редактирование',f));
   refreshIndicator();
+ }
+ if(type==='business_role'){
+  if(user.admin)row.append(button('Создать роль',()=>{
+   if(!discard())return;
+   editor.replaceChildren(panel('Новая роль сотрудников',el('p','Создаётся роль справочника. Права и назначения подтверждаются отдельно.'),form([input('code','Код'),input('name','Название')],'Сохранить роль',async f=>{
+    await api('admin/reference',{type:'business_role',payload:{code:value(f,'code'),name:value(f,'name')}});note('Роль создана. Настройте её права в разделе пользователей.');await render();
+   })));
+  },'primary'),button('Права и назначения',async()=>{if(!discard())return;page='admin';await render()}));
+  else section.append(el('p','Создание ролей и выдача прав выполняются администратором; управляющий использует подтверждённые роли.','muted'));
  }
  if(info.can_create)row.append(button('Добавить',()=>open(null),'primary'));
  const display=(k,field,r)=>{
@@ -386,7 +399,8 @@ async function render(){
   if(page==='audit.history.read'){const n=await finalUI.history();if(serial===sequence)$('content').replaceChildren(n);return}
   if(page==='assistant.read'){const n=await assistantUI.workspace();if(serial===sequence)$('content').replaceChildren(n);return}
   if(page==='sop.constructor'){
-   const info=await api('library/info?kind=sop');if(serial===sequence)$('content').replaceChildren(libraryUI.createPanel('sop',info));return;
+   const info=await api('library/info?kind=sop');
+   if(serial===sequence){const n=libraryUI.createPanel('sop',info);if(!user.admin&&!user.permissions.length)n.prepend(el('p','У вас базовый доступ сотрудника. Для управления центром администратор должен подтвердить назначение роли и область доступа.','muted'));$('content').replaceChildren(n)}return;
   }
   if(['sop.read_twi','sop.read_linked_frv'].includes(page)){
    const data=await api('resources?action=sop.read_effective');if(serial===sequence)$('content').replaceChildren(libraryUI.linked(data.items,page));return;
