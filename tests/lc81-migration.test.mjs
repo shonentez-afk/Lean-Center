@@ -704,7 +704,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
    assert.throws(()=>store.assistantRequest(manager.id,1,{...req,context:{...context,prompt:'send names'}}),/Выберите/);
    const report=store.assistantContext(manager.id,1,{type:'report',kind:'analytics.read',scope,group:'all'});
    assert(report.metrics.length>0);assert(report.metrics.some(m=>m.id==='training_assigned'));
-   assert.throws(()=>store.assistantContext(otherEditor.id,1,{type:'report',kind:'analytics.read',scope,group:'all'}),/недоступен/);
+   assert.throws(()=>store.assistantContext(otherEditor.id,1,{type:'report',kind:'analytics.read',scope,group:'all'}),/Область помощника недоступна/);
   }
   const card=store.personCard(manager.id,1,x.f.trainee);
   assert(card.sections.some(s=>s.action==='employment.read'));
