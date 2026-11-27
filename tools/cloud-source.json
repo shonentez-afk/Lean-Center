@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "f13bfa36019169d4ba2fe3479d2521a02f71a19b",
+  "sourceCommit": "3b644af1518e78d47a13a7edd7e4bc03bdf0994a",
   "files": [
     {
       "path": "amvera.yml",
@@ -123,11 +123,11 @@
     },
     {
       "path": "server/lc81/assistant-commands.mjs",
-      "sha": "a3c955a6930fbcdf1a55ad192d19729b27ec9914"
+      "sha": "97b9fd3b62c6136a01f18ae121ae8789613a8c01"
     },
     {
       "path": "server/lc81/assistant-ui.js",
-      "sha": "408b0ea78a199cb58fc0449fb8876fd0445b141f"
+      "sha": "084c786ac8e309415683dad88703a282a522ec64"
     },
     {
       "path": "server/lc81/center-commands.mjs",
@@ -135,7 +135,7 @@
     },
     {
       "path": "server/lc81/center-ui.js",
-      "sha": "739f422d44099ac8224522ab7dfe89e11d9be3c8"
+      "sha": "2f147aa0ef7c18f56b33905eecf8936339d70684"
     },
     {
       "path": "server/lc81/competency-commands.mjs",
@@ -175,7 +175,7 @@
     },
     {
       "path": "server/lc81/http.mjs",
-      "sha": "f5ab89aa48ccd3bc131d0c3a58dda4d7d2074972"
+      "sha": "304f52b997dfc43405eeae8292915a299be403f5"
     },
     {
       "path": "server/lc81/import-commands.mjs",
@@ -239,11 +239,11 @@
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "b85d1e50955a9dd112ae0cc4655642893ea08552"
+      "sha": "a77c622ee0e700b1f42f642a48478a9d6308fac7"
     },
     {
       "path": "server/lc81/program-commands.mjs",
-      "sha": "52e3fa9d0de098b053042a02cff0057a3a8c9c04"
+      "sha": "78e541cefff8f25ed32a884e42e4272f7004f808"
     },
     {
       "path": "server/lc81/program-form-commands.mjs",
@@ -264,6 +264,10 @@
     {
       "path": "server/lc81/roi-commands.mjs",
       "sha": "557ff80afeb1ed8af938d0b9689a8788d70d19c9"
+    },
+    {
+      "path": "server/lc81/role-presets.mjs",
+      "sha": "4a7a22f4b984d0def92ed118c6ee9b9e514cf792"
     },
     {
       "path": "server/lc81/security-schema.sql",
@@ -287,7 +291,7 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "30cab3edaea7622d668fd48aff237b3b25437b6d"
+      "sha": "0751ec12eb9a5fb054dee2ecbeafa4174086967e"
     },
     {
       "path": "server/lc81/subject-reports.mjs",
@@ -451,7 +455,7 @@
     },
     {
       "path": "src/modules/master-data/people-directory.js",
-      "sha": "4b6d707d25ac51ce5c68bceba288571f991870f1"
+      "sha": "4c893a712af433f62be4fc04150efa3446db8a22"
     },
     {
       "path": "src/modules/master-data/role-matching.js",
@@ -503,7 +507,7 @@
     },
     {
       "path": "src/modules/training/domain.js",
-      "sha": "c807702f05e98fd1065c209bd7e246eb7c01c216"
+      "sha": "5576026a2173331d05dba022118bda6d079db18e"
     },
     {
       "path": "src/modules/training/event-calendar.js",
