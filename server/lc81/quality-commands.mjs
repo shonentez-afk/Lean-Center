@@ -1,5 +1,6 @@
 // LC8.1: actual observations, self-evaluation and corrective work.
 // All scoring, duplicate detection and effectiveness rules are from LC4/LC5.
+import {createHash} from 'node:crypto';
 import {one,rows,isId,uuid,canonical,applyEvent} from '../../src/core/db.js';
 import {auditMethods,trainingMethods,practicalCriteria,selfLevelsForMethod,AUDIT_CODE,AUDIT_STANDARD_CODE,SELF_CODE,methodLabel} from '../../src/modules/training/domain.js';
 import {RC1_CRITERIA} from '../../src/modules/training/builtin-forms.js';
@@ -30,7 +31,8 @@ const methodView=(db,m)=>({id:m.id,label:methodLabel(m),method_code:m.method_cod
 export function installMentorMethod(db,a,f){
  must(a.personId&&site(db,a,'mentor.method.install')&&exact(f,['kind'])&&Object.hasOwn(METHODS,f.kind),403,'Установка методики недоступна');
  const m=METHODS[f.kind];must(!trainingMethods(db,m.code).some(x=>x.state==='active'),409,'Действующая методика уже зарегистрирована; замена отдельно');
- return emit(db,a,'checklist_version',uuid(),'create',0,m.payload,'mentor.method.install');
+ const payload=f.kind==='rc1'?{...m.payload,source_sha256:createHash('sha256').update(canonical(m.payload.criteria)).digest('hex')}:m.payload;
+ return emit(db,a,'checklist_version',uuid(),'create',0,payload,'mentor.method.install');
 }
 function auditCreateResource(db,a,t,on){
  if(!t||!a.personId||a.personId===t.mentor_id||a.personId===t.trainee_id)return null;
@@ -132,12 +134,14 @@ export function createTask(db,a,f){
 }
 function linkedCandidates(db,a,t,r){
  const typ={trainee_training:'assignment',instructor_training:'enrollment',development:'plan'}[t.kind];if(!typ||!t.subject_id)return {type:null,items:[]};
+ const newer=(type,id,sourceAt)=>{const e=one(db,"SELECT occurred_at FROM change_event WHERE entity_type=? AND entity_id=? AND operation='create' ORDER BY occurred_at,id LIMIT 1",[type,id]);return !!(e&&sourceAt&&e.occurred_at>sourceAt)};
  let items=[];
  if(typ==='assignment'){
   const p=find(db,'assessment_session',t.source_assessment_id);
-  if(p)items=rows(db,"SELECT * FROM training_assignment WHERE trainee_id=? AND operation_id=? AND id<>? AND state<>'cancelled' ORDER BY assigned_on DESC,id",[t.subject_id,p.operation_id,t.source_assignment_id]).filter(x=>a.read('training.read',x.id)&&allowed(a,'task.link',t.id,join(r,trainingAssignmentResource(db,x.id,a.day)))).map(x=>({id:x.id,label:'Обучение · '+x.assigned_on+' · '+x.state}));
+  if(p)items=rows(db,"SELECT * FROM training_assignment WHERE trainee_id=? AND operation_id=? AND id<>? AND state<>'cancelled' ORDER BY assigned_on DESC,id",[t.subject_id,p.operation_id,t.source_assignment_id]).filter(x=>newer('training_assignment',x.id,p.recorded_at||p.assessed_at)&&a.read('training.read',x.id)&&allowed(a,'task.link',t.id,join(r,trainingAssignmentResource(db,x.id,a.day)))).map(x=>({id:x.id,label:'Обучение · '+x.assigned_on+' · '+x.state}));
  }else if(typ==='enrollment'){
-  items=rows(db,"SELECT n.*,p.title FROM training_enrollment n JOIN training_program p ON p.id=n.program_id WHERE n.trainee_id=? AND n.state<>'cancelled' ORDER BY n.start_on DESC,n.id",[t.subject_id]).filter(x=>a.read('training.enrollment.read',x.id)&&allowed(a,'task.link',t.id,join(r,enrollmentResource(db,x,a.day)))).map(x=>({id:x.id,label:x.title+' · '+x.start_on+' · '+x.state}));
+  const original=t.audit_id&&find(db,'audit_session',t.audit_id);
+  items=rows(db,"SELECT n.*,p.title FROM training_enrollment n JOIN training_program p ON p.id=n.program_id WHERE n.trainee_id=? AND n.state<>'cancelled' ORDER BY n.start_on DESC,n.id",[t.subject_id]).filter(x=>original&&newer('training_enrollment',x.id,original.recorded_at||original.observed_at)&&a.read('training.enrollment.read',x.id)&&allowed(a,'task.link',t.id,join(r,enrollmentResource(db,x,a.day)))).map(x=>({id:x.id,label:x.title+' · '+x.start_on+' · '+x.state}));
  }else items=rows(db,"SELECT * FROM development_plan WHERE person_id=? AND state<>'cancelled' ORDER BY due_on,id",[t.subject_id]).filter(x=>a.read('development.read',x.id)&&allowed(a,'task.link',t.id,join(r,developmentResource(db,x,a.day)))).map(x=>({id:x.id,label:x.title+' · '+x.state}));
  return {type:typ,items};
 }
@@ -150,10 +154,10 @@ function taskEvidence(db,a,t,r){
 }
 function taskSourceLabel(db,a,t){
  const x=actionSourceOf(db,t);if(!x)return 'Самостоятельная задача';
- if(x.kind==='audit')return a.read('audit.read',x.id)?x.label:'Связанное отклонение';
- if(x.kind==='self_eval')return a.read('self.read',x.id)?x.label:'Связанная самооценка';
- if(x.kind==='practical'||x.kind==='assignment')return x.assignment_id&&a.read('training.read',x.assignment_id)?x.label:'Связанное обучение';
- if(x.kind==='development_goal'){const g=find(db,'development_goal',x.id);return g&&a.read('development.read',g.plan_id)?x.label:'Связанная цель'}
+ if(x.kind==='audit')return a.read('audit.read',x.id)&&allowed(a,'audit.detail',x.id,auditResource(db,find(db,'audit_session',x.id),a.day))?x.label:'Связанное отклонение';
+ if(x.kind==='self_eval')return a.read('self.read',x.id)&&allowed(a,'self.detail',x.id,selfResource(db,find(db,'mentor_self_evaluation',x.id),a.day))?x.label:'Связанная самооценка';
+ if(x.kind==='practical'||x.kind==='assignment')return x.assignment_id&&a.read('training.read',x.assignment_id)&&allowed(a,'training.detail',x.assignment_id,trainingAssignmentResource(db,x.assignment_id,a.day))?x.label:'Связанное обучение';
+ if(x.kind==='development_goal'){const g=find(db,'development_goal',x.id);return g&&a.read('development.read',g.plan_id)&&allowed(a,'development.detail',g.plan_id,developmentResource(db,find(db,'development_plan',g.plan_id),a.day))?x.label:'Связанная цель'}
  return 'Связанный документ';
 }
 export function taskDetail(db,a,id){
@@ -164,7 +168,7 @@ export function taskDetail(db,a,id){
  const link=t.followup_assignment_id&&a.read('training.read',follow)&&allowed(a,'training.detail',follow,trainingAssignmentResource(db,follow,a.day))?{type:'assignment',id:follow}:t.followup_enrollment_id&&a.read('training.enrollment.read',follow)&&allowed(a,'training.enrollment.detail',follow,enrollmentResource(db,find(db,'training_enrollment',follow),a.day))?{type:'enrollment',id:follow}:t.followup_plan_id&&a.read('development.read',follow)&&allowed(a,'development.detail',follow,developmentResource(db,find(db,'development_plan',follow),a.day))?{type:'plan',id:follow}:null;
  const canVerify=cap('task.verify')&&a.personId!==t.owner_id&&status==='implemented';
  return {id,rev:t.rev,title:t.title,owner:name(a,t.owner_id),subject:name(a,t.subject_id),kind:t.kind,kind_label:ACTION_KINDS[t.kind],state:status,state_label:ACTION_STATES[status],priority:t.priority,due_on:t.due_on,result:t.result_note,source:taskSourceLabel(db,a,t),followup:follow?'Связь зарегистрирована':null,followup_link:link,
-  cap:{start:cap('task.start')&&a.personId===t.owner_id&&['open','ineffective'].includes(status),implement:a.personId===t.owner_id&&open&&a.permissions.includes('task.implement_own')&&(!['trainee_training','instructor_training'].includes(t.kind)||!!follow),link:cap('task.link')&&open,cancel:cap('task.cancel')&&[...['open','in_progress','ineffective'],'implemented'].includes(status),verify:canVerify},
+  cap:{start:cap('task.start')&&a.personId===t.owner_id&&['open','ineffective'].includes(status),implement:a.personId===t.owner_id&&open&&cap('task.implement_own')&&(!['trainee_training','instructor_training'].includes(t.kind)||!!follow),link:cap('task.link')&&open,cancel:cap('task.cancel')&&[...['open','in_progress','ineffective'],'implemented'].includes(status),verify:canVerify},
   candidates:cap('task.link')&&open?linkedCandidates(db,a,t,r):{type:null,items:[]},evidence:canVerify?taskEvidence(db,a,t,r):{audits:[],practical:[]},
   verification:rows(db,'SELECT checked_at,outcome,evidence_note FROM action_verification WHERE action_id=? ORDER BY checked_at,id',[id])};
 }
@@ -189,7 +193,8 @@ export function changeTask(db,a,f){
 export function qualityView(db,a,action,data){
  if(action==='task.read'){
   const t=find(db,'action_item',data.id),r=taskResource(db,t,a.day);
-  return {...data,kind:t.kind,owner:name(a,t.owner_id),subject:name(a,t.subject_id),can_detail:allowed(a,'task.detail',data.id,r)};
+  const full=actionRows(db).find(x=>x.id===t.id);
+  return {...data,state:full?actionStatus(db,full):data.state,kind:t.kind,owner:name(a,t.owner_id),subject:name(a,t.subject_id),can_detail:allowed(a,'task.detail',data.id,r)};
  }
  if(action==='audit.read'){const t=find(db,'audit_session',data.id);return {...data,mentor_name:name(a,t.mentor_id),operation_name:a.read('operation.read',t.operation_id)?.data.name??null,can_detail:allowed(a,'audit.detail',t.id,auditResource(db,t,a.day))}}
  const s=find(db,'mentor_self_evaluation',data.id);return {...data,person_name:name(a,s.person_id),can_detail:allowed(a,'self.detail',s.id,selfResource(db,s,a.day))};

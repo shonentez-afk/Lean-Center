@@ -133,12 +133,12 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='POST'&&p==='/api/lc81/development/from-matrix'){reply(res,200,await store.developmentFromMatrix(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/bank/options'){reply(res,200,store.bankOptions(a.id,a.credential_revision));return}
    if(req.method==='GET'&&p==='/api/lc81/bank/detail'){reply(res,200,store.bankDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
-   if(req.method==='POST'&&p==='/api/lc81/bank/save'){reply(res,200,await store.saveBank(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/bank/save'){reply(res,200,await store.saveBank(a.id,a.credential_revision,await body(req,2*1024*1024)));return}
    if(req.method==='GET'&&p==='/api/lc81/quality/options'){reply(res,200,store.qualityOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='GET'&&p==='/api/lc81/quality/detail'){reply(res,200,store.qualityDetail(a.id,a.credential_revision,url.searchParams.get('kind'),url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/quality/install'){reply(res,200,await store.installMentorMethod(a.id,a.credential_revision,await body(req)));return}
-   if(req.method==='POST'&&p==='/api/lc81/quality/audit'){reply(res,200,await store.createAudit(a.id,a.credential_revision,await body(req)));return}
-   if(req.method==='POST'&&p==='/api/lc81/quality/self'){reply(res,200,await store.createSelf(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/quality/audit'){reply(res,200,await store.createAudit(a.id,a.credential_revision,await body(req,512*1024)));return}
+   if(req.method==='POST'&&p==='/api/lc81/quality/self'){reply(res,200,await store.createSelf(a.id,a.credential_revision,await body(req,512*1024)));return}
    if(req.method==='POST'&&p==='/api/lc81/quality/void'){reply(res,200,await store.voidAudit(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/tasks/detail'){reply(res,200,store.taskDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/tasks/options'){reply(res,200,await store.taskOptions(a.id,a.credential_revision,await body(req)));return}

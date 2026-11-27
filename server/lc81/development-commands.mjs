@@ -1,7 +1,7 @@
 // LC8.1: protected development plans and versioned corporate question banks.
 import {one,rows,isId,uuid,applyEvent} from '../../src/core/db.js';
 import {matrixData} from '../../src/modules/training/domain.js';
-import {matrixFromRecord, matrixProjection} from '../../src/modules/training/matrix-view.js';
+import {matrixFromRecord} from '../../src/modules/training/matrix-view.js';
 import {bankRows,bankChanges,bankBaseline} from '../../src/modules/training/standard-workflows.js';
 import {QUESTION_BANK_V03} from '../../src/modules/training/question-bank-v03.js';
 import {developmentResource,matrixResource,programResource,personWorkResource} from './read-policy.mjs';
@@ -95,7 +95,7 @@ export function developmentFromMatrix(db,a,f){
  const p={person_id:f.person_id,title:'Развитие по матрице '+m.code,start_on:a.day,due_on:f.due_on};
  must(who(a,p.person_id)&&planAllowed(db,a,p,'development.create',[f.skill_id])&&planAllowed(db,a,p,'development.read',[f.skill_id]),403,'План недоступен');
  const plan=emit(db,a,'development_plan',uuid(),'create',0,p,'development.create');
- const g={skill_id:f.skill_id,scale_id:m.scale_id,target_level:f.target_level,title:'Освоить: '+cfg.columns.find(x=>x.skill_id===f.skill_id).title,due_on:f.due_on};
+ const g={skill_id:f.skill_id,scale_id:m.scale_id,target_level:f.target_level,title:('Освоить: '+cfg.columns.find(x=>x.skill_id===f.skill_id).title).slice(0,500),due_on:f.due_on};
  const goal=emit(db,a,'development_goal',uuid(),'create',0,goalPayload(db,a,{...p,id:plan.id},g),'development.goal.create');
  return {id:plan.id,goal_id:goal.id};
 }

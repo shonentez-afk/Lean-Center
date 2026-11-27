@@ -108,7 +108,7 @@ function projectView(db,a,action,data,d){
  }
  if(['program.read','training.enrollment.read','preparation.read'].includes(action))return programView(db,trainingAccess(db,a,d),action,data);
  if(['development.read','bank.read'].includes(action))return developmentView(db,trainingAccess(db,a,d),action,data);
- if(['audit.read','self.read','task.read'].includes(action))return qualityView(db,trainingAccess(db,a,d),action,data);
+ if(['audit.read','self.read'].includes(action))return qualityView(db,trainingAccess(db,a,d),action,data);
  if(['order.read','supplement.read'].includes(action))return workflowView(db,trainingAccess(db,a,d),action,data);
  if(['credential.read','appointment.read','authorization.read'].includes(action))return mentorView(db,trainingAccess(db,a,d),action.split('.')[0],data);
  if(action==='matrix.read'){
@@ -129,7 +129,8 @@ function projectView(db,a,action,data,d){
  }
  if(action==='sop.read_steps')return {...data,can_read_photo:photoAllowed(db,a,data.revision_id,d)};
  if(action!=='task.read')return directoryView(db,a,action,data,d);
- return {...data,can_implement:a.bootstrap!==1&&['open','in_progress','ineffective'].includes(data.state)&&canImplementOwnTask(db,security(db,a.id),a.id,data.id,d)};
+ const view=qualityView(db,trainingAccess(db,a,d),action,data),t=one(db,'SELECT kind,followup_assignment_id,followup_enrollment_id FROM action_item WHERE id=?',[data.id]);
+ return {...view,can_implement:a.bootstrap!==1&&['open','in_progress','ineffective'].includes(view.state)&&canImplementOwnTask(db,security(db,a.id),a.id,data.id,d)&&(t.kind!=='trainee_training'||!!t.followup_assignment_id)&&(t.kind!=='instructor_training'||!!t.followup_enrollment_id)};
 }
 function permissionsFor(db,a){
  if(a.bootstrap===1)return [...READ_ACTIONS,...DIRECTORY_COMMANDS,...DETAIL_ACTIONS,...LIBRARY_COMMANDS.filter(x=>x!=='frv.finalize')]; // Unbound bootstrap cannot perform personal decisions.

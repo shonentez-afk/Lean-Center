@@ -300,7 +300,14 @@ function resolve(db,action,id,day){
  }
  if(action==='audit.read'){
   const a=one(db,'SELECT * FROM audit_session WHERE id=?',[id]),r=auditResource(db,a,day);
-  return r?{...r,data:{id:a.id,mentor_id:a.mentor_id,operation_id:a.operation_id,observed_at:a.observed_at,state:a.state,rev:a.rev}}:null;
+  if(!a||!activePerson(db,a.mentor_id))return null;
+  const data={id:a.id,mentor_id:a.mentor_id,operation_id:a.operation_id,observed_at:a.observed_at,state:a.state,rev:a.rev};
+  if(r)return {...r,data};
+  // Keep the minimal historic registry where participants are resolved,
+  // but no detailed access or native commands for incomplete imported facts.
+  const people=[a.mentor_id,a.auditor_id,a.trainee_id].filter(Boolean);
+  const historic=a.operation_id&&personWorkResource(db,people,day,[a.observed_at.slice(0,10)],[a.operation_id]);
+  return historic?{...historic,self:a.mentor_id,data}:{data,self:a.mentor_id,units:[],assigned:[]};
  }
  if(action==='roi.read'){
   const r=one(db,'SELECT id,title,owner_id,unit_id,study_id,action_id,currency,method,review_due,state FROM economic_effect WHERE id=?',[id]);
@@ -392,7 +399,7 @@ export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
 }
 
 export function canUseTrainingResource(db,security,accountId,action,id,day,resource){
- const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','bank.read','bank.detail'];
+ const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','task.implement_own','bank.read','bank.detail'];
  return !!resource&&allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,action,resource);
 }
 export function bootstrapTrainingScope(db,site,resource){
