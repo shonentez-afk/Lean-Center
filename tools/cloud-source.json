@@ -1,9 +1,9 @@
 {
-  "sourceCommit": "dd98d42eb8ddb1cd321612e5cc9d6d1233d13668",
+  "sourceCommit": "c9cda06f54c780976db1d72646f65debe3aa016e",
   "files": [
     {
       "path": "amvera.yml",
-      "sha": "d88b6ba0307b86588fb87f6051a1a95013632771"
+      "sha": "261682b23920340b74aba5e1c0ec420ba00c19d7"
     },
     {
       "path": "baselines/sop-stage43/releases/stage43-sop-print-formats-20261125.html",
@@ -687,7 +687,7 @@
     },
     {
       "path": "tools/cloud-identity.mjs",
-      "sha": "dd0bf37c6578d31ad17395f62c9452e9d5bcbda4"
+      "sha": "6353b45058f704d3e71c1c4a757c5640e470b252"
     },
     {
       "path": "tools/import_sop_baseline.py",
