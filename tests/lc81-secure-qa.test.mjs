@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {openSecureQA,ADMIN_ROLE,MANAGER_ROLE} from '../server/lc81/store.mjs';
+import {readZip} from '../src/modules/training/local-docx.js';
 import {createSecureQAServer} from '../server/lc81/http.mjs';
 import {generatePassword,hashPassword,verifyPassword,normalizeLogin} from '../server/lc81/credentials.mjs';
 const origin='https://qa.example.invalid',day=new Date().toISOString().slice(0,10);
@@ -48,7 +49,16 @@ test('first admin, explicit existing roles, scoped views, blocking and restart',
  const h=await harness(t);
  assert.equal((await h.request('/api/lc81/session')).status,401);
  const a=await h.login('admin',h.adminPassword),ac=a.cookie;
- assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,76);
+ assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,94);
+ const templates=h.store.formsCatalog(a.user.id,1);
+ assert.equal(templates.forms.length,17);
+ for(const form of templates.forms){
+  const file=await h.store.exportForm(a.user.id,1,{kind:'blank',appendix:form.id,id:null});
+  assert.equal(file.filename,'TWI-03-'+form.id+'.'+(form.id===15?'docx':'xlsx'));
+  const entries=await readZip(file.bytes),xml=new TextDecoder().decode(entries.find(x=>x.name===(form.id===15?'word/document.xml':'xl/workbook.xml')).bytes);
+  assert(xml.length>100);assert(entries.some(x=>x.name==='[Content_Types].xml'));
+ }
+ await assert.rejects(h.store.exportForm(a.user.id,1,{kind:'blank',appendix:18,id:null}),/приложение/);
  let d=await h.admin(ac);assert.equal(d.accounts.length,1);assert.equal(d.people.length,0);assert(d.roles.some(r=>r.id===ADMIN_ROLE));assert(d.roles.some(r=>r.id===MANAGER_ROLE));
  const root=d.site;
  async function ref(type,payload){return (await h.post(ac,'reference',{type,payload})).id}

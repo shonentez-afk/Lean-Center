@@ -9,6 +9,7 @@ import {prepareSnapshot,readSnapshot,openDb,one,rows,uuid,meta} from '../src/cor
 import {openPilot,copyPilotCheckpoint,PILOT_STATE} from '../server/lc74-store.mjs';
 import {openSecureQA} from '../server/lc81/store.mjs';
 import {migratePilotCopy,copySecureCheckpoint} from '../server/lc81/maintenance.mjs';
+import {readZip} from '../src/modules/training/local-docx.js';
 import {QUESTION_BANK_V03} from '../src/modules/training/question-bank-v03.js';
 import {READ_ACTIONS,PERMISSIONS} from '../server/lc81/access-contract.mjs';
 import {readManagerProjection} from '../server/lc81/read-policy.mjs';
@@ -148,7 +149,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert(store.listResources(manager.id,'authorization.read').find(r=>r.id===x.f.auth).valid_now);
   await assert.rejects(store.changeDirectory(manager.id,1,command('equipment','archive',equipment.id,equipment.rev,null)),/проверку/);
   await assert.rejects(store.changeDirectory(manager.id,1,command('operation','update',operation.id,operation.rev,{unit_id:x.f.unit,code:'LC81-OP',name:'Перенос',equipment_id:null,workplace_id:null,criticality:'normal'})),/Перенос/);
-  await assert.rejects(store.changeDirectory(manager.id,1,command('business_role','create',null,0,{code:'ADMIN',name:'Подмена'})),/недоступен/);
+  await assert.rejects(store.changeDirectory(manager.id,1,command('business_role','create',null,0,{code:'ADMIN',name:'Подмена'})),/недоступ/);
   await assert.rejects(store.changeDirectory(manager.id,1,{...command('person','update',person.id,update.rev,{employee_code:'LC81-NEW',display_name:'Подмена'}),actor_id:admin.id}),/Неизвестный/);
   const photo=await store.sopPhoto(manager.id,1,x.revision.revision,1);
   assert.equal(photo.type,'image/png');assert.equal(photo.bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
@@ -202,7 +203,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const editorRole=(await store.createReference(admin.id,'business_role',{code:'LC81-OTHER-EDITOR',name:'Редактор другого участка'})).id;
   const editorAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.personB,role_id:editorRole,valid_from:'2020-01-01',valid_to:null})).id;
   const otherEditor=await store.createAccount(admin.id,{person_id:x.personB,login:'other-editor',password:password(),generate:false});
-  await store.setPolicy(admin.id,{role_id:editorRole,revision:0,permissions:['operation.read','sop.read_history','sop.create','sop.edit_draft','sop.revise','frv.read','sop.from_frv','credential.read','credential.register','person.read_basic','program.read','program.create','program.detail','training.enrollment.read','training.enrollment.detail','training.enrollment.create','org.read','center.read','analytics.read','metrics.read','training.read','training.detail']});
+  await store.setPolicy(admin.id,{role_id:editorRole,revision:0,permissions:['operation.read','sop.read_history','sop.create','sop.edit_draft','sop.revise','frv.read','sop.from_frv','credential.read','credential.register','person.read_basic','program.read','program.create','program.detail','training.enrollment.read','training.enrollment.detail','training.enrollment.create','org.read','center.read','analytics.read','metrics.read','training.read','training.detail','person.read_directory','employment.read','employment.detail','employment.transfer','forms.export']});
   await store.grant(admin.id,{account_id:otherEditor.id,assignment_id:editorAssignment,scope:{kind:'unit_tree',unit_id:x.unitB},valid_to:null});
   await assert.rejects(store.changeMentor(otherEditor.id,1,mentorCmd('credential',certificateFields)),/Самоназначение|недоступны|область/);
   assert(!store.mentorOptions(otherEditor.id,1,'credential').people.some(p=>p.id===x.f.mentor));
@@ -526,7 +527,48 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.throws(()=>store.centerWorkspace(otherEditor.id,1,'analytics.read',{...scope,unit_id:''}),/недоступна/);
   assert.throws(()=>store.metricEvidence(otherEditor.id,1,'metrics.read',{...scope,unit_id:x.unitB},'effect_facts',0),/недоступен/);
   assert(store.calendarWorkspace(manager.id,1,{mode:'calendar',from:today,to:due}).items.some(q=>q.route?.type==='roi'&&q.route.id===effect.id));
+  // Global dictionaries use existing registry events. A scale is immutable;
+  // changing its definition must create a new version.
+  const profession=await store.changeDirectory(manager.id,1,command('profession','create',null,0,{code:'QA-NEW-PROF',name:'Учебная новая профессия'}));
+  const position=await store.changeDirectory(manager.id,1,command('position','create',null,0,{code:'QA-NEW-POS',name:'Учебная должность'}));
+  const shift=await store.changeDirectory(manager.id,1,command('work_shift','create',null,0,{code:'QA-NEW-SHIFT',name:'Учебная смена'}));
+  const scale=await store.changeDirectory(manager.id,1,command('rating_scale','create',null,0,{name:'QA дополнительная шкала',version_no:'1',levels:'1: Начальный\n2: Подтверждённый'}));
+  assert.equal(store.readResource(manager.id,'scale.read',scale.id).levels,'1: Начальный\n2: Подтверждённый');
+  await assert.rejects(store.changeDirectory(manager.id,1,command('work_shift','update',shift.id,shift.rev,{code:'QA-CHANGED',name:'Смена'})),/Перенос/);
+  await assert.rejects(store.changeDirectory(manager.id,1,command('rating_scale','update',scale.id,scale.rev,{name:'Подмена',version_no:'1',levels:'1: А\n2: Б'})),/недоступ/);
+  const employee=await store.changeDirectory(manager.id,1,command('person','create',null,0,{employee_code:'QA-HR-LC81',display_name:'Учебное кадровое назначение',unit_id:x.unitB,profession_id:profession.id,position_id:position.id,shift_id:shift.id}));
+  const initial=store.listResources(manager.id,'employment.read').find(q=>q.person_id===employee.id);
+  assert.equal(initial.profession_id,profession.id);assert.equal(initial.shift_id,shift.id);
+  const details=store.employmentDetail(manager.id,1,initial.id);
+  assert(details.can_transfer&&details.units.some(q=>q.id===x.f.unit));
+  const move={id:initial.id,expected_revision:initial.rev,unit_id:x.f.unit,profession_id:profession.id,position_id:position.id,shift_id:shift.id,valid_from:details.earliest};
+  await assert.rejects(store.transferEmployment(otherEditor.id,1,{...move,profession_id:null,position_id:null,shift_id:null}),/недоступно|недоступен|полномочие/);
+  await assert.rejects(store.transferEmployment(manager.id,1,{...move,valid_from:initial.valid_from}),/позже начала/);
+  await assert.rejects(store.transferEmployment(manager.id,1,{...move,expected_revision:initial.rev+1}),/изменилось/);
+  assert.equal(store.readResource(manager.id,'employment.read',initial.id).valid_to,null);
+  const moved=await store.transferEmployment(manager.id,1,move);
+  assert.equal(store.readResource(manager.id,'employment.read',initial.id).valid_to,today);
+  assert.equal(store.readResource(manager.id,'employment.read',moved.id).unit_id,x.f.unit);
+  assert.equal(store.readResource(otherEditor.id,'employment.read',moved.id),null);
+  assert.equal(store.personCard(manager.id,1,employee.id).sections.find(s=>s.action==='employment.read').items.length,2);
+  await assert.rejects(store.transferEmployment(manager.id,1,move),/недоступно/);
+  // Download real original workbook layouts and check the actual Office ZIP
+  // parts, rather than asserting just a filename or a successful response.
+  const exports=[['order',groupOrder.id,'15','word/document.xml'],['audit',recordedAudit.id,'RC1','xl/workbook.xml'],['self',selfResult.id,'14','xl/workbook.xml'],['practical',practical.id,'practice','xl/workbook.xml'],['bank',newBank.id,'10','xl/workbook.xml'],['matrix',finalMatrix.id,'7','xl/workbook.xml'],['training_plan',newTraining.id,'6','xl/workbook.xml'],['journal',newTraining.id,'8','xl/workbook.xml'],['supplement',supp.id,'16','xl/workbook.xml'],['preparation',bundle.id,'17','xl/workbook.xml']];
+  for(const [kind,id,tag,part] of exports){
+   const file=await store.exportForm(manager.id,1,{kind,appendix:null,id});
+   assert(file.filename.startsWith('TWI-03-'+tag+'-'),kind);
+   const entries=await readZip(file.bytes),text=new TextDecoder().decode(entries.find(x=>x.name===part).bytes);
+   assert(text.length>100,kind);
+   if(kind==='audit')assert(text.includes('RC1 - 20'));
+   if(kind==='matrix')assert(text.includes('Исходный срез')&&text.includes('Расшифровка'));
+  }
+  await assert.rejects(store.exportForm(worker.id,1,{kind:'matrix',appendix:null,id:finalMatrix.id}),/недоступна/);
+  await assert.rejects(store.exportForm(otherEditor.id,1,{kind:'journal',appendix:null,id:newTraining.id}),/недоступна/);
+  await assert.rejects(store.exportForm(admin.id,1,{kind:'order',appendix:null,id:groupOrder.id}),/недоступна/);
   const card=store.personCard(manager.id,1,x.f.trainee);
+  assert(card.sections.some(s=>s.action==='employment.read'));
+  assert(card.sections.some(s=>s.action==='role_assignment.read'));
   assert(card.sections.some(s=>s.action==='roi.read'&&s.items.some(x=>x.id===effect.id&&x.can_detail)));
   assert(card.sections.some(s=>s.action==='assessment.read'&&s.items.some(r=>r.id===general.id&&r.can_detail)));
   assert(card.sections.find(s=>s.action==='training.read').items.some(r=>r.id===newTraining.id));
