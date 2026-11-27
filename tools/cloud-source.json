@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "c9cda06f54c780976db1d72646f65debe3aa016e",
+  "sourceCommit": "c827fb08c0dedd7e96ce8f4909683bee7c85ee00",
   "files": [
     {
       "path": "amvera.yml",
@@ -679,7 +679,7 @@
     },
     {
       "path": "tools/build_folder.mjs",
-      "sha": "46b2191f2c58bdb9e757ede16785aea77b349f86"
+      "sha": "c96a1491f88671d05e64fbf8b86f61a7e7a3d639"
     },
     {
       "path": "tools/build_lc1.mjs",
@@ -687,7 +687,7 @@
     },
     {
       "path": "tools/cloud-identity.mjs",
-      "sha": "6353b45058f704d3e71c1c4a757c5640e470b252"
+      "sha": "f8c772a6dc685d19c8046cbf91957a334447a8cd"
     },
     {
       "path": "tools/import_sop_baseline.py",
@@ -728,6 +728,10 @@
     {
       "path": "tools/lc73b/unresolved-summary.mjs",
       "sha": "15ef60297770d7f8f5538dccd769b1fc09ba20cc"
+    },
+    {
+      "path": "tools/lc81-amvera-package-lock.json",
+      "sha": "fbd4296b227f2da04badeecfb2a8b659983ae11d"
     },
     {
       "path": "tools/lc81-inventory.mjs",
