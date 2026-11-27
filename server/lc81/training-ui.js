@@ -584,7 +584,13 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    n.append(items.length?table(['Навык','Категория','Операция'],items.map(r=>[r.name,r.category,r.operation||(r.operation_id?'Операция':'Общий навык')])):empty());
   }else if(page==='requirement.read'){
    if(can('requirement.create'))n.append(button('Добавить требование',()=>requirementEditor(host),'primary'));
-   n.append(items.length?table(['Профессия','Навык','Шкала','Уровень','Критичность','Начало','Окончание','Действия'],items.map(r=>[r.profession,r.skill,r.scale,r.required_level,criticalityNames[r.criticality],r.valid_from,r.valid_to,r.can_close?button('Закрыть требование',()=>setContent(host,panel('Закрытие требования',form([dt('valid_to','Последний день действия','')],'Закрыть',f=>saveCompetency('requirement.close',{id:r.id,rev:r.rev,valid_to:value(f,'valid_to')})))):'—'])):empty());
+   const closeRequirement=r=>{
+    if(!discard())return;
+    const editor=form([dt('valid_to','Последний день действия','')],'Закрыть',f=>saveCompetency('requirement.close',{id:r.id,rev:r.rev,valid_to:value(f,'valid_to')}));
+    setContent(host,panel('Закрытие требования',editor));
+   };
+   const records=items.map(r=>[r.profession,r.skill,r.scale,r.required_level,criticalityNames[r.criticality],r.valid_from,r.valid_to,r.can_close?button('Закрыть требование',()=>closeRequirement(r)):'—']);
+   n.append(records.length?table(['Профессия','Навык','Шкала','Уровень','Критичность','Начало','Окончание','Действия'],records):empty());
   }else if(page==='coverage.read'){
    if(can('coverage.save'))n.append(button('Добавить потребность',()=>coverageEditor(host),'primary'));
    n.append(items.length?table(['Подразделение','Навык','Смена','Уровень','Требуется','Факт','Дефицит','Действия'],items.map(r=>[r.unit,r.skill,r.shift_code||'Все',r.required_level,r.min_people,r.actual,r.deficit,r.can_edit?button('Изменить',()=>coverageEditor(host,r)):'—'])):empty());

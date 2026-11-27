@@ -40,10 +40,19 @@ try{
  const button=(p,name)=>p.getByRole('button',{name,exact:true}),indicator=(p,kind)=>p.locator('#save-indicator[data-kind="'+kind+'"]');
  async function profile(login,password,viewport){
   const ctx=await browser.newContext({ignoreHTTPSErrors:true,viewport}),p=await ctx.newPage();
+  const initialErrors=errors.length;
   p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>d.dismiss());
-  await p.goto(url);
-  await p.locator('#login input[name=login]').fill(login);await p.locator('#login input[name=password]').fill(password);
-  await button(p,'Войти').click();await p.locator('#workspace').waitFor();await indicator(p,'saved').waitFor({timeout:30000});
+  const checkPage=()=>assert.deepEqual(errors.slice(initialErrors),[], 'Browser script error during login: '+login);
+  await p.goto(url);checkPage();
+  try{
+   await p.locator('#login input[name=login]').fill(login);await p.locator('#login input[name=password]').fill(password);
+   await button(p,'Войти').click();await p.locator('#workspace').waitFor();await indicator(p,'saved').waitFor({timeout:30000});
+   checkPage();
+  }catch(e){
+   checkPage();
+   const status=await p.locator('#status').textContent().catch(()=>null);
+   throw new Error('Browser login failed for '+login+'; status: '+(status||'—'),{cause:e});
+  }
   return {ctx,p};
  }
  const m=await profile('manager',managerPassword,{width:1440,height:900});
