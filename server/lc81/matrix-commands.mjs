@@ -65,5 +65,6 @@ export function matrixDetail(db,a,id){
  return {id:m.id,code:m.code,title:m.title,version_no:m.version_no,rev:m.rev,state:m.state,unit_id:m.unit_id,shift_id:m.shift_id,scale_id:m.scale_id,base_on:m.base_on,target_on:m.target_on,day:a.day,columns:m.columns,roster:m.roster,levels:LEVEL_TEXT,
  cells:m.roster.map(r=>m.columns.map(c=>{const x=p.cells.get(r.person_id+':'+c.skill_id);return {base:x.base,actual:x.actual,target:x.target,need:x.need,reason:x.reason,admission:x.admission}})),
  totals:p.total,byPerson:m.roster.map(r=>p.byPerson.get(r.person_id)),bySkill:m.columns.map(c=>p.bySkill.get(c.skill_id)),
+ can_develop:!!a.personId&&m.state==='active'&&a.allows('development.from_matrix',m.id,resource),
  can_revise:!!a.personId&&m.state==='active'&&a.allows('matrix.create',m.id,resource),can_retire:!!a.personId&&m.state==='active'&&a.allows('matrix.retire',m.id,resource)};
 }

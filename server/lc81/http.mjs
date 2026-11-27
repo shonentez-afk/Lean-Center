@@ -126,6 +126,24 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='GET'&&p==='/api/lc81/supplement/detail'){reply(res,200,store.supplementDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/supplement/create'){reply(res,200,await store.createSupplement(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/supplement/change'){reply(res,200,await store.changeSupplement(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/development/options'){reply(res,200,store.developmentOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/development/detail'){reply(res,200,store.developmentDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/development/create'){reply(res,200,await store.createDevelopment(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/development/change'){reply(res,200,await store.changeDevelopment(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/development/from-matrix'){reply(res,200,await store.developmentFromMatrix(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/bank/options'){reply(res,200,store.bankOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/bank/detail'){reply(res,200,store.bankDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/bank/save'){reply(res,200,await store.saveBank(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/quality/options'){reply(res,200,store.qualityOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
+   if(req.method==='GET'&&p==='/api/lc81/quality/detail'){reply(res,200,store.qualityDetail(a.id,a.credential_revision,url.searchParams.get('kind'),url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/quality/install'){reply(res,200,await store.installMentorMethod(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/quality/audit'){reply(res,200,await store.createAudit(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/quality/self'){reply(res,200,await store.createSelf(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/quality/void'){reply(res,200,await store.voidAudit(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/tasks/detail'){reply(res,200,store.taskDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/tasks/options'){reply(res,200,await store.taskOptions(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/tasks/create'){reply(res,200,await store.createTask(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/tasks/change'){reply(res,200,await store.changeTask(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/mentor/options'){reply(res,200,store.mentorOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='POST'&&p==='/api/lc81/mentor/change'){reply(res,200,await store.changeMentor(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/matrix/info'){reply(res,200,store.matrixInfo(a.id,a.credential_revision,url.searchParams.get('unit_id'),url.searchParams.get('base_on'),Object.fromEntries(['shift_id','profession_id','workplace_id','category_id'].map(k=>[k,url.searchParams.get(k)]))));return}

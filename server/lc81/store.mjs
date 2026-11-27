@@ -13,6 +13,8 @@ import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trai
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
 import {mentorOptions,changeMentor,mentorView} from './mentor-commands.mjs';
+import {developmentOptions,createDevelopment,developmentDetail,changeDevelopment,developmentFromMatrix,bankOptions,bankDetail,saveBank,developmentView} from './development-commands.mjs';
+import {qualityOptions,installMentorMethod,createAudit,createSelf,voidAudit,qualityDetail,taskOptions,createTask,taskDetail,changeTask,qualityView} from './quality-commands.mjs';
 import {workflowView,orderOptions,registerOrder,orderDetail,supplementOptions,createSupplement,supplementDetail,changeSupplement} from './mentor-workflows.mjs';
 import {programView,programOptions,saveProgram,retireProgram,programDetail,enrollmentOptions,createEnrollment,changeEnrollment,enrollmentDetail,preparationOptions,createPreparation,preparationDetail,preparationFactOptions,recordPreparationFact} from './program-commands.mjs';
 import {requestDigest,getReceipt,addReceipt} from './library-receipts.mjs';
@@ -105,6 +107,8 @@ function projectView(db,a,action,data,d){
   return {...data,trainee_name:one(db,'SELECT display_name FROM person WHERE id=?',[data.trainee_id])?.display_name||'',operation_name:one(db,'SELECT name FROM operation WHERE id=?',[data.operation_id])?.name||'',can_detail:access.allows('training.detail',data.id,resource),can_sop:access.allows('training.read_sop',data.id,resource)};
  }
  if(['program.read','training.enrollment.read','preparation.read'].includes(action))return programView(db,trainingAccess(db,a,d),action,data);
+ if(['development.read','bank.read'].includes(action))return developmentView(db,trainingAccess(db,a,d),action,data);
+ if(['audit.read','self.read','task.read'].includes(action))return qualityView(db,trainingAccess(db,a,d),action,data);
  if(['order.read','supplement.read'].includes(action))return workflowView(db,trainingAccess(db,a,d),action,data);
  if(['credential.read','appointment.read','authorization.read'].includes(action))return mentorView(db,trainingAccess(db,a,d),action.split('.')[0],data);
  if(action==='matrix.read'){
@@ -409,6 +413,24 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   createSupplement(actor,revision,input){return mutate(db=>createSupplement(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   supplementDetail(actor,revision,id){return read(db=>supplementDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
   changeSupplement(actor,revision,input){return mutate(db=>changeSupplement(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  developmentOptions(actor,revision){return read(db=>developmentOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  createDevelopment(actor,revision,input){return mutate(db=>createDevelopment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  developmentDetail(actor,revision,id){return read(db=>developmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  changeDevelopment(actor,revision,input){return mutate(db=>changeDevelopment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  developmentFromMatrix(actor,revision,input){return mutate(db=>developmentFromMatrix(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  bankOptions(actor,revision){return read(db=>bankOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  bankDetail(actor,revision,id){return read(db=>bankDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  saveBank(actor,revision,input){return mutate(db=>saveBank(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  qualityOptions(actor,revision,kind){return read(db=>qualityOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
+  installMentorMethod(actor,revision,input){return mutate(db=>installMentorMethod(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  createAudit(actor,revision,input){return mutate(db=>createAudit(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  createSelf(actor,revision,input){return mutate(db=>createSelf(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  voidAudit(actor,revision,input){return mutate(db=>voidAudit(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  qualityDetail(actor,revision,kind,id){return read(db=>qualityDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,id))},
+  taskOptions(actor,revision,source){return read(db=>taskOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),source))},
+  createTask(actor,revision,input){return mutate(db=>createTask(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  taskDetail(actor,revision,id){return read(db=>taskDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  changeTask(actor,revision,input){return mutate(db=>changeTask(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
   changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   matrixInfo(actor,revision,unit=null,baseOn=null,filters={}){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return matrixInfo(db,a,unit,baseOn??a.day,filters)})},
@@ -541,8 +563,10 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     must(keys(input,['id','expected_revision','result'])&&isId(input.id)&&Number.isSafeInteger(input.expected_revision)&&input.expected_revision>0&&typeof input.result==='string'&&input.result.trim().length>0&&input.result.length<=2000,400,'Неверные поля выполнения');
     const sec=security(db,actor),d=day();
     must(a.bootstrap!==1&&canImplementOwnTask(db,sec,actor,input.id,d)&&readAuthorized(db,sec,actor,'task.read',input.id,d),403,'Можно выполнить только своё назначенное мероприятие');
-    const row=one(db,'SELECT id,rev FROM action_item WHERE id=?',[input.id]);
+    const row=one(db,'SELECT * FROM action_item WHERE id=?',[input.id]);
     must(row?.rev===input.expected_revision,409,'Запись изменилась; обновите данные');
+    must(row.kind!=='trainee_training'||row.followup_assignment_id,422,'Сначала свяжите мероприятие с повторным обучением');
+    must(row.kind!=='instructor_training'||row.followup_enrollment_id,422,'Сначала свяжите мероприятие с программой переобучения инструктора');
     const eventId=uuid();
     try{applyEvent(db,{id:eventId,entity_type:'action_item',entity_id:input.id,operation:'update',expected_revision:row.rev,payload:{command:'implement',result:input.result.trim(),business_offset_minutes:0},occurred_at:at()})}catch{throw new PilotError(422,'Выполнение не прошло существующие проверки мероприятия')}
     audit(db,actor,'task.implement_own',eventId);

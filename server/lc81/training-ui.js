@@ -76,6 +76,12 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    }
    if(cap.admit)n.append(groups('Решение о допуске',[dt('decided_on','Дата решения',d.day),select('decision','Решение',[['granted','Допустить'],['denied','Отказать']]),input('valid_until','Действует до','date',false),input('evidence','Основание'),input('feedback','Обратная связь')],'Зарегистрировать решение',command('admit',f=>({decided_on:value(f,'decided_on'),valid_until:value(f,'decision')==='granted'?value(f,'valid_until')||null:null,decision:value(f,'decision'),evidence:value(f,'evidence'),feedback:value(f,'feedback')}))));
   }
+  if(d.practical?.can_task){
+   const related=el('div');
+   if(d.practical.conclusion==='not_meet')n.append(button('Мероприятие по результату практики',()=>taskEditor(related,{kind:'practical',id:d.practical.id,criterion_id:null})));
+   for(const q of d.practical.negative)n.append(button('Мероприятие: '+q.question,()=>taskEditor(related,{kind:'practical',id:d.practical.id,criterion_id:q.id})));
+   n.append(related);
+  }
   setContent(host,n);
  }
  async function sop(host,id){
@@ -133,6 +139,11 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const rows=d.roster.map((r,i)=>[r.name,r.position,...d.cells[i].map(x=>{const cell=el('div',x.actual??'—','lc81-matrix-cell');if(x.actual!==null)cell.dataset.level=String(x.actual);cell.title='Срез: '+(x.base??'—')+' · Цель: '+(x.target??'—')+' · Потребность: '+(x.need??'—')+' · '+x.reason+' · '+x.admission;return cell}),d.byPerson[i].base,d.byPerson[i].actual,d.byPerson[i].target,d.byPerson[i].need]);
   rows.push(['ИТОГО','',...d.bySkill.map(x=>x.actual),d.totals.base,d.totals.actual,d.totals.target,d.totals.need]);n.append(table(headings,rows));
   n.append(el('p',Object.entries(d.levels).map(([k,v])=>k+' — '+v).join(' · ')+' · Цели без факта: '+d.totals.unknown,'muted'));
+  if(d.can_develop){
+   n.append(groups('Поставить персональную цель по ячейке',[pick('person_id','Сотрудник',d.roster.map(r=>[r.person_id,r.name])),pick('skill_id','Навык',d.columns.map(c=>[c.skill_id,c.title])),pick('target_level','Цель',Object.entries(d.levels)),dt('due_on','Срок',d.target_on)],'Создать план и цель',async f=>{
+    await api('development/from-matrix',{matrix_id:d.id,matrix_rev:d.rev,person_id:value(f,'person_id'),skill_id:value(f,'skill_id'),target_level:Number(value(f,'target_level')),due_on:value(f,'due_on')});note('Персональная цель создана');await render()
+   }));
+  }
   if(d.can_revise)n.append(button('Создать новую версию матрицы',()=>matrixEditor(host,d),'primary'));
   if(d.can_retire)n.append(groups('Закрыть матрицу',[input('reason','Причина')],'Закрыть',async f=>{await api('matrix/retire',{id:d.id,expected_revision:d.rev,reason:value(f,'reason')});note('Матрица закрыта');await render()}));
   setContent(host,n);
@@ -147,9 +158,9 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const d=await api('person/card?id='+encodeURIComponent(id)),n=panel('Карточка сотрудника · '+d.person.display_name,el('p',[d.person.employee_code,d.person.unit,d.person.position].filter(Boolean).join(' · ')));
   for(const s of d.sections){
    const details=el('details');details.append(el('summary',s.title+' · '+s.items.length));
-   const labels={code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',people:'Сотрудников',skills:'Навыков'};
+   const labels={code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',evaluated_on:'Дата оценки',result_note:'Результат',people:'Сотрудников',skills:'Навыков'};
    const keys=Object.keys(labels).filter(k=>s.items.some(r=>Object.hasOwn(r,k))),sub=el('div');
-   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):'']);
+   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):'']);
    details.append(table([...keys.map(k=>labels[k]),'Действия'],rows),sub);n.append(details);
   }
   if(!d.sections.length)n.append(el('p','Нет связанных записей, доступных вашей учётной записи.'));
@@ -382,5 +393,131 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   if(user.person_id&&user.permissions.includes(order?'order.register':'supplement.create'))n.append(button(order?'Зарегистрировать групповой приказ':'Создать ходатайство',()=>order?orderEditor(host):supplementEditor(host),'primary'));
   n.append(items.length?order?table(['Номер','Дата','Организация','Участников','Действует с','По','Действия'],items.map(r=>[r.order_number,r.order_on,r.organization,r.members,r.valid_from,r.valid_to,r.can_detail?button('Открыть приказ',()=>orderCard(host,r.id)):'—'])):table(['Сотрудник','Месяц','Роль','Состояние','Действия'],items.map(r=>[r.person_name,r.month,mentorRoles[r.role],supplementStates[r.state],r.can_detail?button('Открыть ходатайство',()=>supplementCard(host,r.id)):'—'])):empty(),host);return n;
  }
- return {training,matrices,card,mentor,programPanel,mentorWorkflow};
+ const taskStates={open:'Открыто',in_progress:'В работе',implemented:'Ожидает проверки',verified:'Эффект подтверждён',ineffective:'Эффект не подтверждён',cancelled:'Отменено'},taskKinds={corrective:'Корректирующее мероприятие',instructor_training:'Переобучение инструктора',trainee_training:'Повторное обучение',development:'Индивидуальное развитие'};
+ const methodNames={rc1:'RC1 · 20 критериев',corporate:'Приложение 13 · 17 критериев',self:'Приложение 14 · 16 критериев'};
+ async function developmentEditor(host){
+  if(!discard())return;const d=await api('development/options');
+  setContent(host,panel('Новый план развития',form([pick('person_id','Сотрудник',opts(d.people)),input('title','Цель плана'),dt('start_on','Начало',d.day),dt('due_on','Срок','')],'Создать план',async f=>{
+   await api('development/create',Object.fromEntries(['person_id','title','start_on','due_on'].map(k=>[k,value(f,k)])));note('План создан');await render();
+  })));
+ }
+ async function developmentCard(host,id){
+  if(!discard())return;const d=await api('development/detail?id='+encodeURIComponent(id)),sub=el('div');
+  const command=(c,get)=>async f=>{await api('development/change',{id:d.id,expected_revision:d.rev,command:c,fields:get(f)});note('Изменения сохранены');await render()};
+  const n=panel(d.title+' · '+(d.person_name||''),el('p',d.start_on+' — '+d.due_on+' · '+(state[d.state]||d.state)));
+  n.append(table(['Цель','Навык','Факт','Целевой уровень','Срок','Состояние','Действия'],d.goals.map(g=>{
+   const actions=el('div');if(g.state==='open'){
+    if(d.can_task)actions.append(button('Создать мероприятие',()=>taskEditor(sub,{kind:'development_goal',id:g.id,criterion_id:null})));
+    if(d.can_close_goal){
+     if(!g.skill_id||g.reached)actions.append(button('Завершить',()=>setContent(sub,panel('Фактический результат цели',form([input('reason','Результат / основание')],'Подтвердить',command('goal.finish',f=>({goal_id:g.id,goal_rev:g.rev,reason:value(f,'reason')})))))));
+     actions.append(button('Отменить',()=>setContent(sub,panel('Отмена цели',form([input('reason','Основание')],'Отменить',command('goal.cancel',f=>({goal_id:g.id,goal_rev:g.rev,reason:value(f,'reason')})))))));
+    }
+   }
+   return [g.title,g.skill,g.actual,g.target_level,g.due_on,g.state==='open'?'Открыта':state[g.state]||g.state,actions];
+  })));
+  if(d.can_goal){
+   const skill=pick('skill_id','Навык (необязательно)',opts(d.skills),'',false),scale=pick('target','Шкала и уровень',d.scales.flatMap(s=>s.levels.map(l=>[s.id+'/'+l.value,s.name+' · '+l.value+' — '+l.label])),'',false);
+   n.append(groups('Добавить цель',[input('title','Название цели'),skill,scale,dt('due_on','Срок',d.due_on)],'Добавить цель',command('goal.create',f=>{
+    const skill_id=value(f,'skill_id')||null,t=value(f,'target');if(!!skill_id!==!!t)throw Error('Выберите навык и уровень либо оставьте оба поля пустыми');const [scale_id,level]=t?t.split('/'):[null,null];
+    return {title:value(f,'title'),skill_id,scale_id,target_level:level===null?null:Number(level),due_on:value(f,'due_on')};
+   })));
+  }
+  if(d.can_close){
+   if(d.goals.length&&!d.goals.some(g=>g.state==='open'))n.append(groups('Завершить план',[input('reason','Результат')],'Завершить',command('finish',f=>({reason:value(f,'reason')}))));
+   n.append(groups('Отменить план',[input('reason','Основание')],'Отменить',command('cancel',f=>({reason:value(f,'reason')}))));
+  }
+  n.append(sub);setContent(host,n);
+ }
+ async function bankEditor(host,previous=null){
+  if(!discard())return;const d=await api('bank/options'),blocks=previous?.blocks||d.template,groupsHost=el('div'),entries=[];
+  let key=0;
+  for(const block of blocks){
+   const section=el('fieldset'),list=el('div'),items=[],seen=new Set(block.questions.map(q=>q.id));let serial=0;
+   function add(q=null){
+    if(items.length>=300)throw Error('Не более 300 вопросов на блок');
+    let id=q?.id;if(!id){do{id=block.id+'-extra-'+(++serial)}while(seen.has(id));seen.add(id)}
+    const field='question_'+(++key),row=el('div'),entry={id,field,row};
+    row.append(fill(input(field,'Вопрос'),q?.text),button('Удалить вопрос',()=>{items.splice(items.indexOf(entry),1);row.remove()}));items.push(entry);list.append(row)
+   }
+   block.questions.forEach(add);section.append(el('legend',block.title),list,button('Добавить вопрос',()=>add()));entries.push({block,items});groupsHost.append(section);
+  }
+  const profession=pick('profession_id','Профессия (пусто — общий банк)',opts(d.professions),previous?.profession_id||'',false);
+  if(previous)profession.querySelector('select').disabled=true;
+  setContent(host,panel(previous?'Актуализация банка вопросов':'Первичная редакция банка',el('p','Существующие номера и текст проверяются исходной методикой. Для ежегодной актуализации требуется изменение или добавление не менее 10% вопросов каждого блока.'),
+   form([profession,dt('reviewed_on','Дата актуализации',d.day),input('note','Основание'),groupsHost],'Сохранить редакцию',async f=>{
+    await api('bank/save',{profession_id:previous?previous.profession_id:value(f,'profession_id')||null,reviewed_on:value(f,'reviewed_on'),previous_id:previous?.id??null,note:value(f,'note'),blocks:entries.map(({block,items})=>({id:block.id,title:block.title,questions:items.map((q,i)=>({id:q.id,number:i+1,text:value(f,q.field)}))}))});note('Редакция банка сохранена');await render()
+   })));
+ }
+ async function bankCard(host,id){
+  if(!discard())return;const d=await api('bank/detail?id='+encodeURIComponent(id)),n=panel(d.profession+' · банк v'+d.version_no,el('p',d.reviewed_on+' · '+d.note));
+  if(d.changes.length)n.append(table(['Блок','Прежних вопросов','Изменено','Требуется','Статус'],d.changes.map(x=>[x.title,x.previous,x.changed,x.required,x.ok?'Выполнено':'Не выполнено'])));
+  for(const b of d.blocks){const det=el('details');det.append(el('summary',b.title+' · '+b.questions.length),table(['№','Вопрос'],b.questions.map(q=>[q.number,q.text])));n.append(det)}
+  if(d.can_revise)n.append(button('Создать новую редакцию',()=>bankEditor(host,d),'primary'));
+  setContent(host,n);
+ }
+ async function qualityEditor(host,kind){
+  if(!discard())return;const d=await api('quality/options?kind='+kind),n=panel(kind==='audit'?'Новый аудит первого уровня':'Новая самооценка'),sub=el('div');
+  for(const k of d.installable)n.append(button('Установить '+methodNames[k],async()=>{await api('quality/install',{kind:k});note('Методика зарегистрирована');await render()}));
+  if(!d.methods.length){n.append(el('p','Нет действующей методики. Зарегистрируйте утверждённую форму.'));setContent(host,n);return}
+  if(kind==='audit'&&!d.assignments.length){n.append(el('p','Нет доступных согласованных инструктажей с фактическими этапами.'));setContent(host,n);return}
+  if(kind==='self'&&!d.can_create){setContent(host,n);return}
+  const method=pick('method_id','Методика',d.methods.map(m=>[m.id,m.label+' · '+m.criteria.length+' критериев']));
+  n.append(method,button('Открыть чек-лист',()=>{
+   if(!discard())return;const m=d.methods.find(x=>x.id===method.querySelector('select').value);if(!m)throw Error('Выберите методику');
+   const answers=m.criteria.flatMap((q,i)=>[pick('answer_'+i,q.position+'. '+q.section+' · '+q.question,kind==='audit'?[['1','Да'],['0','Нет'],['not_observed','Не наблюдалось'],['not_applicable','Не применимо']]:Object.entries(m.levels)),input('note_'+i,'Комментарий / основание','text',false)]);
+   const get=f=>m.criteria.map((q,i)=>{const v=value(f,'answer_'+i);return {criterion_id:q.id,value:kind==='self'||v==='0'||v==='1'?Number(v):v,note:value(f,'note_'+i)}});
+   if(kind==='audit'){
+    const t=pick('assignment_id','Фактическое обучение',opts(d.assignments,'label')),s=pick('session_id','Наблюдаемый этап',[]);
+    const sync=()=>{const x=d.assignments.find(x=>x.id===t.querySelector('select').value),sel=s.querySelector('select');sel.replaceChildren();const o=el('option','Выберите');o.value='';sel.append(o);for(const v of x?.sessions||[]){const o=el('option',v.stage_code+' · '+v.held_at);o.value=v.id;sel.append(o)}};
+    t.querySelector('select').addEventListener('change',sync);
+    sub.replaceChildren(form([t,s,dt('observed_on','Дата наблюдения',d.day),...answers,input('feedback','Обратная связь')],'Зарегистрировать аудит',async f=>{
+     const assignment_id=value(f,'assignment_id'),x=d.assignments.find(x=>x.id===assignment_id);await api('quality/audit',{assignment_id,assignment_rev:x.rev,session_id:value(f,'session_id'),method_id:m.id,observed_on:value(f,'observed_on'),responses:get(f),feedback:value(f,'feedback')});note('Аудит зарегистрирован');await render()
+    }));
+   }else sub.replaceChildren(form([el('p','Самооценка регистрируется от вашего имени.'),dt('evaluated_on','Дата',d.day),input('place','Место'),...answers,input('feedback','Обратная связь','text',false)],'Сохранить самооценку',async f=>{await api('quality/self',{method_id:m.id,evaluated_on:value(f,'evaluated_on'),place:value(f,'place'),responses:get(f),feedback:value(f,'feedback')});note('Самооценка зарегистрирована');await render()}));
+  }),sub);setContent(host,n);
+ }
+ async function qualityCard(host,kind,id){
+  if(!discard())return;const d=await api('quality/detail?kind='+kind+'&id='+encodeURIComponent(id)),sub=el('div'),n=panel(kind==='audit'?'Аудит · '+(d.mentor||''):'Самооценка · '+(d.person_name||''),el('p',d.date+' · v'+d.version+' · '+(kind==='audit'?d.method+' · '+d.operation:'Место: '+d.place)));
+  if(kind==='audit'){
+   n.append(el('p','Наблюдалось '+d.stats.observed+' / '+d.stats.expected+' · Да '+d.stats.yes+' · Нет '+d.stats.no+' · Результат '+(d.stats.pct===null?'нет сопоставимого факта':d.stats.pct.toFixed(1)+'%')+' · '+(d.state==='void'?'Аннулирован':'Зарегистрирован')),table(['№','Раздел','Критерий','Ответ','Комментарий','Рекомендация','Действие'],d.questions.map(q=>[q.position,q.section,q.question,d.labels[q.response]||q.response,q.note,q.recommendation,d.can_task&&q.response==='no'?button('Создать мероприятие',()=>taskEditor(sub,{kind:'audit',id:d.id,criterion_id:q.id})):'—'])),el('p',d.summary||''));
+   if(d.can_void)n.append(groups('Аннулировать ошибочную запись',[input('reason','Основание')],'Аннулировать',async f=>{await api('quality/void',{id:d.id,expected_revision:d.rev,reason:value(f,'reason')});note('Запись аннулирована');await render()}));
+   if(d.void_reason)n.append(el('p','Основание аннулирования: '+d.void_reason));
+  }else n.append(table(['№','Раздел','Критерий','Уровень','Комментарий','Действие'],d.questions.map(q=>[q.position,q.section,q.question,q.value===null?'—':q.value+' · '+d.levels[q.value],q.note,d.can_task?button('Мероприятие',()=>taskEditor(sub,{kind:'self_eval',id:d.id,criterion_id:q.id})):'—'])),el('p',d.feedback||''));
+  n.append(sub);setContent(host,n);
+ }
+ async function taskEditor(host,source=null){
+  if(!discard())return;const d=await api('tasks/options',source);
+  if(!d.owners.length){setContent(host,panel('Мероприятие',el('p','Нет доступных исполнителей')));return}
+  setContent(host,panel('Новое мероприятие',el('p','Источник: '+d.label),form([fill(input('title','Что необходимо выполнить'),source?d.label.slice(0,500):''),pick('owner_id','Ответственный',opts(d.owners)),pick('kind','Вид',d.kinds),pick('priority','Приоритет',[['normal','Обычный'],['major','Значимый'],['critical','Критический']],'normal'),dt('due_on','Срок',d.day)],'Создать мероприятие',async f=>{
+   await api('tasks/create',{source,title:value(f,'title'),owner_id:value(f,'owner_id'),due_on:value(f,'due_on'),kind:value(f,'kind'),priority:value(f,'priority')});note('Мероприятие зарегистрировано');await render()
+  })));
+ }
+ async function taskCard(host,id){
+  if(!discard())return;const d=await api('tasks/detail?id='+encodeURIComponent(id)),sub=el('div'),n=panel(d.title,el('p',d.kind_label+' · '+d.state_label+' · срок '+d.due_on),el('p','Ответственный: '+(d.owner||'—')+' · сотрудник: '+(d.subject||'—')),el('p','Источник: '+d.source));
+  const command=(c,get)=>async f=>{await api('tasks/change',{id:d.id,expected_revision:d.rev,command:c,fields:get(f)});note('Изменения подтверждены');await render()};
+  if(d.result)n.append(el('p','Результат: '+d.result));
+  if(d.followup)n.append(el('p',d.followup));
+  if(d.followup_link){const l=d.followup_link;n.append(button('Открыть связанное обучение / план',()=>l.type==='assignment'?assignment(sub,l.id):l.type==='enrollment'?enrollmentCard(sub,l.id):developmentCard(sub,l.id)))}
+  if(d.cap.link&&d.candidates.type){if(d.candidates.items.length)n.append(groups('Связать повторное обучение / план',[pick('id','Назначение / план',opts(d.candidates.items,'label'))],'Сохранить связь',command('link',f=>({type:d.candidates.type,id:value(f,'id')}))));else n.append(el('p','Сначала создайте соответствующее новое назначение обучения или план в рабочем разделе.'))}
+  if(d.cap.start)n.append(button('Взять в работу',command('start',()=>({}))));
+  if(d.cap.implement)n.append(groups('Выполнить своё мероприятие',[input('result','Фактический результат')],'Подтвердить выполнение',async f=>{await api('tasks/implement',{id:d.id,expected_revision:d.rev,result:value(f,'result')});note('Факт выполнения подтверждён');await render()}));
+  if(d.cap.verify)n.append(groups('Независимая проверка эффекта',[pick('outcome','Результат проверки',[['effective','Эффект подтверждён'],['ineffective','Неэффективно'],['insufficient','Недостаточно данных']]),pick('audit_id','Последующий аудит',opts(d.evidence.audits,'label'),'',false),pick('assessment_id','Последующая практическая оценка',opts(d.evidence.practical,'label'),'',false),input('evidence','Обоснование и подтверждение')],'Зарегистрировать проверку',command('verify',f=>({outcome:value(f,'outcome'),audit_id:value(f,'audit_id')||null,assessment_id:value(f,'assessment_id')||null,evidence:value(f,'evidence')}))));
+  if(d.cap.cancel)n.append(groups('Отменить мероприятие',[input('reason','Основание')],'Отменить',command('cancel',f=>({reason:value(f,'reason')}))));
+  if(d.verification.length)n.append(table(['Дата проверки','Результат','Основание'],d.verification.map(v=>[v.checked_at,v.outcome,v.evidence_note])));
+  n.append(sub);setContent(host,n);
+ }
+ function qualityPanel(page,items,user){
+  const titles={'development.read':'Планы развития','audit.read':'Аудиты первого уровня','self.read':'Самооценки наставников','task.read':'Задачи и корректирующие мероприятия','bank.read':'Банк вопросов'},host=el('div'),n=panel(titles[page]);
+  const specs={'development.read':['development.create','Создать план',()=>developmentEditor(host)],'audit.read':['audit.create','Новый аудит',()=>qualityEditor(host,'audit')],'self.read':['self.create','Новая самооценка',()=>qualityEditor(host,'self')],'task.read':['task.create','Создать мероприятие',()=>taskEditor(host)],'bank.read':['bank.save','Создать редакцию',()=>bankEditor(host)]};
+  const [permission,label,fn]=specs[page];if(user.person_id&&(user.permissions.includes(permission)||['audit.read','self.read'].includes(page)&&user.permissions.includes('mentor.method.install')))n.append(button(label,fn,'primary'));
+  if(page==='audit.read')n.append(el('p','RC1 — основная рабочая форма из 20 критериев. Приложение 13 — отдельная форма из 17 критериев.'));
+  if(!items.length)n.append(empty());
+  else if(page==='development.read')n.append(table(['Сотрудник','План','Начало','Срок','Состояние','Действия'],items.map(r=>[r.person_name,r.title,r.start_on,r.due_on,state[r.state]||r.state,r.can_detail?button('Открыть план',()=>developmentCard(host,r.id)):'—'])));
+  else if(page==='audit.read')n.append(table(['Инструктор','Операция','Дата','Состояние','Действия'],items.map(r=>[r.mentor_name,r.operation_name,r.observed_at,r.state==='void'?'Аннулирован':'Зарегистрирован',r.can_detail?button('Открыть аудит',()=>qualityCard(host,'audit',r.id)):'—'])));
+  else if(page==='self.read')n.append(table(['Сотрудник','Дата','Действия'],items.map(r=>[r.person_name,r.evaluated_on,r.can_detail?button('Открыть самооценку',()=>qualityCard(host,'self',r.id)):'—'])));
+  else if(page==='bank.read')n.append(table(['Профессия','Версия','Дата','Действия'],items.map(r=>[r.profession,r.version_no,r.reviewed_on,r.can_detail?button('Открыть банк',()=>bankCard(host,r.id)):'—'])));
+  else n.append(table(['Мероприятие','Вид','Исполнитель','Срок','Состояние','Действия'],items.map(r=>[r.title,taskKinds[r.kind],r.owner,r.due_on,taskStates[r.state]||r.state,r.can_detail?button('Открыть мероприятие',()=>taskCard(host,r.id)):r.can_implement?button('Выполнить',()=>setContent(host,panel(r.title,form([input('result','Фактический результат')],'Подтвердить выполнение',async f=>{await api('tasks/implement',{id:r.id,expected_revision:r.rev,result:value(f,'result')});note('Выполнение подтверждено');await render()})))):'—'])));
+  n.append(host);return n;
+ }
+ return {training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel};
 }
