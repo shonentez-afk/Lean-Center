@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "b5d5dd7bc9c234baebfe39df1fa1adde26fb54d9",
+  "sourceCommit": "41831c7245f1cc22a83e591fd9a91961860affd2",
   "files": [
     {
       "path": "amvera.yml",
@@ -115,7 +115,7 @@
     },
     {
       "path": "server/lc81/access-contract.mjs",
-      "sha": "431b535690f98c9fd93106996f5f701c2e2f2df0"
+      "sha": "3f7fce44071953160f23fcdc8b650e332068ca0c"
     },
     {
       "path": "server/lc81/admin-commands.mjs",
@@ -131,7 +131,7 @@
     },
     {
       "path": "server/lc81/center-commands.mjs",
-      "sha": "e1093644ccc5a617dca7e65358d3d892e77610d5"
+      "sha": "778ead11a9cbef4f861f1d3588334683f007a01d"
     },
     {
       "path": "server/lc81/center-ui.js",
@@ -162,12 +162,16 @@
       "sha": "86ee923af242ab9868820e766c64963ecf38c4bc"
     },
     {
+      "path": "server/lc81/final-ui.js",
+      "sha": "cf25c6dd0b9123e881404f45e88fc00494910438"
+    },
+    {
       "path": "server/lc81/form-commands.mjs",
       "sha": "9d970371b497f05d40a7dc42884ec106d06fbec0"
     },
     {
       "path": "server/lc81/http.mjs",
-      "sha": "dcec40c3f08a8d8b83fb2cab8597165f8fa865d3"
+      "sha": "e406555e9b1a2ed31d05fe2e52c7b64da6b2a865"
     },
     {
       "path": "server/lc81/import-commands.mjs",
@@ -231,7 +235,7 @@
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "0283a41c83a6772bdf455d93e040cbcb8f6bf570"
+      "sha": "771753b6b25c7331ad95419cc4dffbd834f44256"
     },
     {
       "path": "server/lc81/program-commands.mjs",
@@ -243,11 +247,15 @@
     },
     {
       "path": "server/lc81/quality-commands.mjs",
-      "sha": "21c47b1f8b25fe99289ec5b2880d9c82469950b5"
+      "sha": "df9a2c5aeb7b5ec7355444e613e12db28e535ce8"
+    },
+    {
+      "path": "server/lc81/rc1-history.mjs",
+      "sha": "59415b7db627dea308f9b52c75895b3642040eb0"
     },
     {
       "path": "server/lc81/read-policy.mjs",
-      "sha": "7ea4018bc8d6e81952f4b0a1dc2560fb001397f0"
+      "sha": "2e0b88429ef3b294434a19664814d818fa6f2a3e"
     },
     {
       "path": "server/lc81/roi-commands.mjs",
@@ -271,7 +279,11 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "8b5d2d0079f4253144d5ae16910866f5e745a510"
+      "sha": "fa3954ec3bb46e25468dfc74c39af4ca559c5b88"
+    },
+    {
+      "path": "server/lc81/subject-reports.mjs",
+      "sha": "58e7e1d9f6f283ba8d002cae040d86ec3ab11058"
     },
     {
       "path": "server/lc81/training-commands.mjs",
@@ -283,7 +295,7 @@
     },
     {
       "path": "server/lc81/training-ui.js",
-      "sha": "0401a03846540f21683c4b9bf9750facb05ac5fb"
+      "sha": "94b66d848a98c150a1f91e2b71e27fa955c42ee2"
     },
     {
       "path": "server/main.mjs",
@@ -707,7 +719,7 @@
     },
     {
       "path": "tools/lc81-inventory.mjs",
-      "sha": "695441801fab62287749537d01637a66a0e9f931"
+      "sha": "601cb5795c603d182b548669f543aa4d7ade7ab3"
     },
     {
       "path": "tools/package_folder.py",
