@@ -706,6 +706,8 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
    assert(report.metrics.length>0);assert(report.metrics.some(m=>m.id==='training_assigned'));
    assert.throws(()=>store.assistantContext(otherEditor.id,1,{type:'report',kind:'analytics.read',scope,group:'all'}),/Область помощника недоступна/);
   }
+  const mentors=store.mentorWorkspace(manager.id,1);assert(mentors.items.some(p=>p.id===x.f.mentor&&p.can_card));
+  assert(!mentors.items.some(p=>p.id===x.personB&&!p.roles.length&&!p.credentials&&!p.appointments&&!p.authorizations.length));
   const card=store.personCard(manager.id,1,x.f.trainee);
   assert(card.sections.some(s=>s.action==='employment.read'));
   assert(card.sections.some(s=>s.action==='role_assignment.read'));

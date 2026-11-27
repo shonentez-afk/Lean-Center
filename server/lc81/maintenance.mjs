@@ -8,14 +8,14 @@ async function separate(source,target){
  const from=await fs.realpath(source),parent=await fs.realpath(path.dirname(target)),to=path.resolve(parent,path.basename(target));
  if(from===to||to.startsWith(from+path.sep)||from.startsWith(to+path.sep))throw Error('Separate storage directories required');
 }
-export async function migratePilotCopy({source,target,siteId,adminRoleId=null,managerRoleId=null,login='admin',password}){
+export async function migratePilotCopy({source,target,siteId,adminRoleId=null,managerRoleId=null,login='admin',password,siteTimeZone=null}){
  await separate(source,target);
  await fs.access(path.join(source,PILOT_STATE));
  // Source opened only for verified reads under the existing single-writer lock.
  const legacy=await openPilot({dataDir:source});
  let migrated;
  try{
-  migrated=await openSecureQA({dataDir:target,initialize:true,login,password,seed:{snapshot:legacy.snapshot(),siteId,adminRoleId,managerRoleId,readSource:sha=>legacy.getSource(sha)}});
+  migrated=await openSecureQA({dataDir:target,initialize:true,login,password,siteTimeZone,seed:{snapshot:legacy.snapshot(),siteId,adminRoleId,managerRoleId,readSource:sha=>legacy.getSource(sha)}});
   return {database_id:legacy.head().database_id,source_sha256:legacy.head().snapshot_sha256};
  }finally{try{await migrated?.close()}finally{await legacy.close()}}
 }

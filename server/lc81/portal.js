@@ -12,14 +12,14 @@ import {cloudSaveState} from '/shared/cloud-save-state.js';
 const $=id=>document.getElementById(id),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n};
 let libraryUI=null,trainingUI=null,centerUI=null,assistantUI=null,mobileUI=null;
 let user=null,page='person.read_basic',busy=false,sequence=0,saving=false,checking=false,saveFailed=false,networkFailed=false;
-const actions={...{'person.read_basic':'Сотрудники','sop.read_effective':'Действующие СОП','training.read':'Обучение','task.read':'Мои задачи / мероприятия',"org.read":"Структура предприятия","operation.read":"Операции","sop.read_history":"Редакции СОП","sop.read_steps":"Шаги действующих СОП","frv.read":"ФРВ","program.read":"Шаблоны программ","training.enrollment.read":"Персональные программы","preparation.read":"Комплекты подготовки","credential.read":"Подготовка наставников","appointment.read":"Приказы о назначении","development.read":"Планы развития","audit.read":"Аудиты","supplement.read":"Доплаты","roi.read":"Экономический эффект","calendar.read":"Календарь","plan.read":"Мой план","center.read":"Дашборд","analytics.read":"Аналитика","metrics.read":"Дерево показателей"},'person.read_directory':'Сотрудники — справочник','equipment.read':'Оборудование','workplace.read':'Рабочие места','sop.constructor':'Конструктор СОП','sop.read_twi':'Планы инструктажа TWI','sop.read_linked_frv':'ФРВ по СОП','matrix.read':'Матрицы компетенций','authorization.read':'Полномочия наставников','order.read':'Групповые приказы','self.read':'Самооценка наставников','bank.read':'Банк вопросов','skill.read':'Каталог навыков','requirement.read':'Требования по профессиям','coverage.read':'Покрытие компетенций','assessment.read':'Оценки компетенций','profession.read':'Профессии','position.read':'Должности','shift.read':'Смены','category.read':'Категории навыков','scale.read':'Шкалы оценивания','role.read':'Роли сотрудников','employment.read':'Кадровые назначения','role_assignment.read':'Назначения ролей','forms.read':'Бланки и методики','sop.evaluation.read':'Оценки СОП','journal.view':'Журнал инструктажей','retraining.view':'Переобучение','import.view':'Импорт XLSX','assistant.read':'ИИ-помощник'};
+const actions={...{'person.read_basic':'Сотрудники','sop.read_effective':'Действующие СОП','training.read':'Обучение','task.read':'Мои задачи / мероприятия',"org.read":"Структура предприятия","operation.read":"Операции","sop.read_history":"Редакции СОП","sop.read_steps":"Шаги действующих СОП","frv.read":"ФРВ","program.read":"Шаблоны программ","training.enrollment.read":"Персональные программы","preparation.read":"Комплекты подготовки","credential.read":"Подготовка наставников","appointment.read":"Приказы о назначении","development.read":"Планы развития","audit.read":"Аудиты","supplement.read":"Доплаты","roi.read":"Экономический эффект","calendar.read":"Календарь","plan.read":"Мой план","center.read":"Дашборд","analytics.read":"Аналитика","metrics.read":"Дерево показателей"},'person.read_directory':'Сотрудники — справочник','equipment.read':'Оборудование','workplace.read':'Рабочие места','sop.constructor':'Конструктор СОП','sop.read_twi':'Планы инструктажа TWI','sop.read_linked_frv':'ФРВ по СОП','matrix.read':'Матрицы компетенций','authorization.read':'Полномочия наставников','order.read':'Групповые приказы','self.read':'Самооценка наставников','bank.read':'Банк вопросов','skill.read':'Каталог навыков','requirement.read':'Требования по профессиям','coverage.read':'Покрытие компетенций','assessment.read':'Оценки компетенций','profession.read':'Профессии','position.read':'Должности','shift.read':'Смены','category.read':'Категории навыков','scale.read':'Шкалы оценивания','role.read':'Роли сотрудников','employment.read':'Кадровые назначения','role_assignment.read':'Назначения ролей','forms.read':'Бланки и методики','sop.evaluation.read':'Оценки СОП','journal.view':'Журнал инструктажей','retraining.view':'Переобучение','import.view':'Импорт XLSX','assistant.read':'ИИ-помощник','instruction.view':'Инструктажи TWI','internship.view':'Программы стажировки','mentoring.view':'Наставники и ВТ'};
 const directoryActions={'person.read_directory':'person','org.read':'org_unit','equipment.read':'equipment','workplace.read':'workplace','operation.read':'operation','profession.read':'profession','position.read':'position','shift.read':'work_shift','category.read':'skill_category','scale.read':'rating_scale','role.read':'business_role'};
 const actionLabels={...actions,'task.implement_own':'Выполнение собственных задач','sop.read_photo':'Просмотр фотографий СОП','sop.create':'Создание СОП','sop.edit_draft':'Редактирование черновика СОП','sop.revise':'Создание редакции СОП','sop.passport':'Паспорт СОП','sop.from_frv':'Создание СОП из ФРВ','frv.create':'Создание ФРВ','frv.edit_draft':'Редактирование ФРВ','frv.finalize':'Завершение ФРВ','frv.read_summary':'Результаты фактических замеров ФРВ','training.create':'Назначение обучения','training.approve_responsible':'Подтверждение плана ответственным','training.approve_head':'Подтверждение плана руководителем','training.reschedule':'Изменение срока обучения','training.cancel':'Отмена назначения','training.stage':'Факт инструктажа','training.verify':'Проверка знаний','training.practical':'Практическая оценка','training.qualify':'Подтверждение квалификации','training.admit':'Решение о допуске','training.detail':'Карточка обучения','training.read_sop':'СОП назначенного обучения','matrix.create':'Конструктор матриц','matrix.retire':'Закрытие матриц','matrix.detail':'Детальная матрица','person.read_card':'Карточка сотрудника','credential.register':'Регистрация документов подготовки','credential.revoke':'Отзыв документов подготовки','appointment.register':'Регистрация приказов','appointment.revoke':'Отзыв назначений','authorization.register':'Выдача права обучать','authorization.revoke':'Отзыв права обучать','program.create':'Конструктор программ и новые версии','program.retire':'Закрытие шаблонов','program.detail':'Карточка шаблона','training.enrollment.create':'Назначение персональной программы','training.enrollment.result':'Регистрация результата задания','training.enrollment.finish':'Завершение программы','training.enrollment.cancel':'Отмена программы','training.enrollment.detail':'Карточка персональной программы','preparation.create':'Формирование комплекта подготовки','preparation.detail':'Карточка комплекта подготовки','preparation.shift':'Фактическая смена стажировки','preparation.safety':'Протокол обучения безопасным методам','preparation.internship':'Итог стажировки','preparation.questions':'Выдача вопросов','preparation.commission':'Регистрация решения комиссии','order.register':'Регистрация группового приказа','order.detail':'Карточка группового приказа','supplement.create':'Создание ходатайства','supplement.revise':'Уточнение ходатайства','supplement.decide':'Решение по ходатайству','supplement.detail':'Карточка ходатайства','development.create':'Создание планов развития','development.goal.create':'Постановка целей','development.goal.close':'Завершение целей','development.close':'Закрытие планов','development.from_matrix':'Цели из матрицы','development.detail':'Карточка плана развития','audit.create':'Регистрация аудита L1','audit.void':'Аннулирование аудита','audit.detail':'Результаты аудита','self.create':'Собственная самооценка','self.detail':'Результаты самооценки','task.create':'Создание мероприятий','task.start':'Начало выполнения своего мероприятия','task.link':'Связь с повторным обучением или развитием','task.cancel':'Отмена мероприятия','task.verify':'Независимая проверка эффекта','task.detail':'Карточка мероприятия','bank.save':'Версии банка вопросов','bank.detail':'Вопросы и история версий','mentor.method.install':'Первичная установка утверждённой методики','skill.category.create':'Создание категорий навыков','skill.create':'Создание общих навыков','skill.from_sop':'Создание навыков из действующего СОП','requirement.create':'Требования к профессии','requirement.close':'Закрытие требования','coverage.save':'Планирование покрытия','assessment.general':'Регистрация оценки общего навыка','assessment.detail':'Подробности оценки компетенции','calendar.detail':'Карточка планового события','calendar.plan':'Планирование аудитов и оценок','calendar.cancel':'Отмена плана','calendar.complete':'Завершение своего плана по факту','calendar.replan':'Перепланирование после аннулирования','roi.detail':'Финансовые данные и источники эффекта','roi.create':'Создание карточек эффекта','roi.plan':'Плановые расчёты','roi.reschedule':'Сроки контроля эффекта','roi.cancel':'Отмена карточки эффекта','roi.measure':'Независимая проверка расчёта','roi.fact.create':'Регистрация денежного факта','roi.fact.save':'Уточнение своего черновика','roi.fact.confirm':'Независимое подтверждение денег','roi.fact.void':'Аннулирование денежного факта','roi.target':'Денежные цели','roi.target.cancel':'Отмена цели','roi.target.review':'Разбор отклонения цели','roi.twi_basis':'Сопоставимые основания TWI','profession.create':'Создание профессии','profession.update':'Изменение названия профессии','position.create':'Создание должности','position.update':'Изменение названия должности','shift.create':'Создание смены','shift.update':'Изменение названия смены','scale.create':'Создание новой версии шкалы','employment.detail':'Детали кадрового назначения','employment.transfer':'Кадровое перемещение','forms.read':'Редактируемые бланки TWI 03','forms.export':'Выгрузка разрешённых записей','sop.evaluation.read':'Чтение оценок СОП','sop.evaluation.create':'Регистрация оценки СОП','sop.method.install':'Установка методики оценки СОП','audit.mobile.export':'Выгрузка своего автономного аудита RC1','audit.mobile.import':'Приём своего мобильного аудита RC1','assistant.read':'Локальный и контекстный помощник','assistant.cloud':'Разрешение отправки общих тем во внешний ИИ'};
 for(const [action,type] of Object.entries(directoryActions)){
  const prefix=action==='person.read_directory'?'person':action.split('.')[0];
  for(const [op,label] of [['create','Создание'],['update','Изменение'],['archive','Архивирование']])actionLabels[prefix+'.'+op]=label+': '+actions[action];
 }
-const pageActions={person:['person.read_directory','person.read_basic'],home:['center.read'],ai:['assistant.read'],my_plan:['plan.read'],calendar:['calendar.read'],actions:['task.read'],sop:['sop.read_effective','sop.read_steps','sop.read_history'],sop_constructor:['sop.constructor'],frv:['frv.read','sop.read_linked_frv'],twi_plans:['sop.read_twi'],twi:['training.read'],journal:['journal.view'],retraining:['retraining.view'],sop_evaluation:['sop.evaluation.read'],skills:['matrix.read','requirement.read','coverage.read'],practical:['assessment.read'],skill:['skill.read'],programs:['program.read','training.enrollment.read'],preparation:['preparation.read'],knowledge_bank:['bank.read'],development:['development.read'],certification:['credential.read'],appointments:['appointment.read','order.read','authorization.read'],audit:['audit.read'],self_eval:['self.read'],supplements:['supplement.read'],analytics:['analytics.read'],metrics:['metrics.read'],roi:['roi.read'],org_unit:['org.read'],workplace:['workplace.read'],operation:['operation.read'],equipment:['equipment.read'],profession:['profession.read'],position:['position.read'],work_shift:['shift.read'],skill_category:['category.read'],rating_scale:['scale.read'],business_role:['role.read'],person_assignment:['employment.read'],role_assignment:['role_assignment.read'],forms:['forms.read'],import_xlsx:['import.view'],storage:['admin']};
+const pageActions={person:['person.read_directory','person.read_basic'],home:['center.read'],ai:['assistant.read'],my_plan:['plan.read'],calendar:['calendar.read'],actions:['task.read'],sop:['sop.read_effective','sop.read_steps','sop.read_history'],sop_constructor:['sop.constructor'],frv:['frv.read','sop.read_linked_frv'],twi_plans:['sop.read_twi'],twi:['training.read'],instruction:['instruction.view'],internship:['internship.view'],mentoring:['mentoring.view'],journal:['journal.view'],retraining:['retraining.view'],sop_evaluation:['sop.evaluation.read'],skills:['matrix.read','requirement.read','coverage.read'],practical:['assessment.read'],skill:['skill.read'],programs:['program.read','training.enrollment.read'],preparation:['preparation.read'],knowledge_bank:['bank.read'],development:['development.read'],certification:['credential.read'],appointments:['appointment.read','order.read','authorization.read'],audit:['audit.read'],self_eval:['self.read'],supplements:['supplement.read'],analytics:['analytics.read'],metrics:['metrics.read'],roi:['roi.read'],org_unit:['org.read'],workplace:['workplace.read'],operation:['operation.read'],equipment:['equipment.read'],profession:['profession.read'],position:['position.read'],work_shift:['shift.read'],skill_category:['category.read'],rating_scale:['scale.read'],business_role:['role.read'],person_assignment:['employment.read'],role_assignment:['role_assignment.read'],forms:['forms.read'],import_xlsx:['import.view'],storage:['admin']};
 const dirty=()=>hasUnsavedForms($('content'))||libraryUI?.active()===true;
 const discard=()=>{if(libraryUI?.active()&&!libraryUI.close())return false;return !hasUnsavedForms($('content'))||confirm('Есть несохранённые изменения. Продолжить без сохранения?')};
 function refreshIndicator(){
@@ -42,8 +42,8 @@ async function api(url,data,signal){
 }
 function button(text,fn,cls=''){const n=el('button',text,cls);n.type='button';n.addEventListener('click',()=>run(fn));return n}
 async function run(fn){if(busy)return;busy=true;try{await fn()}catch(e){if(e.status===401)showLogin();note(e.message||'Ошибка',true)}finally{busy=false;refreshIndicator()}}
-function showLogin(){sequence++;user=null;libraryUI?.clear();saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
-function showUser(a){user=a;$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Выйти',async()=>{if(!discard()||!$('issued').hidden&&!confirm('Выданный пароль ещё открыт. Завершить сеанс?'))return;await api('logout',{});showLogin();note('Выход выполнен')}));refreshIndicator()}
+function showLogin(){for(const d of document.querySelectorAll('dialog.lc81-password-dialog,dialog.lc72-context-dialog')){if(d.open)d.close();else d.remove()}sequence++;user=null;libraryUI?.clear();saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
+function showUser(a){user=a;$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Изменить пароль',ownPasswordDialog),button('Выйти',async()=>{if(!discard()||!$('issued').hidden&&!confirm('Выданный пароль ещё открыт. Завершить сеанс?'))return;await api('logout',{});showLogin();note('Выход выполнен')}));refreshIndicator()}
 function panel(title,...children){const n=el('section',undefined,'panel');n.append(el('h2',title),...children);return n}
 function table(headers,values){const wrap=el('div',undefined,'tablewrap lc81-rows');const t=el('table'),h=el('thead'),tr=el('tr');for(const v of headers)tr.append(el('th',v));h.append(tr);t.append(h);const b=el('tbody');for(const row of values){const r=el('tr');for(const v of row){const d=el('td');d.append(v instanceof Node?v:el('span',v??'—'));r.append(d)}b.append(r)}t.append(b);wrap.append(t);return wrap}
 function input(name,label,type='text',required=true){const n=el('input');n.name=name;n.type=type;n.required=required;if(type==='password')n.autocomplete='new-password';const l=el('label',label,'field');l.append(n);return l}
@@ -52,6 +52,27 @@ function check(name,label,checked=false){const l=el('label'),n=el('input');n.typ
 const value=(f,k)=>f.elements.namedItem(k).value;
 function form(fields,submit,fn){const f=el('form',undefined,'lc81-form');f.append(...fields,el('button',submit,'primary'));f.addEventListener('submit',e=>{e.preventDefault();run(async()=>{if([...$('content').querySelectorAll('[data-lc-work-form]')].some(x=>x!==f&&x.lcIsDirty?.())&&!confirm('В другой форме есть изменения. Продолжить без их сохранения?'))return;await fn(f)})});return protectWorkForm(f)}
 const options=items=>items.map(x=>[x.id,x.name||x.display_name||x.login||x.id]);
+function ownPasswordDialog(){
+ if(!discard())return;
+ if(!$('issued').hidden)throw Error('Сначала сохраните и закройте выданный пароль');
+ const d=el('dialog',undefined,'lc72-context-dialog lc81-password-dialog'),head=el('div',undefined,'lc72-context-head'),body=el('div',undefined,'lc72-context-body'),trigger=document.activeElement;
+ d.setAttribute('aria-label','Изменение пароля');
+ const close=button('Отмена',()=>d.close());
+ head.append(el('h2','Изменение пароля'),close);
+ const old=input('current_password','Текущий пароль','password');old.querySelector('input').autocomplete='current-password';
+ const f=form([old,input('new_password','Новый пароль (12–128 байт)','password'),input('new_password_confirm','Повторите новый пароль','password')],'Сменить пароль',async f=>{
+  if(value(f,'new_password')!==value(f,'new_password_confirm'))throw Error('Пароли не совпадают');
+  await api('password/change',{current_password:value(f,'current_password'),new_password:value(f,'new_password')});
+  f.reset();f.lcResetForm?.();d.close();showLogin();note('Пароль изменён. Все прежние сеансы завершены. Войдите с новым паролем.');
+ });
+ body.append(el('p','После изменения пароля потребуется повторный вход на всех устройствах.'),f);d.append(head,body);document.body.append(d);
+ d.addEventListener('close',()=>{f.reset();d.remove();if(trigger?.isConnected)trigger.focus()},{once:true});d.showModal();
+}
+function displayIssued(r){
+ if(!r.issued_password)return;
+ const n=$('issued');n.hidden=false;n.replaceChildren(el('p','Выданный пароль для '+r.login+': '+r.issued_password),button('Пароль записан · скрыть',()=>{n.replaceChildren();n.hidden=true}));
+}
+const grantLabels={effective:'Действует',revoked:'Отозван',future:'Ещё не действует',expired:'Истёк срок',blocked:'Аккаунт заблокирован',role_ended:'Роль не действует',policy_changed:'Политика изменена · требуется подтверждение',employment_changed:'Кадровое назначение изменилось',scope_changed:'Область недоступна'};
 function adminPanel(d){
  const people=new Map(d.people.map(x=>[x.id,x.display_name])),roles=new Map(d.roles.map(x=>[x.id,x.name])),units=new Map(d.units.map(x=>[x.id,x.name])),accounts=new Map(d.accounts.map(x=>[x.id,x.login]));
  const renew=async(text)=>{note(text);await render()};
@@ -71,10 +92,38 @@ function adminPanel(d){
   if(!$('issued').hidden)throw Error('Сначала сохраните и закройте ранее выданный пароль');
   const r=await api('admin/account',{person_id:value(f,'person_id'),login:value(f,'login'),password:generate?null:password,generate});
   f.reset();f.lcResetForm?.();
-  if(r.issued_password){const n=$('issued');n.hidden=false;n.replaceChildren(el('p','Выданный пароль для '+r.login+': '+r.issued_password),button('Пароль записан · скрыть',()=>{n.replaceChildren();n.hidden=true}));}
+  displayIssued(r);
   await renew('Пользователь создан. Назначьте подтверждённый доступ.');
  });
- const accountTable=table(['Логин','Сотрудник','Статус','Действие'],d.accounts.map(a=>[a.login,a.display_name,a.state==='active'?'Активен':'Заблокирован',a.admin?'Защищённый администратор':button(a.state==='active'?'Заблокировать':'Разблокировать',()=>post('state',{id:a.id,state:a.state==='active'?'blocked':'active'},'Состояние изменено'))]));
+ const accountEditor=el('div'),accountTable=table(['Логин','Сотрудник','Состояние','Сеансы / действия'],d.accounts.map(a=>{
+  const controls=el('div',undefined,'row');
+  if(a.admin)controls.append(el('span','Защищённый администратор. Пароль меняется в личном меню.'));
+  else{
+   controls.append(button(a.state==='active'?'Заблокировать':'Разблокировать',async()=>{
+    if(!discard()||!confirm(a.state==='active'?'Заблокировать вход и завершить все сеансы пользователя?':'Разрешить вход? Доступны только действующие ранее подтверждённые полномочия.'))return;
+    await post('state',{id:a.id,state:a.state==='active'?'blocked':'active',expected_revision:a.credential_revision},'Состояние изменено; старые сеансы не возобновляются');
+   }),button('Сбросить пароль',()=>{
+    if(!discard())return;if(!$('issued').hidden)throw Error('Сначала сохраните и закройте выданный пароль');
+    const f=form([input('password','Новый пароль','password',false),input('password_confirm','Повторите пароль','password',false),check('generate','Сгенерировать пароль на сервере')],'Подтвердить сброс',async f=>{
+     const generate=f.elements.generate.checked,password=value(f,'password');
+     if(!generate&&password!==value(f,'password_confirm'))throw Error('Пароли не совпадают');
+     if(!$('issued').hidden)throw Error('Сначала сохраните и закройте выданный пароль');
+     if(!confirm('Сбросить пароль? Все сеансы этого аккаунта завершатся; блокировка и роли не меняются.'))return;
+     const r=await api('admin/password-reset',{id:a.id,expected_revision:a.credential_revision,password:generate?null:password,generate});
+     f.reset();f.lcResetForm?.();displayIssued(r);await renew('Пароль сброшен; старые сеансы завершены');
+    });
+    accountEditor.replaceChildren(panel('Сброс пароля · '+a.login,f));accountEditor.scrollIntoView({block:'nearest'});
+   }),button('Изменить логин',()=>{
+    if(!discard())return;
+    const login=input('login','Новый логин или рабочая почта');login.querySelector('input').value=a.login;
+    accountEditor.replaceChildren(panel('Изменение логина · '+a.login,form([login],'Сохранить новый логин',async f=>{
+     if(!confirm('Изменить логин и завершить все текущие сеансы?'))return;
+     await post('login-change',{id:a.id,expected_revision:a.credential_revision,login:value(f,'login')},'Логин изменён; требуется повторный вход');
+    })));accountEditor.scrollIntoView({block:'nearest'});
+   }));
+  }
+  return [a.login,a.display_name,a.state==='blocked'?'Заблокирован':!a.employment_active?'Нет действующего кадрового назначения':'Активен',controls];
+ }));
  const policyForms=d.roles.map(r=>{
   const p=d.policies.find(x=>x.role_id===r.id);
   if(d.protectedRoles.includes(r.id)){
@@ -87,12 +136,42 @@ function adminPanel(d){
  });
  const grantForm=form([
   select('account_id','Пользователь',options(d.accounts.filter(a=>!a.admin&&a.state==='active'))),
-  select('assignment_id','Действующее назначение роли',d.assignments.map(a=>[a.id,(people.get(a.person_id)||a.person_id)+' — '+(roles.get(a.role_id)||a.role_id)])),
+  select('assignment_id','Действующее назначение роли',d.assignments.filter(a=>a.valid_from<=d.clock.day&&(!a.valid_to||a.valid_to>=d.clock.day)&&a.role_id!==d.protectedRoles[0]).map(a=>[a.id,(people.get(a.person_id)||a.person_id)+' — '+(roles.get(a.role_id)||a.role_id)])),
   select('scope','Область',[['self','Своё'],['assigned','Назначенное обучение'],['unit_tree','Подразделение с дочерними']]),
   select('unit_id','Подразделение (если выбрана область)',options(d.units)),input('valid_to','До (необязательно)','date',false)
  ],'Подтвердить доступ',f=>post('grant',{account_id:value(f,'account_id'),assignment_id:value(f,'assignment_id'),scope:value(f,'scope')==='unit_tree'?{kind:'unit_tree',unit_id:value(f,'unit_id')}:{kind:value(f,'scope')},valid_to:value(f,'valid_to')||null},'Доступ назначен'));
- const grants=table(['Пользователь','Роль','Область','Ревизия','Состояние'],d.grants.map(g=>[accounts.get(g.account_id),roles.get(g.role_id),g.scope.kind==='unit_tree'?units.get(g.scope.unit_id):g.scope.kind,g.policy_revision,g.state==='active'?button('Отозвать',()=>post('revoke',{id:g.id},'Доступ отозван')):'Отозван']));
- return [panel('Пользователи',accountTable,userForm),panel('Права в существующих ролях',...policyForms),panel('Подтверждённые назначения доступа',grantForm,grants),panel('Учебные справочники',grid),panel('Журнал управления доступом',table(['Время','Действие','Цель'],d.audit.map(a=>[a.occurred_at,a.action,a.target_id])))];
+ // Keep role assignment and account together; no cross-person combinations.
+ const accountField=grantForm.elements.account_id,roleField=grantForm.elements.assignment_id,scopeField=grantForm.elements.scope,unitField=grantForm.elements.unit_id;
+ const updateRoles=()=>{
+  const a=d.accounts.find(x=>x.id===accountField.value),matches=d.assignments.filter(x=>x.person_id===a?.person_id&&x.valid_from<=d.clock.day&&(!x.valid_to||x.valid_to>=d.clock.day)&&d.policies.some(p=>p.role_id===x.role_id));
+  roleField.replaceChildren(...matches.map(x=>new Option(roles.get(x.role_id)||x.role_id,x.id)));
+  updateScope();
+ };
+ const updateScope=()=>{
+  const r=d.assignments.find(x=>x.id===roleField.value),manager=r?.role_id===d.protectedRoles[1];
+  scopeField.disabled=manager;if(manager){scopeField.value='unit_tree';unitField.value=d.site}
+  unitField.disabled=manager||scopeField.value!=='unit_tree';
+ };
+ accountField.addEventListener('change',updateRoles);roleField.addEventListener('change',updateScope);scopeField.addEventListener('change',updateScope);updateRoles();grantForm.lcResetForm?.();
+ const grants=table(['Пользователь','Роль','Область','Период','Версия политики','Фактическое состояние','Действие'],d.grants.map(g=>[accounts.get(g.account_id),roles.get(g.role_id),g.scope.kind==='unit_tree'?units.get(g.scope.unit_id):g.scope.kind==='self'?'Своё':'Назначенное обучение',g.valid_from+' — '+(g.valid_to||'без срока'),g.policy_revision,grantLabels[g.status]||'Проверить',g.state==='active'?button('Отозвать',async()=>{if(discard()&&confirm('Немедленно отозвать этот доступ?'))await post('revoke',{id:g.id},'Доступ отозван')}):'—']));
+ const history=el('div'),endForm=(type,x)=>{
+  if(!discard())return;
+  const dateField=input('valid_to',type==='role'?'Последний день действия роли':'Последний рабочий день','date');dateField.querySelector('input').min=x.valid_from>d.clock.day?x.valid_from:d.clock.day;dateField.querySelector('input').value=dateField.querySelector('input').min;
+  const flag=type==='role'?'revoke_now':'block_now';
+  history.replaceChildren(panel((type==='role'?'Завершить роль · ':'Завершить кадровое назначение · ')+(people.get(x.person_id)||''),el('p','Дата включается в период действия. История сохраняется; закрытую запись нельзя переписать.'),form([dateField,input('reason','Основание'),check(flag,type==='role'?'Отозвать связанные доступы немедленно':'Немедленно заблокировать аккаунт и отозвать доступы',true)],'Подтвердить завершение',async f=>{
+   if(!confirm('Завершить назначение без удаления истории?'))return;
+   await post(type==='role'?'role-end':'employment-end',{id:x.id,expected_revision:x.rev,valid_to:value(f,'valid_to'),reason:value(f,'reason'),[flag]:f.elements[flag].checked},'Назначение завершено');
+  })));history.scrollIntoView({block:'nearest'});
+ };
+ const periodText=x=>x.valid_from+' — '+(x.valid_to||'без срока');
+ const peopleHistory=panel('Кадровая история и роли',el('p','Перевод выполняется в кадровом реестре. Здесь — окончание действующей роли и последнего кадрового назначения. Сначала урегулируйте открытое обучение, задачи, планы и роли.'),table(['Сотрудник','Роль','Период','Действие'],d.assignments.map(x=>[people.get(x.person_id),roles.get(x.role_id),periodText(x),x.valid_to===null&&x.role_id!==d.protectedRoles[0]?button('Завершить роль',()=>endForm('role',x)):'—'])),table(['Сотрудник','Подразделение','Период','Действие'],d.employment.map(x=>[people.get(x.person_id),units.get(x.unit_id),periodText(x),x.valid_to===null&&x.valid_from<=d.clock.day?button('Завершить назначение',()=>endForm('employment',x)):'—'])),history);
+ const clock=panel('Календарь предприятия',el('p','Текущий часовой пояс: '+d.clock.zone+' · рабочая дата '+d.clock.day+' · смещение '+d.clock.offset_minutes+' мин.'),el('p',d.clock.configured?'Часовой пояс закреплён в хранилище. Старые события не пересчитываются.':'Пока используется UTC. Укажите фактический IANA часовой пояс предприятия; он будет зафиксирован один раз. Не определяется по компьютеру пользователя.'));
+ if(!d.clock.configured)clock.append(form([input('zone','IANA часовой пояс (например Asia/Novokuznetsk)'),check('confirmed','Подтверждаю календарь предприятия; текущие сеансы сотрудников завершатся')],'Закрепить часовой пояс',async f=>{
+  if(!f.elements.confirmed.checked)throw Error('Подтвердите часовой пояс');
+  await post('clock',{zone:value(f,'zone').trim(),confirmed:true},'Календарь предприятия закреплён');
+ }));
+ const storage=panel('Хранение и восстановление',el('p','Резервная копия выполняется только администратором сервера на остановленном экземпляре в отдельную новую папку. Копия содержит закрытые учётные записи, права и исходники; её нельзя передавать в браузер или хранить в общей папке.'),el('pre','LC81_QA=1 node server/lc81-maintenance.mjs backup /abs/source /abs/new-backup\nLC81_QA=1 node server/lc81-maintenance.mjs restore-new /abs/new-backup /abs/new-restored'),el('p','Восстановление не перезаписывает исходное хранилище. Сначала проверьте копию в изолированном QA; только после приёмки переключайте размещение. Рабочий Amvera этим экраном не изменяется.'));
+ return [panel('Пользователи',accountTable,accountEditor,userForm),panel('Права в существующих ролях',...policyForms),panel('Подтверждённые назначения доступа',grantForm,grants),peopleHistory,panel('Административные справочники',grid),clock,storage,panel('Журнал управления доступом',table(['Время (UTC)','Кто','Действие','Цель','Основание'],d.audit.map(a=>[a.occurred_at,accounts.get(a.actor_account_id)||a.actor_account_id,a.action,a.target_id,a.reason])))];
 }
 
 function directoryPanel(info,items){
@@ -252,6 +331,9 @@ async function openLinked(host,r){
 function buildNav(){
  const nav=$('nav');nav.replaceChildren();const available=new Set(Object.keys(actions).filter(id=>user.permissions.includes(id)&&!['sop.read_twi','sop.read_linked_frv','sop.constructor'].includes(id)));if(user.admin)available.add('admin');
  if(!user.person_id)available.delete('plan.read');
+ if(user.permissions.includes('training.read'))available.add('instruction.view');else available.delete('instruction.view');
+ if(['program.read','training.enrollment.read'].some(k=>user.permissions.includes(k)))available.add('internship.view');else available.delete('internship.view');
+ if(['person.read_basic','person.read_directory'].some(k=>user.permissions.includes(k))&&['authorization.read','role_assignment.read','credential.read','appointment.read'].some(k=>user.permissions.includes(k)))available.add('mentoring.view');else available.delete('mentoring.view');
  if(Object.keys(directoryActions).some(k=>{const type=k==='person.read_directory'?'person':k.split('.')[0];return user.permissions.includes(k)&&['create','update'].some(op=>user.permissions.includes(type+'.'+op))}))available.add('import.view');
  if(['training.read','training.detail','sop.read_history','operation.read','org.read'].every(x=>user.permissions.includes(x)))available.add('journal.view');
  if(['training.read','training.detail','assessment.read','assessment.detail','audit.read','audit.detail','matrix.read','matrix.detail','development.read','development.detail','task.read','task.detail'].every(x=>user.permissions.includes(x)))available.add('retraining.view');
@@ -283,6 +365,23 @@ async function render(){
   buildNav();$('content').replaceChildren(); // do not retain stale authorized rows
   if(page==='admin'&&user.admin){const data=await api('admin');if(serial===sequence)$('content').replaceChildren(...adminPanel(data));return}
   if(!page){$('content').replaceChildren(panel('Личное рабочее пространство',el('p','Вам пока не назначены права на рабочие разделы. Обратитесь к администратору.')));return}
+  if(page==='instruction.view'){
+   const d=await api('resources?action=training.read');if(serial===sequence)$('content').replaceChildren(trainingUI.training(d.items,user,'instruction'));return;
+  }
+  if(page==='internship.view'){
+   const root=el('div');
+   for(const action of ['program.read','training.enrollment.read'])if(user.permissions.includes(action)){
+    const d=await api('resources?action='+action);root.append(trainingUI.programPanel(action,d.items,user,'internship'));
+   }
+   if(serial===sequence)$('content').replaceChildren(root);return;
+  }
+  if(page==='mentoring.view'){
+   const d=await api('mentor/workspace'),host=el('div'),root=panel('Наставники и внутренние тренеры',el('p','Роли, документы, полномочия и открытые обучения по доступным данным. Количества не включают скрытые записи.'),
+    table(['Сотрудник','Подразделение','Доступные роли','Документы подготовки','Приказы','Действующие права обучать','Открытые обучения','Действия'],d.items.map(x=>[x.name,x.unit,x.roles.join(', '),x.credentials,x.appointments,x.authorizations.filter(r=>r.valid).length,x.training,x.can_card?button('Карточка сотрудника',()=>trainingUI.card(host,x.id)):'—'])),host);
+   const links=el('div',undefined,'row');
+   for(const [action,label] of [['authorization.read','Полномочия по операциям'],['credential.read','Сертификация'],['appointment.read','Назначения'],['role_assignment.read','Роли сотрудников']])if(user.permissions.includes(action))links.append(button(label,async()=>{if(!discard())return;page=action;await render()}));
+   root.append(links);if(serial===sequence)$('content').replaceChildren(root);return;
+  }
   if(page==='assistant.read'){const n=await assistantUI.workspace();if(serial===sequence)$('content').replaceChildren(n);return}
   if(page==='sop.constructor'){
    const info=await api('library/info?kind=sop');if(serial===sequence)$('content').replaceChildren(libraryUI.createPanel('sop',info));return;

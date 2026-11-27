@@ -157,6 +157,9 @@ try{
  await m.p.locator('#content select[name=profession_id]').selectOption({label:'Учебная профессия браузера'});
  await button(m.p,'Оформить новое назначение').click();
  await m.p.getByRole('cell',{name:'Учебная профессия браузера',exact:true}).waitFor();
+ await goSection('instruction.view');await m.p.getByRole('heading',{name:'Реестр инструктажей TWI',exact:true}).waitFor();
+ await goSection('internship.view');await m.p.getByRole('heading',{name:'Шаблоны стажировки',exact:true}).waitFor();
+ await goSection('mentoring.view');await m.p.getByRole('heading',{name:'Наставники и внутренние тренеры',exact:true}).waitFor();
  await goSection('journal.view');await m.p.getByRole('heading',{name:'Журнал заданий и проведённых инструктажей',exact:true}).waitFor();
  await goSection('retraining.view');await m.p.getByRole('heading',{name:'Единая очередь оснований для переобучения',exact:true}).waitFor();
  await goSection('sop.evaluation.read');await m.p.getByRole('heading',{name:'Оценки СОП',exact:true}).last().waitFor();
@@ -243,6 +246,13 @@ try{
  assert.equal(saved.constructor.steps[0].hasPhoto,true);
  assert(Object.keys(saved.photoAssets).length>0);
  assert.equal((await m.ctx.storageState({indexedDB:true})).origins.length,0,'no persistent editor storage');
+ // Visit every exposed working destination under the enterprise manager.
+ const destinations=await m.p.locator('#nav [data-action]').evaluateAll(ns=>ns.map(n=>n.dataset.action));
+ for(const dest of destinations){
+  await goSection(dest);await indicator(m.p,'saved').waitFor({timeout:30000});
+  assert(await m.p.locator('#content').evaluate(e=>e.childElementCount>0),'Empty destination: '+dest);
+  assert.equal(await m.p.locator('#status.error').count(),0,'Route failed: '+dest);
+ }
  const r=await profile('reader',readerPassword,{width:390,height:844});await r.p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();
  assert.equal(await r.p.getByRole('cell',{name:'BROWSER-A',exact:true}).count(),0);assert.equal(await r.p.getByRole('cell',{name:'BROWSER-C',exact:true}).count(),0);
  assert.equal(await button(r.p,'Добавить').count(),0);assert.equal(await button(r.p,'Изменить').count(),0);
@@ -254,6 +264,10 @@ try{
  const aa=await profile('admin',adminPassword,{width:1440,height:900});
  await aa.p.getByRole('heading',{name:'Пользователи и права доступа',exact:true}).waitFor();
  assert(await aa.p.locator('#nav [data-action=admin]').count());
+ await aa.p.getByRole('heading',{name:'Кадровая история и роли',exact:true}).waitFor();
+ await aa.p.getByRole('heading',{name:'Календарь предприятия',exact:true}).waitFor();
+ await aa.p.getByRole('heading',{name:'Хранение и восстановление',exact:true}).waitFor();
+ await button(aa.p,'Изменить пароль').click();await aa.p.getByRole('dialog',{name:'Изменение пароля'}).waitFor();await aa.p.getByRole('dialog').getByRole('button',{name:'Отмена',exact:true}).click();
  assert.equal(await aa.p.evaluate(()=>Object.keys(localStorage).length),0);
  const cookie=(await aa.ctx.cookies()).find(x=>x.name==='__Host-lc81');assert(cookie?.httpOnly&&cookie.secure&&cookie.sameSite==='Strict');
  for(const p of [m.p,r.p,aa.p])assert.equal(await p.evaluate(()=>document.querySelector('script[src*="sql"]')!==null),false);

@@ -9,6 +9,7 @@ import {programResource,enrollmentResource,preparationResource,personWorkResourc
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {matchesRoleKind} from '../../src/modules/master-data/role-matching.js';
 import {PilotError} from '../lc74-store.mjs';
+import {civilPayload} from './site-clock.mjs';
 const must=(v,s,m)=>{if(!v)throw new PilotError(s,m)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
 const date=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
@@ -27,7 +28,7 @@ const programLabel=p=>p.code+' · '+p.title+' · v'+p.version_no;
 const kinds=Object.fromEntries(Object.entries(PROGRAM_DOCS).map(([k,v])=>[k,v.title]));
 function emit(db,a,type,id,operation,rev,payload,action){
  const event=uuid();
- try{applyEvent(db,{id:event,entity_type:type,entity_id:id,operation,expected_revision:rev,payload,occurred_at:a.at})}
+ try{applyEvent(db,{id:event,entity_type:type,entity_id:id,operation,expected_revision:rev,payload:civilPayload(type,payload,a.offsetMinutes??0),occurred_at:a.at})}
  catch(e){throw new PilotError(422,'Проверка программы: '+String(e.message||'ошибка').split('\n')[0].slice(0,250))}
  a.audit(action,event);
  return {id,rev:one(db,'SELECT rev FROM '+type+' WHERE id=?',[id]).rev};

@@ -1,6 +1,6 @@
 // Explicit, closed allowlist. Entries describe ONLY implemented QA coverage.
-// Future actions (including director approval and password reset) are absent
-// and therefore denied. No wildcard permissions or dynamic table names.
+// Future work actions (including director approval) are absent and denied.
+// Account password / identity / lifecycle commands are separate, never role permissions. No wildcard permissions or dynamic table names.
 export const RESOURCE_TABLES=Object.freeze({
  'person.read_basic':'person',
  'person.read_directory':'person',

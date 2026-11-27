@@ -90,12 +90,12 @@ export function saveLibrary(db,request,ctx,inspected,{at,audit}){
  const current=one(db,'SELECT rev FROM '+entity_type+' WHERE id=?',[entity_id]);
  return {id:entity_id,revision_id:kind==='sop'?(command==='save'?revision_id:eventId):null,rev:current.rev,state:'draft',source_sha256:inspected.source.sha256};
 }
-export function passportLibrary(db,input,{read,allows,at,audit}){
+export function passportLibrary(db,input,{read,allows,at,offsetMinutes=0,audit}){
  must(exact(input,['id','revision_id','expected_revision','print_format','changed_on'])&&isId(input.id)&&isId(input.revision_id)&&Number.isSafeInteger(input.expected_revision)&&date(input.changed_on)&&['portrait','landscape'].includes(input.print_format),400,'Неверные поля паспорта');
  must(read('sop.read_history',input.revision_id)&&allows('sop.passport','sop.read_history',input.revision_id),403,'Паспорт недоступен');
  const r=one(db,"SELECT d.id,d.rev FROM document d JOIN document_revision v ON v.document_id=d.id WHERE d.id=? AND d.archived=0 AND v.id=? AND v.state='draft'",[input.id,input.revision_id]);
  must(r?.rev===input.expected_revision,409,'Документ изменился или не является черновиком');
- apply(db,{id:uuid(),entity_type:'document',entity_id:r.id,operation:'update',expected_revision:r.rev,payload:{command:'passport',revision_id:input.revision_id,print_format:input.print_format,changed_on:input.changed_on},occurred_at:at},audit,'sop.passport');
+ apply(db,{id:uuid(),entity_type:'document',entity_id:r.id,operation:'update',expected_revision:r.rev,payload:{command:'passport',revision_id:input.revision_id,print_format:input.print_format,changed_on:input.changed_on,business_offset_minutes:offsetMinutes},occurred_at:at},audit,'sop.passport');
  return {id:r.id,revision_id:input.revision_id,rev:r.rev+1};
 }
 export function finalizeLibrary(db,input,{read,allows,personId,at,audit}){

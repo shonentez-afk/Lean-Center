@@ -7,6 +7,8 @@ import {fileURLToPath} from 'node:url';
 import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-store.mjs';
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
+import {siteClock,normalizeZone,SITE_ZONE_KEY} from './site-clock.mjs';
+import {changeOwnPassword,resetAccountPassword,renameAccount,grantStatus,endRole,endEmployment} from './admin-commands.mjs';
 import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource} from './read-policy.mjs';
 import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,SITE_REFERENCE_TYPES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop} from './training-commands.mjs';
@@ -16,6 +18,7 @@ import {calendarWorkspace,calendarOptions,calendarDetail,createSchedule,changeSc
 import {roiOptions,roiView,roiDetail,createRoi,changeRoi,roiMeasureContext,measureRoi,roiTwiOptions,previewRoiTwi} from './roi-commands.mjs';
 import {competencyOptions,competencyChange,competencyView,assessmentDetail} from './competency-commands.mjs';
 import {mentorOptions,changeMentor,mentorView} from './mentor-commands.mjs';
+import {mentorWorkspace} from './mentor-workspace.mjs';
 import {developmentOptions,createDevelopment,developmentDetail,changeDevelopment,developmentFromMatrix,bankOptions,bankDetail,saveBank,developmentView} from './development-commands.mjs';
 import {qualityOptions,installMentorMethod,createAudit,createSelf,voidAudit,qualityDetail,taskOptions,createTask,taskDetail,changeTask,qualityView} from './quality-commands.mjs';
 import {workflowView,orderOptions,registerOrder,orderDetail,supplementOptions,createSupplement,supplementDetail,changeSupplement} from './mentor-workflows.mjs';
@@ -38,7 +41,7 @@ const SITE='8c810000-0000-4000-8000-000000000003';
 const MAGIC=Buffer.from('LC81QA1\n'),MAX=24*1024*1024;
 const schema=await fs.readFile(fileURLToPath(new URL('./security-schema.sql',import.meta.url)),'utf8');
 const must=(ok,status,message)=>{if(!ok)throw new PilotError(status,message)};
-const day=()=>new Date().toISOString().slice(0,10); // QA UTC; site clock contract remains open.
+const day=db=>siteClock(db).day;
 const at=()=>new Date().toISOString();
 const period=(r,d)=>!!r&&r.valid_from<=d&&(r.valid_to===null||r.valid_to>=d);
 const keys=(o,k)=>o&&typeof o==='object'&&!Array.isArray(o)&&Object.keys(o).length===k.length&&k.every(x=>Object.hasOwn(o,x));
@@ -63,17 +66,17 @@ function account(db,id){
  const a=one(db,'SELECT * FROM lc81_account WHERE id=?',[id]);
  if(!a||a.state!=='active')return null;
  if(a.bootstrap===1)return roleRow(db,config(db).admin)?a:null;
- return activePerson(db,a.person_id)&&employment(db,a.person_id,day()).length===1?a:null;
+ return activePerson(db,a.person_id)&&employment(db,a.person_id,day(db)).length===1?a:null;
 }
-function requireAdmin(db,id){const a=account(db,id);must(a?.bootstrap===1,403,'Требуются полномочия администратора');return a}
+function requireAdmin(db,id,revision=undefined){const a=account(db,id);must(a?.bootstrap===1,403,'Требуются полномочия администратора');must(revision===undefined||a.credential_revision===revision,401,'Сеанс завершён');return a}
 function sanitized(db,a){
  const p=a.person_id&&activePerson(db,a.person_id);
  return {id:a.id,person_id:a.person_id,login:a.login,state:a.state,display_name:p?.display_name||(a.bootstrap===1?'Администратор':'Сотрудник недоступен'),admin:a.bootstrap===1,credential_revision:a.credential_revision,permissions:a.state==='active'&&account(db,a.id)?permissionsFor(db,a):[]};
 }
-function auditView(db){return rows(db,'SELECT id,actor_account_id,action,target_id,occurred_at FROM lc81_audit ORDER BY occurred_at DESC,id LIMIT 100')}
+function auditView(db){return rows(db,"SELECT a.id,a.actor_account_id,a.action,a.target_id,a.occurred_at,m.value reason FROM lc81_audit a LEFT JOIN lc81_meta m ON m.key='reason:'||a.target_id ORDER BY a.occurred_at DESC,a.id LIMIT 100")}
 function security(db,accountId){
  const a=account(db,accountId);if(!a||a.bootstrap===1)return {accounts:[],policies:[],grants:[]};
- const emp=employment(db,a.person_id,day())[0];
+ const emp=employment(db,a.person_id,day(db))[0];
  const policies=rows(db,'SELECT * FROM lc81_policy').map(({role_id,revision,permissions_json})=>({role_id,revision,permissions:JSON.parse(permissions_json)}));
  const grants=rows(db,"SELECT * FROM lc81_grant WHERE account_id=? AND state='active' AND employment_id=?",[a.id,emp.id]).filter(g=>{
   const s=JSON.parse(g.scope_json);
@@ -98,7 +101,8 @@ function libraryAccess(db,a,d){
  return {read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchor,id)=>(LIBRARY_COMMANDS.includes(action)||DETAIL_ACTIONS.includes(action))&&(a.bootstrap===1?action!=='frv.finalize'&&!!readManagerProjection(db,config(db).site,anchor,id,d):canUseLibrary(db,security(db,a.id),a.id,action,anchor,id,d)),readScope:(kind,id)=>a.bootstrap===1?!!readManagerProjection(db,config(db).site,'operation.read',id,d):canReadLibraryAtOperation(db,security(db,a.id),a.id,kind,id,d),permissions:permissionsFor(db,a)};
 }
 function trainingAccess(db,a,d){
- return {accountId:a.id,personId:a.person_id,credentialRevision:a.credential_revision,day:d,at:at(),permissions:permissionsFor(db,a),
+ const clock=siteClock(db);d=clock.day;
+ return {accountId:a.id,personId:a.person_id,credentialRevision:a.credential_revision,day:d,at:clock.at,offsetMinutes:clock.offset_minutes,permissions:permissionsFor(db,a),
  read:(action,id)=>readFor(db,a,action,id,d),
  scope:(action,id,resource)=>a.bootstrap===1?(READ_ACTIONS.includes(action)||DETAIL_ACTIONS.includes(action))&&bootstrapTrainingScope(db,config(db).site,resource):canUseTrainingResource(db,security(db,a.id),a.id,action,id,d,resource),
  allows:(action,id,resource)=>a.bootstrap===1?DETAIL_ACTIONS.includes(action)&&bootstrapTrainingScope(db,config(db).site,resource):canUseTrainingResource(db,security(db,a.id),a.id,action,id,d,resource),
@@ -152,7 +156,7 @@ function projectView(db,a,action,data,d){
 }
 function permissionsFor(db,a){
  if(a.bootstrap===1)return [...READ_ACTIONS,...DIRECTORY_COMMANDS,...DETAIL_ACTIONS,...LIBRARY_COMMANDS.filter(x=>x!=='frv.finalize')]; // Unbound bootstrap cannot perform personal decisions.
- const d=day(),s=security(db,a.id),out=new Set();
+ const d=day(db),s=security(db,a.id),out=new Set();
  for(const g of s.grants){
   if(g.revoked_at!==null||!period(g,d)||!roleRow(db,g.role_id))continue;
   const arow=one(db,'SELECT person_id,role_id,valid_from,valid_to FROM role_assignment WHERE id=?',[g.assignment_id]);
@@ -165,6 +169,8 @@ function permissionsFor(db,a){
 function checkPrivate(db){
  verifyDb(db);
  must(one(db,"SELECT value FROM lc81_meta WHERE key='service_schema'")?.value==='1',503,'Неизвестная схема авторизации');
+ const tz=one(db,'SELECT value FROM lc81_meta WHERE key=?',[SITE_ZONE_KEY])?.value;
+ must(tz===undefined||normalizeZone(tz)!==null,503,'Некорректный часовой пояс хранилища');
  const admins=rows(db,'SELECT * FROM lc81_account WHERE bootstrap=1');
  const cfg=config(db);
  must(isId(cfg.site)&&isId(cfg.admin)&&isId(cfg.manager)&&cfg.admin!==cfg.manager&&admins.length===1&&admins[0].state==='active'&&roleRow(db,cfg.admin)&&roleRow(db,cfg.manager)&&rootUnit(db,cfg.site)===cfg.site,503,'Нарушена целостность начального администратора');
@@ -215,7 +221,9 @@ function selectRole(db,mapped,fallback,code,name){
  must(!collision,422,'Роль уже существует: требуется явное сопоставление ID');
  return domainCreate(db,'business_role',{code,name},fallback);
 }
-export async function openSecureQA({dataDir,initialize=false,login='admin',password,write=atomicReplace,seed=null}){
+export async function openSecureQA({dataDir,initialize=false,login='admin',password,write=atomicReplace,seed=null,siteTimeZone=null}){
+ const selectedZone=siteTimeZone===null?null:normalizeZone(siteTimeZone);
+ must(siteTimeZone===null||selectedZone,422,'Укажите корректный IANA часовой пояс предприятия');
  must(path.isAbsolute(dataDir)&&dataDir!==path.parse(dataDir).root,503,'Требуется отдельная абсолютная папка QA');
  const {SQL,schema:domainSchema,migration}=await pilotSql();
  let fresh=false;
@@ -240,6 +248,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    current.run(schema);
    tx(current,()=>{
     current.run("INSERT INTO lc81_meta VALUES('service_schema','1')");
+    if(selectedZone)current.run('INSERT INTO lc81_meta VALUES(?,?)',[SITE_ZONE_KEY,selectedZone]);
     const site=seed?seed.siteId:domainCreate(current,'org_unit',{code:'LC81-QA',name:'Учебное предприятие',kind:'Предприятие',parent_id:null},SITE);
     const admin=selectRole(current,seed?.adminRoleId,ADMIN_ROLE,'LC81_ACCESS_ADMIN','Администратор');
     const manager=selectRole(current,seed?.managerRoleId,MANAGER_ROLE,'LC81_CENTER_MANAGER','Управляющий центром TWI');
@@ -258,6 +267,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    current.close();current=null;
   }
   current=await unpack(SQL,file);
+  must(!selectedZone||siteClock(current).configured&&normalizeZone(siteClock(current).zone)===selectedZone,409,'Часовой пояс уже хранится в базе; настройте его явно через администратора');
   must((await fs.readFile(marker,'utf8'))===meta(current,'database_id')+'\n',503,'Отсутствует или повреждён маркер инициализации');
   await checkSources(current,dataDir);
  }catch(e){current?.close();await release();throw e}
@@ -302,7 +312,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   await checkContent(ref,await readFile(ref));
  }
  function checkedAccount(db,actor,revision){const a=account(db,actor);must(a&&a.credential_revision===revision,401,'Сеанс завершён');return a}
- const resolveCtx=(db,actor,revision,input)=>resolveLibraryContext(db,input,libraryAccess(db,checkedAccount(db,actor,revision),day()));
+ const resolveCtx=(db,actor,revision,input)=>resolveLibraryContext(db,input,libraryAccess(db,checkedAccount(db,actor,revision),day(db)));
  return {
   get healthy(){return !closed&&!poisoned},
   authenticate(login,password){return read(db=>{
@@ -311,21 +321,21 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    return ok&&account(db,a.id)?sanitized(db,a):null;
   })},
   session(id,revision){return read(db=>{const a=account(db,id);return a&&a.credential_revision===revision?sanitized(db,a):null})},
-  adminData(actor){return read(db=>{
-   requireAdmin(db,actor);
-   return {accounts:rows(db,'SELECT * FROM lc81_account ORDER BY login').map(a=>sanitized(db,a)),
+  adminData(actor,revision){return read(db=>{
+   requireAdmin(db,actor,revision);
+   return {clock:siteClock(db),accounts:rows(db,'SELECT * FROM lc81_account ORDER BY login').map(a=>({...sanitized(db,a),employment_active:a.bootstrap===1||employment(db,a.person_id,day(db)).length===1})),
     people:rows(db,'SELECT id,display_name,employee_code FROM person WHERE archived=0 ORDER BY display_name'),
     units:rows(db,'SELECT id,parent_id,name,code FROM org_unit WHERE archived=0 ORDER BY name'),
     roles:rows(db,'SELECT id,code,name FROM business_role WHERE archived=0 ORDER BY name'),
-    assignments:rows(db,'SELECT id,person_id,role_id,valid_from,valid_to FROM role_assignment'),
-    employment:rows(db,'SELECT id,person_id,unit_id,valid_from,valid_to FROM person_assignment'),
+    assignments:rows(db,'SELECT id,person_id,role_id,valid_from,valid_to,rev FROM role_assignment ORDER BY valid_from DESC,id'),
+    employment:rows(db,'SELECT id,person_id,unit_id,valid_from,valid_to,rev FROM person_assignment ORDER BY valid_from DESC,id'),
     policies:rows(db,'SELECT * FROM lc81_policy').map(p=>({role_id:p.role_id,revision:p.revision,permissions:JSON.parse(p.permissions_json)})),
-    grants:rows(db,'SELECT id,account_id,role_id,assignment_id,employment_id,scope_json,policy_revision,state,valid_from,valid_to FROM lc81_grant').map(g=>({...g,scope:JSON.parse(g.scope_json)})),
+    grants:rows(db,'SELECT id,account_id,role_id,assignment_id,employment_id,scope_json,policy_revision,state,valid_from,valid_to,revoked_at FROM lc81_grant ORDER BY issued_at DESC,id').map(g=>{const x={...g,scope:JSON.parse(g.scope_json)};return {...x,status:grantStatus(db,x,day(db),config(db).site)}}),
     actions:PERMISSIONS,audit:auditView(db),site:config(db).site,protectedRoles:[config(db).admin,config(db).manager]};
   })},
-  createReference(actor,type,payload){
+  createReference(actor,type,payload,revision){
    return mutate(db=>{
-    requireAdmin(db,actor);
+    requireAdmin(db,actor,revision);
     must(REFERENCE_CREATE_TYPES.includes(type),403,'Неизвестное действие');
     must(payload&&typeof payload==='object'&&!Array.isArray(payload),400,'Неверные поля');
     // Only QA references; no generic writes, imports or business events.
@@ -337,11 +347,11 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     audit(db,actor,'directory.create.'+type,id);return {id};
    });
   },
-  createAccount(actor,input){
+  createAccount(actor,input,revision){
    return mutate(db=>{
-    requireAdmin(db,actor);must(keys(input,['person_id','login','password','generate']),400,'Неверные поля аккаунта');
+    requireAdmin(db,actor,revision);must(keys(input,['person_id','login','password','generate']),400,'Неверные поля аккаунта');
     const {person_id,generate}=input,name=normalizeLogin(input.login);
-    must(isId(person_id)&&activePerson(db,person_id)&&employment(db,person_id,day()).length===1&&name,422,'Нужен активный сотрудник, одно назначение и уникальный логин');
+    must(isId(person_id)&&activePerson(db,person_id)&&employment(db,person_id,day(db)).length===1&&name,422,'Нужен активный сотрудник, одно назначение и уникальный логин');
     must(!one(db,'SELECT id FROM lc81_account WHERE person_id=? OR login=?',[person_id,name]),409,'Аккаунт или логин уже существует');
     must(typeof generate==='boolean'&&(generate?input.password===null:validPassword(input.password)),422,'Укажите стойкий пароль');
     const secret=generate?generatePassword():input.password,id=uuid();
@@ -349,159 +359,191 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     audit(db,actor,'account.create',id);return {id,login:name,...(generate?{issued_password:secret}:{})};
    });
   },
-  setState(actor,id,state){
+  setState(actor,id,state,revision,expectedRevision=undefined){
    return mutate(db=>{
-    requireAdmin(db,actor);const a=one(db,'SELECT * FROM lc81_account WHERE id=?',[id]);
+    requireAdmin(db,actor,revision);const a=one(db,'SELECT * FROM lc81_account WHERE id=?',[id]);
     must(a&&a.bootstrap!==1&&['active','blocked'].includes(state),403,'Защищённый аккаунт или неверное состояние');
+    must(expectedRevision===undefined||a.credential_revision===expectedRevision,409,'Учётная запись изменилась');
+    must(state!=='active'||activePerson(db,a.person_id)&&employment(db,a.person_id,day(db)).length===1,422,'Сначала зарегистрируйте действующее кадровое назначение');
     db.run('UPDATE lc81_account SET state=?,credential_revision=credential_revision+1 WHERE id=?',[state,id]);
     audit(db,actor,'account.'+state,id);return {id,state};
    });
   },
-  setPolicy(actor,input){
+  changePassword(actor,revision,input){
+   return mutate(db=>changeOwnPassword(db,checkedAccount(db,actor,revision),input,(k,id)=>audit(db,actor,k,id)));
+  },
+  resetPassword(actor,revision,input){
+   return mutate(db=>{requireAdmin(db,actor,revision);return resetAccountPassword(db,input,(k,id)=>audit(db,actor,k,id))});
+  },
+  renameAccount(actor,revision,input){
+   return mutate(db=>{requireAdmin(db,actor,revision);return renameAccount(db,input,(k,id)=>audit(db,actor,k,id))});
+  },
+  endRole(actor,revision,input){
+   return mutate(db=>{requireAdmin(db,actor,revision);return endRole(db,input,{...siteClock(db),adminRole:config(db).admin,audit:(k,id)=>audit(db,actor,k,id)})});
+  },
+  endEmployment(actor,revision,input){
+   return mutate(db=>{requireAdmin(db,actor,revision);return endEmployment(db,input,{...siteClock(db),audit:(k,id)=>audit(db,actor,k,id)})});
+  },
+  configureClock(actor,revision,input){
    return mutate(db=>{
-    requireAdmin(db,actor);must(keys(input,['role_id','revision','permissions']),400,'Неверные поля политики');
-    const {role_id,revision,permissions}=input;
-    must(roleRow(db,role_id)&&role_id!==config(db).admin&&role_id!==config(db).manager,403,'Системная политика защищена');
-    must(Array.isArray(permissions)&&permissions.length<=PERMISSIONS.length&&new Set(permissions).size===permissions.length&&permissions.every(p=>PERMISSIONS.includes(p)),422,'Неизвестное право');
-    const old=one(db,'SELECT revision FROM lc81_policy WHERE role_id=?',[role_id]);must(revision===(old?.revision||0),409,'Политика изменилась');
-    db.run('INSERT INTO lc81_policy VALUES(?,?,?) ON CONFLICT(role_id) DO UPDATE SET revision=excluded.revision,permissions_json=excluded.permissions_json',[role_id,revision+1,JSON.stringify([...permissions].sort())]);
-    audit(db,actor,'policy.update',role_id);return {revision:revision+1};
+    requireAdmin(db,actor,revision);must(keys(input,['zone','confirmed'])&&input.confirmed===true,400,'Подтвердите календарь предприятия');
+    must(!siteClock(db).configured,409,'Часовой пояс уже установлен; изменение требует отдельной миграции');
+    const zone=normalizeZone(input.zone);must(zone,422,'Укажите корректный IANA часовой пояс');
+    db.run('INSERT INTO lc81_meta VALUES(?,?)',[SITE_ZONE_KEY,zone]);
+    // The date boundary changes permission evaluation; require fresh sessions
+    // without altering any historic domain record or role assignment.
+    db.run('UPDATE lc81_account SET credential_revision=credential_revision+1 WHERE bootstrap=0');
+    audit(db,actor,'site.clock.configure',config(db).site);return siteClock(db);
    });
   },
-  grant(actor,input){
+  setPolicy(actor,input,revision){
    return mutate(db=>{
-    requireAdmin(db,actor);must(keys(input,['account_id','assignment_id','scope','valid_to']),400,'Неверные поля назначения');
-    const a=account(db,input.account_id),d=day(),assignment=one(db,'SELECT * FROM role_assignment WHERE id=?',[input.assignment_id]);
+    requireAdmin(db,actor,revision);must(keys(input,['role_id','revision','permissions']),400,'Неверные поля политики');
+    const {role_id,revision:policyRevision,permissions}=input;
+    must(roleRow(db,role_id)&&role_id!==config(db).admin&&role_id!==config(db).manager,403,'Системная политика защищена');
+    must(Array.isArray(permissions)&&permissions.length<=PERMISSIONS.length&&new Set(permissions).size===permissions.length&&permissions.every(p=>PERMISSIONS.includes(p)),422,'Неизвестное право');
+    const old=one(db,'SELECT revision FROM lc81_policy WHERE role_id=?',[role_id]);must(policyRevision===(old?.revision||0),409,'Политика изменилась');
+    db.run('INSERT INTO lc81_policy VALUES(?,?,?) ON CONFLICT(role_id) DO UPDATE SET revision=excluded.revision,permissions_json=excluded.permissions_json',[role_id,policyRevision+1,JSON.stringify([...permissions].sort())]);
+    audit(db,actor,'policy.update',role_id);return {revision:policyRevision+1};
+   });
+  },
+  grant(actor,input,revision){
+   return mutate(db=>{
+    requireAdmin(db,actor,revision);must(keys(input,['account_id','assignment_id','scope','valid_to']),400,'Неверные поля назначения');
+    const a=account(db,input.account_id),d=day(db),assignment=one(db,'SELECT * FROM role_assignment WHERE id=?',[input.assignment_id]);
     must(a&&a.bootstrap!==1&&assignment?.person_id===a.person_id&&assignment.role_id!==config(db).admin&&period(assignment,d)&&roleRow(db,assignment.role_id),422,'Не найдено действующее назначение роли');
     const emp=employment(db,a.person_id,d)[0],p=one(db,'SELECT * FROM lc81_policy WHERE role_id=?',[assignment.role_id]),s=input.scope;
     must(p&&s&&((keys(s,['kind'])&&['self','assigned'].includes(s.kind))||(keys(s,['kind','unit_id'])&&s.kind==='unit_tree'&&rootUnit(db,s.unit_id)===rootUnit(db,emp.unit_id))),422,'Нет политики или неверная область');
     if(assignment.role_id===config(db).manager)must(s.kind==='unit_tree'&&s.unit_id===config(db).site,422,'Управляющий назначается на площадку');
     const end=input.valid_to;
     must(end===null||typeof end==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(end)&&Number.isFinite(Date.parse(end+'T00:00:00Z'))&&new Date(end+'T00:00:00Z').toISOString().slice(0,10)===end&&end>=d,422,'Неверный срок');
+    const prior=rows(db,"SELECT id,scope_json,valid_from,valid_to FROM lc81_grant WHERE account_id=? AND assignment_id=? AND employment_id=? AND policy_revision=? AND state='active'",[a.id,assignment.id,emp.id,p.revision]).find(g=>period(g,d)&&JSON.parse(g.scope_json).kind===s.kind&&(s.kind!=='unit_tree'||JSON.parse(g.scope_json).unit_id===s.unit_id));
+    must(!prior,409,'Такой доступ уже действует; отзовите прежнее назначение перед изменением срока');
     const id=uuid();db.run("INSERT INTO lc81_grant(id,account_id,role_id,assignment_id,employment_id,scope_json,policy_revision,state,valid_from,valid_to,revoked_at,issued_by,issued_at) VALUES(?,?,?,?,?,?,?,'active',?,?,NULL,?,?)",[id,a.id,assignment.role_id,assignment.id,emp.id,JSON.stringify(s),p.revision,d,end,actor,at()]);
     audit(db,actor,'grant.create',id);return {id};
    });
   },
-  revoke(actor,id){
+  revoke(actor,id,revision){
    return mutate(db=>{
-    requireAdmin(db,actor);must(one(db,"SELECT id FROM lc81_grant WHERE id=? AND state='active'",[id]),404,'Назначение не найдено');
+    requireAdmin(db,actor,revision);must(one(db,"SELECT id FROM lc81_grant WHERE id=? AND state='active'",[id]),404,'Назначение не найдено');
     db.run("UPDATE lc81_grant SET state='revoked',revoked_at=? WHERE id=?",[at(),id]);audit(db,actor,'grant.revoke',id);return {id};
    });
   },
   readResource(actor,action,id){return read(db=>{
    const a=account(db,actor);if(!a)return null;
-   const v=a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day()):readAuthorized(db,security(db,actor),actor,action,id,day());
-   return v?projectView(db,a,action,v.data,day()):null;
+   const v=a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day(db)):readAuthorized(db,security(db,actor),actor,action,id,day(db));
+   return v?projectView(db,a,action,v.data,day(db)):null;
   })},
   listResources(actor,action){return read(db=>{
    const a=account(db,actor);must(a,401,'Необходим вход');must(READ_ACTIONS.includes(action)&&permissionsFor(db,a).includes(action),404,'Раздел недоступен');
    const table=RESOURCE_TABLES[action];
-   const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day()):readAuthorized(db,s,actor,action,id,day())).filter(Boolean).map(v=>projectView(db,a,action,v.data,day()));
+   const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day(db)):readAuthorized(db,s,actor,action,id,day(db))).filter(Boolean).map(v=>projectView(db,a,action,v.data,day(db)));
   })},
-  trainingOptions(actor,revision,operationId=null){return read(db=>trainingOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),operationId))},
+  trainingOptions(actor,revision,operationId=null){return read(db=>trainingOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),operationId))},
   async createTraining(actor,revision,input){
-   const resolved=read(db=>resolveTrainingCreate(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())));
+   const resolved=read(db=>resolveTrainingCreate(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))));
    try{await verifyDomainEvents([{id:uuid(),entity_type:'training_assignment',entity_id:uuid(),operation:'create',expected_revision:0,payload:resolved.payload,occurred_at:at()}],ref=>readFile(ref))}
    catch(e){throw new PilotError(422,'Проверьте исходный СОП, актуальный план TWI и методику: '+String(e.message||'ошибка').split('\n')[0].slice(0,200))}
    return mutate(db=>{
-    const access=trainingAccess(db,checkedAccount(db,actor,revision),day()),next=resolveTrainingCreate(db,input,access);
+    const access=trainingAccess(db,checkedAccount(db,actor,revision),day(db)),next=resolveTrainingCreate(db,input,access);
     must(next.source.sha256===resolved.source.sha256&&JSON.stringify(next.payload)===JSON.stringify(resolved.payload),409,'Назначение изменилось при проверке');
     return createTraining(db,next,access);
    });
   },
-  changeTraining(actor,revision,input){return mutate(db=>changeTraining(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  trainingDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...trainingDetail(db,a,id),forms:documentLinks(db,a,id,["training_plan","journal"])}})},
-  trainingSop(actor,revision,id){return read(db=>trainingSop(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
-  programOptions(actor,revision){return read(db=>programOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  saveProgram(actor,revision,input){return mutate(db=>saveProgram(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  retireProgram(actor,revision,input){return mutate(db=>retireProgram(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  programDetail(actor,revision,id){return read(db=>programDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
-  enrollmentOptions(actor,revision){return read(db=>enrollmentOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  createEnrollment(actor,revision,input){return mutate(db=>createEnrollment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  changeEnrollment(actor,revision,input){return mutate(db=>changeEnrollment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  enrollmentDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...enrollmentDetail(db,a,id),forms:documentLinks(db,a,id,['entry'])}})},
-  preparationOptions(actor,revision){return read(db=>preparationOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  createPreparation(actor,revision,input){return mutate(db=>createPreparation(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  preparationFactOptions(actor,revision,id,on){return read(db=>preparationFactOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id,on))},
-  recordPreparationFact(actor,revision,input){return mutate(db=>recordPreparationFact(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  preparationDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...preparationDetail(db,a,id),forms:documentLinks(db,a,id,["adaptation","safety_program","internship_program","preparation","preparation_pack"])}})},
-  orderOptions(actor,revision){return read(db=>orderOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  registerOrder(actor,revision,input){return mutate(db=>registerOrder(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  orderDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...orderDetail(db,a,id),forms:documentLinks(db,a,id,["order"])}})},
-  supplementOptions(actor,revision){return read(db=>supplementOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  createSupplement(actor,revision,input){return mutate(db=>createSupplement(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  supplementDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...supplementDetail(db,a,id),forms:documentLinks(db,a,id,["supplement"])}})},
-  changeSupplement(actor,revision,input){return mutate(db=>changeSupplement(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  developmentOptions(actor,revision){return read(db=>developmentOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  createDevelopment(actor,revision,input){return mutate(db=>createDevelopment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  developmentDetail(actor,revision,id){return read(db=>developmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
-  changeDevelopment(actor,revision,input){return mutate(db=>changeDevelopment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  developmentFromMatrix(actor,revision,input){return mutate(db=>developmentFromMatrix(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  bankOptions(actor,revision){return read(db=>bankOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  bankDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...bankDetail(db,a,id),forms:documentLinks(db,a,id,["bank"])}})},
-  saveBank(actor,revision,input){return mutate(db=>saveBank(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  mobileOptions(actor,revision){return read(db=>mobileOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  exportMobile(actor,revision,f){return mutate(db=>exportMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
-  previewMobile(actor,revision,f){return read(db=>previewMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
-  commitMobile(actor,revision,f){return mutate(db=>commitMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
-  receiptMobile(actor,revision,f){return read(db=>receiptMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
-  assistantOptions(actor,revision){return read(db=>assistantOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  assistantContext(actor,revision,f){return read(db=>{const user=checkedAccount(db,actor,revision),d=day();return assistantContext(db,trainingAccess(db,user,d),f,id=>cardAllowed(db,user,id,d))})},
-  assistantRequest(actor,revision,f){return read(db=>{const user=checkedAccount(db,actor,revision),d=day();return assistantRequest(db,trainingAccess(db,user,d),f,id=>cardAllowed(db,user,id,d))})},
-  qualityOptions(actor,revision,kind){return read(db=>qualityOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
-  installMentorMethod(actor,revision,input){return mutate(db=>installMentorMethod(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  createAudit(actor,revision,input){return mutate(db=>createAudit(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  createSelf(actor,revision,input){return mutate(db=>createSelf(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  voidAudit(actor,revision,input){return mutate(db=>voidAudit(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  qualityDetail(actor,revision,kind,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...qualityDetail(db,a,kind,id),forms:documentLinks(db,a,id,[kind])}})},
-  taskOptions(actor,revision,source){return read(db=>taskOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),source))},
-  createTask(actor,revision,input){return mutate(db=>createTask(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  taskDetail(actor,revision,id){return read(db=>taskDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
-  changeTask(actor,revision,input){return mutate(db=>changeTask(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
-  changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  calendarWorkspace(actor,revision,query){return read(db=>calendarWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),query))},
-  calendarOptions(actor,revision,type,sourceId=null){return read(db=>calendarOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),type,sourceId))},
-  calendarDetail(actor,revision,id){return read(db=>calendarDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
-  createSchedule(actor,revision,input){return mutate(db=>createSchedule(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  changeSchedule(actor,revision,input){return mutate(db=>changeSchedule(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  centerOptions(actor,revision,kind){return read(db=>centerOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
-  centerWorkspace(actor,revision,kind,scope){return read(db=>centerWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,scope))},
-  metricEvidence(actor,revision,kind,scope,id,offset){return read(db=>metricEvidence(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,scope,id,offset))},
-  roiOptions(actor,revision){return read(db=>roiOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  roiDetail(actor,revision,id){return read(db=>roiDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
-  createRoi(actor,revision,input){return mutate(db=>createRoi(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  changeRoi(actor,revision,input){return mutate(db=>changeRoi(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  roiTwiOptions(actor,revision,id){return read(db=>roiTwiOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
-  previewRoiTwi(actor,revision,input){return read(db=>previewRoiTwi(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  changeTraining(actor,revision,input){return mutate(db=>changeTraining(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  trainingDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...trainingDetail(db,a,id),forms:documentLinks(db,a,id,["training_plan","journal"])}})},
+  trainingSop(actor,revision,id){return read(db=>trainingSop(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  programOptions(actor,revision){return read(db=>programOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  saveProgram(actor,revision,input){return mutate(db=>saveProgram(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  retireProgram(actor,revision,input){return mutate(db=>retireProgram(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  programDetail(actor,revision,id){return read(db=>programDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  enrollmentOptions(actor,revision){return read(db=>enrollmentOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  createEnrollment(actor,revision,input){return mutate(db=>createEnrollment(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  changeEnrollment(actor,revision,input){return mutate(db=>changeEnrollment(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  enrollmentDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...enrollmentDetail(db,a,id),forms:documentLinks(db,a,id,['entry'])}})},
+  preparationOptions(actor,revision){return read(db=>preparationOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  createPreparation(actor,revision,input){return mutate(db=>createPreparation(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  preparationFactOptions(actor,revision,id,on){return read(db=>preparationFactOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id,on))},
+  recordPreparationFact(actor,revision,input){return mutate(db=>recordPreparationFact(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  preparationDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...preparationDetail(db,a,id),forms:documentLinks(db,a,id,["adaptation","safety_program","internship_program","preparation","preparation_pack"])}})},
+  orderOptions(actor,revision){return read(db=>orderOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  registerOrder(actor,revision,input){return mutate(db=>registerOrder(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  orderDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...orderDetail(db,a,id),forms:documentLinks(db,a,id,["order"])}})},
+  supplementOptions(actor,revision){return read(db=>supplementOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  createSupplement(actor,revision,input){return mutate(db=>createSupplement(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  supplementDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...supplementDetail(db,a,id),forms:documentLinks(db,a,id,["supplement"])}})},
+  changeSupplement(actor,revision,input){return mutate(db=>changeSupplement(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  developmentOptions(actor,revision){return read(db=>developmentOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  createDevelopment(actor,revision,input){return mutate(db=>createDevelopment(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  developmentDetail(actor,revision,id){return read(db=>developmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  changeDevelopment(actor,revision,input){return mutate(db=>changeDevelopment(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  developmentFromMatrix(actor,revision,input){return mutate(db=>developmentFromMatrix(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  bankOptions(actor,revision){return read(db=>bankOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  bankDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...bankDetail(db,a,id),forms:documentLinks(db,a,id,["bank"])}})},
+  saveBank(actor,revision,input){return mutate(db=>saveBank(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  mobileOptions(actor,revision){return read(db=>mobileOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  exportMobile(actor,revision,f){return mutate(db=>exportMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  previewMobile(actor,revision,f){return read(db=>previewMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  commitMobile(actor,revision,f){return mutate(db=>commitMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  receiptMobile(actor,revision,f){return read(db=>receiptMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  assistantOptions(actor,revision){return read(db=>assistantOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  assistantContext(actor,revision,f){return read(db=>{const user=checkedAccount(db,actor,revision),d=day(db);return assistantContext(db,trainingAccess(db,user,d),f,id=>cardAllowed(db,user,id,d))})},
+  assistantRequest(actor,revision,f){return read(db=>{const user=checkedAccount(db,actor,revision),d=day(db);return assistantRequest(db,trainingAccess(db,user,d),f,id=>cardAllowed(db,user,id,d))})},
+  qualityOptions(actor,revision,kind){return read(db=>qualityOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind))},
+  installMentorMethod(actor,revision,input){return mutate(db=>installMentorMethod(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  createAudit(actor,revision,input){return mutate(db=>createAudit(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  createSelf(actor,revision,input){return mutate(db=>createSelf(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  voidAudit(actor,revision,input){return mutate(db=>voidAudit(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  qualityDetail(actor,revision,kind,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...qualityDetail(db,a,kind,id),forms:documentLinks(db,a,id,[kind])}})},
+  taskOptions(actor,revision,source){return read(db=>taskOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),source))},
+  createTask(actor,revision,input){return mutate(db=>createTask(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  taskDetail(actor,revision,id){return read(db=>taskDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  changeTask(actor,revision,input){return mutate(db=>changeTask(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  mentorWorkspace(actor,revision){return read(db=>{const a=checkedAccount(db,actor,revision),d=day(db);return mentorWorkspace(db,trainingAccess(db,a,d),id=>cardAllowed(db,a,id,d))})},
+  mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind))},
+  changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  calendarWorkspace(actor,revision,query){return read(db=>calendarWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),query))},
+  calendarOptions(actor,revision,type,sourceId=null){return read(db=>calendarOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),type,sourceId))},
+  calendarDetail(actor,revision,id){return read(db=>calendarDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  createSchedule(actor,revision,input){return mutate(db=>createSchedule(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  changeSchedule(actor,revision,input){return mutate(db=>changeSchedule(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  centerOptions(actor,revision,kind){return read(db=>centerOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind))},
+  centerWorkspace(actor,revision,kind,scope){return read(db=>centerWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind,scope))},
+  metricEvidence(actor,revision,kind,scope,id,offset){return read(db=>metricEvidence(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind,scope,id,offset))},
+  roiOptions(actor,revision){return read(db=>roiOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  roiDetail(actor,revision,id){return read(db=>roiDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  createRoi(actor,revision,input){return mutate(db=>createRoi(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  changeRoi(actor,revision,input){return mutate(db=>changeRoi(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  roiTwiOptions(actor,revision,id){return read(db=>roiTwiOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  previewRoiTwi(actor,revision,input){return read(db=>previewRoiTwi(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   async measureRoi(actor,revision,input){
    const descriptor=read(db=>{
-    const account=checkedAccount(db,actor,revision),d=day(),ctx=roiMeasureContext(db,trainingAccess(db,account,d),input);
+    const account=checkedAccount(db,actor,revision),d=day(db),ctx=roiMeasureContext(db,trainingAccess(db,account,d),input);
     return ctx.r.study_id?detailDescriptor(db,'frv.read_summary',ctx.r.study_id,libraryAccess(db,account,d)):null;
    });
    const verified=descriptor?await checkedLibrarySource(descriptor,readFile):null;
    // The mutation resolves the record, permissions, CAS, verified source
    // identity and current effective action evidence again after file I/O.
-   return mutate(db=>measureRoi(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input,verified));
+   return mutate(db=>measureRoi(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input,verified));
   },
-  competencyOptions(actor,revision,kind,personId=null,skillId=null){return read(db=>competencyOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,personId,skillId))},
-  competencyChange(actor,revision,input){return mutate(db=>competencyChange(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  assessmentDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...assessmentDetail(db,a,id),forms:documentLinks(db,a,id,["practical"])}})},
-  suggestMatrix(actor,revision,input){return read(db=>suggestMatrix(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  matrixInfo(actor,revision,unit=null,baseOn=null,filters={}){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return matrixInfo(db,a,unit,baseOn??a.day,filters)})},
-  saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  matrixDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...matrixDetail(db,a,id),forms:documentLinks(db,a,id,["matrix"])}})},
-  personCard(actor,revision,id){return read(db=>{const a=checkedAccount(db,actor,revision),d=day();return personCard(db,trainingAccess(db,a,d),id,i=>cardAllowed(db,a,i,d))})},
+  competencyOptions(actor,revision,kind,personId=null,skillId=null){return read(db=>competencyOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind,personId,skillId))},
+  competencyChange(actor,revision,input){return mutate(db=>competencyChange(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  assessmentDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...assessmentDetail(db,a,id),forms:documentLinks(db,a,id,["practical"])}})},
+  suggestMatrix(actor,revision,input){return read(db=>suggestMatrix(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  matrixInfo(actor,revision,unit=null,baseOn=null,filters={}){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return matrixInfo(db,a,unit,baseOn??a.day,filters)})},
+  saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  matrixDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...matrixDetail(db,a,id),forms:documentLinks(db,a,id,["matrix"])}})},
+  personCard(actor,revision,id){return read(db=>{const a=checkedAccount(db,actor,revision),d=day(db);return personCard(db,trainingAccess(db,a,d),id,i=>cardAllowed(db,a,i,d))})},
   libraryInfo(actor,kind){
    return read(db=>{
     const a=account(db,actor);must(a&&['sop','frv'].includes(kind),404,'Раздел недоступен');
-    const access=libraryAccess(db,a,day());
+    const access=libraryAccess(db,a,day(db));
     must(access.permissions.includes(libraryReadAction(kind)),404,'Раздел недоступен');
     return {operations:rows(db,'SELECT id FROM operation WHERE archived=0 ORDER BY name').flatMap(({id})=>{
      const r=access.read('operation.read',id);
      return r&&access.readScope(kind,id)&&access.allows(kind+'.create','operation.read',id)?[{id,name:r.data.name,code:r.data.code}]:[];
-    }),day:day()};
+    }),day:day(db)};
    });
   },
   async openLibrary(actor,revision,input){
@@ -510,7 +552,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    return read(db=>{
     const next=resolveCtx(db,actor,revision,input);
     must(contextStamp(next)===contextStamp(ctx),409,'Документ изменился при открытии');
-    const a=checkedAccount(db,actor,revision),d=day();
+    const a=checkedAccount(db,actor,revision),d=day(db);
     // Only visible directory entries. Omit protected role names and unrelated personnel.
     const people=directoryPeople(db,d).filter(p=>readFor(db,a,'person.read_directory',p.id,d)).map(({id,employee_code,display_name,position,unit})=>({id,employee_code,display_name,position,unit,roles:[]}));
     return {context:ctx.input,expected_revision:ctx.expected,title:ctx.title,code:ctx.code,observed_at:ctx.observed_at,operation:ctx.operation,people,text};
@@ -522,7 +564,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const priorResult=db=>{
     const a=checkedAccount(db,actor,revision),prior=getReceipt(db,actor,request.request_id,digest);
     if(!prior)return null;
-    const kind=request.context?.kind,access=libraryAccess(db,a,day());
+    const kind=request.context?.kind,access=libraryAccess(db,a,day(db));
     must(['sop','frv'].includes(kind)&&access.read(libraryReadAction(kind),kind==='sop'?prior.revision_id:prior.id),403,'Документ недоступен');
     return {...prior,duplicate:true};
    };
@@ -543,17 +585,18 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   },
   passportLibrary(actor,revision,input){return mutate(db=>{
    const a=checkedAccount(db,actor,revision);
-   return passportLibrary(db,input,{...libraryAccess(db,a,day()),at:at(),audit:(action,target)=>audit(db,actor,action,target)});
+   const clock=siteClock(db);
+   return passportLibrary(db,input,{...libraryAccess(db,a,clock.day),at:clock.at,offsetMinutes:clock.offset_minutes,audit:(action,target)=>audit(db,actor,action,target)});
   })},
   finalizeLibrary(actor,revision,input){return mutate(db=>{
    const a=checkedAccount(db,actor,revision);
-   return finalizeLibrary(db,input,{...libraryAccess(db,a,day()),personId:a.person_id,at:at(),audit:(action,target)=>audit(db,actor,action,target)});
+   return finalizeLibrary(db,input,{...libraryAccess(db,a,day(db)),personId:a.person_id,at:at(),audit:(action,target)=>audit(db,actor,action,target)});
   })},
   async libraryDetail(actor,revision,action,id){
-   const desc=read(db=>detailDescriptor(db,action,id,libraryAccess(db,checkedAccount(db,actor,revision),day())));
+   const desc=read(db=>detailDescriptor(db,action,id,libraryAccess(db,checkedAccount(db,actor,revision),day(db))));
    const data=await checkedLibrarySource(desc,readFile);
    return read(db=>{
-    const latest=detailDescriptor(db,action,id,libraryAccess(db,checkedAccount(db,actor,revision),day()));
+    const latest=detailDescriptor(db,action,id,libraryAccess(db,checkedAccount(db,actor,revision),day(db)));
     must(latest.source.sha256===desc.source.sha256,409,'Материал изменился');
     return projectLibraryDetail(action,data.raw);
    });
@@ -561,7 +604,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   async sopPhoto(actor,revision,id,position){
    must(isId(id)&&Number.isSafeInteger(position)&&position>=1&&position<=1000,404,'Фото недоступно');
    const descriptor=read(db=>{
-    const a=account(db,actor);must(a&&a.credential_revision===revision&&photoAllowed(db,a,id,day()),404,'Фото недоступно');
+    const a=account(db,actor);must(a&&a.credential_revision===revision&&photoAllowed(db,a,id,day(db)),404,'Фото недоступно');
     return photoDescriptor(db,id,position);
    });
    must(descriptor,404,'Фото недоступно');
@@ -572,13 +615,13 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    // Authorization and effective revision may have changed during I/O.
    read(db=>{
     const a=account(db,actor),latest=photoDescriptor(db,id,position);
-    must(a&&a.credential_revision===revision&&photoAllowed(db,a,id,day())&&latest?.source.sha256===descriptor.source.sha256&&latest.sourceId===descriptor.sourceId,404,'Фото недоступно');
+    must(a&&a.credential_revision===revision&&photoAllowed(db,a,id,day(db))&&latest?.source.sha256===descriptor.source.sha256&&latest.sourceId===descriptor.sourceId,404,'Фото недоступно');
    });
    return result;
   },
-  upgradeManagerPolicy(actor,input){
+  upgradeManagerPolicy(actor,input,revision){
    return mutate(db=>{
-    requireAdmin(db,actor);must(keys(input,['revision']),400,'Неверные поля политики');
+    requireAdmin(db,actor,revision);must(keys(input,['revision']),400,'Неверные поля политики');
     const id=config(db).manager,old=one(db,'SELECT * FROM lc81_policy WHERE role_id=?',[id]);
     must(old&&old.revision===input.revision,409,'Политика изменилась');
     if(JSON.stringify([...JSON.parse(old.permissions_json)].sort())===JSON.stringify([...PERMISSIONS].sort()))return {revision:old.revision};
@@ -591,7 +634,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    return read(db=>{
     const a=account(db,actor);
     must(a&&Object.hasOwn(DIRECTORIES,type),404,'Справочник недоступен');
-    const d=DIRECTORIES[type],date=day();
+    const d=DIRECTORIES[type],date=day(db);
     must(permissionsFor(db,a).includes(d.read),404,'Справочник недоступен');
     const refs={};
     for(const [t,action] of [['org_unit','org.read'],['equipment','equipment.read'],['workplace','workplace.read'],['profession','profession.read'],['position','position.read'],['work_shift','shift.read']]){
@@ -603,24 +646,24 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     return {type,definition:directorySchema(type),refs,can_create:refs.org_unit.some(x=>x.can_create),day:date};
    });
   },
-  journalWorkspace(actor,revision,f){return read(db=>journalWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
-  retrainingWorkspace(actor,revision,f){return read(db=>retrainingWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
-  sopEvaluationWorkspace(actor,revision,f){return read(db=>sopEvaluationWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
-  sopEvaluationOptions(actor,revision){return read(db=>sopEvaluationOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  sopEvaluationDetail(actor,revision,kind,id){return read(db=>sopEvaluationDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,id))},
-  createSopEvaluation(actor,revision,f){return mutate(db=>createSopEvaluation(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
-  installSopMethod(actor,revision,f){return mutate(db=>installSopMethod(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
-  importTypes(actor,revision){return read(db=>({types:importTypes(trainingAccess(db,checkedAccount(db,actor,revision),day())),max_bytes:2*1024*1024}))},
+  journalWorkspace(actor,revision,f){return read(db=>journalWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  retrainingWorkspace(actor,revision,f){return read(db=>retrainingWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  sopEvaluationWorkspace(actor,revision,f){return read(db=>sopEvaluationWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  sopEvaluationOptions(actor,revision){return read(db=>sopEvaluationOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  sopEvaluationDetail(actor,revision,kind,id){return read(db=>sopEvaluationDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind,id))},
+  createSopEvaluation(actor,revision,f){return mutate(db=>createSopEvaluation(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  installSopMethod(actor,revision,f){return mutate(db=>installSopMethod(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  importTypes(actor,revision){return read(db=>({types:importTypes(trainingAccess(db,checkedAccount(db,actor,revision),day(db))),max_bytes:2*1024*1024}))},
   async inspectDirectoryFile(actor,revision,f){
-   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day()),f?.type));
+   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f?.type));
    const data=await inspectDirectoryFile(f);
-   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day()),f?.type));return data;
+   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f?.type));return data;
   },
   async previewDirectoryFile(actor,revision,f){
-   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day()),f?.type));
+   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f?.type));
    const parsed=await parseDirectoryFile(f);
    return read(db=>{
-    const a=checkedAccount(db,actor,revision),d=day(),access=trainingAccess(db,a,d),copy=openDb(SQL,bytesOf(db),{upgrade:false});
+    const a=checkedAccount(db,actor,revision),d=day(db),access=trainingAccess(db,a,d),copy=openDb(SQL,bytesOf(db),{upgrade:false});
     try{
      const result=planDirectoryImport(copy,access,parsed,{day:d,at:at(),site:config(copy).site,read:(action,id)=>readFor(copy,a,action,id,d),allows:(action,anchor,id)=>directoryAllowed(copy,a,action,anchor,id,d),audit:()=>{}});
      return {...result,token:result.can_commit?makeImportToken(db,access,parsed):null};
@@ -628,27 +671,27 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    });
   },
   async commitDirectoryFile(actor,revision,f){
-   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day()),f?.type));
+   read(db=>importAllowed(trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f?.type));
    const parsed=await parseDirectoryFile(f,true);
    return mutate(db=>{
-    const a=checkedAccount(db,actor,revision),d=day(),access=trainingAccess(db,a,d);
+    const a=checkedAccount(db,actor,revision),d=day(db),access=trainingAccess(db,a,d);
     importAllowed(access,parsed.type);checkImportToken(db,access,parsed,f.token);
     const result=planDirectoryImport(db,access,parsed,{day:d,at:at(),site:config(db).site,read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchor,id)=>directoryAllowed(db,a,action,anchor,id,d),audit:(action,target)=>audit(db,actor,action,target)});
     must(result.can_commit,409,'Импорт не подтверждён: появились конфликты. Выполните предварительную проверку');
     return {counts:result.counts};
    });
   },
-  formsCatalog(actor,revision){return read(db=>formsCatalog(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  formsCatalog(actor,revision){return read(db=>formsCatalog(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
   exportForm(actor,revision,input){
    let result;
-   return mutate(db=>{result=prepareForm(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input);return result},async()=>{await serializeForm(result)});
+   return mutate(db=>{result=prepareForm(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input);return result},async()=>{await serializeForm(result)});
   },
-  employmentDetail(actor,revision,id){return read(db=>employmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
-  transferEmployment(actor,revision,input){return mutate(db=>transferEmployment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  employmentDetail(actor,revision,id){return read(db=>employmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  transferEmployment(actor,revision,input){return mutate(db=>transferEmployment(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   changeDirectory(actor,revision,input){
    return mutate(db=>{
     const a=account(db,actor);must(a&&a.credential_revision===revision,401,'Сеанс завершён');
-    const d=day();
+    const d=day(db);
     must(Object.hasOwn(DIRECTORIES,input?.type)&&permissionsFor(db,a).includes(DIRECTORIES[input.type].read),403,'Справочник недоступен');
     return applyDirectoryCommand(db,input,{day:d,at:at(),site:config(db).site,read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchorAction,id)=>directoryAllowed(db,a,action,anchorAction,id,d),audit:(action,target)=>audit(db,actor,action,target)});
    });
@@ -658,14 +701,14 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     const a=account(db,actor);
     must(a&&a.credential_revision===revision,401,'Сеанс завершён');
     must(keys(input,['id','expected_revision','result'])&&isId(input.id)&&Number.isSafeInteger(input.expected_revision)&&input.expected_revision>0&&typeof input.result==='string'&&input.result.trim().length>0&&input.result.length<=2000,400,'Неверные поля выполнения');
-    const sec=security(db,actor),d=day();
+    const sec=security(db,actor),clock=siteClock(db),d=clock.day;
     must(a.bootstrap!==1&&canImplementOwnTask(db,sec,actor,input.id,d)&&readAuthorized(db,sec,actor,'task.read',input.id,d),403,'Можно выполнить только своё назначенное мероприятие');
     const row=one(db,'SELECT * FROM action_item WHERE id=?',[input.id]);
     must(row?.rev===input.expected_revision,409,'Запись изменилась; обновите данные');
     must(row.kind!=='trainee_training'||row.followup_assignment_id,422,'Сначала свяжите мероприятие с повторным обучением');
     must(row.kind!=='instructor_training'||row.followup_enrollment_id,422,'Сначала свяжите мероприятие с программой переобучения инструктора');
     const eventId=uuid();
-    try{applyEvent(db,{id:eventId,entity_type:'action_item',entity_id:input.id,operation:'update',expected_revision:row.rev,payload:{command:'implement',result:input.result.trim(),business_offset_minutes:0},occurred_at:at()})}catch{throw new PilotError(422,'Выполнение не прошло существующие проверки мероприятия')}
+    try{applyEvent(db,{id:eventId,entity_type:'action_item',entity_id:input.id,operation:'update',expected_revision:row.rev,payload:{command:'implement',result:input.result.trim(),business_offset_minutes:clock.offset_minutes},occurred_at:clock.at})}catch{throw new PilotError(422,'Выполнение не прошло существующие проверки мероприятия')}
     audit(db,actor,'task.implement_own',eventId);
     return one(db,'SELECT id,state,rev FROM action_item WHERE id=?',[input.id]);
    });

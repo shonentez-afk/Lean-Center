@@ -6,7 +6,7 @@ async function main(){
  if(process.env.LC81_QA!=='1'||process.env.LC_PILOT_DEMO==='1'||process.env.LC_PILOT_USERS)throw Error('Explicit separate LC81 QA mode required; legacy environment forbidden');
  const dataDir=process.env.LC81_DATA_DIR;
  if(!dataDir||!path.isAbsolute(dataDir))throw Error('LC81_DATA_DIR required');
- const store=await openSecureQA({dataDir,initialize:process.env.LC81_INIT==='1',login:process.env.LC_BOOTSTRAP_ADMIN_LOGIN||'admin',password:process.env.LC_BOOTSTRAP_ADMIN_PASSWORD});
+ const store=await openSecureQA({dataDir,initialize:process.env.LC81_INIT==='1',login:process.env.LC_BOOTSTRAP_ADMIN_LOGIN||'admin',password:process.env.LC_BOOTSTRAP_ADMIN_PASSWORD,siteTimeZone:process.env.LC81_SITE_TIME_ZONE||null});
  let server;
  try{server=createSecureQAServer({store,origin:process.env.LC81_ORIGIN,cloudAiEnabled:process.env.LC81_CLOUD_AI==='1'});}catch(e){await store.close();throw e}
  server.on('error',async()=>{await store.close();process.exitCode=1;console.error('LC8.1 QA HTTP listen error')});

@@ -90,14 +90,25 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
    const {a,key}=getSession(req);
    if(req.method==='GET'&&p==='/api/lc81/session'){reply(res,200,{user:a,mode:'LC8.1-QA'});return}
    if(req.method==='POST'&&p==='/api/lc81/logout'){sessions.delete(key);reply(res,200,{ok:true},undefined,{'Set-Cookie':cookie('',0)});return}
-   if(req.method==='GET'&&p==='/api/lc81/admin'){reply(res,200,store.adminData(a.id));return}
-   if(req.method==='POST'&&p==='/api/lc81/admin/reference'){const b=await body(req);must(keys(b,['type','payload']),400,'Неверные поля');reply(res,200,await store.createReference(a.id,b.type,b.payload));return}
-   if(req.method==='POST'&&p==='/api/lc81/admin/account'){reply(res,200,await store.createAccount(a.id,await body(req)));return}
-   if(req.method==='POST'&&p==='/api/lc81/admin/state'){const b=await body(req);must(keys(b,['id','state']),400,'Неверные поля');reply(res,200,await store.setState(a.id,b.id,b.state));return}
-   if(req.method==='POST'&&p==='/api/lc81/admin/policy'){reply(res,200,await store.setPolicy(a.id,await body(req)));return}
-   if(req.method==='POST'&&p==='/api/lc81/admin/grant'){reply(res,200,await store.grant(a.id,await body(req)));return}
-   if(req.method==='POST'&&p==='/api/lc81/admin/revoke'){const b=await body(req);must(keys(b,['id']),400,'Неверные поля');reply(res,200,await store.revoke(a.id,b.id));return}
-   if(req.method==='POST'&&p==='/api/lc81/admin/manager-policy'){reply(res,200,await store.upgradeManagerPolicy(a.id,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/password/change'){
+    const f=await body(req);must(keys(f,['current_password','new_password']),400,'Неверные поля пароля');
+    limiter('password:'+a.id,req.socket.remoteAddress||'unknown');
+    const result=await store.changePassword(a.id,a.credential_revision,f);sessions.delete(key);
+    reply(res,200,result,undefined,{'Set-Cookie':cookie('',0)});return;
+   }
+   if(req.method==='POST'&&['/api/lc81/admin/password-reset','/api/lc81/admin/login-change','/api/lc81/admin/role-end','/api/lc81/admin/employment-end','/api/lc81/admin/clock'].includes(p)){
+    must(a.admin,403,'Требуются полномочия администратора');
+    const methods={'password-reset':'resetPassword','login-change':'renameAccount','role-end':'endRole','employment-end':'endEmployment','clock':'configureClock'};
+    const f=await body(req);reply(res,200,await store[methods[p.split('/').at(-1)]](a.id,a.credential_revision,f));return;
+   }
+   if(req.method==='GET'&&p==='/api/lc81/admin'){reply(res,200,store.adminData(a.id,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/reference'){const b=await body(req);must(keys(b,['type','payload']),400,'Неверные поля');reply(res,200,await store.createReference(a.id,b.type,b.payload,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/account'){reply(res,200,await store.createAccount(a.id,await body(req),a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/state'){const b=await body(req);must(keys(b,['id','state'])||keys(b,['id','state','expected_revision'])&&Number.isSafeInteger(b.expected_revision),400,'Неверные поля');reply(res,200,await store.setState(a.id,b.id,b.state,a.credential_revision,b.expected_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/policy'){reply(res,200,await store.setPolicy(a.id,await body(req),a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/grant'){reply(res,200,await store.grant(a.id,await body(req),a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/revoke'){const b=await body(req);must(keys(b,['id']),400,'Неверные поля');reply(res,200,await store.revoke(a.id,b.id,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/manager-policy'){reply(res,200,await store.upgradeManagerPolicy(a.id,await body(req),a.credential_revision));return}
    if(req.method==='GET'&&p==='/editor/frame'){
     const kind=url.searchParams.get('kind'),tab=url.searchParams.get('tab')||null;
     must(['sop','frv'].includes(kind)&&a.permissions.some(x=>x===kind+'.create'||x===kind+'.edit_draft'||kind==='sop'&&x==='sop.revise'),403,'Редактор недоступен');
@@ -179,6 +190,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
    if(req.method==='POST'&&p==='/api/lc81/tasks/options'){reply(res,200,await store.taskOptions(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/tasks/create'){reply(res,200,await store.createTask(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/tasks/change'){reply(res,200,await store.changeTask(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/mentor/workspace'){reply(res,200,store.mentorWorkspace(a.id,a.credential_revision));return}
    if(req.method==='GET'&&p==='/api/lc81/mentor/options'){reply(res,200,store.mentorOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='POST'&&p==='/api/lc81/mentor/change'){reply(res,200,await store.changeMentor(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/calendar/view'){reply(res,200,store.calendarWorkspace(a.id,a.credential_revision,Object.fromEntries(['mode','from','to'].map(k=>[k,url.searchParams.get(k)]))));return}

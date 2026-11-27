@@ -1,3 +1,4 @@
+import {economicEventDay} from '../../core/business-clock.js';
 import {MIME,obj,string,nonempty,date,types,exact,num,validateRef,checkContent,inspectSource} from './source-validation.js';
 export {MAX_CONTENT,validateRef,checkContent,inspectSource} from './source-validation.js';
 import {isLC6Event,applyEconomicEvent,verifyEconomicSource} from '../effect/domain.js';
@@ -64,9 +65,9 @@ export function applyDomainEvent(db,e,old){
   if(e.operation==='archive'){invariant(p===null&&!one(db,"SELECT id FROM document_revision WHERE document_id=? AND state NOT IN ('superseded','withdrawn')",[id]),'Сначала выведите версии из действия');db.run('UPDATE document SET archived=1,rev=rev+1 WHERE id=?',[id]);return}
   invariant(e.operation==='update'&&obj(p),'Неверная операция с СОП');
   if(p.command==='passport'){
-   exact(p,['command','revision_id','print_format','changed_on']);
+   exact(p,['command','revision_id','print_format','changed_on',...(Object.hasOwn(p,'business_offset_minutes')?['business_offset_minutes']:[])]);
    const v=revision(db,p.revision_id,id);invariant(v.state==='draft','Паспорт редактируется только у черновика');
-   invariant(['portrait','landscape'].includes(p.print_format)&&validDate(p.changed_on)&&p.changed_on<=e.occurred_at.slice(0,10),'Выберите формат и фактическую дату изменения');
+   invariant(['portrait','landscape'].includes(p.print_format)&&validDate(p.changed_on)&&p.changed_on<=economicEventDay(e),'Выберите формат и фактическую дату изменения');
    const steps=rows(db,'SELECT * FROM document_step WHERE revision_id=?',[v.id]);invariant(steps.length<=(p.print_format==='portrait'?9:12),'Количество шагов превышает выбранный формат А3');
    const op=old.operation_id?one(db,'SELECT * FROM operation WHERE id=? AND archived=0',[old.operation_id]):null;
    const w=op?.workplace_id?one(db,'SELECT * FROM workplace WHERE id=? AND archived=0',[op.workplace_id]):null;

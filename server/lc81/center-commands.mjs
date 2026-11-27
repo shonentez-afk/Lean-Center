@@ -14,6 +14,7 @@ import {effectOverview,effectFacts,twiBasis,effectPending,effectStatus} from '..
 import {evaluationAccess} from './sop-evaluation-commands.mjs';
 import {programResource,personWorkResource,scheduleResource,trainingAssignmentResource,assessmentResource,auditResource,selfResource,enrollmentResource,preparationResource,developmentResource,taskResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
+import {civilPayload} from './site-clock.mjs';
 const must=(x,s,m)=>{if(!x)throw new PilotError(s,m)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
 const validDate=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
@@ -26,7 +27,7 @@ const detail=(a,read,k,id,r)=>!!r&&!!a.read(read,id)&&allowed(a,k,id,r);
 const site=(db,a,k)=>{const r=programResource(db);return !!r&&allowed(a,k,r.units[0],r)};
 const has=(a,k)=>a.permissions.includes(k);
 function emit(db,a,t,id,operation,rev,payload,action){
- const event=uuid();try{applyEvent(db,{id:event,entity_type:t,entity_id:id,operation,expected_revision:rev,payload,occurred_at:a.at})}
+ const event=uuid();try{applyEvent(db,{id:event,entity_type:t,entity_id:id,operation,expected_revision:rev,payload:civilPayload(t,payload,a.offsetMinutes??0),occurred_at:a.at})}
  catch(e){throw new PilotError(422,'Планирование: '+String(e.message||'ошибка').split('\n')[0].slice(0,250))}
  a.audit(action,event);return {id,rev:one(db,'SELECT rev FROM '+t+' WHERE id=?',[id]).rev};
 }

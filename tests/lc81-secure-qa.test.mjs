@@ -7,6 +7,8 @@ import {randomBytes} from 'node:crypto';
 import {openSecureQA,ADMIN_ROLE,MANAGER_ROLE} from '../server/lc81/store.mjs';
 import {readZip} from '../src/modules/training/local-docx.js';
 import {createSecureQAServer} from '../server/lc81/http.mjs';
+import {zoneOffset,normalizeZone,civilPayload} from '../server/lc81/site-clock.mjs';
+import {economicEventDay} from '../src/core/business-clock.js';
 import {generatePassword,hashPassword,verifyPassword,normalizeLogin} from '../server/lc81/credentials.mjs';
 const origin='https://qa.example.invalid',day=new Date().toISOString().slice(0,10);
 const secret=()=>randomBytes(24).toString('base64url');
@@ -94,7 +96,7 @@ test('first admin, explicit existing roles, scoped views, blocking and restart',
   assert.equal((await h.request('/api/lc81/admin/state',{cookie,body:{id:a.user.id,state:'blocked'}})).status,403);
   assert.equal((await h.request('/api/lc81/admin/policy',{cookie,body:{role_id:role,revision:1,permissions:['person.read_basic']}})).status,403);
  }
- for(const cookie of [ac,wc,m.cookie])for(const route of ['/api/v1/head','/api/v1/snapshot','/api/v1/documents/'+'a'.repeat(64),'/api/lc81/password/reset','/api/lc81/password/change']){
+ for(const cookie of [ac,wc,m.cookie])for(const route of ['/api/v1/head','/api/v1/snapshot','/api/v1/documents/'+'a'.repeat(64),'/api/lc81/password/reset']){
   assert.equal((await h.request(route,{cookie})).status,404);
   assert.equal((await h.request(route,{cookie,body:{}})).status,404);
  }
@@ -200,4 +202,74 @@ test('protected cloud helper sends only previewed static rules to fixed provider
  await h.post(ac,'revoke',{id:grant.id});
  assert.equal((await h.request('/api/lc81/assistant/cloud',{cookie,body:{...request,confirmed:true}})).status,403);
  assert.equal(calls.length,1);
+});
+
+test('password lifecycle, current grants, role and employment end preserve history',async t=>{
+ const h=await harness(t),admin=await h.login('admin',h.adminPassword),ac=admin.cookie,d=await h.admin(ac);
+ const ref=async(type,payload)=>(await h.post(ac,'reference',{type,payload})).id;
+ const p=(await h.request('/api/lc81/directory/change',{cookie:ac,body:{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:'LIFE-A',display_name:'Учебный сотрудник',unit_id:d.site}}})).data.id;
+ const role=await ref('business_role',{code:'LIFE-ROLE',name:'Проверка кадров'}),assignment=await ref('role_assignment',{person_id:p,role_id:role,valid_from:day,valid_to:null});
+ const pw=secret(),pw2=secret(),created=await h.post(ac,'account',{person_id:p,login:'life-user',password:pw,generate:false});
+ await h.post(ac,'policy',{role_id:role,revision:0,permissions:['person.read_basic']});
+ const grantInput={account_id:created.id,assignment_id:assignment,scope:{kind:'self'},valid_to:null};
+ const grant=await h.post(ac,'grant',grantInput);
+ assert.equal((await h.request('/api/lc81/admin/grant',{cookie:ac,body:grantInput})).status,409);
+ assert.equal((await h.admin(ac)).grants.find(g=>g.id===grant.id).status,'effective');
+ const u=await h.login('life-user',pw),u2=await h.login('life-user',pw),wc=u.cookie;
+ assert.equal((await h.request('/api/lc81/admin/password-reset',{cookie:wc,body:{id:created.id,expected_revision:1,password:pw2,generate:false}})).status,403);
+ assert.equal((await h.request('/api/lc81/password/change',{cookie:wc,body:{current_password:pw,new_password:pw2},csrf:false})).status,403);
+ assert.equal((await h.request('/api/lc81/password/change',{cookie:wc,body:{current_password:secret(),new_password:pw2}})).status,403);
+ assert.equal((await h.request('/api/lc81/password/change',{cookie:wc,body:{current_password:pw,new_password:pw}})).status,422);
+ const changed=await h.request('/api/lc81/password/change',{cookie:wc,body:{current_password:pw,new_password:pw2}});
+ assert.equal(changed.status,200,JSON.stringify(changed.data));assert.equal(changed.data.credential_revision,2);
+ for(const cookie of [wc,u2.cookie])assert.equal((await h.request('/api/lc81/session',{cookie})).status,401);
+ assert.equal((await h.request('/api/lc81/login',{body:{login:'life-user',password:pw}})).status,401);
+ const fresh=await h.login('life-user',pw2);
+ assert.equal(fresh.user.credential_revision,2);
+ assert.equal((await h.request('/api/lc81/admin/password-reset',{cookie:ac,body:{id:created.id,expected_revision:1,password:null,generate:true}})).status,409);
+ assert.equal((await h.request('/api/lc81/admin/password-reset',{cookie:ac,body:{id:admin.user.id,expected_revision:1,password:null,generate:true}})).status,403);
+ const reset=await h.post(ac,'password-reset',{id:created.id,expected_revision:2,password:null,generate:true});
+ assert(reset.issued_password);assert.equal(reset.credential_revision,3);assert.equal((await h.request('/api/lc81/session',{cookie:fresh.cookie})).status,401);
+ const afterReset=await h.login('life-user',reset.issued_password);
+ await h.post(ac,'login-change',{id:created.id,expected_revision:3,login:'LIFE-RENAMED'});
+ assert.equal((await h.request('/api/lc81/session',{cookie:afterReset.cookie})).status,401);
+ assert.equal((await h.request('/api/lc81/login',{body:{login:'life-user',password:reset.issued_password}})).status,401);
+ const renamed=await h.login('life-renamed',reset.issued_password);
+ const e=(await h.admin(ac)).employment.find(x=>x.person_id===p);
+ const ending={id:e.id,expected_revision:e.rev,valid_to:day,reason:'Учебное окончание',block_now:true};
+ assert.equal((await h.request('/api/lc81/admin/employment-end',{cookie:ac,body:ending})).status,422,'Role must first be closed');
+ const closure={id:assignment,expected_revision:1,valid_to:day,reason:'Окончание роли',revoke_now:true};
+ const ended=await h.post(ac,'role-end',closure);assert.equal(ended.rev,2);assert.equal(ended.revoked,1);
+ assert.equal((await h.request('/api/lc81/admin/role-end',{cookie:ac,body:closure})).status,409);
+ assert.equal((await h.request('/api/lc81/resources?action=person.read_basic',{cookie:renamed.cookie})).status,404);
+ const end=await h.post(ac,'employment-end',ending);assert(end.blocked);
+ assert.equal((await h.request('/api/lc81/session',{cookie:renamed.cookie})).status,401);
+ const info=await h.admin(ac);assert.equal(info.assignments.find(x=>x.id===assignment).valid_to,day);assert.equal(info.employment.find(x=>x.id===e.id).valid_to,day);
+ assert.equal(info.grants.find(x=>x.id===grant.id).status,'revoked');assert(info.audit.some(x=>x.reason==='Учебное окончание'));
+ for(const token of [pw,pw2,reset.issued_password,h.adminPassword])assert(!JSON.stringify(info).includes(token)&&!(await fs.readFile(path.join(h.dataDir,'secure.lc81'))).includes(Buffer.from(token)));
+ // Bootstrap can change its own password, but no other account can reset it.
+ const ap=secret(),self=await h.request('/api/lc81/password/change',{cookie:ac,body:{current_password:h.adminPassword,new_password:ap}});
+ assert.equal(self.status,200,JSON.stringify(self.data));assert.equal((await h.request('/api/lc81/admin',{cookie:ac})).status,401);
+ const aa=await h.login('admin',ap);assert(aa.user.admin);
+ await assert.rejects(h.store.createReference(admin.user.id,'business_role',{code:'STALE-ADMIN',name:'Stale'},1),/Сеанс завершён/);
+ await h.stop();await h.start({initialize:true,password:secret()});assert.equal((await h.login('admin',ap)).user.id,admin.user.id);
+});
+test('site clock is explicit, immutable and preserves civil event offsets',async t=>{
+ const instant=new Date('2026-11-27T20:15:00.000Z');
+ assert.equal(zoneOffset('Asia/Novokuznetsk',instant),420);
+ assert.equal(zoneOffset('America/New_York',new Date('2026-01-01T12:00:00Z')),-300);
+ assert.equal(zoneOffset('America/New_York',new Date('2026-07-01T12:00:00Z')),-240);
+ assert.equal(normalizeZone('Mars/Nowhere'),null);
+ const payload=civilPayload('schedule_event',{assignment_id:'x',owner_id:'y',due_on:'2026-11-28'},420);
+ assert.equal(economicEventDay({payload,occurred_at:instant.toISOString()}),'2026-11-28');
+ assert.equal(economicEventDay({payload:{},occurred_at:instant.toISOString()}),'2026-11-27');
+ assert.deepEqual(civilPayload('audit_session',{x:1},420),{x:1});
+ const h=await harness(t),admin=await h.login('admin',h.adminPassword),ac=admin.cookie;
+ assert.equal((await h.admin(ac)).clock.configured,false);
+ assert.equal((await h.request('/api/lc81/admin/clock',{cookie:ac,body:{zone:'Mars/Nowhere',confirmed:true}})).status,422);
+ assert.equal((await h.request('/api/lc81/admin/clock',{cookie:ac,body:{zone:'Asia/Novokuznetsk',confirmed:false}})).status,400);
+ const configured=await h.post(ac,'clock',{zone:'Asia/Novokuznetsk',confirmed:true});assert.equal(configured.offset_minutes,420);assert(configured.configured);
+ assert.equal((await h.request('/api/lc81/admin/clock',{cookie:ac,body:{zone:'UTC',confirmed:true}})).status,409);
+ await h.stop();await assert.rejects(openSecureQA({dataDir:h.dataDir,siteTimeZone:'UTC'}),/Часовой пояс/);
+ await h.start();assert.equal((await h.admin((await h.login('admin',h.adminPassword)).cookie)).clock.offset_minutes,420);
 });

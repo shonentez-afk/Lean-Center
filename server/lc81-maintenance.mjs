@@ -5,7 +5,7 @@ try{
  let result;
  if(mode==='migrate-copy'){
   if(!siteId||!admin||!manager)throw Error('Explicit site and role mapping required');
-  result=await migratePilotCopy({source,target,siteId,adminRoleId:admin==='new'?null:admin,managerRoleId:manager==='new'?null:manager,login:process.env.LC_BOOTSTRAP_ADMIN_LOGIN||'admin',password:process.env.LC_BOOTSTRAP_ADMIN_PASSWORD});
+  result=await migratePilotCopy({source,target,siteId,adminRoleId:admin==='new'?null:admin,managerRoleId:manager==='new'?null:manager,login:process.env.LC_BOOTSTRAP_ADMIN_LOGIN||'admin',password:process.env.LC_BOOTSTRAP_ADMIN_PASSWORD,siteTimeZone:process.env.LC81_SITE_TIME_ZONE||null});
  }else if(['backup','restore-new'].includes(mode)&&!siteId&&!admin&&!manager)result=await copySecureCheckpoint(source,target);
  else throw Error('Unknown arguments');
  console.log(JSON.stringify(result));

@@ -21,9 +21,9 @@ const cap=(db,a,k)=>!!a.personId&&financialScope(db,a)&&site(db,a,k);
 const fail=e=>new PilotError(422,'Экономический эффект: '+String(e.message||'ошибка').split('\n')[0].slice(0,300));
 function emit(db,a,t,id,operation,rev,payload,action){
  const event=uuid();
- // LC8.1 business clock is still UTC. Keep the recorded offset explicit,
+ // Use the persisted enterprise civil calendar. Keep the recorded offset explicit,
  // and never accept a timestamp or actor from the browser.
- try{applyEvent(db,{id:event,entity_type:t,entity_id:id,operation,expected_revision:rev,payload:{...payload,business_offset_minutes:0},occurred_at:a.at})}catch(e){throw fail(e)}
+ try{applyEvent(db,{id:event,entity_type:t,entity_id:id,operation,expected_revision:rev,payload:{...payload,business_offset_minutes:a.offsetMinutes??0},occurred_at:a.at})}catch(e){throw fail(e)}
  a.audit(action,event);return {id,rev:one(db,'SELECT rev FROM '+t+' WHERE id=?',[id]).rev};
 }
 function calc(method,inputs){try{return calculateEffect(method,inputs)}catch(e){throw fail(e)}}
