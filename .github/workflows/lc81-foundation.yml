@@ -1,7 +1,7 @@
 name: LC8.1 integrated access QA
 on:
   push:
-    branches: [feature/lc8.1-access-foundation, feature/lc8.1-integrated-access, feature/lc8.1-amvera-qa]
+    branches: [feature/lc8.1-access-foundation, feature/lc8.1-integrated-access, feature/lc8.1-amvera-qa, feature/lc8.1-parity-qa]
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,17 +22,17 @@ jobs:
       - run: npm test
       - run: node --test tests/lc74-server.test.mjs tests/lc74-save-state.test.mjs
       - name: Reproduce Amvera npm lock rewrite before the real build
-        if: github.ref == 'refs/heads/feature/lc8.1-amvera-qa'
+        if: github.ref == 'refs/heads/feature/lc8.1-amvera-qa' || github.ref == 'refs/heads/feature/lc8.1-parity-qa'
         run: |
           node --input-type=module -e "import fs from 'node:fs';const p='package-lock.json',v=JSON.parse(fs.readFileSync(p,'utf8'));v.packages['node_modules/echarts'].version='0.0.0';fs.writeFileSync(p,JSON.stringify(v,null,2)+'\\n')"
       - run: node tools/build_folder.mjs --cloud
       - name: Verify build restored the exact committed npm lock
-        if: github.ref == 'refs/heads/feature/lc8.1-amvera-qa'
+        if: github.ref == 'refs/heads/feature/lc8.1-amvera-qa' || github.ref == 'refs/heads/feature/lc8.1-parity-qa'
         run: |
           git diff --exit-code -- package-lock.json
           cmp package-lock.json tools/lc81-amvera-package-lock.json
       - name: Test pinned Amvera QA recipe, startup, restart and restore
-        if: github.ref == 'refs/heads/feature/lc8.1-amvera-qa'
+        if: github.ref == 'refs/heads/feature/lc8.1-amvera-qa' || github.ref == 'refs/heads/feature/lc8.1-parity-qa'
         run: node --test tests/lc81-amvera-smoke.test.mjs
       - run: npx playwright install --with-deps chromium
       - run: node tests/lc81-browser.mjs

@@ -29,23 +29,25 @@ test('pinned protected Amvera recipe: new storage, persistent state, offline bac
  let running=null;
  async function stop(){
   if(!running)return;
-  const {child,done}=running;running=null;
+  const {child,done,diagnostic}=running;running=null;
   if(child.exitCode===null&&child.signalCode===null)child.kill('SIGTERM');
   let timer;try{
    const result=await Promise.race([done,new Promise((_,reject)=>{timer=setTimeout(()=>{child.kill('SIGKILL');reject(Error('QA shutdown timeout'))},15000)})]);
-   assert.equal(result.code,0,'protected server must close gracefully');
+   assert.equal(result.code,0,'protected server must close gracefully'+diagnostic());
   }finally{clearTimeout(timer)}
  }
  async function start(dir,init=false,extraEnv={},loginPassword=password){
   const port=await freePort(),url='http://127.0.0.1:'+port;
-  const child=spawn(process.execPath,['server/lc81-main.mjs'],{env:{...env,PORT:String(port),LC81_QA:'1',LC81_DATA_DIR:dir,LC81_ORIGIN:origin,...(init?{LC81_INIT:'1',LC_BOOTSTRAP_ADMIN_PASSWORD:password,LC81_SITE_TIME_ZONE:'UTC'}:{}),...extraEnv},stdio:['ignore','ignore','ignore']});
-  const done=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',(code,signal)=>resolve({code,signal}))});
+  const child=spawn(process.execPath,['server/lc81-main.mjs'],{env:{...env,PORT:String(port),LC81_QA:'1',LC81_DATA_DIR:dir,LC81_ORIGIN:origin,...(init?{LC81_INIT:'1',LC_BOOTSTRAP_ADMIN_PASSWORD:password,LC81_SITE_TIME_ZONE:'UTC'}:{}),...extraEnv},stdio:['ignore','ignore','pipe']});
+  let stderr='';child.stderr.setEncoding('utf8');child.stderr.on('data',chunk=>{stderr=(stderr+chunk).slice(-4096)});
+  const diagnostic=()=>{const found=stderr.match(/LC8\.1 QA startup refused: ([A-Z0-9_]+)\. No secrets logged\./);return found?' · '+found[1]:''};
+  const done=new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',(code,signal)=>resolve({code,signal}))});
   // Avoid unhandled rejection while polling startup.
   done.catch(()=>{});
-  running={child,done};
+  running={child,done,diagnostic};
   let health=null;
   for(let i=0;i<150;i++){
-   if(child.exitCode!==null||child.signalCode!==null)throw Error('Protected QA process exited before health');
+   if(child.exitCode!==null||child.signalCode!==null){await done;throw Error('Protected QA process exited before health'+diagnostic())}
    try{const r=await fetch(url+'/healthz',{signal:AbortSignal.timeout(1000)});if(r.ok){health=await r.json();break}}catch{}
    await pause(100);
   }
@@ -71,6 +73,7 @@ test('pinned protected Amvera recipe: new storage, persistent state, offline bac
  async function admin(client){
   const r=await client.req('/api/lc81/admin',client.cookie);assert.equal(r.status,200);return r.json();
  }
+ let failure=null;
  try{
   let client=await start(dataDir,true);
   const a=await admin(client);
@@ -120,7 +123,7 @@ test('pinned protected Amvera recipe: new storage, persistent state, offline bac
   assert((await fs.readFile(path.join(imported,'secure.lc81'))).equals(after));
   await assert.rejects(restoreUploadedQA(options),{code:'EEXIST'});
   assert((await fs.readFile(path.join(imported,'secure.lc81'))).equals(after));
- }finally{try{await stop()}finally{await fs.rm(root,{recursive:true,force:true})}}
+ }catch(e){failure=e;throw e}finally{try{await stop()}catch(e){if(!failure)throw e}finally{await fs.rm(root,{recursive:true,force:true})}}
 });
 
 test('Amvera generated recipe accepts the observed safe configuration and rejects the previous server',async()=>{

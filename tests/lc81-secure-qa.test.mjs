@@ -350,6 +350,8 @@ test('shared library: grantless employees, own drafts, final summaries and HTTP 
  assert.equal((await post(A,'save',draftReq)).data.duplicate,true);
  assert.equal((await read(A,'sop.read_history',sop.revision_id)).data.data.can_edit,true);
  assert.equal((await read(B,'sop.read_history',sop.revision_id)).status,404);
+ const ownCard=await h.request('/api/lc81/library/card?id='+sop.revision_id,{cookie:A.cookie});assert.equal(ownCard.status,200,JSON.stringify(ownCard.data));assert.equal(ownCard.data.revision.revision_id,sop.revision_id);assert(ownCard.data.revision.can_edit);
+ assert.equal((await h.request('/api/lc81/library/card?id='+sop.revision_id,{cookie:B.cookie})).status,404);
  assert.equal((await read(B,'sop.read_history')).data.items.length,0);
  const edit=context('sop','save',sop.id,sop.revision_id);
  assert.equal((await post(B,'open',edit)).status,403);assert.equal((await post(B,'save',request(edit,sop.rev,'Подмена',null,null,text))).status,403);
@@ -491,4 +493,18 @@ test('preconfigured role profiles: no automatic grants, personal scope, administ
  assert.deepEqual(after.policies.find(p=>p.role_id===by('employee').role_id).permissions,['person.read_basic']);
  assert.equal(after.policies.find(p=>p.role_id===by('employee').role_id).revision,changed.revision);
  assert.equal((await h.request('/api/lc81/assistant/records?kind=person',{cookie:e.cookie})).status,403);
+});
+
+test('PARITY: competence report without requirements returns an empty report, not a server error',async t=>{
+ const h=await harness(t),admin=await h.login('admin',h.adminPassword),cookie=admin.cookie,d=await h.admin(cookie),today=d.clock.day;
+ const body={kind:'competence',from:today,to:today,unit_id:'',person_id:'',shift_id:'',operation_id:'',revision_id:'',program_id:'',method_id:'',self_id:'',role:'all',state:'all',sop_kind:'sop_evaluation'};
+ const report=await h.request('/api/lc81/analytics/report',{cookie,body});
+ assert.equal(report.status,200,JSON.stringify(report.data));
+ assert(report.data.tables.some(x=>x.title==='Покрытие по подразделениям'&&x.items.length===0));
+ const section=await h.request('/api/lc81/analytics/report',{cookie,body:{...body,unit_id:d.site}});
+ assert.equal(section.status,200,JSON.stringify(section.data));
+ assert.equal((await h.request('/api/lc81/analytics/report',{body})).status,401);
+ const overview=await h.request('/api/lc81/matrix/overview',{cookie,body:{unit_id:'',profession_id:'',shift_id:'',category_id:'',workplace_id:'',q:'',gaps:false,person_page:0,skill_page:0}});
+ assert.equal(overview.status,200,JSON.stringify(overview.data));
+ assert.deepEqual(overview.data.cells,[]);
 });

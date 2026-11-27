@@ -153,6 +153,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await assert.rejects(store.changeDirectory(manager.id,1,command('operation','update',operation.id,operation.rev,{unit_id:x.f.unit,code:'LC81-OP',name:'Перенос',equipment_id:null,workplace_id:null,criticality:'normal'})),/Перенос/);
   await assert.rejects(store.changeDirectory(manager.id,1,command('business_role','create',null,0,{code:'ADMIN',name:'Подмена'})),/недоступ/);
   await assert.rejects(store.changeDirectory(manager.id,1,{...command('person','update',person.id,update.rev,{employee_code:'LC81-NEW',display_name:'Подмена'}),actor_id:admin.id}),/Неизвестный/);
+  const sopCard=store.libraryCard(manager.id,1,x.revision.revision);assert.equal(sopCard.revision.revision_id,x.revision.revision);assert(sopCard.versions.some(r=>r.revision_id===x.f.doc.id));assert(sopCard.can_steps&&sopCard.can_twi&&sopCard.can_linked_frv);
   const photo=await store.sopPhoto(manager.id,1,x.revision.revision,1);
   assert.equal(photo.type,'image/png');assert.equal(photo.bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
   await assert.rejects(store.sopPhoto(manager.id,1,x.f.doc.id,1),/недоступно/,'superseded revision must not disclose its photo');
@@ -469,6 +470,11 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await assert.rejects(competence(manager.id,'skill.from_sop',{category_id:x.category,revisions:[{id:candidate.id,rev:candidate.rev}]}),/уже существует/);
   const profile={profession_id:x.f.profession,skill_id:x.generalSkill,scale_id:x.matrixScale,required_level:3,criticality:'important',valid_from:today,valid_to:null};
   const requirement=await competence(manager.id,'requirement.create',profile);
+  const nextProfileDay=new Date(Date.parse(today+'T00:00:00Z')+86400000).toISOString().slice(0,10);
+  const profileView=store.professionProfile(manager.id,1,x.f.profession,x.matrixScale,nextProfileDay),profileItem=profileView.items.find(s=>s.id===x.generalSkill);assert.equal(profileItem.level,3);assert.equal(profileItem.expected_id,requirement.id);assert(profileItem.editable);
+  const noChange={profession_id:x.f.profession,scale_id:x.matrixScale,effective:nextProfileDay,entries:[{skill_id:x.generalSkill,level:3,criticality:'important',expected_id:profileItem.expected_id,expected_rev:profileItem.expected_rev}]};
+  await assert.rejects(store.saveProfessionProfile(manager.id,1,{...noChange,entries:[{...noChange.entries[0],expected_rev:profileItem.expected_rev+1}]}),/изменён/);
+  assert.throws(()=>store.professionProfile(worker.id,1,x.f.profession,x.matrixScale,nextProfileDay),/недоступны/);
   const suggestion=store.suggestMatrix(manager.id,1,{unit_id:x.f.unit,base_on:today,filters:{shift_id:null,profession_id:null,workplace_id:null,category_id:null},scale_id:x.matrixScale,person_ids:[x.f.trainee],include_sops:false});
   assert(suggestion.keys.includes(x.generalSkill+':null'));assert.equal(suggestion.missing,0);
   assert.throws(()=>store.suggestMatrix(manager.id,1,{unit_id:x.f.unit,base_on:today,filters:{shift_id:null,profession_id:null,workplace_id:null,category_id:null},scale_id:x.matrixScale,person_ids:[x.personB],include_sops:false}),/недоступны/);
@@ -484,6 +490,9 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(store.assessmentDetail(worker.id,1,general.id).items[0].level,2);
   assert.equal(store.readResource(manager.id,'coverage.read',need.id).actual,1);
   assert.equal(store.readResource(manager.id,'coverage.read',need.id).deficit,1);
+  const matrixQuery={unit_id:x.f.unit,profession_id:'',shift_id:'',category_id:'',workplace_id:'',q:'',gaps:false,person_page:0,skill_page:0};
+  const whole=store.matrixOverview(manager.id,1,matrixQuery),row=whole.people.findIndex(p=>p.id===x.f.trainee),col=whole.skills.findIndex(s=>s.id===x.generalSkill);assert(row>=0&&col>=0);assert.equal(whole.cells[row][col].actual,2);assert.equal(whole.cells[row][col].target,3);assert.equal(whole.cells[row][col].gap,true);
+  assert.throws(()=>store.matrixOverview(worker.id,1,matrixQuery),/необходим доступ|недоступ/);
   const assessedMatrix=store.matrixDetail(manager.id,1,mixed.id);
   assert.equal(assessedMatrix.cells[1][0].actual,2);assert.equal(assessedMatrix.cells[1][0].target,3);assert.equal(assessedMatrix.cells[1][1].actual,2);
   await assert.rejects(competence(manager.id,'assessment.general',baseGeneral),/История оценки изменилась/);
@@ -768,7 +777,9 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert(card.sections.some(s=>s.action==='role_assignment.read'));
   assert(card.sections.some(s=>s.action==='roi.read'&&s.items.some(x=>x.id===effect.id&&x.can_detail)));
   assert(card.sections.some(s=>s.action==='assessment.read'&&s.items.some(r=>r.id===general.id&&r.can_detail)));
-  assert(card.sections.find(s=>s.action==='training.read').items.some(r=>r.id===newTraining.id));
+  assert(card.sections.find(s=>s.action==='training.read').items.some(r=>r.id===newTraining.id&&r.operation_name&&r.mentor_name&&r.sop_label));
+  assert(card.can_calendar&&card.can_plan&&card.can_twi_report);
+  const personalPlan=store.calendarWorkspace(manager.id,1,{mode:'plan',from:yesterday,to:today,person_id:x.f.trainee});assert(Array.isArray(personalPlan.items));
   assert(card.sections.find(s=>s.action==='matrix.read').items.some(r=>r.id===finalMatrix.id));
   const ownCard=store.personCard(worker.id,1,x.f.trainee);assert(!ownCard.sections.some(s=>s.action==='matrix.read'));
   assert.throws(()=>store.personCard(worker.id,1,x.personB),/недоступна/);
