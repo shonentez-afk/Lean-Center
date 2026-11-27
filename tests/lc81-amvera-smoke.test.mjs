@@ -134,3 +134,29 @@ test('Amvera generated recipe accepts the observed safe configuration and reject
  }finally{await fs.writeFile(file,original)}
  assert.deepEqual(cloudIdentity(),identity);
 });
+
+test('Amvera restores only the verified canonical npm lock; all other source changes still fail closed',async()=>{
+ const lock='package-lock.json',canonical='tools/lc81-amvera-package-lock.json',manifest='package.json';
+ const original=await fs.readFile(lock),copy=await fs.readFile(canonical),pkg=await fs.readFile(manifest);
+ assert(original.equals(copy));
+ const identity=cloudIdentity();
+ const changed=JSON.parse(original.toString('utf8'));changed.packages['node_modules/echarts'].version='0.0.0';
+ const rewritten=JSON.stringify(changed,null,2)+'\n';
+ try{
+  await fs.writeFile(lock,rewritten);
+  assert.throws(()=>cloudIdentity(),/Cloud source changed: package-lock.json/);
+  await fs.writeFile(manifest,Buffer.concat([pkg,Buffer.from('\n')]));
+  assert.throws(()=>cloudIdentity(process.cwd(),{restoreNpmLock:true}),/Cloud source changed: package.json/);
+  assert.equal(await fs.readFile(lock,'utf8'),rewritten,'other invalid sources must prevent lock recovery');
+  await fs.writeFile(manifest,pkg);
+  await fs.writeFile(canonical,rewritten);
+  assert.throws(()=>cloudIdentity(process.cwd(),{restoreNpmLock:true}),/Unverified LC8.1 canonical npm lock or recipe/);
+  assert.equal(await fs.readFile(lock,'utf8'),rewritten);
+  await fs.writeFile(canonical,copy);
+  assert.deepEqual(cloudIdentity(process.cwd(),{restoreNpmLock:true}),identity);
+  assert((await fs.readFile(lock)).equals(original));
+  assert.deepEqual(cloudIdentity(),identity);
+ }finally{
+  await fs.writeFile(lock,original);await fs.writeFile(canonical,copy);await fs.writeFile(manifest,pkg);
+ }
+});

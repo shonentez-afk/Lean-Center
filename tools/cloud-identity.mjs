@@ -1,12 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 const gitBlob=bytes=>createHash('sha1').update(Buffer.from('blob '+bytes.length+'\0')).update(bytes).digest('hex');
 // Amvera may reserialize its root YAML when the user saves Configuration.
 // Only this exact, restricted LC8.1 recipe can be accepted in another
 // formatting. This is deliberately NOT a general YAML parser: reject aliases,
 // tags, duplicate/unknown fields, sequences, complex scalars and other modes.
 const qaRecipePath='deploy/lc81-amvera/amvera.yml';
+const qaLockPath='tools/lc81-amvera-package-lock.json';
 const qaFields=new Map([
  ['meta.environment','nodejs'],['meta.toolchain.name','npm'],['meta.toolchain.version',22],
  ['build.skip',false],['build.additionalCommands','node tools/build_folder.mjs --cloud'],['build.artifacts.*','/'],
@@ -51,11 +53,23 @@ function formattedQaRecipe(root,bytes,expectedSha){
 }
 // A metadata-only child pins the actual source commit, allowing exact
 // diagnostics when Amvera builds without a .git directory.
-export function cloudIdentity(root=process.cwd()){
+export function cloudIdentity(root=process.cwd(),{restoreNpmLock=false}={}){
  const pin=JSON.parse(fs.readFileSync(path.join(root,'tools/cloud-source.json'),'utf8'));
  if(!/^[a-f0-9]{40}$/.test(pin.sourceCommit)||!Array.isArray(pin.files)||!pin.files.length)throw Error('Invalid cloud source descriptor');
  const expected=new Map();
  for(const item of pin.files){if(typeof item.path!=='string'||item.path.split('/').some(x=>!x||x==='.'||x==='..')||! /^[a-f0-9]{40}$/.test(item.sha)||expected.has(item.path))throw Error('Invalid cloud source entry');expected.set(item.path,item.sha)}
+ // In the protected deployment branch only, a pinned copy is the
+ // authority for the npm lock. The platform's rewritten lock is never
+ // trusted as an alternative dependency graph. Verify the whole tree before
+ // restoring anything. Normal identity checks remain strict.
+ let recovery=null,replacement=null;
+ if(restoreNpmLock&&expected.has(qaLockPath)){
+  const source=path.join(root,qaLockPath),recipe=path.join(root,qaRecipePath),target=path.join(root,'package-lock.json');
+  if(!fs.lstatSync(source).isFile()||!fs.lstatSync(recipe).isFile()||!fs.lstatSync(target).isFile())throw Error('Unsupported LC8.1 deployment source entry');
+  const canonical=fs.readFileSync(source),yaml=fs.readFileSync(recipe);
+  if(expected.get(qaLockPath)!==expected.get('package-lock.json')||gitBlob(canonical)!==expected.get(qaLockPath)||gitBlob(yaml)!==expected.get('amvera.yml')||!qaRecipe(yaml))throw Error('Unverified LC8.1 canonical npm lock or recipe');
+  recovery=canonical;
+ }
  const actual=[];
  function walk(dir){for(const name of fs.readdirSync(path.join(root,dir)).sort()){const file=dir+'/'+name;if(file==='tools/cloud-source.json')continue;const s=fs.lstatSync(path.join(root,file));if(s.isDirectory())walk(file);else if(s.isFile())actual.push(file);else throw Error('Unsupported source entry '+file)}}
  for(const dir of ['src','server','db','tools'])walk(dir);
@@ -64,10 +78,34 @@ export function cloudIdentity(root=process.cwd()){
  const hash=createHash('sha256');for(const file of actual){
   const bytes=fs.readFileSync(path.join(root,file)),sha=gitBlob(bytes),pinned=expected.get(file);
   if(sha!==pinned){
-   if(file!=='amvera.yml'||!formattedQaRecipe(root,bytes,pinned))throw Error('Cloud source changed: '+file+' (expected '+pinned+', actual '+sha+')');
-   console.log('LC8.1 Amvera recipe: approved equivalent YAML formatting; canonical '+pinned+', actual '+sha);
+   if(file==='package-lock.json'&&recovery){
+    replacement={bytes:recovery,actual:sha,pinned};
+   }else{
+    if(file!=='amvera.yml'||!formattedQaRecipe(root,bytes,pinned))throw Error('Cloud source changed: '+file+' (expected '+pinned+', actual '+sha+')');
+    console.log('LC8.1 Amvera recipe: approved equivalent YAML formatting; canonical '+pinned+', actual '+sha);
+   }
   }
   hash.update(file+'\0'+pinned+'\n');
  }
+ if(replacement){
+  const target=path.join(root,'package-lock.json');
+  fs.writeFileSync(target,replacement.bytes);
+  if(gitBlob(fs.readFileSync(target))!==replacement.pinned)throw Error('LC8.1 npm lock restoration failed');
+  console.log('LC8.1 Amvera npm lock restored: platform '+replacement.actual+', canonical '+replacement.pinned);
+ }
  return {sourceCommit:pin.sourceCommit,sourceFingerprint:hash.digest('hex')};
+}
+// Call before loading esbuild or any other npm dependency. In this isolated
+// branch Amvera has already run its own install. Replace that installation
+// with npm ci from the verified, exact lock, including build/optional deps.
+// The strict identity check after installation proves npm ci did not mutate
+// any pinned files. Other cloud/desktop branches keep their previous behavior.
+export function prepareCloudBuild(root=process.cwd()){
+ if(!fs.existsSync(path.join(root,qaLockPath)))return cloudIdentity(root);
+ const before=cloudIdentity(root,{restoreNpmLock:true});
+ execFileSync('npm',['ci','--ignore-scripts','--include=dev','--include=optional','--package-lock=true','--no-audit','--no-fund'],{cwd:root,stdio:'inherit',shell:process.platform==='win32'});
+ const after=cloudIdentity(root);
+ if(before.sourceCommit!==after.sourceCommit||before.sourceFingerprint!==after.sourceFingerprint)throw Error('LC8.1 source identity changed during dependency installation');
+ console.log('LC8.1 Amvera npm ci verified against canonical lock');
+ return after;
 }
