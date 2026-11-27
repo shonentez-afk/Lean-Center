@@ -51,8 +51,9 @@ test('first admin, explicit existing roles, scoped views, blocking and restart',
  const h=await harness(t);
  assert.equal((await h.request('/api/lc81/session')).status,401);
  const a=await h.login('admin',h.adminPassword),ac=a.cookie;
- assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,97);
+ assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,98);
  assert.equal((await h.request('/api/lc81/mobile-audit/options',{cookie:ac})).status,403);
+ assert.equal((await h.request('/api/lc81/history/preview',{cookie:ac,body:{raw:{schemaVersion:3,audits:[]},offset:0}})).status,403);
  assert.equal((await h.request('/api/lc81/assistant/cloud',{cookie:ac,body:{confirmed:true}})).status,403);
  const templates=h.store.formsCatalog(a.user.id,1);
  assert.equal(templates.forms.length,17);

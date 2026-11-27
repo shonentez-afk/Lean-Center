@@ -16,6 +16,7 @@ const publicFiles=new Map(await Promise.all([
  ['/center-ui.js','./center-ui.js','text/javascript; charset=utf-8'],
  ['/assistant-ui.js','./assistant-ui.js','text/javascript; charset=utf-8'],
  ['/mobile-audit-ui.js','./mobile-audit-ui.js','text/javascript; charset=utf-8'],
+ ['/final-ui.js','./final-ui.js','text/javascript; charset=utf-8'],
  ['/assets/echarts.min.js','../../node_modules/echarts/dist/echarts.min.js','text/javascript; charset=utf-8'],
  ['/shared/center-report.js','../../src/ui/center-report.js','text/javascript; charset=utf-8'],
  ['/analytics/palette.js','../../src/analytics/palette.js','text/javascript; charset=utf-8'],
@@ -198,6 +199,18 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
    if(req.method==='GET'&&p==='/api/lc81/calendar/detail'){reply(res,200,store.calendarDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/calendar/create'){reply(res,200,await store.createSchedule(a.id,a.credential_revision,await body(req,128*1024)));return}
    if(req.method==='POST'&&p==='/api/lc81/calendar/change'){reply(res,200,await store.changeSchedule(a.id,a.credential_revision,await body(req,128*1024)));return}
+   if(req.method==='GET'&&p==='/api/lc81/history/options'){reply(res,200,store.historyOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/history/list'){reply(res,200,store.historyList(a.id,a.credential_revision,Number(url.searchParams.get('offset')||0)));return}
+   if(req.method==='GET'&&p==='/api/lc81/history/detail'){reply(res,200,store.historyDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='GET'&&p==='/api/lc81/history/archive'){reply(res,200,store.historyArchive(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&['/api/lc81/history/preview','/api/lc81/history/import'].includes(p)){
+    must(libraryBusy<1,429,'Импорт или документы обрабатываются');libraryBusy++;
+    try{const f=await body(req,6*1024*1024),result=p.endsWith('/preview')?await store.previewHistory(a.id,a.credential_revision,f):await store.importHistory(a.id,a.credential_revision,f);reply(res,200,result);return}finally{libraryBusy--}
+   }
+   if(req.method==='GET'&&p==='/api/lc81/analytics/subjects'){reply(res,200,store.subjectOptions(a.id,a.credential_revision,url.searchParams.get('kind'),url.searchParams.get('sop_kind')||'sop_evaluation'));return}
+   if(req.method==='POST'&&p==='/api/lc81/analytics/report'){reply(res,200,store.subjectReport(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/analytics/export'){const r=await store.exportSubject(a.id,a.credential_revision,await body(req));reply(res,200,r.bytes,r.mime,{'Content-Disposition':'attachment; filename="'+r.filename+'"'});return}
+   if(req.method==='GET'&&p==='/api/lc81/analytics/frv'){reply(res,200,await store.frvReport(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/center/options'){reply(res,200,store.centerOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='GET'&&p==='/api/lc81/center/view'){reply(res,200,store.centerWorkspace(a.id,a.credential_revision,url.searchParams.get('kind'),Object.fromEntries(['unit_id','from','to'].map(k=>[k,url.searchParams.get(k)]))));return}
    if(req.method==='GET'&&p==='/api/lc81/center/evidence'){reply(res,200,store.metricEvidence(a.id,a.credential_revision,url.searchParams.get('kind'),Object.fromEntries(['unit_id','from','to'].map(k=>[k,url.searchParams.get(k)])),url.searchParams.get('id'),Number(url.searchParams.get('offset')||0)));return}

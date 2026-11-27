@@ -11,6 +11,7 @@ import {openSecureQA} from '../server/lc81/store.mjs';
 import {migratePilotCopy,copySecureCheckpoint} from '../server/lc81/maintenance.mjs';
 import {readZip} from '../src/modules/training/local-docx.js';
 import {excelJS} from '../server/lc81/form-commands.mjs';
+import {builtinRC1Method} from '../src/modules/training/rc1-import.js';
 import {QUESTION_BANK_V03} from '../src/modules/training/question-bank-v03.js';
 import {READ_ACTIONS,PERMISSIONS} from '../server/lc81/access-contract.mjs';
 import {readManagerProjection} from '../server/lc81/read-policy.mjs';
@@ -708,6 +709,47 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   }
   const mentors=store.mentorWorkspace(manager.id,1);assert(mentors.items.some(p=>p.id===x.f.mentor&&p.can_card));
   assert(!mentors.items.some(p=>p.id===x.personB&&!p.roles.length&&!p.credentials&&!p.appointments&&!p.authorizations.length));
+  // Final LC8.1: all original subject reports, same domain facts, restricted scope, immutable archive.
+  {
+  const reportOpts=store.subjectOptions(manager.id,1);
+  assert.equal(reportOpts.reports.length,11);
+  const reportScope={from:yesterday,to:today,unit_id:x.f.unit,person_id:'',shift_id:'',operation_id:'',revision_id:'',program_id:'',method_id:'',self_id:'',role:'all',state:'all',sop_kind:'sop_evaluation'};
+  const reports={};
+  for(const {id:kind} of reportOpts.reports){
+   const options=store.subjectOptions(manager.id,1,kind);
+   const method_id=kind==='audit'||kind==='comparison'?rc.id:kind==='self_eval'?sm.id:kind==='sop'?sopMethod.id:options.methods[0]?.id||'';
+   const f={...reportScope,kind,method_id,self_id:kind==='comparison'?selfResult.id:''};
+   const q=store.subjectReport(manager.id,1,f);
+   assert.equal(q.scope.kind,kind);assert(Array.isArray(q.tables));assert(q.notes.length,kind);
+   reports[kind]=q;
+  }
+  assert(reports.audit.tables.some(t=>t.items.some(r=>r.route?.id===recordedAudit.id)));
+  assert(reports.self_eval.tables.some(t=>t.items.some(r=>r.route?.id===selfResult.id)));
+  assert(reports.comparison.tables.some(t=>t.items.some(r=>r.route?.id===selfResult.id)));
+  assert(reports.sop.tables.some(t=>t.items.some(r=>r.route?.id===evaluation.id)));
+  assert.throws(()=>store.subjectReport(worker.id,1,{...reportScope,kind:'audit',method_id:rc.id}));
+  assert.throws(()=>store.subjectReport(otherEditor.id,1,{...reportScope,kind:'audit',method_id:rc.id}));
+  const exportReport=await store.exportSubject(manager.id,1,{...reportScope,kind:'audit',method_id:rc.id});
+  assert(exportReport.bytes.length>1000);assert.match(exportReport.filename,/\.xlsx$/);
+  const method=builtinRC1Method(),raw={schemaVersion:3,audits:[{id:'QA-RC1-ARCHIVE-001',date:today,instructor:{name:'Исторический инструктор'},trainer:{name:'Исторический ВТ'},trainee:{name:''},job:{name:'Историческая операция'},checklistVersion:method.id,responses:{[method.keys[0]]:{value:0.5,note:'Исходная оценка'},[method.keys[1]]:{value:0,note:''}},improvementComment:'Архивный факт'}],correctiveActions:[{id:'QA-HIST-ACTION',problem:'Историческое отклонение'}],auditCycles:[],auditChangeLog:[],mobileImportLog:[]};
+  const before=store.historyList(manager.id,1,0).total;
+  const preview=await store.previewHistory(manager.id,1,{raw,offset:0});
+  assert.equal(preview.counts.ready,1);assert.equal(store.historyList(manager.id,1,0).total,before);
+  await assert.rejects(store.previewHistory(otherEditor.id,1,{raw,offset:0}));
+  const selected=[{id:preview.items[0].id,hash:preview.items[0].hash,mentor_id:x.f.mentor,auditor_id:x.f.actor,trainee_id:null,revision_id:null}];
+  const payload={raw,token:preview.token,selected,metadata:[],archive_hash:preview.archive[0]?.hash??null};
+  const accepted=await store.importHistory(manager.id,1,payload);assert.equal(accepted.imported,1);
+  const history=store.historyList(manager.id,1,0);assert.equal(history.total,before+1);
+  const historical=history.items.find(v=>v.source_id===raw.audits[0].id);assert(historical);
+  const detail=store.historyDetail(manager.id,1,historical.id);
+  assert.equal(detail.questions[0].value,0.5);assert.equal(detail.questions[1].value,0);
+  assert.throws(()=>store.historyDetail(worker.id,1,historical.id));
+  assert.throws(()=>store.qualityDetail(manager.id,1,'audit',historical.id));
+  const again=await store.previewHistory(manager.id,1,{raw,offset:0});assert.equal(again.counts.duplicate,1);
+  await assert.rejects(store.importHistory(manager.id,1,payload));
+  const changed=structuredClone(raw);changed.audits[0].responses[method.keys[0]].value=1;
+  assert.equal((await store.previewHistory(manager.id,1,{raw:changed,offset:0})).counts.conflict,1);
+  }
   const card=store.personCard(manager.id,1,x.f.trainee);
   assert(card.sections.some(s=>s.action==='employment.read'));
   assert(card.sections.some(s=>s.action==='role_assignment.read'));
@@ -730,6 +772,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(store.readResource(worker.id,'task.read',x.otherTask),null);
   assert.equal((await store.saveLibrary(manager.id,1,savedRequest)).id,savedDraft.id,'receipt survives restore');
   assert.equal(store.trainingDetail(manager.id,1,newTraining.id).qualification.level,2);
+  const archived=store.historyList(manager.id,1,0).items.find(v=>v.source_id==='QA-RC1-ARCHIVE-001');assert(archived);assert.equal(store.historyDetail(manager.id,1,archived.id).questions[0].value,0.5);
   assert.equal(store.matrixDetail(manager.id,1,finalMatrix.id).cells[0][0].actual,2);
   const imported=await store.openLibrary(manager.id,1,{kind:'sop',command:'save',operation_id:x.f.operation,id:fromFrv.id,revision_id:fromFrv.revision_id,origin_id:null,origin_revision:null});
   assert.equal(JSON.parse(imported.text).constructor.steps[0].frvSource.observedTimeSec,12);

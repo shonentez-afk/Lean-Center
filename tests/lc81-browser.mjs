@@ -198,6 +198,13 @@ try{
  await goSection('center.read');await m.p.locator('#content').getByRole('heading',{name:'Оперативный обзор',exact:true}).waitFor();
  await button(m.p,'Проверить этот отчёт').click();await m.p.getByRole('dialog',{name:'Контекстный помощник'}).waitFor();await button(m.p,'Закрыть помощник').click();
  await goSection('analytics.read');await m.p.locator('#content').getByRole('heading',{name:'Аналитика за период',exact:true}).waitFor();
+ await m.p.getByRole('heading',{name:'Расширенные отчёты LC7',exact:true}).waitFor();
+ await button(m.p,'Подготовка сотрудников').click();
+ await button(m.p,'Сформировать подробный отчёт').click();
+ await button(m.p,'Скачать полный отчёт XLSX').waitFor();
+ await goSection('audit.history.read');
+ await m.p.getByRole('heading',{name:'Историческая база RC1',exact:true}).waitFor();
+ await m.p.locator('input[name=rc1_history_file]').waitFor();
  assert(await m.p.evaluate(()=>typeof globalThis.echarts?.init==='function'));
  await goSection('metrics.read');await m.p.locator('#content').getByRole('heading',{name:'Дерево показателей',exact:true}).waitFor();
  const metricRow=m.p.getByRole('row').filter({has:m.p.getByRole('cell',{name:'Назначено обучения',exact:true})});

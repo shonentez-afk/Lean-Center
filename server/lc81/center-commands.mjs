@@ -11,6 +11,7 @@ import {centerAttention,scopedAttention} from '../../src/modules/training/center
 import {metricScopeValid,METRIC_RELATIONS,RELATION_LABELS} from '../../src/modules/training/metric-catalog.js';
 import {annualAuditCoverage} from '../../src/modules/training/audit-analytics.js';
 import {effectOverview,effectFacts,twiBasis,effectPending,effectStatus} from '../../src/modules/effect/domain.js';
+import {historyAllowed,isHistoricalRC1} from './rc1-history.mjs';
 import {evaluationAccess} from './sop-evaluation-commands.mjs';
 import {programResource,personWorkResource,scheduleResource,trainingAssignmentResource,assessmentResource,auditResource,selfResource,enrollmentResource,preparationResource,developmentResource,taskResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
@@ -40,7 +41,7 @@ export function recordAccess(db,a,type,id){
  case 'enrollment':r=enrollmentResource(db,find(db,'training_enrollment',id),day);read='training.enrollment.read';permission='training.enrollment.detail';break;
  case 'preparation':r=preparationResource(db,find(db,'twi_preparation',id),day);read='preparation.read';permission='preparation.detail';break;
  case 'assessment':r=assessmentResource(db,find(db,'assessment_session',id),day);read='assessment.read';permission='assessment.detail';break;
- case 'audit':r=auditResource(db,find(db,'audit_session',id),day);read='audit.read';permission='audit.detail';break;
+ case 'audit':{const v=find(db,'audit_session',id);if(v&&isHistoricalRC1(db,id))return historyAllowed(db,a,id)?{type:'rc1_history',id,resource:programResource(db)}:null;r=auditResource(db,v,day);read='audit.read';permission='audit.detail';break}
  case 'self':r=selfResource(db,find(db,'mentor_self_evaluation',id),day);read='self.read';permission='self.detail';break;
  case 'task':r=taskResource(db,find(db,'action_item',id),day);read='task.read';permission='task.detail';break;
  case 'development':r=developmentResource(db,find(db,'development_plan',id),day);read='development.read';permission='development.detail';break;

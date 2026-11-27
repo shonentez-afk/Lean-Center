@@ -33,6 +33,8 @@ import {journalWorkspace,retrainingWorkspace} from './training-registers.mjs';
 import {sopEvaluationWorkspace,sopEvaluationOptions,sopEvaluationDetail,createSopEvaluation,installSopMethod} from './sop-evaluation-commands.mjs';
 import {importTypes,importAllowed,inspectDirectoryFile,parseDirectoryFile,planDirectoryImport,makeImportToken,checkImportToken} from './import-commands.mjs';
 import {mobileOptions,exportMobile,previewMobile,commitMobile,receiptMobile} from './mobile-audit-commands.mjs';
+import {assertImport,historyOptions,historyList,historyDetail,historyArchive,loadHistoryPlan,historyPreview,buildHistoryEvents,commitHistory} from './rc1-history.mjs';
+import {subjectOptions,subjectReport,subjectWorkbook,frvReportDetail} from './subject-reports.mjs';
 import {assistantOptions,assistantContext,assistantRequest} from './assistant-commands.mjs';
 import {formsCatalog,prepareForm,serializeForm,canExportForm} from './form-commands.mjs';
 import {refsForDb,checkContent,MAX_CONTENT,verifyDomainEvents} from '../../src/modules/library/domain.js';
@@ -508,6 +510,35 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   createSchedule(actor,revision,input){return mutate(db=>createSchedule(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   changeSchedule(actor,revision,input){return mutate(db=>changeSchedule(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   centerOptions(actor,revision,kind){return read(db=>centerOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind))},
+  historyOptions(actor,revision){return read(db=>historyOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  historyList(actor,revision,offset){return read(db=>historyList(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),offset))},
+  historyDetail(actor,revision,id){return read(db=>historyDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  historyArchive(actor,revision,id){return read(db=>historyArchive(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  async previewHistory(actor,revision,f){
+   must(keys(f,['raw','offset']),400,'Неверный запрос предпросмотра');
+   const snapshot=read(db=>{assertImport(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)));return openDb(SQL,bytesOf(db),{upgrade:false})});
+   try{const access=trainingAccess(snapshot,checkedAccount(snapshot,actor,revision),day(snapshot)),plan=await loadHistoryPlan(snapshot,access,f.raw),result=historyPreview(snapshot,access,plan,f.offset);
+    read(db=>assertImport(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))));return result;
+   }finally{snapshot.close()}
+  },
+  async importHistory(actor,revision,f){
+   must(keys(f,['raw','token','selected','metadata','archive_hash']),400,'Неверный запрос импорта');
+   const snapshot=read(db=>{assertImport(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)));return openDb(SQL,bytesOf(db),{upgrade:false})});
+   let prepared;
+   try{const access=trainingAccess(snapshot,checkedAccount(snapshot,actor,revision),day(snapshot)),plan=await loadHistoryPlan(snapshot,access,f.raw);prepared=await buildHistoryEvents(snapshot,access,f,plan)}
+   finally{snapshot.close()}
+   return mutate(db=>commitHistory(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f.raw,prepared));
+  },
+  subjectOptions(actor,revision,kind=null,sopKind='sop_evaluation'){return read(db=>subjectOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind,sopKind))},
+  subjectReport(actor,revision,f){return read(db=>subjectReport(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  exportSubject(actor,revision,f){
+   let result;return mutate(db=>{result=subjectWorkbook(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f);return result},async()=>{await serializeForm(result)});
+  },
+  async frvReport(actor,revision,id){
+   const descriptor=db=>{const user=checkedAccount(db,actor,revision);subjectOptions(db,trainingAccess(db,user,day(db)),'frv');return detailDescriptor(db,'frv.read_summary',id,libraryAccess(db,user,day(db)))};
+   const desc=read(descriptor),data=await checkedLibrarySource(desc,readFile);
+   return read(db=>{must(descriptor(db).source.sha256===desc.source.sha256,409,'Исходник ФРВ изменился');return frvReportDetail(data.raw,id)});
+  },
   centerWorkspace(actor,revision,kind,scope){return read(db=>centerWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind,scope))},
   metricEvidence(actor,revision,kind,scope,id,offset){return read(db=>metricEvidence(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind,scope,id,offset))},
   roiOptions(actor,revision){return read(db=>roiOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},

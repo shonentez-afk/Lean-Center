@@ -7,6 +7,7 @@ import {RC1_CRITERIA} from '../../src/modules/training/builtin-forms.js';
 import {AUDIT_V03,SELF_V03} from '../../src/modules/training/standard-v03.js';
 import {auditDetails,actionRows,actionStatus,actionSource,actionSourceOf,evidenceForAction,practicalEvidenceForAction,ACTION_KINDS,ACTION_STATES,RESPONSE_LABELS} from '../../src/modules/training/audit-domain.js';
 import {sopEvidence} from '../../src/modules/library/sop-assessment-review.js';
+import {historyAllowed,isHistoricalRC1} from './rc1-history.mjs';
 import {evaluationAccess} from './sop-evaluation-commands.mjs';
 import {ACTION_VERIFY_DATE_BASIS} from '../../src/modules/training/action-calendar.js';
 import {auditResource,selfResource,developmentResource,practicalResource,taskResource,trainingAssignmentResource,enrollmentResource,personWorkResource,programResource} from './read-policy.mjs';
@@ -73,14 +74,14 @@ export function createSelf(db,a,f){
 export function voidAudit(db,a,f){
  must(a.personId&&exact(f,['id','expected_revision','reason'])&&isId(f.id)&&Number.isSafeInteger(f.expected_revision)&&txt(f.reason),400,'Укажите основание аннулирования');
  const t=find(db,'audit_session',f.id),r=auditResource(db,t,a.day);
- must(t&&a.read('audit.read',t.id)&&a.personId!==t.mentor_id&&a.personId!==t.trainee_id&&allowed(a,'audit.void',t.id,r),403,'Аудит недоступен');
+ must(t&&!isHistoricalRC1(db,t.id)&&a.read('audit.read',t.id)&&a.personId!==t.mentor_id&&a.personId!==t.trainee_id&&allowed(a,'audit.void',t.id,r),403,'Аудит недоступен');
  must(t.rev===f.expected_revision&&t.state==='final',409,'Аудит изменён');
  return emit(db,a,'audit_session',t.id,'update',t.rev,{command:'void',reason:f.reason},'audit.void');
 }
 export function qualityDetail(db,a,kind,id){
  if(kind==='audit'){
   const t=find(db,'audit_session',id),r=auditResource(db,t,a.day);
-  must(t&&a.read('audit.read',id)&&allowed(a,'audit.detail',id,r),404,'Аудит недоступен');
+  must(t&&!isHistoricalRC1(db,t.id)&&a.read('audit.read',id)&&allowed(a,'audit.detail',id,r),404,'Аудит недоступен; исторический RC1 открывается в архиве');
   const d=auditDetails(db,id);
   return {id,rev:t.rev,state:t.state,date:t.observed_at,mentor:name(a,t.mentor_id),auditor:name(a,t.auditor_id),operation:a.read('operation.read',t.operation_id)?.data.name??null,method:d.method_code,version:d.version_no,summary:t.summary,void_reason:t.void_reason,stats:d.stats,questions:d.questions.map(q=>({id:q.id,position:q.position,section:q.section_code,question:q.question,response:q.response,note:q.note,recommendation:q.recommendation,response_id:q.response_id})),labels:RESPONSE_LABELS,can_void:!!a.personId&&t.state==='final'&&a.personId!==t.mentor_id&&a.personId!==t.trainee_id&&allowed(a,'audit.void',id,r),can_task:!!a.personId&&t.state==='final'&&allowed(a,'task.create',id,r)};
  }
@@ -97,7 +98,7 @@ function sourceFor(db,a,s){
  must(exact(s,['kind','id','criterion_id'])&&isId(s.id)&&(s.criterion_id===null||string(s.criterion_id,150)),400,'Неверный источник');
  if(s.kind==='audit'){
   const t=find(db,'audit_session',s.id),r=auditResource(db,t,a.day);
-  must(t&&t.state==='final'&&a.read('audit.read',t.id)&&allowed(a,'audit.detail',t.id,r),404,'Аудит недоступен');
+  must(t&&!isHistoricalRC1(db,t.id)&&t.state==='final'&&a.read('audit.read',t.id)&&allowed(a,'audit.detail',t.id,r),404,'Аудит недоступен');
   const q=one(db,"SELECT r.id,c.question FROM audit_response r JOIN checklist_criterion c ON c.id=r.criterion_id WHERE r.audit_id=? AND r.criterion_id=? AND r.response='no'",[t.id,s.criterion_id]);
   must(q,422,'Выберите подтверждённое отклонение');
   return {resource:r,subject_id:t.mentor_id,response_id:q.id,link:null,label:q.question,kinds:['corrective','instructor_training','development']};
@@ -207,6 +208,6 @@ export function qualityView(db,a,action,data){
   const full=actionRows(db).find(x=>x.id===t.id);
   return {...data,state:full?actionStatus(db,full):data.state,kind:t.kind,owner:name(a,t.owner_id),subject:name(a,t.subject_id),can_detail:allowed(a,'task.detail',data.id,r)};
  }
- if(action==='audit.read'){const t=find(db,'audit_session',data.id);return {...data,mentor_name:name(a,t.mentor_id),operation_name:a.read('operation.read',t.operation_id)?.data.name??null,can_detail:allowed(a,'audit.detail',t.id,auditResource(db,t,a.day))}}
+ if(action==='audit.read'){const t=find(db,'audit_session',data.id);return {...data,mentor_name:name(a,t.mentor_id),operation_name:a.read('operation.read',t.operation_id)?.data.name??null,historical:!!isHistoricalRC1(db,t.id),can_history:historyAllowed(db,a,t.id),can_detail:!isHistoricalRC1(db,t.id)&&allowed(a,'audit.detail',t.id,auditResource(db,t,a.day))}}
  const s=find(db,'mentor_self_evaluation',data.id);return {...data,person_name:name(a,s.person_id),can_detail:allowed(a,'self.detail',s.id,selfResource(db,s,a.day))};
 }
