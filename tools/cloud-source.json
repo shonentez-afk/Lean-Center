@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "ac6264557680280fd74142cac988b77a17369aaa",
+  "sourceCommit": "f13bfa36019169d4ba2fe3479d2521a02f71a19b",
   "files": [
     {
       "path": "amvera.yml",
@@ -231,7 +231,7 @@
     },
     {
       "path": "server/lc81/portal.css",
-      "sha": "3529d3d1cc5141b01394185de64630d01c1b7452"
+      "sha": "53973b7a7ee7f55ea3dec92ef5f84998d87b1985"
     },
     {
       "path": "server/lc81/portal.html",
