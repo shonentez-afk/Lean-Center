@@ -13,7 +13,11 @@ import {cloudSaveState} from '/shared/cloud-save-state.js';
 const $=id=>document.getElementById(id),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n};
 let libraryUI=null,trainingUI=null,centerUI=null,assistantUI=null,mobileUI=null,finalUI=null;
 let user=null,page='person.read_basic',busy=false,sequence=0,saving=false,checking=false,saveFailed=false,networkFailed=false;
-let authGeneration=0,statusVersion=0,accessCheck=null,accessRefreshPending=false;
+let authGeneration=0,statusVersion=0,accessCheck=null,accessRefreshPending=false,provisionManager=false;
+const adminPages=Object.freeze({admin:'Начало работы','admin.enterprise':'Предприятие','admin.users':'Пользователи','admin.roles':'Роли и права','admin.access':'Назначения и доступ','admin.storage':'Хранение и журнал'});
+const isAdminPage=key=>Object.hasOwn(adminPages,key);
+const titleFor=key=>adminPages[key]||actions[key]||'Личное рабочее пространство';
+const landingPage=a=>a.admin?'admin':a.workspace_actions?.includes('center.read')?'center.read':a.permissions.includes('person.read_directory')?'person.read_directory':a.workspace_actions?.includes('sop.constructor')?'sop.constructor':'person.read_basic';
 const actions={...{'person.read_basic':'Сотрудники','sop.read_effective':'Каталог СОП','training.read':'Обучение','task.read':'Мои задачи / мероприятия',"org.read":"Структура предприятия","operation.read":"Операции","sop.read_history":"Редакции и черновики СОП","sop.read_steps":"Шаги действующих СОП","frv.read":"ФРВ","program.read":"Шаблоны программ","training.enrollment.read":"Персональные программы","preparation.read":"Комплекты подготовки","credential.read":"Подготовка наставников","appointment.read":"Приказы о назначении","development.read":"Планы развития","audit.read":"Аудиты","supplement.read":"Доплаты","roi.read":"Экономический эффект","calendar.read":"Календарь","plan.read":"Мой план","center.read":"Дашборд","analytics.read":"Аналитика","metrics.read":"Дерево показателей"},'person.read_directory':'Сотрудники — справочник','equipment.read':'Оборудование','workplace.read':'Рабочие места','sop.constructor':'Конструктор СОП','sop.read_twi':'Планы инструктажа TWI','sop.read_linked_frv':'ФРВ по СОП','matrix.read':'Матрицы компетенций','authorization.read':'Полномочия наставников','order.read':'Групповые приказы','self.read':'Самооценка наставников','bank.read':'Банк вопросов','skill.read':'Каталог навыков','requirement.read':'Требования по профессиям','coverage.read':'Покрытие компетенций','assessment.read':'Оценки компетенций','profession.read':'Профессии','position.read':'Должности','shift.read':'Смены','category.read':'Категории навыков','scale.read':'Шкалы оценивания','role.read':'Роли сотрудников','employment.read':'Кадровые назначения','role_assignment.read':'Назначения ролей','forms.read':'Бланки и методики','sop.evaluation.read':'Оценки СОП','journal.view':'Журнал инструктажей','retraining.view':'Переобучение','import.view':'Импорт XLSX','assistant.read':'ИИ-помощник','instruction.view':'Инструктажи TWI','internship.view':'Программы стажировки','mentoring.view':'Наставники и ВТ','audit.history.read':'Исторический RC1'};
 const directoryActions={'person.read_directory':'person','org.read':'org_unit','equipment.read':'equipment','workplace.read':'workplace','operation.read':'operation','profession.read':'profession','position.read':'position','shift.read':'work_shift','category.read':'skill_category','scale.read':'rating_scale','role.read':'business_role'};
 const actionLabels={...actions,'task.implement_own':'Выполнение собственных задач','sop.read_photo':'Просмотр фотографий СОП','sop.create':'Создание СОП','sop.edit_draft':'Редактирование черновика СОП','sop.revise':'Создание редакции СОП','sop.passport':'Паспорт СОП','sop.from_frv':'Создание СОП из ФРВ','frv.create':'Создание ФРВ','frv.edit_draft':'Редактирование ФРВ','frv.finalize':'Завершение ФРВ','frv.read_summary':'Результаты фактических замеров ФРВ','training.create':'Назначение обучения','training.approve_responsible':'Подтверждение плана ответственным','training.approve_head':'Подтверждение плана руководителем','training.reschedule':'Изменение срока обучения','training.cancel':'Отмена назначения','training.stage':'Факт инструктажа','training.verify':'Проверка знаний','training.practical':'Практическая оценка','training.qualify':'Подтверждение квалификации','training.admit':'Решение о допуске','training.detail':'Карточка обучения','training.read_sop':'СОП назначенного обучения','matrix.create':'Конструктор матриц','matrix.retire':'Закрытие матриц','matrix.detail':'Детальная матрица','person.read_card':'Карточка сотрудника','credential.register':'Регистрация документов подготовки','credential.revoke':'Отзыв документов подготовки','appointment.register':'Регистрация приказов','appointment.revoke':'Отзыв назначений','authorization.register':'Выдача права обучать','authorization.revoke':'Отзыв права обучать','program.create':'Конструктор программ и новые версии','program.retire':'Закрытие шаблонов','program.detail':'Карточка шаблона','training.enrollment.create':'Назначение персональной программы','training.enrollment.result':'Регистрация результата задания','training.enrollment.finish':'Завершение программы','training.enrollment.cancel':'Отмена программы','training.enrollment.detail':'Карточка персональной программы','preparation.create':'Формирование комплекта подготовки','preparation.detail':'Карточка комплекта подготовки','preparation.shift':'Фактическая смена стажировки','preparation.safety':'Протокол обучения безопасным методам','preparation.internship':'Итог стажировки','preparation.questions':'Выдача вопросов','preparation.commission':'Регистрация решения комиссии','order.register':'Регистрация группового приказа','order.detail':'Карточка группового приказа','supplement.create':'Создание ходатайства','supplement.revise':'Уточнение ходатайства','supplement.decide':'Решение по ходатайству','supplement.detail':'Карточка ходатайства','development.create':'Создание планов развития','development.goal.create':'Постановка целей','development.goal.close':'Завершение целей','development.close':'Закрытие планов','development.from_matrix':'Цели из матрицы','development.detail':'Карточка плана развития','audit.create':'Регистрация аудита L1','audit.void':'Аннулирование аудита','audit.detail':'Результаты аудита','self.create':'Собственная самооценка','self.detail':'Результаты самооценки','task.create':'Создание мероприятий','task.start':'Начало выполнения своего мероприятия','task.link':'Связь с повторным обучением или развитием','task.cancel':'Отмена мероприятия','task.verify':'Независимая проверка эффекта','task.detail':'Карточка мероприятия','bank.save':'Версии банка вопросов','bank.detail':'Вопросы и история версий','mentor.method.install':'Первичная установка утверждённой методики','skill.category.create':'Создание категорий навыков','skill.create':'Создание общих навыков','skill.from_sop':'Создание навыков из действующего СОП','requirement.create':'Требования к профессии','requirement.close':'Закрытие требования','coverage.save':'Планирование покрытия','assessment.general':'Регистрация оценки общего навыка','assessment.detail':'Подробности оценки компетенции','calendar.detail':'Карточка планового события','calendar.plan':'Планирование аудитов и оценок','calendar.cancel':'Отмена плана','calendar.complete':'Завершение своего плана по факту','calendar.replan':'Перепланирование после аннулирования','roi.detail':'Финансовые данные и источники эффекта','roi.create':'Создание карточек эффекта','roi.plan':'Плановые расчёты','roi.reschedule':'Сроки контроля эффекта','roi.cancel':'Отмена карточки эффекта','roi.measure':'Независимая проверка расчёта','roi.fact.create':'Регистрация денежного факта','roi.fact.save':'Уточнение своего черновика','roi.fact.confirm':'Независимое подтверждение денег','roi.fact.void':'Аннулирование денежного факта','roi.target':'Денежные цели','roi.target.cancel':'Отмена цели','roi.target.review':'Разбор отклонения цели','roi.twi_basis':'Сопоставимые основания TWI','profession.create':'Создание профессии','profession.update':'Изменение названия профессии','position.create':'Создание должности','position.update':'Изменение названия должности','shift.create':'Создание смены','shift.update':'Изменение названия смены','scale.create':'Создание новой версии шкалы','employment.detail':'Детали кадрового назначения','employment.transfer':'Кадровое перемещение','forms.read':'Редактируемые бланки TWI 03','forms.export':'Выгрузка разрешённых записей','sop.evaluation.read':'Чтение оценок СОП','sop.evaluation.create':'Регистрация оценки СОП','sop.method.install':'Установка методики оценки СОП','audit.mobile.export':'Выгрузка своего автономного аудита RC1','audit.mobile.import':'Приём своего мобильного аудита RC1','assistant.read':'Локальный и контекстный помощник','assistant.cloud':'Разрешение отправки общих тем во внешний ИИ','audit.history.read':'Архив RC1 всего предприятия','audit.history.import':'Импорт неизменяемой истории RC1'};
@@ -91,16 +95,35 @@ function adminPanel(d){
   addRef('Создать роль сотрудников','business_role',[input('code','Код'),input('name','Название')],f=>({code:value(f,'code'),name:value(f,'name')})),
   addRef('Назначение роли','role_assignment',[select('person_id','Сотрудник',options(d.people)),select('role_id','Роль',options(d.roles.filter(r=>r.id!==d.protectedRoles[0]))),input('valid_from','С','date')],f=>({person_id:value(f,'person_id'),role_id:value(f,'role_id'),valid_from:value(f,'valid_from'),valid_to:null}))
  );
- const userForm=form([select('person_id','Сотрудник',options(d.people.filter(p=>!d.accounts.some(a=>a.person_id===p.id)))),input('login','Рабочая почта или логин'),input('password','Пароль (12–128 байт)','password',false),input('password_confirm','Повторите пароль','password',false),check('generate','Сгенерировать пароль на сервере')],'Создать пользователя',async f=>{
+ const employed=id=>d.employment.filter(x=>x.person_id===id&&x.valid_from<=d.clock.day&&(!x.valid_to||x.valid_to>=d.clock.day)).length===1;
+ const eligible=d.people.filter(p=>employed(p.id)&&!d.accounts.some(a=>a.person_id===p.id));
+ const picker=select('person_id','Сотрудник',[['new','Создать нового сотрудника'],...options(eligible)]);
+ const personFields=el('div',undefined,'lc81-form'),unit=select('unit_id','Подразделение',options(d.units));
+ unit.querySelector('select').value=d.site;
+ personFields.append(input('employee_code','Табельный номер'),input('display_name','ФИО сотрудника'),unit);
+ const mode=select('access_mode','Доступ при создании',[['employee','Сотрудник — общая библиотека, собственные СОП и ФРВ'],['manager','Управляющий центром TWI — рабочие разделы предприятия']]);
+ mode.querySelector('select').value=provisionManager?'manager':'employee';
+ const passwordFields=el('div',undefined,'lc81-form'),generateField=check('generate','Сгенерировать надёжный пароль',true);
+ passwordFields.append(input('password','Пароль (12–128 байт)','password',false),input('password_confirm','Повторите пароль','password',false));
+ const explanation=el('p','','muted');
+ const userForm=form([picker,personFields,input('login','Рабочая почта или логин'),mode,explanation,generateField,passwordFields,check('confirmed','Подтверждаю создание пользователя и выбранный доступ')],'Создать пользователя',async f=>{
+  if(!f.elements.confirmed.checked)throw Error('Подтвердите создание пользователя и выбранный доступ');
   const generate=f.elements.generate.checked,password=value(f,'password');
   if(!generate&&password!==value(f,'password_confirm'))throw Error('Пароли не совпадают');
   if(!$('issued').hidden)throw Error('Сначала сохраните и закройте ранее выданный пароль');
-  const r=await api('admin/account',{person_id:value(f,'person_id'),login:value(f,'login'),password:generate?null:password,generate});
-  f.reset();f.lcResetForm?.();
-  displayIssued(r);
-  await renew('Пользователь создан. Назначьте подтверждённый доступ.');
+  const id=value(f,'person_id'),manager=value(f,'access_mode')==='manager';
+  const r=await api('admin/provision',{person_id:id==='new'?null:id,new_person:id==='new'?{employee_code:value(f,'employee_code'),display_name:value(f,'display_name'),unit_id:value(f,'unit_id')}:null,login:value(f,'login'),password:generate?null:password,generate,manager});
+  f.reset();f.lcResetForm?.();provisionManager=false;displayIssued(r);
+  await renew(manager?'Управляющий создан. Доступ ко всему предприятию подтверждён.':'Пользователь создан. Базовый доступ к СОП и ФРВ уже действует.');
  });
- const accountEditor=el('div'),accountTable=table(['Логин','Сотрудник','Состояние','Сеансы / действия'],d.accounts.map(a=>{
+ const syncUserForm=()=>{
+  const show=userForm.elements.person_id.value==='new',manual=!userForm.elements.generate.checked;
+  personFields.hidden=!show;for(const n of personFields.querySelectorAll('input,select'))n.disabled=!show;
+  passwordFields.hidden=!manual;for(const n of passwordFields.querySelectorAll('input')){n.disabled=!manual;n.required=manual}
+  explanation.textContent=userForm.elements.access_mode.value==='manager'?'Будут связаны сотрудник, учётная запись, роль управляющего и действующий доступ ко всему предприятию. Административные права не выдаются.':'Сотрудник сможет работать со своими черновиками и общей библиотекой. Дополнительные рабочие права можно назначить позже.';
+ };
+ for(const key of ['person_id','access_mode','generate'])userForm.elements[key].addEventListener('change',syncUserForm);syncUserForm();userForm.lcResetForm?.();
+ const accountEditor=el('div'),accountTable=table(['Логин','Сотрудник','Состояние','Действующий доступ','Действия'],d.accounts.map(a=>{
   const controls=el('div',undefined,'row');
   if(a.admin)controls.append(el('span','Защищённый администратор. Пароль меняется в личном меню.'));
   else{
@@ -127,7 +150,9 @@ function adminPanel(d){
     })));accountEditor.scrollIntoView({block:'nearest'});
    }));
   }
-  return [a.login,a.display_name,a.state==='blocked'?'Заблокирован':!a.employment_active?'Нет действующего кадрового назначения':'Активен',controls];
+  const effective=d.grants.filter(g=>g.account_id===a.id&&g.status==='effective').map(g=>roles.get(g.role_id));
+  const access=a.admin?'Системный администратор':a.state==='blocked'||!a.employment_active?'Нет доступа':effective.length?[...new Set(effective)].join(', '):'Базовый доступ сотрудника';
+  return [a.login,a.display_name,a.state==='blocked'?'Заблокирован':!a.employment_active?'Нет действующего кадрового назначения':'Активен',access,controls];
  }));
  const policyForms=d.roles.map(r=>{
   const p=d.policies.find(x=>x.role_id===r.id);
@@ -136,29 +161,36 @@ function adminPanel(d){
    if(r.id===d.protectedRoles[1]&&p){detail.append(el('p','Разрешений: '+p.permissions.length+' из '+d.actions.length+' · версия '+p.revision));if(d.actions.some(a=>!p.permissions.includes(a)))detail.append(button('Принять новые возможности управляющего',async()=>{if(!confirm('Обновить рабочие полномочия управляющего? Прежние назначения доступа нужно будет подтвердить заново.'))return;await post('manager-policy',{revision:p.revision},'Права обновлены; подтвердите назначения заново.')}))}
    return detail;
   }
-  const checks=el('div');checks.className='lc81-checks';for(const a of d.actions)checks.append(check(a,actionLabels[a],p?.permissions.includes(a)));
+  const checks=el('div',undefined,'lc81-policy-groups'),groups=new Map();
+  const areas=[['Сотрудники и структура',['person','org','profession','position','shift','employment','role','role_assignment','equipment','workplace','operation']],['СОП, ФРВ и методики',['sop','frv','forms']],['Обучение и наставничество',['training','program','preparation','credential','appointment','authorization','order','supplement','mentor','bank']],['Компетенции и развитие',['matrix','skill','requirement','coverage','assessment','category','scale','development']],['Аудит и задачи',['audit','self','task']],['Планирование и аналитика',['calendar','plan','center','analytics','metrics','roi','assistant']]];
+  for(const a of d.actions){const name=areas.find(([,prefixes])=>prefixes.includes(a.split('.')[0]))?.[0]||'Прочее';if(!groups.has(name))groups.set(name,[]);groups.get(name).push(a)}
+  for(const [name,items] of groups){
+   const details=el('details',undefined,'lc81-policy'),body=el('div',undefined,'lc81-checks');
+   details.append(el('summary',name+' · '+items.filter(a=>p?.permissions.includes(a)).length+' / '+items.length));
+   for(const a of items)body.append(check(a,actionLabels[a]||a,p?.permissions.includes(a)));
+   details.append(body);checks.append(details);
+  }
   const detail=el('details');detail.className='lc81-policy';detail.append(el('summary',r.name+' · '+(p?.permissions.length||0)+' разрешений'),form([checks],'Сохранить права',f=>post('policy',{role_id:r.id,revision:p?.revision||0,permissions:d.actions.filter(a=>f.elements.namedItem(a).checked)},'Права сохранены; прежние гранты требуют подтверждения')));return detail;
  });
+ const usableAccounts=d.accounts.filter(a=>!a.admin&&a.state==='active'&&a.employment_active);
+ const roleOptions=d.roles.filter(r=>r.id!==d.protectedRoles[0]&&d.policies.some(p=>p.role_id===r.id));
  const grantForm=form([
-  select('account_id','Пользователь',options(d.accounts.filter(a=>!a.admin&&a.state==='active'))),
-  select('assignment_id','Действующее назначение роли',d.assignments.filter(a=>a.valid_from<=d.clock.day&&(!a.valid_to||a.valid_to>=d.clock.day)&&a.role_id!==d.protectedRoles[0]).map(a=>[a.id,(people.get(a.person_id)||a.person_id)+' — '+(roles.get(a.role_id)||a.role_id)])),
-  select('scope','Область',[['self','Своё'],['assigned','Назначенное обучение'],['unit_tree','Подразделение с дочерними']]),
-  select('unit_id','Подразделение (если выбрана область)',options(d.units)),input('valid_to','До (необязательно)','date',false)
- ],'Подтвердить доступ',f=>post('grant',{account_id:value(f,'account_id'),assignment_id:value(f,'assignment_id'),scope:value(f,'scope')==='unit_tree'?{kind:'unit_tree',unit_id:value(f,'unit_id')}:{kind:value(f,'scope')},valid_to:value(f,'valid_to')||null},'Доступ назначен'));
- // Keep role assignment and account together; no cross-person combinations.
- const accountField=grantForm.elements.account_id,roleField=grantForm.elements.assignment_id,scopeField=grantForm.elements.scope,unitField=grantForm.elements.unit_id;
- const updateRoles=()=>{
-  const a=d.accounts.find(x=>x.id===accountField.value),matches=d.assignments.filter(x=>x.person_id===a?.person_id&&x.valid_from<=d.clock.day&&(!x.valid_to||x.valid_to>=d.clock.day)&&d.policies.some(p=>p.role_id===x.role_id));
-  roleField.replaceChildren(...matches.map(x=>new Option(roles.get(x.role_id)||x.role_id,x.id)));
-  updateScope();
- };
+  select('account_id','Пользователь',[['','— Выберите пользователя —'],...usableAccounts.map(a=>[a.id,a.display_name+' · '+a.login])]),
+  select('role_id','Рабочая роль',[['','— Выберите роль —'],...options(roleOptions)]),
+  select('scope','Где действует доступ',[['self','Только собственные записи'],['assigned','Назначенное обучение'],['unit_tree','Подразделение и его дочерние подразделения']]),
+  select('unit_id','Подразделение',options(d.units)),input('valid_to','До (необязательно)','date',false),check('confirmed','Подтверждаю выбранную роль и область доступа')
+ ],'Назначить доступ',async f=>{
+  if(!f.elements.confirmed.checked)throw Error('Подтвердите роль и область доступа');
+  await post('access',{account_id:value(f,'account_id'),role_id:value(f,'role_id'),scope:value(f,'scope')==='unit_tree'?{kind:'unit_tree',unit_id:value(f,'unit_id')}:{kind:value(f,'scope')},valid_to:value(f,'valid_to')||null},'Роль и доступ назначены');
+ });
+ const roleField=grantForm.elements.role_id,scopeField=grantForm.elements.scope,unitField=grantForm.elements.unit_id;
  const updateScope=()=>{
-  const r=d.assignments.find(x=>x.id===roleField.value),manager=r?.role_id===d.protectedRoles[1];
+  const manager=roleField.value===d.protectedRoles[1];
   scopeField.disabled=manager;if(manager){scopeField.value='unit_tree';unitField.value=d.site}
   unitField.disabled=manager||scopeField.value!=='unit_tree';
  };
- accountField.addEventListener('change',updateRoles);roleField.addEventListener('change',updateScope);scopeField.addEventListener('change',updateScope);updateRoles();grantForm.lcResetForm?.();
- const grants=table(['Пользователь','Роль','Область','Период','Версия политики','Фактическое состояние','Действие'],d.grants.map(g=>[accounts.get(g.account_id),roles.get(g.role_id),g.scope.kind==='unit_tree'?units.get(g.scope.unit_id):g.scope.kind==='self'?'Своё':'Назначенное обучение',g.valid_from+' — '+(g.valid_to||'без срока'),g.policy_revision,grantLabels[g.status]||'Проверить',g.state==='active'?button('Отозвать',async()=>{if(discard()&&confirm('Немедленно отозвать этот доступ?'))await post('revoke',{id:g.id},'Доступ отозван')}):'—']));
+ roleField.addEventListener('change',updateScope);scopeField.addEventListener('change',updateScope);updateScope();grantForm.lcResetForm?.();
+ const grants=table(['Пользователь','Роль','Область','Период','Версия прав','Состояние доступа','Действие'],d.grants.map(g=>[accounts.get(g.account_id),roles.get(g.role_id),g.scope.kind==='unit_tree'?units.get(g.scope.unit_id):g.scope.kind==='self'?'Своё':'Назначенное обучение',g.valid_from+' — '+(g.valid_to||'без срока'),g.policy_revision,grantLabels[g.status]||'Проверить',g.state==='active'?button('Отозвать',async()=>{if(discard()&&confirm('Немедленно отозвать этот доступ?'))await post('revoke',{id:g.id},'Доступ отозван')}):'—']));
  const history=el('div'),endForm=(type,x)=>{
   if(!discard())return;
   const dateField=input('valid_to',type==='role'?'Последний день действия роли':'Последний рабочий день','date');dateField.querySelector('input').min=x.valid_from>d.clock.day?x.valid_from:d.clock.day;dateField.querySelector('input').value=dateField.querySelector('input').min;
@@ -178,9 +210,30 @@ function adminPanel(d){
  for(const field of grid.querySelectorAll('input[type=date][name=valid_from]'))field.value=d.clock.day;
  for(const f of grid.querySelectorAll('form'))f.lcResetForm?.();
  const openPage=act=>async()=>{if(!discard())return;page=act;await render()};
- const guide=panel('Настройка центра',el('p','Сотрудников: '+d.people.length+' · подразделений: '+d.units.length+' · ролей: '+d.roles.length+' · учётных записей сотрудников: '+d.accounts.filter(a=>!a.admin).length+' · действующих доступов: '+d.grants.filter(g=>g.status==='effective').length),el('p','Если база новая, заполните реальные справочники или импортируйте сотрудников. Для управляющего: кадровое назначение → назначение роли → учётная запись → подтверждение доступа ко всему предприятию. Роль без подтверждённого доступа не открывает рабочие разделы.'),button('Структура предприятия',openPage('org.read')),button('Справочник сотрудников',openPage('person.read_directory')),button('Операции',openPage('operation.read')),button('Справочник ролей',openPage('role.read')),button('Конструктор СОП',openPage('sop.constructor')));
+ const activeManager=d.grants.some(g=>g.role_id===d.protectedRoles[1]&&g.status==='effective'),root=d.units.find(u=>u.id===d.site);
+ const goManager=async()=>{if(!discard())return;provisionManager=true;page='admin.users';await render()};
+ const statusCard=(title,description,done,links)=>{
+  const card=el('section',undefined,'lc81-start-card');card.append(el('span',done?'Готово':'Настроить',done?'lc81-start-ready':'lc81-start-next'),el('h3',title),el('p',description,'muted'));
+  const row=el('div',undefined,'row');row.append(...links);card.append(row);return card;
+ };
+ const cards=el('div',undefined,'lc81-start-grid');
+ cards.append(
+  statusCard('1. Предприятие и календарь',(root?.name||'Предприятие')+' · '+d.units.length+' подразделений (включая предприятие). Часовой пояс: '+d.clock.zone,d.clock.configured&&root?.code!=='LC81-QA',[button('Настроить предприятие',openPage('admin.enterprise'))]),
+  statusCard('2. Сотрудники','В справочнике: '+d.people.length+'. Добавьте сотрудников вручную или импортируйте XLSX.',d.people.length>0,[button('Справочник сотрудников',openPage('person.read_directory')),button('Импорт сотрудников',openPage('import.view'))]),
+  statusCard('3. Рабочие пользователи','Учётных записей сотрудников: '+d.accounts.filter(a=>!a.admin).length+'. '+(activeManager?'Доступ управляющего действует.':'Назначьте управляющего, чтобы открыть рабочие разделы центра.'),activeManager,[button('Создать управляющего',goManager,'primary'),button('Пользователи',openPage('admin.users')),button('Назначить доступ',openPage('admin.access'))]),
+  statusCard('4. Начать работу','Операции, СОП и ФРВ можно создавать по мере заполнения центра. Не нужно заранее заполнять все справочники.',false,[button('Конструктор СОП',openPage('sop.constructor'),'primary'),button('ФРВ',openPage('frv.read')),button('Операции',openPage('operation.read'))])
+ );
+ const guide=panel('Настройка центра',el('p',activeManager?'Предприятие готово к началу работы. Настройки можно изменять через меню администрирования.':'Добро пожаловать в Центр TWI. Настройте предприятие и создайте рабочий аккаунт управляющего — система сама свяжет сотрудника, роль и доступ.'),cards,el('p','Системный администратор отвечает за пользователей и права. Производственные решения выполняются под рабочими учётными записями.','muted'));
  const storage=panel('Хранение и восстановление',el('p','Резервная копия выполняется только администратором сервера на остановленном экземпляре в отдельную новую папку. Копия содержит закрытые учётные записи, права и исходники; её нельзя передавать в браузер или хранить в общей папке.'),el('pre','LC81_QA=1 node server/lc81-maintenance.mjs backup /abs/source /abs/new-backup\nLC81_QA=1 node server/lc81-maintenance.mjs restore-new /abs/new-backup /abs/new-restored'),el('p','Восстановление не перезаписывает исходное хранилище. Сначала проверьте копию в изолированном QA; только после приёмки переключайте размещение. Рабочий Amvera этим экраном не изменяется.'));
- return [guide,panel('Административные справочники',grid),panel('Пользователи',accountTable,accountEditor,userForm),panel('Права в существующих ролях',...policyForms),panel('Подтверждённые назначения доступа',grantForm,grants),peopleHistory,clock,storage,panel('Журнал управления доступом',table(['Время (UTC)','Кто','Действие','Цель','Основание'],d.audit.map(a=>[a.occurred_at,accounts.get(a.actor_account_id)||a.actor_account_id,a.action,a.target_id,a.reason])))];
+ const auditPanel=panel('Журнал управления доступом',table(['Время (UTC)','Кто','Действие','Цель','Основание'],d.audit.map(a=>[a.occurred_at,accounts.get(a.actor_account_id)||a.actor_account_id,a.action,a.target_id,a.reason])));
+ const [personRef,unitRef,employmentRef,roleRef,assignmentRef]=[...grid.children];
+ if(page==='admin.enterprise')return [panel('Данные предприятия',el('p',root?.name||'Предприятие'),el('p','Измените название и код корневого предприятия в справочнике структуры. Дочерние подразделения создаются там же.'),button('Структура предприятия',openPage('org.read'),'primary'),button('Справочник сотрудников',openPage('person.read_directory')),button('Импорт XLSX',openPage('import.view'))),clock,panel('Справочники',unitRef,personRef,employmentRef)];
+ if(page==='admin.users')return [panel('Создание пользователя',el('p','Выберите существующего сотрудника или создайте нового. Для управляющего роль и доступ назначаются автоматически после вашего подтверждения.'),userForm),panel('Пользователи',accountTable,accountEditor)];
+ if(page==='admin.roles')return [panel('Роли и права',el('p','Роль — набор разрешённых действий. Выберите роль, чтобы настроить права. Системные роли защищены. Изменение прав требует подтверждения доступа в разделе «Назначения и доступ».'),roleRef,...policyForms),button('Справочник ролей',openPage('role.read'))];
+ if(page==='admin.access')return [panel('Назначение доступа',el('p','Выберите пользователя, рабочую роль и область. Система создаст недостающее назначение роли и подтвердит доступ одной операцией. Роль без настроенных прав здесь не появляется.'),grantForm),panel('Действующие и завершённые доступы',grants),peopleHistory, panel('Дополнительные кадровые назначения',assignmentRef,employmentRef)];
+ if(page==='admin.storage')return [storage,auditPanel];
+ return [guide];
+
 }
 
 function directoryPanel(info,items){
@@ -206,7 +259,7 @@ function directoryPanel(info,items){
    editor.replaceChildren(panel('Новая роль сотрудников',el('p','Создаётся роль справочника. Права и назначения подтверждаются отдельно.'),form([input('code','Код'),input('name','Название')],'Сохранить роль',async f=>{
     await api('admin/reference',{type:'business_role',payload:{code:value(f,'code'),name:value(f,'name')}});note('Роль создана. Настройте её права в разделе пользователей.');await render();
    })));
-  },'primary'),button('Права и назначения',async()=>{if(!discard())return;page='admin';await render()}));
+  },'primary'),button('Права и назначения',async()=>{if(!discard())return;page='admin.roles';await render()}));
   else section.append(el('p','Создание ролей и выдача прав выполняются администратором; управляющий использует подтверждённые роли.','muted'));
  }
  if(info.can_create)row.append(button('Добавить',()=>open(null),'primary'));
@@ -352,7 +405,11 @@ async function openLinked(host,r){
 function buildNav(){
  const nav=$('nav');nav.replaceChildren();const available=new Set((user.workspace_actions||[]).filter(k=>k==='admin'&&user.admin||Object.hasOwn(actions,k)));
  const selected=[];
- const groupFor=act=>navGroups.find(([,keys])=>keys.some(k=>(pageActions[k]||[]).includes(act)))?.[0]||'Рабочие разделы';
+ if(user.admin){
+  const group=el('details',undefined,'nav-section');group.open=true;group.append(el('summary','Администрирование','navgroup'));
+  for(const act of Object.keys(adminPages)){available.add(act);selected.push(act);group.append(navButton(act,available))}nav.append(group);
+ }
+ const groupFor=act=>isAdminPage(act)?'Администрирование':navGroups.find(([,keys])=>keys.some(k=>(pageActions[k]||[]).includes(act)))?.[0]||'Рабочие разделы';
  for(const [name,keys] of navGroups){
   const list=keys.flatMap(k=>pageActions[k]||[]).filter(a=>available.has(a)&&!selected.includes(a));
   if(!list.length)continue;
@@ -361,12 +418,12 @@ function buildNav(){
   nav.append(group);
  }
  for(const act of available)if(!selected.includes(act)){selected.push(act);nav.append(navButton(act,available))}
- if(!available.has(page))page=available.has('person.read_directory')?'person.read_directory':selected[0]||'';
+ if(!available.has(page))page=user.admin?'admin':available.has('person.read_directory')?'person.read_directory':available.has('sop.constructor')?'sop.constructor':selected[0]||'';
  const current=nav.querySelector('[data-action="'+page+'"]');if(current){current.classList.add('active');current.setAttribute('aria-current','page');if(current.closest('details'))current.closest('details').open=true}
- const head=$('page-heading'),left=el('div');left.append(el('div',groupFor(page),'eyebrow'),el('h1',page==='admin'?'Пользователи и права доступа':actions[page]||'Личное рабочее пространство'));head.replaceChildren(left,el('span','Подтверждение сервером','pill'));
+ const head=$('page-heading'),left=el('div');left.append(el('div',groupFor(page),'eyebrow'),el('h1',titleFor(page)));head.replaceChildren(left,el('span','Подтверждение сервером','pill'));
 }
 function navButton(act,available){
- const n=button(act==='admin'?'Пользователи и права доступа':actions[act],async()=>{if(!discard())return;page=act;$('nav').classList.remove('lc53-menu-open');$('menu').setAttribute('aria-expanded','false');await render()},'nav');
+ const n=button(titleFor(act),async()=>{if(!discard())return;page=act;$('nav').classList.remove('lc53-menu-open');$('menu').setAttribute('aria-expanded','false');await render()},'nav');
  n.dataset.action=act;return n;
 }
 async function render(){
@@ -377,7 +434,7 @@ async function render(){
   user=fresh.user;succeeded=true;
   const version=document.querySelector('.header-meta .version');if(version&&/^[a-f0-9]{40}$/.test(fresh.sourceCommit||'')){version.textContent='LC8.1 · QA · '+fresh.sourceCommit.slice(0,7);version.title='Исходный коммит: '+fresh.sourceCommit;}
   buildNav();$('content').replaceChildren(); // do not retain stale authorized rows
-  if(page==='admin'&&user.admin){const data=await api('admin');if(serial===sequence)$('content').replaceChildren(...adminPanel(data));return}
+  if(isAdminPage(page)&&user.admin){const data=await api('admin');if(serial===sequence)$('content').replaceChildren(...adminPanel(data));return}
   if(!page){$('content').replaceChildren(panel('Личное рабочее пространство',el('p','Вам пока не назначены права на рабочие разделы. Обратитесь к администратору.')));return}
   if(page==='instruction.view'){
    const d=await api('resources?action=training.read');if(serial===sequence)$('content').replaceChildren(trainingUI.training(d.items,user,'instruction'));return;
@@ -406,7 +463,16 @@ async function render(){
    const data=await api('resources?action=sop.read_effective');if(serial===sequence)$('content').replaceChildren(libraryUI.linked(data.items,page));return;
   }
   if(['center.read','analytics.read','metrics.read'].includes(page)){
-   const content=await centerUI.report(page);if(page==='analytics.read')content.prepend(await finalUI.analytics());if(serial===sequence)$('content').replaceChildren(content);return;
+   const content=await centerUI.report(page);if(page==='analytics.read')content.prepend(await finalUI.analytics());
+   if(page==='center.read'&&user.permissions.includes('operation.create')&&user.workspace_actions.includes('sop.constructor')){
+    const info=await api('library/info?kind=sop');
+    if(!info.operations.length){
+     const links=el('div',undefined,'row'),start=panel('Начало работы в центре',el('p','Пока нет доступных операций. Добавьте сотрудников и производственные операции или начните с первого СОП — операцию можно создать при сохранении.'),links);
+     for(const [act,label] of [['org.read','Структура предприятия'],['person.read_directory','Сотрудники'],['import.view','Импорт XLSX'],['operation.read','Операции'],['sop.constructor','Новый СОП'],['frv.read','Новое ФРВ']])if(user.workspace_actions.includes(act))links.append(button(label,async()=>{if(!discard())return;page=act;await render()}));
+     content.prepend(start);
+    }
+   }
+   if(serial===sequence)$('content').replaceChildren(content);return;
   }
   if(['calendar.read','plan.read'].includes(page)){
    const content=await centerUI.calendar(page==='plan.read'?'plan':'calendar');if(serial===sequence)$('content').replaceChildren(content);return;
@@ -508,5 +574,5 @@ window.addEventListener('focus',()=>{if(user)void checkAccess(true)});
 window.addEventListener('pagehide',()=>{if(user)maskAccess(true)});
 window.addEventListener('pageshow',e=>{if(e.persisted&&user)void checkAccess(true)});
 window.addEventListener('beforeunload',e=>{if(user&&(dirty()||saving||!$('issued').hidden)){e.preventDefault();e.returnValue=''}});
-$('login').addEventListener('submit',e=>{e.preventDefault();run(async()=>{const f=e.currentTarget;const b=await api('login',{login:value(f,'login'),password:value(f,'password')});f.reset();showUser(b.user);page=b.user.admin?'admin':b.user.permissions.includes('person.read_directory')?'person.read_directory':'person.read_basic';note('Вход выполнен');await render()})});
-run(async()=>{try{const b=await api('session');showUser(b.user);page=b.user.admin?'admin':b.user.permissions.includes('person.read_directory')?'person.read_directory':'person.read_basic';await render()}catch(e){if(e.status!==401)throw e;showLogin()}});
+$('login').addEventListener('submit',e=>{e.preventDefault();run(async()=>{const f=e.currentTarget;const b=await api('login',{login:value(f,'login'),password:value(f,'password')});f.reset();showUser(b.user);page=landingPage(b.user);provisionManager=false;note('Вход выполнен');await render()})});
+run(async()=>{try{const b=await api('session');showUser(b.user);page=landingPage(b.user);provisionManager=false;await render()}catch(e){if(e.status!==401)throw e;showLogin()}});

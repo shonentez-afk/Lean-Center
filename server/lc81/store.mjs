@@ -204,6 +204,44 @@ function permissionsFor(db,a){
  }
  return PERMISSIONS.filter(p=>out.has(p));
 }
+function createAccountRecord(db,actor,input,revision){
+ requireAdmin(db,actor,revision);must(keys(input,['person_id','login','password','generate']),400,'Неверные поля аккаунта');
+ const {person_id,generate}=input,name=normalizeLogin(input.login);
+ must(isId(person_id)&&activePerson(db,person_id)&&employment(db,person_id,day(db)).length===1&&name,422,'Нужен активный сотрудник, одно назначение и уникальный логин');
+ must(!one(db,'SELECT id FROM lc81_account WHERE person_id=? OR login=?',[person_id,name]),409,'Аккаунт или логин уже существует');
+ must(typeof generate==='boolean'&&(generate?input.password===null:validPassword(input.password)),422,'Укажите стойкий пароль');
+ const secret=generate?generatePassword():input.password,id=uuid();
+ db.run("INSERT INTO lc81_account(id,person_id,login,password_hash,state,bootstrap,created_at) VALUES(?,?,?,?,'active',0,?)",[id,person_id,name,hashPassword(secret),at()]);
+ audit(db,actor,'account.create',id);return {id,login:name,...(generate?{issued_password:secret}:{})};
+}
+function grantRecord(db,actor,input,revision){
+ requireAdmin(db,actor,revision);must(keys(input,['account_id','assignment_id','scope','valid_to']),400,'Неверные поля назначения');
+ const a=account(db,input.account_id),d=day(db),assignment=one(db,'SELECT * FROM role_assignment WHERE id=?',[input.assignment_id]);
+ must(a&&a.bootstrap!==1&&assignment?.person_id===a.person_id&&assignment.role_id!==config(db).admin&&period(assignment,d)&&roleRow(db,assignment.role_id),422,'Не найдено действующее назначение роли');
+ const emp=employment(db,a.person_id,d)[0],p=one(db,'SELECT * FROM lc81_policy WHERE role_id=?',[assignment.role_id]),s=input.scope;
+ must(p&&s&&((keys(s,['kind'])&&['self','assigned'].includes(s.kind))||(keys(s,['kind','unit_id'])&&s.kind==='unit_tree'&&rootUnit(db,s.unit_id)===rootUnit(db,emp.unit_id))),422,'Нет политики или неверная область');
+ if(assignment.role_id===config(db).manager)must(s.kind==='unit_tree'&&s.unit_id===config(db).site,422,'Управляющий назначается на площадку');
+ const end=input.valid_to;
+ must(end===null||typeof end==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(end)&&Number.isFinite(Date.parse(end+'T00:00:00Z'))&&new Date(end+'T00:00:00Z').toISOString().slice(0,10)===end&&end>=d,422,'Неверный срок');
+ const prior=rows(db,"SELECT id,scope_json,valid_from,valid_to FROM lc81_grant WHERE account_id=? AND assignment_id=? AND employment_id=? AND policy_revision=? AND state='active'",[a.id,assignment.id,emp.id,p.revision]).find(g=>period(g,d)&&JSON.parse(g.scope_json).kind===s.kind&&(s.kind!=='unit_tree'||JSON.parse(g.scope_json).unit_id===s.unit_id));
+ must(!prior,409,'Такой доступ уже действует; отзовите прежнее назначение перед изменением срока');
+ const id=uuid();db.run("INSERT INTO lc81_grant(id,account_id,role_id,assignment_id,employment_id,scope_json,policy_revision,state,valid_from,valid_to,revoked_at,issued_by,issued_at) VALUES(?,?,?,?,?,?,?,'active',?,?,NULL,?,?)",[id,a.id,assignment.role_id,assignment.id,emp.id,JSON.stringify(s),p.revision,d,end,actor,at()]);
+ audit(db,actor,'grant.create',id);return {id};
+}
+function assignAccessRecord(db,actor,input,revision){
+ requireAdmin(db,actor,revision);must(keys(input,['account_id','role_id','scope','valid_to']),400,'Неверные поля доступа');
+ const a=account(db,input.account_id),d=day(db);
+ must(a&&a.bootstrap!==1&&isId(input.role_id)&&input.role_id!==config(db).admin&&roleRow(db,input.role_id)&&one(db,'SELECT role_id FROM lc81_policy WHERE role_id=?',[input.role_id]),422,'Нужен действующий пользователь и роль с настроенными правами');
+ const current=rows(db,'SELECT id,valid_from,valid_to FROM role_assignment WHERE person_id=? AND role_id=?',[a.person_id,input.role_id]).filter(r=>period(r,d));
+ must(current.length<=1,409,'У сотрудника несколько действующих назначений одной роли');
+ let id=current[0]?.id;
+ if(!id){
+  try{id=domainCreate(db,'role_assignment',{person_id:a.person_id,role_id:input.role_id,valid_from:d,valid_to:null})}catch{throw new PilotError(422,'Не удалось назначить роль; проверьте историю назначений')}
+  audit(db,actor,'directory.create.role_assignment',id);
+ }
+ const result=grantRecord(db,actor,{account_id:a.id,assignment_id:id,scope:input.scope,valid_to:input.valid_to},revision);
+ return {...result,assignment_id:id};
+}
 function checkPrivate(db){
  verifyDb(db);
  must(one(db,"SELECT value FROM lc81_meta WHERE key='service_schema'")?.value==='1',503,'Неизвестная схема авторизации');
@@ -385,18 +423,29 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     audit(db,actor,'directory.create.'+type,id);return {id};
    });
   },
-  createAccount(actor,input,revision){
+  createAccount(actor,input,revision){return mutate(db=>createAccountRecord(db,actor,input,revision))},
+  // One explicit transaction: no partial employee/account/manager grants.
+  provisionAccount(actor,input,revision){
    return mutate(db=>{
-    requireAdmin(db,actor,revision);must(keys(input,['person_id','login','password','generate']),400,'Неверные поля аккаунта');
-    const {person_id,generate}=input,name=normalizeLogin(input.login);
-    must(isId(person_id)&&activePerson(db,person_id)&&employment(db,person_id,day(db)).length===1&&name,422,'Нужен активный сотрудник, одно назначение и уникальный логин');
-    must(!one(db,'SELECT id FROM lc81_account WHERE person_id=? OR login=?',[person_id,name]),409,'Аккаунт или логин уже существует');
-    must(typeof generate==='boolean'&&(generate?input.password===null:validPassword(input.password)),422,'Укажите стойкий пароль');
-    const secret=generate?generatePassword():input.password,id=uuid();
-    db.run("INSERT INTO lc81_account(id,person_id,login,password_hash,state,bootstrap,created_at) VALUES(?,?,?,?,'active',0,?)",[id,person_id,name,hashPassword(secret),at()]);
-    audit(db,actor,'account.create',id);return {id,login:name,...(generate?{issued_password:secret}:{})};
+    requireAdmin(db,actor,revision);
+    must(keys(input,['person_id','new_person','login','password','generate','manager'])&&typeof input.manager==='boolean',400,'Неверные поля пользователя');
+    let id=input.person_id;
+    if(id===null){
+     must(keys(input.new_person,['employee_code','display_name','unit_id']),400,'Заполните сотрудника и подразделение');
+     const d=day(db),a=account(db,actor);
+     const result=applyDirectoryCommand(db,{type:'person',operation:'create',id:null,expected_revision:0,fields:input.new_person},{day:d,at:at(),site:config(db).site,read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchor,id)=>directoryAllowed(db,a,action,anchor,id,d),audit:(action,target)=>audit(db,actor,action,target)});
+     id=result.id;
+    }else must(input.new_person===null,400,'Выберите одного сотрудника');
+    const result=createAccountRecord(db,actor,{person_id:id,login:input.login,password:input.password,generate:input.generate},revision);
+    if(input.manager){
+     // A deliberately selected manager gets the actual existing protected
+     // manager policy, not a wildcard or silently upgraded old policy.
+     assignAccessRecord(db,actor,{account_id:result.id,role_id:config(db).manager,scope:{kind:'unit_tree',unit_id:config(db).site},valid_to:null},revision);
+    }
+    return {...result,person_id:id,manager:input.manager};
    });
   },
+  assignAccess(actor,input,revision){return mutate(db=>assignAccessRecord(db,actor,input,revision))},
   setState(actor,id,state,revision,expectedRevision=undefined){
    return mutate(db=>{
     requireAdmin(db,actor,revision);const a=one(db,'SELECT * FROM lc81_account WHERE id=?',[id]);
@@ -445,22 +494,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     audit(db,actor,'policy.update',role_id);return {revision:policyRevision+1};
    });
   },
-  grant(actor,input,revision){
-   return mutate(db=>{
-    requireAdmin(db,actor,revision);must(keys(input,['account_id','assignment_id','scope','valid_to']),400,'Неверные поля назначения');
-    const a=account(db,input.account_id),d=day(db),assignment=one(db,'SELECT * FROM role_assignment WHERE id=?',[input.assignment_id]);
-    must(a&&a.bootstrap!==1&&assignment?.person_id===a.person_id&&assignment.role_id!==config(db).admin&&period(assignment,d)&&roleRow(db,assignment.role_id),422,'Не найдено действующее назначение роли');
-    const emp=employment(db,a.person_id,d)[0],p=one(db,'SELECT * FROM lc81_policy WHERE role_id=?',[assignment.role_id]),s=input.scope;
-    must(p&&s&&((keys(s,['kind'])&&['self','assigned'].includes(s.kind))||(keys(s,['kind','unit_id'])&&s.kind==='unit_tree'&&rootUnit(db,s.unit_id)===rootUnit(db,emp.unit_id))),422,'Нет политики или неверная область');
-    if(assignment.role_id===config(db).manager)must(s.kind==='unit_tree'&&s.unit_id===config(db).site,422,'Управляющий назначается на площадку');
-    const end=input.valid_to;
-    must(end===null||typeof end==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(end)&&Number.isFinite(Date.parse(end+'T00:00:00Z'))&&new Date(end+'T00:00:00Z').toISOString().slice(0,10)===end&&end>=d,422,'Неверный срок');
-    const prior=rows(db,"SELECT id,scope_json,valid_from,valid_to FROM lc81_grant WHERE account_id=? AND assignment_id=? AND employment_id=? AND policy_revision=? AND state='active'",[a.id,assignment.id,emp.id,p.revision]).find(g=>period(g,d)&&JSON.parse(g.scope_json).kind===s.kind&&(s.kind!=='unit_tree'||JSON.parse(g.scope_json).unit_id===s.unit_id));
-    must(!prior,409,'Такой доступ уже действует; отзовите прежнее назначение перед изменением срока');
-    const id=uuid();db.run("INSERT INTO lc81_grant(id,account_id,role_id,assignment_id,employment_id,scope_json,policy_revision,state,valid_from,valid_to,revoked_at,issued_by,issued_at) VALUES(?,?,?,?,?,?,?,'active',?,?,NULL,?,?)",[id,a.id,assignment.role_id,assignment.id,emp.id,JSON.stringify(s),p.revision,d,end,actor,at()]);
-    audit(db,actor,'grant.create',id);return {id};
-   });
-  },
+  grant(actor,input,revision){return mutate(db=>grantRecord(db,actor,input,revision))},
   revoke(actor,id,revision){
    return mutate(db=>{
     requireAdmin(db,actor,revision);must(one(db,"SELECT id FROM lc81_grant WHERE id=? AND state='active'",[id]),404,'Назначение не найдено');

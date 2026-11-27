@@ -120,6 +120,8 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    }
    if(req.method==='GET'&&p==='/api/lc81/admin'){reply(res,200,store.adminData(a.id,a.credential_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/reference'){const b=await body(req);must(keys(b,['type','payload']),400,'Неверные поля');reply(res,200,await store.createReference(a.id,b.type,b.payload,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/provision'){reply(res,200,await store.provisionAccount(a.id,await body(req),a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/access'){reply(res,200,await store.assignAccess(a.id,await body(req),a.credential_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/account'){reply(res,200,await store.createAccount(a.id,await body(req),a.credential_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/state'){const b=await body(req);must(keys(b,['id','state'])||keys(b,['id','state','expected_revision'])&&Number.isSafeInteger(b.expected_revision),400,'Неверные поля');reply(res,200,await store.setState(a.id,b.id,b.state,a.credential_revision,b.expected_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/admin/policy'){reply(res,200,await store.setPolicy(a.id,await body(req),a.credential_revision));return}
