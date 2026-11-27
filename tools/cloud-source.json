@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "4686501bc2a25f540b8de337982d2983be953238",
+  "sourceCommit": "f4665661d8a42f56206fdcfbff1abddb022da4e7",
   "files": [
     {
       "path": "amvera.yml",
@@ -107,7 +107,7 @@
     },
     {
       "path": "server/lc81-main.mjs",
-      "sha": "6dae9f563593b6f83c9a8261aa5a8c6b3dada7d4"
+      "sha": "79711b39d15b2f3eb1890dd83c356cb5e6f3fb34"
     },
     {
       "path": "server/lc81-maintenance.mjs",

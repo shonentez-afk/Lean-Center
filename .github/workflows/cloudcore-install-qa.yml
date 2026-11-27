@@ -1,0 +1,102 @@
+name: CloudCore VPS - private test installation
+on:
+  push:
+    branches: [feature/cloudcore-vps-qa]
+    paths:
+      - '.github/workflows/cloudcore-install-qa.yml'
+      - 'deploy/cloudcore/**'
+permissions:
+  contents: read
+concurrency:
+  group: cloudcore-install-qa
+  cancel-in-progress: false
+jobs:
+  install:
+    if: github.repository == 'shonentez-afk/Lean-Center' && github.event_name == 'push' && github.ref == 'refs/heads/feature/cloudcore-vps-qa'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Build pinned LC8.1 and check the standard startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          bash -n deploy/cloudcore/install.sh
+          bash -n deploy/cloudcore/start.sh
+          node --check deploy/cloudcore/smoke.mjs
+          node tools/build_folder.mjs --cloud
+          node --test tests/lc81-amvera-smoke.test.mjs
+          git diff --exit-code -- package-lock.json
+      - name: Package the Ubuntu x64 runtime and application
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+          test "$(node -p 'process.arch')" = x64
+          mkdir -p .runtime
+          install -m 0755 "$(command -v node)" .runtime/node
+          tar -czf "$RUNNER_TEMP/cloudcore-qa.tgz" .runtime \
+            deploy/cloudcore package.json package-lock.json node_modules \
+            server src db tools baselines/sop-stage43 dist/LeanCenterCloud
+      - name: Install over pinned SSH and verify persistence on CloudCore
+        shell: bash
+        env:
+          SSH_KEY: ${{ secrets.CLOUDCORE_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.CLOUDCORE_KNOWN_HOSTS }}
+          VPS_HOST: ${{ secrets.CLOUDCORE_HOST }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [[ -z "$SSH_KEY" || -z "$KNOWN_HOSTS" ]]; then
+            echo "::error::Required SSH secrets missing"
+            exit 1
+          fi
+          tmp="$(mktemp -d)"
+          trap 'rm -rf -- "$tmp"' EXIT
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > "$tmp/key"
+          printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' > "$tmp/known_hosts"
+          unset SSH_KEY KNOWN_HOSTS
+          if ! ssh-keygen -y -P '' -f "$tmp/key" > /dev/null 2>&1; then
+            echo "::error::Invalid or passphrase-protected deployment key"
+            exit 1
+          fi
+          host="$VPS_HOST"
+          unset VPS_HOST
+          if [[ -z "$host" ]]; then
+            host="$(awk '$2=="ssh-ed25519" && $1 !~ /^#/ {print $1}' "$tmp/known_hosts" | sort -u)"
+          fi
+          if [[ ! "$host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            echo "::error::Set CLOUDCORE_HOST to the VPS IPv4 address if known_hosts is hashed or ambiguous"
+            exit 1
+          fi
+          echo "::add-mask::$host"
+          if ! ssh-keygen -F "$host" -f "$tmp/known_hosts" 2>/dev/null | awk '$2=="ssh-ed25519"{found=1} END{exit !found}'; then
+            echo "::error::No pinned ED25519 host key for the target"
+            exit 1
+          fi
+          bundle="$RUNNER_TEMP/cloudcore-qa.tgz"
+          read -r digest _ < <(sha256sum "$bundle")
+          script64="$(base64 -w0 deploy/cloudcore/install.sh)"
+          status=0
+          ssh -F /dev/null -T \
+            -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null \
+            -o UserKnownHostsFile="$tmp/known_hosts" -o HostKeyAlgorithms=ssh-ed25519 \
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+            -o ConnectTimeout=12 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+            -o ClearAllForwardings=yes -o LogLevel=ERROR \
+            -i "$tmp/key" -l lean-deploy "$host" \
+            "bash -c \"\$(printf %s $script64 | base64 -d)\" -- $GITHUB_SHA $digest" \
+            < "$bundle" > "$tmp/result" 2>/dev/null || status=$?
+          if (( status != 0 )); then
+            grep -E '^(CLOUDCORE_QA_ERROR_[A-Z_]+|LC81_(STARTUP_[A-Z0-9_]+|SMOKE_(BOOTSTRAP|RESTART)))$' "$tmp/result" || true
+            echo "::error::CloudCore QA installation failed (exit $status)"
+            exit 1
+          fi
+          grep -Ex 'CLOUDCORE_QA_(INSTALLED_AND_VERIFIED|ALREADY_VERIFIED)' "$tmp/result"
