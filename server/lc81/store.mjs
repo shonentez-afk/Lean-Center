@@ -29,6 +29,8 @@ import {personnelView,employmentDetail,transferEmployment} from './personnel-com
 import {journalWorkspace,retrainingWorkspace} from './training-registers.mjs';
 import {sopEvaluationWorkspace,sopEvaluationOptions,sopEvaluationDetail,createSopEvaluation,installSopMethod} from './sop-evaluation-commands.mjs';
 import {importTypes,importAllowed,inspectDirectoryFile,parseDirectoryFile,planDirectoryImport,makeImportToken,checkImportToken} from './import-commands.mjs';
+import {mobileOptions,exportMobile,previewMobile,commitMobile,receiptMobile} from './mobile-audit-commands.mjs';
+import {assistantOptions,assistantContext,assistantRequest} from './assistant-commands.mjs';
 import {formsCatalog,prepareForm,serializeForm,canExportForm} from './form-commands.mjs';
 import {refsForDb,checkContent,MAX_CONTENT,verifyDomainEvents} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
@@ -438,6 +440,14 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   bankOptions(actor,revision){return read(db=>bankOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   bankDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...bankDetail(db,a,id),forms:documentLinks(db,a,id,["bank"])}})},
   saveBank(actor,revision,input){return mutate(db=>saveBank(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  mobileOptions(actor,revision){return read(db=>mobileOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  exportMobile(actor,revision,f){return mutate(db=>exportMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
+  previewMobile(actor,revision,f){return read(db=>previewMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
+  commitMobile(actor,revision,f){return mutate(db=>commitMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
+  receiptMobile(actor,revision,f){return read(db=>receiptMobile(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
+  assistantOptions(actor,revision){return read(db=>assistantOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  assistantContext(actor,revision,f){return read(db=>{const user=checkedAccount(db,actor,revision),d=day();return assistantContext(db,trainingAccess(db,user,d),f,id=>cardAllowed(db,user,id,d))})},
+  assistantRequest(actor,revision,f){return read(db=>{const user=checkedAccount(db,actor,revision),d=day();return assistantRequest(db,trainingAccess(db,user,d),f,id=>cardAllowed(db,user,id,d))})},
   qualityOptions(actor,revision,kind){return read(db=>qualityOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
   installMentorMethod(actor,revision,input){return mutate(db=>installMentorMethod(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   createAudit(actor,revision,input){return mutate(db=>createAudit(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},

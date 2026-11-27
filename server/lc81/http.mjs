@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {randomBytes} from 'node:crypto';
 import {editorFrame} from './editor-frame.mjs';
+import {askCenterCloud,CENTER_MODELS} from '../../src/modules/assistant/cloud.js';
 import {PilotError} from '../lc74-store.mjs';
 import {normalizeLogin,tokenDigest} from './credentials.mjs';
 const COOKIE='__Host-lc81',SESSION_MS=8*60*60*1000,MAX_SESSIONS=256;
@@ -13,6 +14,8 @@ const publicFiles=new Map(await Promise.all([
  ['/library-ui.js','./library-ui.js','text/javascript; charset=utf-8'],
  ['/training-ui.js','./training-ui.js','text/javascript; charset=utf-8'],
  ['/center-ui.js','./center-ui.js','text/javascript; charset=utf-8'],
+ ['/assistant-ui.js','./assistant-ui.js','text/javascript; charset=utf-8'],
+ ['/mobile-audit-ui.js','./mobile-audit-ui.js','text/javascript; charset=utf-8'],
  ['/assets/echarts.min.js','../../node_modules/echarts/dist/echarts.min.js','text/javascript; charset=utf-8'],
  ['/shared/center-report.js','../../src/ui/center-report.js','text/javascript; charset=utf-8'],
  ['/analytics/palette.js','../../src/analytics/palette.js','text/javascript; charset=utf-8'],
@@ -45,9 +48,9 @@ function rawCookie(req){
  return /^[a-f0-9]{64}$/.test(s)?s:null;
 }
 const cookie=(s,maxAge)=>COOKIE+'='+s+'; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age='+maxAge;
-export function createSecureQAServer({store,origin}){
+export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFetcher=globalThis.fetch}){
  const u=new URL(origin);must(u.protocol==='https:'&&u.origin===origin,503,'Требуется точный HTTPS origin');
- const sessions=new Map(),attempts=new Map();let active=0,loginBusy=0,libraryBusy=0;
+ const sessions=new Map(),attempts=new Map();let active=0,loginBusy=0,libraryBusy=0,cloudBusy=0;
  const prune=now=>{for(const [k,v] of sessions)if(v.expires<=now)sessions.delete(k);for(const [k,v] of attempts)if(v.until<=now)attempts.delete(k)};
  const getSession=req=>{
   const raw=rawCookie(req),key=raw&&tokenDigest(raw),s=key&&sessions.get(key);
@@ -138,6 +141,34 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='GET'&&p==='/api/lc81/bank/options'){reply(res,200,store.bankOptions(a.id,a.credential_revision));return}
    if(req.method==='GET'&&p==='/api/lc81/bank/detail'){reply(res,200,store.bankDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/bank/save'){reply(res,200,await store.saveBank(a.id,a.credential_revision,await body(req,2*1024*1024)));return}
+   if(req.method==='GET'&&p==='/api/lc81/mobile-audit/options'){reply(res,200,store.mobileOptions(a.id,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/mobile-audit/export'){reply(res,200,await store.exportMobile(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&['/api/lc81/mobile-audit/preview','/api/lc81/mobile-audit/commit','/api/lc81/mobile-audit/receipt'].includes(p)){
+    const f=await body(req,6*1024*1024),method=p.endsWith('/preview')?'previewMobile':p.endsWith('/commit')?'commitMobile':'receiptMobile';
+    reply(res,200,await store[method](a.id,a.credential_revision,f));return;
+   }
+   if(req.method==='GET'&&p==='/api/lc81/assistant/options'){reply(res,200,store.assistantOptions(a.id,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/assistant/context'){
+    const d=store.assistantContext(a.id,a.credential_revision,await body(req));
+    reply(res,200,{...d,cloud_enabled:cloudAiEnabled===true,models:Object.entries(CENTER_MODELS).map(([id,m])=>({id,label:m.label}))});return;
+   }
+   if(req.method==='POST'&&p==='/api/lc81/assistant/preview'){
+    must(cloudAiEnabled===true,403,'Внешний ИИ отключён');
+    reply(res,200,{payload:store.assistantRequest(a.id,a.credential_revision,await body(req))});return;
+   }
+   if(req.method==='POST'&&p==='/api/lc81/assistant/cloud'){
+    must(cloudAiEnabled===true,403,'Внешний ИИ отключён');
+    const f=await body(req);must(keys(f,['context','ids','model','confirmed'])&&f.confirmed===true,400,'Подтвердите точное содержимое запроса');
+    const request={context:f.context,ids:f.ids,model:f.model};store.assistantRequest(a.id,a.credential_revision,request);
+    must(cloudBusy===0,429,'Облачный помощник занят');cloudBusy++;
+    const controller=new AbortController(),cancel=()=>controller.abort();res.once('close',cancel);
+    try{
+     let result;try{result=await askCenterCloud(f.ids,{model:f.model,context:null,fetcher:cloudFetcher,signal:controller.signal})}catch{throw new PilotError(502,'Облачный совет не получен или отменён; локальные рекомендации доступны')}
+     if(res.destroyed)return;
+     const fresh=getSession(req);must(fresh.a.id===a.id&&fresh.a.credential_revision===a.credential_revision,401,'Сеанс изменился');
+     store.assistantRequest(a.id,a.credential_revision,request);reply(res,200,result);return;
+    }finally{res.removeListener('close',cancel);cloudBusy--}
+   }
    if(req.method==='GET'&&p==='/api/lc81/quality/options'){reply(res,200,store.qualityOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='GET'&&p==='/api/lc81/quality/detail'){reply(res,200,store.qualityDetail(a.id,a.credential_revision,url.searchParams.get('kind'),url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/quality/install'){reply(res,200,await store.installMentorMethod(a.id,a.credential_revision,await body(req)));return}

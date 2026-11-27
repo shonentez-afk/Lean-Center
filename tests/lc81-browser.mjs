@@ -162,6 +162,13 @@ try{
  await goSection('sop.evaluation.read');await m.p.getByRole('heading',{name:'Оценки СОП',exact:true}).last().waitFor();
  await button(m.p,'Новая оценка СОП').click();await button(m.p,'Установить утверждённый чек-лист из 20 критериев').click();
  await m.p.getByText('Нужны доступная редакция СОП и действующая методика.',{exact:true}).waitFor();
+ await goSection('audit.read');
+ await button(m.p,'Мобильный аудит · выгрузка и приём').click();
+ await m.p.getByRole('heading',{name:'Мобильный аудит L1 · RC1',exact:true}).waitFor();
+ await m.p.getByRole('button',{name:'Предварительная проверка JSON',exact:true}).waitFor();
+ await goSection('assistant.read');await m.p.locator('#content').getByRole('heading',{name:'ИИ-помощник',exact:true}).waitFor();
+ await m.p.getByRole('heading',{name:'Что требует внимания',exact:true}).waitFor();
+ await m.p.getByText('Внешний ИИ отключён настройкой сервера или не разрешён для этой области. Локальные рекомендации доступны.',{exact:true}).waitFor();
  await goSection('forms.read');
  const formRow=m.p.getByRole('row').filter({has:m.p.getByRole('cell',{name:'Аудит 1-го уровня',exact:true})});
  const downloaded=m.p.waitForEvent('download');await formRow.getByRole('button',{name:'Скачать XLSX',exact:true}).click();
@@ -186,6 +193,7 @@ try{
  await m.p.getByRole('heading',{name:'Самооценка · Учебный сотрудник Б',exact:true}).waitFor();
  await goSection('plan.read');await m.p.locator('#content').getByRole('heading',{name:'Мой план работы',exact:true}).waitFor();
  await goSection('center.read');await m.p.locator('#content').getByRole('heading',{name:'Оперативный обзор',exact:true}).waitFor();
+ await button(m.p,'Проверить этот отчёт').click();await m.p.getByRole('dialog',{name:'Контекстный помощник'}).waitFor();await button(m.p,'Закрыть помощник').click();
  await goSection('analytics.read');await m.p.locator('#content').getByRole('heading',{name:'Аналитика за период',exact:true}).waitFor();
  assert(await m.p.evaluate(()=>typeof globalThis.echarts?.init==='function'));
  await goSection('metrics.read');await m.p.locator('#content').getByRole('heading',{name:'Дерево показателей',exact:true}).waitFor();

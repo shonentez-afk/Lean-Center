@@ -1,7 +1,7 @@
 // The protected browser consumes only authorized projections. Shared
 // controls, corporate styles and chart palette; no browser database.
 import {localChart} from '/shared/center-report.js';
-export function createCenterUI({api,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked}){
+export function createCenterUI({api,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,assistant}){
  const opts=(items,field='name')=>items.map(x=>[x.id,x[field]]);
  const empty=text=>el('p',text||'Нет доступных записей','muted');
  const state={planned:'Запланировано',done:'Выполнено',cancelled:'Отменено',needs_replan:'Требует перепланирования',replanned:'Перепланировано',open:'Открыто',active:'Действует',in_progress:'В работе',completed:'Завершено',implemented:'Ожидает проверки',verified:'Эффект подтверждён',ineffective:'Эффект не подтверждён',final:'Зарегистрировано',draft:'Черновик',confirmed:'Подтверждён',void:'Аннулирован'};
@@ -139,7 +139,7 @@ export function createCenterUI({api,button,panel,table,el,input,select,form,valu
      header.append(panel('Связи показателей · не единый рейтинг',table(['От','К','Тип связи'],data.relations.map(r=>{const a=by.get(r.from),b=by.get(r.to);return [a.availability==='restricted'?a.label:button(a.label,()=>show(a.id)),b.availability==='restricted'?b.label:button(b.label,()=>show(b.id)),r.label]}))));
     }
    }
-   header.append(evidence,sub);out.replaceChildren(header);
+   header.append(assistant({type:'report',kind,scope:s,group:'all'},'Проверить этот отчёт'),evidence,sub);out.replaceChildren(header);
   }
   root.append(panel('Область и период',unit,from,to,button('Месяц',async()=>{if(!discard())return;from.querySelector('input').value=d.day.slice(0,7)+'-01';to.querySelector('input').value=d.day;await draw()}),button('Год',async()=>{if(!discard())return;from.querySelector('input').value=d.day.slice(0,4)+'-01-01';to.querySelector('input').value=d.day;await draw()}),button('Обновить',async()=>{if(discard())await draw()},'primary')),out);
   await draw();return root;
@@ -224,7 +224,7 @@ export function createCenterUI({api,button,panel,table,el,input,select,form,valu
    if(t.cap.review)a.append(button('Разобрать отклонение',()=>{if(discard())hostSet(sub,panel('Разбор отклонения',form([pick('cause','Причина',Object.entries(d.causes)),input('note','Решение'),pick('action_id','Связанное мероприятие',opts(d.target_actions,'label'),'',false)],'Зарегистрировать разбор',f=>command('target.review',{target_id:t.id,signature:t.signature,cause:value(f,'cause'),note:value(f,'note'),action_id:value(f,'action_id')||null}))))}));
    return [t.from+' — '+t.to,money(t.target_minor,d.currency),money(t.actual_minor,d.currency),money(t.delta_minor,d.currency),t.status,a];
   })):empty());
-  n.append(facts,targets,sub);hostSet(host,n);
+  n.append(facts,targets,assistant({type:'roi',id}),sub);hostSet(host,n);
  }
  function roiPanel(items,user){
   const host=el('div'),n=panel('Экономический эффект',el('p','Годовые сценарии, факты за закрытые периоды и денежные цели — разные сущности. Финансовые детали требуют отдельных полномочий уровня предприятия.'));

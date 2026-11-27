@@ -24,6 +24,7 @@ jobs:
       - run: node tools/build_folder.mjs --cloud
       - run: npx playwright install --with-deps chromium
       - run: node tests/lc81-browser.mjs
+      - run: node tests/lc53-mobile-browser.mjs
       - run: node tests/lc74-cloud-browser.mjs
 
       - uses: actions/upload-artifact@v4

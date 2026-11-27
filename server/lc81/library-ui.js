@@ -3,7 +3,7 @@
 const context=(kind,command,operation_id,id=null,revision_id=null,origin_id=null,origin_revision=null)=>({kind,command,id,revision_id,operation_id,origin_id,origin_revision});
 const stateLabel={draft:'Черновик',review:'На согласовании',approved:'Согласован (прежний порядок)',effective:'Действует',superseded:'Заменён',withdrawn:'Выведен',final:'Завершено',archived:'Архив'};
 const max=30*1024*1024;
-export function createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh,render,discard}){
+export function createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh,render,discard,assistant}){
  let active=null;
  function clear(){
   const s=active;active=null;
@@ -116,6 +116,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
     const d=el('details');d.append(el('summary','Завершить исследование'),form([input('note','Примечание','text',false)],'Подтвердить завершение',async f=>{await api('library/finalize',{id:r.id,expected_revision:r.rev,note:value(f,'note')});note('Исследование завершено');await render()}));row.append(d);
    }
   }
+  if(assistant)row.append(assistant({type:kind==='sop'?'sop':'frv',id:kind==='sop'?r.revision_id:r.id},'Проверить запись'));
   return row.childElementCount?row:'Только чтение';
  }
  function detailButton(r,action,title){

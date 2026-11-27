@@ -204,7 +204,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const editorRole=(await store.createReference(admin.id,'business_role',{code:'LC81-OTHER-EDITOR',name:'Редактор другого участка'})).id;
   const editorAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.personB,role_id:editorRole,valid_from:'2020-01-01',valid_to:null})).id;
   const otherEditor=await store.createAccount(admin.id,{person_id:x.personB,login:'other-editor',password:password(),generate:false});
-  await store.setPolicy(admin.id,{role_id:editorRole,revision:0,permissions:['operation.read','sop.read_history','sop.create','sop.edit_draft','sop.revise','frv.read','sop.from_frv','credential.read','credential.register','person.read_basic','program.read','program.create','program.detail','training.enrollment.read','training.enrollment.detail','training.enrollment.create','org.read','center.read','analytics.read','metrics.read','training.read','training.detail','person.read_directory','employment.read','employment.detail','employment.transfer','forms.export']});
+  await store.setPolicy(admin.id,{role_id:editorRole,revision:0,permissions:['operation.read','sop.read_history','sop.create','sop.edit_draft','sop.revise','frv.read','sop.from_frv','credential.read','credential.register','person.read_basic','program.read','program.create','program.detail','training.enrollment.read','training.enrollment.detail','training.enrollment.create','org.read','center.read','analytics.read','metrics.read','training.read','training.detail','person.read_directory','employment.read','employment.detail','employment.transfer','forms.export','assistant.read','assistant.cloud']});
   await store.grant(admin.id,{account_id:otherEditor.id,assignment_id:editorAssignment,scope:{kind:'unit_tree',unit_id:x.unitB},valid_to:null});
   await assert.rejects(store.changeMentor(otherEditor.id,1,mentorCmd('credential',certificateFields)),/Самоназначение|недоступны|область/);
   assert(!store.mentorOptions(otherEditor.id,1,'credential').people.some(p=>p.id===x.f.mentor));
@@ -655,6 +655,56 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
    await store.commitDirectoryFile(manager.id,1,{...allowed,token:updated.token});
    const movedFile=await store.previewDirectoryFile(manager.id,1,{...allowed,file:await toFile([headers,['QA-IMPORT-001','Учебный импорт изменён','QA-B','QA-NEW-PROF']])});
    assert(movedFile.counts.error>0);assert.equal(movedFile.token,null);
+  }
+  // Native offline RC1: current actor, immutable method, actual session,
+  // atomic selection, duplicate detection and durable receipt.
+  {
+   const opt=store.mobileOptions(manager.id,1),assignment=opt.assignments.find(q=>q.id===newTraining.id);
+   assert(assignment);assert(opt.methods.some(q=>q.id===rc.id));
+   const html=await store.exportMobile(manager.id,1,{assignment_id:assignment.id,assignment_rev:assignment.rev,method_id:rc.id,confirmed:true});
+   assert.match(html.html,/Мобильный аудит первого уровня/);assert.match(html.html,/Content-Security-Policy/);
+   const marker=')({"database_id":',start=html.html.indexOf(marker)+2,stop=html.html.indexOf(',(function assessmentAnalysis',start);
+   assert(start>1&&stop>start,'Standalone config must remain parseable');
+   const {criteria,label,...cfg}=JSON.parse(html.html.slice(start,stop));
+   assert.equal(cfg.auditor_id,x.f.actor);assert.equal(criteria.length,20);
+   const record={...cfg,id:uuid(),observed_on:today,responses:criteria.map(q=>({criterion_id:q.id,value:1,note:''})),feedback:'Учебный мобильный аудит'};
+   const packet={type:'lean-l1-mobile-v1',schemaVersion:1,audits:[record]};
+   const count=store.listResources(manager.id,'audit.read').length;
+   const preview=store.previewMobile(manager.id,1,packet).items[0];
+   assert.equal(preview.status,'ready');assert(!preview.facts.some(f=>f.id===auditInput.session_id));
+   assert.equal(store.listResources(manager.id,'audit.read').length,count);
+   assert.throws(()=>store.receiptMobile(manager.id,1,packet),/Нет принятых/);
+   assert.throws(()=>store.previewMobile(otherEditor.id,1,packet),/недоступен/);
+   assert.equal(store.previewMobile(manager.id,1,{...packet,audits:[{...record,auditor_id:x.f.trainee}]}).items[0].status,'invalid');
+   const pick={id:record.id,hash:preview.hash,assignment_rev:preview.assignment_rev,session_id:preview.facts[0].id};
+   const another={...record,id:uuid()},double={...packet,audits:[record,another]},p2=store.previewMobile(manager.id,1,double).items[1];
+   await assert.rejects(store.commitMobile(manager.id,1,{packet:double,selected:[pick,{...pick,id:another.id,hash:p2.hash}]}),/Конфликт/);
+   assert.equal(store.listResources(manager.id,'audit.read').length,count);
+   await assert.rejects(store.commitMobile(manager.id,1,{packet,selected:[{...pick,assignment_rev:pick.assignment_rev+1}]}),/Изменилось/);
+   const result=await store.commitMobile(manager.id,1,{packet,selected:[pick]});assert.equal(result.imported,1);
+   const receipt=store.receiptMobile(manager.id,1,packet);assert.equal(receipt.accepted.length,1);assert.equal(receipt.accepted[0].hash,preview.hash);
+   assert.equal(store.qualityDetail(manager.id,1,'audit',receipt.accepted[0].audit_id).stats.yes,20);
+   assert.equal(store.previewMobile(manager.id,1,packet).items[0].status,'duplicate');
+   assert.equal(store.previewMobile(manager.id,1,{...packet,audits:[{...record,feedback:'Подмена'}]}).items[0].status,'conflict');
+   await assert.rejects(store.commitMobile(manager.id,1,{packet,selected:[pick]}),/Изменилось/);
+  }
+  // Assistant is a read-only projection, bound to the current scope.
+  {
+   const context={type:'audit',id:recordedAudit.id},local=store.assistantContext(manager.id,1,context);
+   assert(local.checks.some(q=>q.id==='ctx_audit_no'&&q.count===1));
+   assert(local.can_cloud);
+   assert.throws(()=>store.assistantContext(otherEditor.id,1,context),/недоступен/);
+   assert.throws(()=>store.assistantContext(worker.id,1,context),/недоступен/);
+   const req={context,ids:['ctx_audit_no'],model:'yandexgpt-lite'};
+   const payload=store.assistantRequest(manager.id,1,req);
+   assert.equal(payload.model,'yandexgpt-lite');
+   const outbound=JSON.stringify(payload);
+   for(const forbidden of [recordedAudit.id,x.f.actor,x.f.mentor,x.f.trainee,'Учебное отклонение','Учебная обратная связь',today])assert(!outbound.includes(forbidden));
+   assert.throws(()=>store.assistantRequest(manager.id,1,{...req,ids:['ctx_roi_period']}),/Сигналы изменились/);
+   assert.throws(()=>store.assistantRequest(manager.id,1,{...req,context:{...context,prompt:'send names'}}),/Выберите/);
+   const report=store.assistantContext(manager.id,1,{type:'report',kind:'analytics.read',scope,group:'all'});
+   assert(report.metrics.length>0);assert(report.metrics.some(m=>m.id==='training_assigned'));
+   assert.throws(()=>store.assistantContext(otherEditor.id,1,{type:'report',kind:'analytics.read',scope,group:'all'}),/недоступен/);
   }
   const card=store.personCard(manager.id,1,x.f.trainee);
   assert(card.sections.some(s=>s.action==='employment.read'));

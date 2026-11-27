@@ -16,12 +16,12 @@ test('login normalization, random salt and password verification',()=>{
  assert.equal(normalizeLogin(' Worker@Example.invalid '),'worker@example.invalid');assert.equal(normalizeLogin('x@@example.invalid'),null);
  assert.throws(()=>hashPassword('short'));
 });
-async function harness(t){
+async function harness(t,serverOptions={}){
  const parent=await fs.mkdtemp(path.join(os.tmpdir(),'lc81-')),dataDir=path.join(parent,'qa');
  const adminPassword=secret();let store,server,base;
  async function start(options={}){
   store=await openSecureQA({dataDir,...options});
-  server=createSecureQAServer({store,origin});
+  server=createSecureQAServer({store,origin,...serverOptions});
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve)});
   base='http://127.0.0.1:'+server.address().port;
  }
@@ -49,7 +49,9 @@ test('first admin, explicit existing roles, scoped views, blocking and restart',
  const h=await harness(t);
  assert.equal((await h.request('/api/lc81/session')).status,401);
  const a=await h.login('admin',h.adminPassword),ac=a.cookie;
- assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,95);
+ assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,97);
+ assert.equal((await h.request('/api/lc81/mobile-audit/options',{cookie:ac})).status,403);
+ assert.equal((await h.request('/api/lc81/assistant/cloud',{cookie:ac,body:{confirmed:true}})).status,403);
  const templates=h.store.formsCatalog(a.user.id,1);
  assert.equal(templates.forms.length,17);
  for(const form of templates.forms){
@@ -168,4 +170,34 @@ test('scoped directory write through HTTP: no self escalation or cross-unit chan
  assert.equal((await h.request('/api/lc81/admin',{cookie:wc})).status,403);
  assert.equal((await h.request('/api/lc81/sop/photo?revision_id='+p2+'&position=1',{cookie:wc})).status,404);
  assert.equal((await h.request('/api/v1/snapshot',{cookie:wc})).status,404);
+});
+
+test('protected cloud helper sends only previewed static rules to fixed provider',async t=>{
+ const calls=[],h=await harness(t,{cloudAiEnabled:true,cloudFetcher:async(url,options)=>{
+  const request=JSON.parse(options.body);calls.push({url,request});
+  return new Response(JSON.stringify({model:'yandexgpt-lite/latest',choices:[{finish_reason:'stop',message:{content:JSON.stringify({recommendations:[{id:'ctx_metric_review',text:'Сверьте определения и исходные записи.'}]})}}]}),{headers:{'Content-Type':'application/json'}});
+ }});
+ const admin=await h.login('admin',h.adminPassword),ac=admin.cookie,data=await h.admin(ac);
+ const ref=async(type,payload)=>(await h.post(ac,'reference',{type,payload})).id;
+ const person=(await h.request('/api/lc81/directory/change',{cookie:ac,body:{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:'AI-QA-SECRET',display_name:'Учебный пользователь помощника',unit_id:data.site}}})).data.id;
+ const role=await ref('business_role',{code:'AI-QA',name:'Проверка ИИ'}),assignment=await ref('role_assignment',{person_id:person,role_id:role,valid_from:day,valid_to:null});
+ const pw=secret(),user=await h.post(ac,'account',{person_id:person,login:'assistant-qa',password:pw,generate:false});
+ await h.post(ac,'policy',{role_id:role,revision:0,permissions:['assistant.read','assistant.cloud','org.read','analytics.read','training.read','training.detail']});
+ const grant=await h.post(ac,'grant',{account_id:user.id,assignment_id:assignment,scope:{kind:'unit_tree',unit_id:data.site},valid_to:null});
+ const session=await h.login('assistant-qa',pw),cookie=session.cookie;
+ const context={type:'report',kind:'analytics.read',scope:{unit_id:'',from:day,to:day},group:'all'},request={context,ids:['ctx_metric_review'],model:'yandexgpt-lite'};
+ const local=await h.request('/api/lc81/assistant/context',{cookie,body:context});
+ assert.equal(local.status,200,JSON.stringify(local.data));assert(local.data.can_cloud);assert(local.data.checks.some(x=>x.id==='ctx_metric_review'));
+ const preview=await h.request('/api/lc81/assistant/preview',{cookie,body:request});
+ assert.equal(preview.status,200,JSON.stringify(preview.data));assert.equal(calls.length,0);
+ assert.equal((await h.request('/api/lc81/assistant/cloud',{cookie,body:{...request,confirmed:false}})).status,400);
+ assert.equal((await h.request('/api/lc81/assistant/cloud',{cookie,body:{...request,ids:['ctx_audit_no'],confirmed:true}})).status,409);
+ assert.equal(calls.length,0);
+ const result=await h.request('/api/lc81/assistant/cloud',{cookie,body:{...request,confirmed:true}});
+ assert.equal(result.status,200,JSON.stringify(result.data));assert.equal(calls.length,1);assert.deepEqual(calls[0].request,preview.data.payload);assert.equal(result.data.reported,'yandexgpt-lite');
+ const raw=JSON.stringify(calls[0]);for(const x of [person,data.site,'AI-QA-SECRET',day,'Учебный пользователь помощника'])assert(!raw.includes(x));
+ assert.equal((await h.request('/api/lc81/assistant/cloud',{cookie,body:{...request,confirmed:true},csrf:false})).status,403);
+ await h.post(ac,'revoke',{id:grant.id});
+ assert.equal((await h.request('/api/lc81/assistant/cloud',{cookie,body:{...request,confirmed:true}})).status,403);
+ assert.equal(calls.length,1);
 });
