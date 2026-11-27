@@ -505,7 +505,7 @@ test('PARITY: competence report without requirements returns an empty report, no
  assert.equal(section.status,200,JSON.stringify(section.data));
  const unit=await h.store.createReference(admin.user.id,'org_unit',{code:'PAR-EMPTY',name:'Участок без требований',kind:'Участок',parent_id:d.site});
  const shift=await h.store.changeDirectory(admin.user.id,1,{type:'work_shift',operation:'create',id:null,expected_revision:0,fields:{code:'PAR-EMPTY-SHIFT',name:'Смена без требований'}});
- const person=await h.store.changeDirectory(admin.user.id,1,{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:'PAR-EMPTY-PERSON',display_name:'Сотрудник без требований',unit_id:unit.id,shift_id:shift.id}});
+ const person=await h.store.changeDirectory(admin.user.id,1,{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:'PAR-EMPTY-PERSON',display_name:'Сотрудник без требований',unit_id:unit.id,profession_id:null,position_id:null,shift_id:shift.id}});
  for(const filters of [{unit_id:unit.id},{person_id:person.id},{shift_id:shift.id},{unit_id:unit.id,person_id:person.id,shift_id:shift.id}]){
   const r=await h.request('/api/lc81/analytics/report',{cookie,body:{...body,...filters}});
   assert.equal(r.status,200,JSON.stringify(r.data));
