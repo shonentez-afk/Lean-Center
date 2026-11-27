@@ -166,7 +166,7 @@ function build(db,a,f){
   for(const y of gaps)must(a.read('coverage.read',y.id),403,'Не все требования смен доступны');
   note('Требования на текущую дату. Нормы смен не применяются к отдельному сотруднику. Нет оценки — не нулевой уровень.');
   tab('Требования смен',['Подразделение','Навык','Смена','Требуется','Подтверждено','Дефицит'],gaps.map(y=>row([labelRef('org.read',y.unit_id),labelRef('skill.read',y.skill_id),y.shift_code||null,y.min_people,y.actual,y.deficit])));
-  if(!f.shift_id&&!f.person_id)tab('Покрытие по подразделениям',['Подразделение','Покрыто','Требуется'],splitEvidence(m,'unitId').map(y=>row([labelRef('org.read',y.key),y.value,y.denominator])));
+  if(!f.shift_id&&!f.person_id){const groups=m.dimensions.includes('unitId')?splitEvidence(m,'unitId'):[];tab('Покрытие по подразделениям',['Подразделение','Покрыто','Требуется'],groups.map(y=>row([labelRef('org.read',y.key),y.value,y.denominator])))}
   tab('Сотрудники и требования',['Сотрудник','Навык','Подразделение','Требуется','Оценка','Основание'],cells.map(y=>{const c=y.c;must(a.read('requirement.read',c.goal.id),403,'Требование недоступно');if(c.fact)link('assessment',c.fact.session_id);return row([requiredName(y.p.id),labelRef('skill.read',y.s.id),labelRef('org.read',y.p.unit_id),c.goal.required_level,c.fact?.level??null,!c.fact?'Нет оценки':!c.valid?'Нет действующей числовой оценки':!c.same?'Другая шкала':!c.revisionCurrent?'Неактуальная редакция':c.gap?'Уровень ниже требования':'Требование покрыто'],{type:'person',id:y.p.id})}));
  }else if(f.kind==='twi_effect'){
   const x=twiOverview(db,{...scope,operationId:f.operation_id,revisionId:f.revision_id,programId:f.program_id,role:f.role}),z=x.stats;

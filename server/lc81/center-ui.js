@@ -1,7 +1,7 @@
 // The protected browser consumes only authorized projections. Shared
 // controls, corporate styles and chart palette; no browser database.
 import {localChart} from '/shared/center-report.js';
-export function createCenterUI({api,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,assistant}){
+export function createCenterUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,assistant,goMetric}){
  const opts=(items,field='name')=>items.map(x=>[x.id,x[field]]);
  const empty=text=>el('p',text||'Нет доступных записей','muted');
  const state={planned:'Запланировано',done:'Выполнено',cancelled:'Отменено',needs_replan:'Требует перепланирования',replanned:'Перепланировано',open:'Открыто',active:'Действует',in_progress:'В работе',completed:'Завершено',implemented:'Ожидает проверки',verified:'Эффект подтверждён',ineffective:'Эффект не подтверждён',final:'Зарегистрировано',draft:'Черновик',confirmed:'Подтверждён',void:'Аннулирован'};
@@ -88,21 +88,41 @@ export function createCenterUI({api,button,panel,table,el,input,select,form,valu
   await draw();return root;
  }
 
+ // Account-local UI state, no persisted records, permissions or identities.
+ // Manual dates stay manual; relative periods follow the enterprise day.
+ let reportSelection=null,pendingMetric=null;
+ const resetReports=()=>{reportSelection=null;pendingMetric=null};
+ const focusMetric=(id,scope)=>{pendingMetric={id,scope};reportSelection={...scope,preset:'custom'}};
+ const presetBounds=(day,preset)=>{
+  const month=Number(day.slice(5,7)),start=preset==='year'?1:preset==='quarter'?Math.floor((month-1)/3)*3+1:month;
+  return {from:day.slice(0,4)+'-'+String(start).padStart(2,'0')+'-01',to:day};
+ };
  const metricText=m=>m.availability==='restricted'?'Недоступно по правам':m.denominator===null?fmt(m.value):m.denominator===0?'— · нет знаменателя':fmt(m.value)+' / '+fmt(m.denominator)+' · '+fmt(100*m.value/m.denominator)+'%';
  const priority={urgent:'Сначала проверить',review:'Требуется решение',plan:'Запланировать / настроить'};
  const basis={event:'Факт за период',cohort:'Когорта периода',current:'Текущее состояние'};
  const metricTable=(metrics,show)=>table(['Показатель','Значение','Основание','Действия'],metrics.map(m=>[m.label,metricText(m),basis[m.basis]||m.basis,m.availability==='restricted'?'—':button('Раскрыть расчёт',()=>show(m.id))]));
  async function report(kind){
   const d=await api(query('center/options',{kind})),unit=select('unit_id','Подразделение (точное)',[...(d.all?[['','Всё предприятие']]:[]),...opts(d.units)]),from=date('from','С даты',d.day.slice(0,7)+'-01'),to=date('to','По дату',d.day),out=el('div'),root=el('div');
-  unit.querySelector('select').value=d.default_unit;
+  let preset=reportSelection?.preset||'month';
+  const unitId=reportSelection?.unit_id;
+  unit.querySelector('select').value=(unitId===''&&d.all||d.units.some(x=>x.id===unitId))?unitId:d.default_unit;
+  const dates=preset==='custom'&&reportSelection?reportSelection:presetBounds(d.day,preset);
+  from.querySelector('input').value=dates.from;to.querySelector('input').value=dates.to;
   const scope=()=>({unit_id:unit.querySelector('select').value,from:from.querySelector('input').value,to:to.querySelector('input').value});
+  const scopeListeners=new Set(),saveSelection=()=>{reportSelection={...scope(),preset};for(const fn of scopeListeners)fn()};
+  root.lc81ReportScope={read:scope,onChange:fn=>scopeListeners.add(fn)};
+  let drawSerial=0;
   async function draw(){
-   const s=scope(),data=await api(query('center/view',{kind,...s})),sub=el('div'),evidence=el('div'),metrics=data.metrics;
-   const show=async(id,offset=0)=>{
-    if(!discard())return;
-    const r=await api(query('center/evidence',{kind,...s,id,offset}));
-    const n=panel(r.label,el('p',metricText({...r,availability:'available'})+' · '+r.source),el('p',r.definition),el('p',r.rules,'muted'),table(['Дата','Запись','Сотрудник','Состояние','В расчёте','Основание','Источник'],r.items.map(x=>[x.date,x.label,x.person,x.state,x.included?'Числитель / факт':'Только знаменатель',x.reason,route(sub,x.route)])));
-    if(r.total>50)n.append(button('Предыдущая страница',()=>show(id,Math.max(0,offset-50))),el('p',(offset+1)+'–'+Math.min(offset+50,r.total)+' из '+r.total),button('Следующая страница',()=>show(id,Math.min(Math.max(0,r.total-1),offset+50))));
+   const serial=++drawSerial,s=scope();saveSelection();
+   const data=await api(query('center/view',{kind,...s}));if(serial!==drawSerial)return;
+   const sub=el('div'),evidence=el('div'),metrics=data.metrics;
+   let evidenceSerial=0;
+   const show=async(id,offset=0,selected=s)=>{
+    if(!discard()||serial!==drawSerial)return;
+    const request=++evidenceSerial,r=await api(query('center/evidence',{kind,...selected,id,offset}));
+    if(request!==evidenceSerial||serial!==drawSerial)return;
+    const n=panel(r.label,el('p','Период основания: '+selected.from+' — '+selected.to+' · '+(d.units.find(u=>u.id===selected.unit_id)?.name||'Всё предприятие'),'muted'),el('p',metricText({...r,availability:'available'})+' · '+r.source),el('p',r.definition),el('p',r.rules,'muted'),table(['Дата','Запись','Сотрудник','Состояние','В расчёте','Основание','Источник'],r.items.map(x=>[x.date,x.label,x.person,x.state,x.included?'Числитель / факт':'Только знаменатель',x.reason,route(sub,x.route)])));
+    if(r.total>50)n.append(button('Предыдущая страница',()=>show(id,Math.max(0,offset-50),selected)),el('p',(offset+1)+'–'+Math.min(offset+50,r.total)+' из '+r.total),button('Следующая страница',()=>show(id,Math.min(Math.max(0,r.total-1),offset+50),selected)));
     evidence.replaceChildren(n);sub.replaceChildren();if(evidence.isConnected)evidence.scrollIntoView({block:'nearest'});
    };
    const header=panel(kind==='center.read'?'Оперативный обзор':kind==='analytics.read'?'Аналитика за период':'Дерево показателей',el('p','Дата среза: '+data.day+' · '+s.from+' — '+s.to+' · '+(d.units.find(u=>u.id===s.unit_id)?.name||'Всё предприятие')),el('p','Отдельные показатели используют исходные определения LC7. Недоступные источники не заменяются нулями.','muted'));
@@ -110,7 +130,10 @@ export function createCenterUI({api,button,panel,table,el,input,select,form,valu
    const groups=new Map();for(const m of metrics){if(!groups.has(m.group))groups.set(m.group,[]);groups.get(m.group).push(m)}
    if(kind==='center.read'){
     const primary=['prep_completed','twi_first','training_overdue','skill_coverage','audit_count','actions_overdue','effect_pending'];
-    for(const m of metrics.filter(x=>primary.includes(x.id)))cards.append(panel(m.label,el('strong',metricText(m),'lc81-kpi'),m.availability==='restricted'?empty('Ограничено правами'):button('Раскрыть расчёт',()=>show(m.id))));
+    for(const m of metrics.filter(x=>primary.includes(x.id))){
+     const kpi=m.availability==='restricted'?el('strong',metricText(m),'lc81-kpi'):button(metricText(m),()=>goMetric?goMetric(m.id,s,()=>show(m.id)):show(m.id),'lc81-kpi lc81-kpi-link');
+     cards.append(panel(m.label,kpi,m.availability==='restricted'?empty('Ограничено правами'):button('Раскрыть расчёт',()=>show(m.id))));
+    }
     header.append(cards);
     const attention=panel('Требует внимания');
     for(const x of data.attention.filter(x=>x.count>0).sort((a,b)=>['urgent','review','plan'].indexOf(a.priority)-['urgent','review','plan'].indexOf(b.priority))){
@@ -123,12 +146,17 @@ export function createCenterUI({api,button,panel,table,el,input,select,form,valu
     header.append(attention);
    }else{
     if(kind==='analytics.read'){
-     const addChart=(title,labels,series,headers,values)=>{
-      const h=el('div',undefined,'lc81-chart'),p=panel(title,h,table(headers,values));header.append(p);
-      requestAnimationFrame(()=>{if(h.isConnected)localChart(h,labels,series)});
+     const openMonth=(month,id)=>{
+      const b=bounds(month),selected={...s,from:b.from>s.from?b.from:s.from,to:b.to<s.to?b.to:s.to};
+      return show(id,0,selected);
      };
-     if(data.cohortMonths?.length){const x=data.cohortMonths;addChart('Назначения обучения по месяцам когорты',x.map(r=>r.id),[{name:'Назначено',data:x.map(r=>r.assignments)},{name:'Завершено из назначенных',data:x.map(r=>r.completed)}],['Месяц','Назначено','Завершено'],x.map(r=>[r.id,r.assignments,r.completed]))}
-     if(data.auditMonths?.length){const x=data.auditMonths;addChart('Факты аудита L1',x.map(r=>r.id),[{name:'Аудиты',data:x.map(r=>r.count)}],['Месяц','Аудиты'],x.map(r=>[r.id,r.count]))}
+     const addChart=(title,labels,series,headers,values,ids)=>{
+      const drill=(i,j)=>labels[i]&&ids[j]?openMonth(labels[i],ids[j]):undefined;
+      const h=el('div',undefined,'lc81-chart'),p=panel(title,h,table(headers,values.map((row,i)=>[row[0],...row.slice(1).map((v,j)=>button(String(v),()=>drill(i,j),'lc81-number-link'))])));header.append(p);
+      requestAnimationFrame(()=>{if(h.isConnected)localChart(h,labels,series,{onClick:(i,j)=>{if(h.isConnected)void run(()=>drill(i,j))}})});
+     };
+     if(data.cohortMonths?.length){const x=data.cohortMonths;addChart('Назначения обучения по месяцам когорты',x.map(r=>r.id),[{name:'Назначено',data:x.map(r=>r.assignments)},{name:'Завершено из назначенных',data:x.map(r=>r.completed)}],['Месяц','Назначено','Завершено'],x.map(r=>[r.id,r.assignments,r.completed]),['training_assigned','training_completed'])}
+     if(data.auditMonths?.length){const x=data.auditMonths;addChart('Факты аудита L1',x.map(r=>r.id),[{name:'Аудиты',data:x.map(r=>r.count)}],['Месяц','Аудиты'],x.map(r=>[r.id,r.count]),['audit_count'])}
      if(data.auditGroups?.length)header.append(panel('Аудиты по отдельным методикам и версиям',table(['Методика','Версия','Аудитов','Наблюдалось','Да','Результат'],data.auditGroups.map(x=>[x.methodCode,x.version,x.count,x.observed,x.passed,x.observed?fmt(100*x.passed/x.observed)+'%':'—']))));
      if(data.annual!==null)header.append(panel('Годовой контроль L1 · '+data.day.slice(0,4),data.annual.length?table(['Инструктор','Норма','Зачтено','Осталось','Состояние'],data.annual.map(x=>[x.person,x.required,x.actual,x.remaining,x.status])):empty()));
      if(data.currencies!==null)header.append(panel('Подтверждённые денежные факты · валюты не суммируются',data.currencies.length?table(['Валюта','Фактов','Валовый эффект','Затраты','Инвестиции','Чистый эффект'],data.currencies.map(x=>[x.currency,x.count,money(x.gross,x.currency),money(x.recurring,x.currency),money(x.investment,x.currency),money(x.net,x.currency)])):empty('За период нет действующих подтверждённых денежных фактов')));
@@ -140,8 +168,14 @@ export function createCenterUI({api,button,panel,table,el,input,select,form,valu
     }
    }
    header.append(assistant({type:'report',kind,scope:s,group:'all'},'ИИ-помощник отчёта'),evidence,sub);out.replaceChildren(header);
+   if(kind==='metrics.read'&&pendingMetric){
+    const focus=pendingMetric;pendingMetric=null;
+    if(metrics.some(m=>m.id===focus.id&&m.availability!=='restricted'))await show(focus.id);
+   }
   }
-  root.append(panel('Область и период',unit,from,to,button('Месяц',async()=>{if(!discard())return;from.querySelector('input').value=d.day.slice(0,7)+'-01';to.querySelector('input').value=d.day;await draw()}),button('Год',async()=>{if(!discard())return;from.querySelector('input').value=d.day.slice(0,4)+'-01-01';to.querySelector('input').value=d.day;await draw()}),button('Обновить',async()=>{if(discard())await draw()},'primary')),out);
+  const choosePreset=key=>async()=>{if(!discard())return;preset=key;const b=presetBounds(d.day,key);from.querySelector('input').value=b.from;to.querySelector('input').value=b.to;await draw()};
+  for(const field of [unit,from,to])field.querySelector('input,select').addEventListener('change',()=>{if(field!==unit)preset='custom';drawSerial++;out.replaceChildren(empty('Фильтры изменены. Нажмите «Обновить» для общего обзора.'));saveSelection()});
+  root.append(panel('Область и период',el('p','Единая область для дашборда, аналитики, подробных отчётов и дерева показателей.','muted'),unit,from,to,button('Месяц',choosePreset('month')),button('Квартал',choosePreset('quarter')),button('Год',choosePreset('year')),button('Обновить',async()=>{if(discard())await draw()},'primary')),out);
   await draw();return root;
  }
 
@@ -232,5 +266,5 @@ export function createCenterUI({api,button,panel,table,el,input,select,form,valu
   n.append(items.length?table(['Карточка','Валюта','Метод','Срок проверки','Состояние','Действия'],items.map(r=>[r.title,r.currency,r.method==='time'?'По времени':'Прямой',r.review_due,r.display_state||state[r.state]||r.state,r.can_detail?button('Открыть эффект',()=>roiCard(host,r.id)):'Только реестр'])):empty(),host);
   return n;
  }
- return {calendar,report,roiPanel,open:(host,type,id)=>type==='schedule'?scheduleCard(host,id):roiCard(host,id)};
+ return {resetReports,focusMetric,calendar,report,roiPanel,open:(host,type,id)=>type==='schedule'?scheduleCard(host,id):roiCard(host,id)};
 }

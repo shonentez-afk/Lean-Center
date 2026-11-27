@@ -24,15 +24,16 @@ export function createFinalUI({api,button,panel,table,el,input,select,note,disca
   if(!discard())return;const d=await api(query('analytics/frv',{id})),links=el('div');renderTables(d,host,links);
   host.append(button('Карточка ФРВ',()=>openLinked(links,{type:'frv',id})),links);host.scrollIntoView({block:'nearest'});
  }
- async function analytics(){
+ async function analytics(shared){
   const o=await api('analytics/subjects'),root=panel('Расширенные отчёты LC7',el('p','Исходные расчёты, версии методик, фильтры и первичные факты. Полный отчёт доступен только при наличии прав на все необходимые регистры предприятия. Отдельные показатели ограниченной области остаются в общем обзоре.'));
   if(!o.reports.length){root.append(el('p','Нет разрешённых полных отчётов.'));return root}
   const controls=el('div'),out=el('div'),links=el('div'),tabs=el('div',undefined,'row');
-  const retained={from:o.day.slice(0,7)+'-01',to:o.day,unit_id:''};let generation=0;
+  let generation=0;
+  if(!shared||typeof shared.read!=='function')throw Error('Не настроен общий период аналитики');
+  shared.onChange(()=>{out.replaceChildren(el('p','Область или период изменены. Сформируйте отчёт заново.','muted'));links.replaceChildren()});
   async function choose(kind,sop_kind='sop_evaluation'){
    const serial=++generation,d=await api(query('analytics/subjects',{kind,sop_kind}));if(serial!==generation)return;
-   const f={from:dt('report_from','С даты',retained.from),to:dt('report_to','По дату',retained.to),unit_id:pick('report_unit','Подразделение (точное)',d.units,'Всё предприятие',retained.unit_id)};
-   for(const k of ['from','to','unit_id'])f[k].querySelector('input,select').addEventListener('change',()=>{retained[k]=val(f[k]);out.replaceChildren();links.replaceChildren()});
+   const f={};
    const put=(flag,key,label,xs,blank='Все',v='')=>{if(d.filters.includes(flag))f[key]=pick('report_'+key,label,xs,blank,v)};
    put('person','person_id',kind==='audit'?'Инструктор':kind==='sop'?'Оценщик':'Сотрудник',d.people);
    put('shift','shift_id','Смена',d.shifts);put('operation','operation_id','Операция',d.operations);put('revision','revision_id','Редакция СОП',d.revisions);put('program','program_id','Программа',d.programs);put('method','method_id','Методика / версия',d.methods,'— Выберите —',d.methods[0]?.id||'');
@@ -41,7 +42,7 @@ export function createFinalUI({api,button,panel,table,el,input,select,note,disca
    if(d.filters.includes('role'))f.role=select('report_role','Роль',[['all','Все участники'],['trainee','Обучаемый'],['mentor','Инструктор'],['auditor','ВТ']]);
    if(d.filters.includes('state'))f.state=select('report_state','Состояние',kind==='preparation'?[['all','Все'],['open','Открытые'],['overdue','Просроченные'],['complete','Завершено'],['review','Повторная проверка'],['negative','Отрицательное решение'],['finish','Готов к завершению'],['cancelled','Отменено']]:[['all','Все'],['open','Открытые'],['overdue','Просроченные'],['in_progress','В работе'],['implemented','Ожидает проверки'],['verified','Подтверждено'],['ineffective','Не подтверждено'],['cancelled','Отменено']]);
    if(d.filters.includes('sop_kind')){f.sop_kind=select('report_sop_kind','Вид методики',[['sop_evaluation','Корпоративная бинарная'],['weighted_sop','Взвешенные снимки Stage43']]);f.sop_kind.querySelector('select').value=sop_kind;f.sop_kind.querySelector('select').addEventListener('change',()=>{choose(kind,val(f.sop_kind)).catch(e=>out.replaceChildren(el('p',e.message,'warn')))})}
-   const request=()=>({kind,from:val(f.from),to:val(f.to),unit_id:val(f.unit_id),person_id:f.person_id?val(f.person_id):'',shift_id:f.shift_id?val(f.shift_id):'',operation_id:f.operation_id?val(f.operation_id):'',revision_id:f.revision_id?val(f.revision_id):'',program_id:f.program_id?val(f.program_id):'',method_id:f.method_id?val(f.method_id):'',self_id:f.self_id?val(f.self_id):'',role:f.role?val(f.role):'all',state:f.state?val(f.state):'all',sop_kind});
+   const request=()=>({kind,...shared.read(),person_id:f.person_id?val(f.person_id):'',shift_id:f.shift_id?val(f.shift_id):'',operation_id:f.operation_id?val(f.operation_id):'',revision_id:f.revision_id?val(f.revision_id):'',program_id:f.program_id?val(f.program_id):'',method_id:f.method_id?val(f.method_id):'',self_id:f.self_id?val(f.self_id):'',role:f.role?val(f.role):'all',state:f.state?val(f.state):'all',sop_kind});
    for(const x of Object.values(f))x.querySelector('input,select').addEventListener('change',()=>{out.replaceChildren();links.replaceChildren()});
    async function draw(){const q=request(),r=await api('analytics/report',q);if(serial!==generation||JSON.stringify(q)!==JSON.stringify(request()))return;links.replaceChildren();const n=renderTables(r,out,links);
     if(r.can_export)n.append(button('Скачать полный отчёт XLSX',async()=>{
@@ -53,7 +54,7 @@ export function createFinalUI({api,button,panel,table,el,input,select,note,disca
    }
    controls.replaceChildren(panel(d.reports.find(x=>x.id===kind).label,...Object.values(f),button('Сформировать подробный отчёт',draw,'primary')));out.replaceChildren();links.replaceChildren();
   }
-  for(const r of o.reports)tabs.append(button(r.label,()=>{if(discard())return choose(r.id)}));root.append(tabs,controls,out,links);return root;
+  for(const r of o.reports)tabs.append(button(r.label,()=>{if(discard())return choose(r.id)}));root.append(el('p','Период и подразделение берутся из общей панели выше.','muted'),tabs,controls,out,links);return root;
  }
  async function historyDetail(host,id){
   if(!discard())return;const d=await api(query('history/detail',{id})),n=panel('Исторический аудит RC1',el('p',d.date+' · '+d.version+' · исходный ID '+d.source_id+' · ревизия '+d.source_revision),el('p','Инструктор: '+d.names.mentor+' · ВТ: '+d.names.auditor+' · Обучаемый: '+(d.names.trainee||'—')),el('p','Работа: '+d.job),el('p','Исторические ответы не подтверждают допуск или действующую норму L1.'),table(['№','Раздел','Критерий','Исходная оценка','Комментарий'],d.questions.map(q=>[q.position,q.section,q.question,q.value,q.note])),el('p',d.feedback));

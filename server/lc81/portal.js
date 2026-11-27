@@ -14,6 +14,7 @@ const $=id=>document.getElementById(id),el=(tag,text,cls)=>{const n=document.cre
 let libraryUI=null,trainingUI=null,centerUI=null,assistantUI=null,mobileUI=null,finalUI=null;
 let user=null,page='person.read_basic',busy=false,sequence=0,saving=false,checking=false,saveFailed=false,networkFailed=false;
 let authGeneration=0,statusVersion=0,accessCheck=null,accessRefreshPending=false,provisionManager=false;
+let navigationStarted=false,historyReplay=false,navAccount=null,navOpen=new Map();
 const adminPages=Object.freeze({admin:'Начало работы','admin.enterprise':'Предприятие','admin.users':'Пользователи','admin.roles':'Роли и права','admin.access':'Назначения и доступ','admin.storage':'Хранение и журнал'});
 const isAdminPage=key=>Object.hasOwn(adminPages,key);
 const titleFor=key=>adminPages[key]||actions[key]||'Личное рабочее пространство';
@@ -51,7 +52,7 @@ async function api(url,data,signal){
 function button(text,fn,cls=''){const n=el('button',text,cls);n.type='button';n.addEventListener('click',()=>run(fn));return n}
 async function run(fn){if(busy||user&&document.documentElement.classList.contains('lc81-access-check'))return;busy=true;try{await fn()}catch(e){if(e.name!=='AbortError'){if(e.status===401)showLogin();note(e.message||'Ошибка',true)}}finally{busy=false;refreshIndicator();if(accessRefreshPending&&user)void checkAccess(true)}}
 function closeProtectedViews(){for(const d of document.querySelectorAll('dialog.lc81-password-dialog,dialog.lc72-context-dialog')){if(d.open)d.close();else d.remove()}libraryUI?.clear();$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren()}
-function showLogin(){authGeneration++;sequence++;user=null;accessRefreshPending=false;maskAccess(false);closeProtectedViews();saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
+function showLogin(){authGeneration++;sequence++;user=null;navigationStarted=false;historyReplay=false;navAccount=null;navOpen.clear();centerUI?.resetReports();history.replaceState(null,'');accessRefreshPending=false;maskAccess(false);closeProtectedViews();saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
 function showUser(a){user=a;maskAccess(false);$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Изменить пароль',ownPasswordDialog),button('Выйти',async()=>{if(!discard()||!$('issued').hidden&&!confirm('Выданный пароль ещё открыт. Завершить сеанс?'))return;await api('logout',{});showLogin();note('Выход выполнен')}));refreshIndicator()}
 function panel(title,...children){const n=el('section',undefined,'panel');n.append(el('h2',title),...children);return n}
 function table(headers,values){const wrap=el('div',undefined,'tablewrap lc81-rows');const t=el('table'),h=el('thead'),tr=el('tr');for(const v of headers)tr.append(el('th',v));h.append(tr);t.append(h);const b=el('tbody');for(const row of values){const r=el('tr');for(const v of row){const d=el('td');d.append(v instanceof Node?v:el('span',v??'—'));r.append(d)}b.append(r)}t.append(b);wrap.append(t);return wrap}
@@ -405,7 +406,10 @@ assistantUI=createAssistantUI({api,button,panel,table,el,input,select,note,openL
 mobileUI=createMobileAuditUI({api,button,panel,table,el,input,select,form,value,note,discard});
 finalUI=createFinalUI({api,button,panel,table,el,input,select,note,discard,openLinked});
 trainingUI=createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,downloadForm,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),mobilePanel:()=>mobileUI.panel()});
-centerUI=createCenterUI({api,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label)});
+centerUI=createCenterUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),goMetric:async(id,scope,fallback)=>{
+ if(!user?.workspace_actions.includes('metrics.read'))return fallback();
+ if(!discard())return;centerUI.focusMetric(id,scope);page='metrics.read';await render();
+}});
 async function openLinked(host,r){
  if(!discard())return;
  if(r.type==='rc1_history')return finalUI.historyDetail(host,r.id);
@@ -428,17 +432,18 @@ const assistantSections=Object.freeze({
  'person.read_basic':['person'],'person.read_directory':['person'],'mentoring.view':['person'],'training.read':['training'],'instruction.view':['training'],'journal.view':['training'],'retraining.view':['training'],'matrix.read':['matrix'],'program.read':['program'],'internship.view':['enrollment','program'],'training.enrollment.read':['enrollment'],'preparation.read':['preparation'],'audit.read':['audit'],'self.read':['self'],'assessment.read':['assessment'],'development.read':['development'],'task.read':['task'],'sop.read_effective':['sop'],'sop.read_history':['sop'],'sop.read_steps':['sop'],'sop.read_twi':['sop'],'sop.read_linked_frv':['sop'],'sop.constructor':['sop'],'frv.read':['frv'],'sop.evaluation.read':['sop_evaluation','weighted_sop'],'roi.read':['roi'],'plan.read':['training','enrollment','task','development'],'calendar.read':['training','audit','self','assessment']
 });
 function buildNav(){
- const nav=$('nav');nav.replaceChildren();const available=new Set((user.workspace_actions||[]).filter(k=>k==='admin'&&user.admin||Object.hasOwn(actions,k)));
+ const nav=$('nav');if(navAccount===user.id){for(const group of nav.querySelectorAll('details[data-group]'))navOpen.set(group.dataset.group,group.open)}else{navAccount=user.id;navOpen.clear()}
+ nav.replaceChildren();const available=new Set((user.workspace_actions||[]).filter(k=>k==='admin'&&user.admin||Object.hasOwn(actions,k)));
  const selected=[];
  if(user.admin){
-  const group=el('details',undefined,'nav-section');group.open=true;group.append(el('summary','Администрирование','navgroup'));
+  const group=el('details',undefined,'nav-section');group.dataset.group='Администрирование';group.open=navOpen.get(group.dataset.group)??true;group.append(el('summary','Администрирование','navgroup'));
   for(const act of Object.keys(adminPages)){available.add(act);selected.push(act);group.append(navButton(act,available))}nav.append(group);
  }
  const groupFor=act=>isAdminPage(act)?'Администрирование':navGroups.find(([,keys])=>keys.some(k=>(pageActions[k]||[]).includes(act)))?.[0]||'Рабочие разделы';
  for(const [name,keys] of navGroups){
   const list=keys.flatMap(k=>pageActions[k]||[]).filter(a=>available.has(a)&&!selected.includes(a));
   if(!list.length)continue;
-  const group=el('details',undefined,'nav-section');group.open=list.includes(page)||!user.admin&&['Ежедневная работа','Люди и компетенции','Управление центром'].includes(name);group.append(el('summary',name,'navgroup'));
+  const group=el('details',undefined,'nav-section');group.dataset.group=name;group.open=navOpen.get(name)??(list.includes(page)||!user.admin&&['Ежедневная работа','Люди и компетенции','Управление центром'].includes(name));group.append(el('summary',name,'navgroup'));
   for(const act of list){selected.push(act);group.append(navButton(act,available))}
   nav.append(group);
  }
@@ -447,6 +452,22 @@ function buildNav(){
  const current=nav.querySelector('[data-action="'+page+'"]');if(current){current.classList.add('active');current.setAttribute('aria-current','page');if(current.closest('details'))current.closest('details').open=true}
  const head=$('page-heading'),left=el('div');left.append(el('div',groupFor(page),'eyebrow'),el('h1',titleFor(page)));const tools=el('div',undefined,'row');if(user.permissions.includes('assistant.read')&&assistantSections[page])tools.append(button('ИИ-помощник раздела',()=>assistantUI.section(assistantSections[page])));tools.append(el('span','Подтверждение сервером','pill'));head.replaceChildren(left,tools);
 }
+// Only page keys in history, no personal identifiers or content. Back/Forward
+// reauthorize through render() just like menu navigation.
+function rememberPage(){
+ const state={lc81Page:page};
+ if(!navigationStarted||historyReplay){history.replaceState(state,'');navigationStarted=true;historyReplay=false}
+ else if(history.state?.lc81Page!==page)history.pushState(state,'');
+}
+window.addEventListener('popstate',e=>{
+ if(!user)return;
+ const target=e.state?.lc81Page;
+ if(!target||target===page)return;
+ if(busy||document.documentElement.classList.contains('lc81-access-check')||!discard()){
+  history.pushState({lc81Page:page},'');return;
+ }
+ historyReplay=true;page=target;void run(()=>render());
+});
 function navButton(act,available){
  const n=button(titleFor(act),async()=>{if(!discard())return;page=act;$('nav').classList.remove('lc53-menu-open');$('menu').setAttribute('aria-expanded','false');await render()},'nav');
  n.dataset.action=act;return n;
@@ -458,7 +479,7 @@ async function render(){
   if(user&&user.access_stamp!==fresh.user.access_stamp){authGeneration++;closeProtectedViews();}
   user=fresh.user;succeeded=true;
   const version=document.querySelector('.header-meta .version');if(version&&/^[a-f0-9]{40}$/.test(fresh.sourceCommit||'')){version.textContent='LC8.1 · QA · '+fresh.sourceCommit.slice(0,7);version.title='Исходный коммит: '+fresh.sourceCommit;}
-  buildNav();$('content').replaceChildren(); // do not retain stale authorized rows
+  buildNav();rememberPage();$('content').replaceChildren(); // do not retain stale authorized rows
   if(isAdminPage(page)&&user.admin){const data=await api('admin');if(serial===sequence)$('content').replaceChildren(...adminPanel(data));return}
   if(!page){$('content').replaceChildren(panel('Личное рабочее пространство',el('p','Вам пока не назначены права на рабочие разделы. Обратитесь к администратору.')));return}
   if(page==='instruction.view'){
@@ -488,7 +509,7 @@ async function render(){
    const data=await api('resources?action=sop.read_effective');if(serial===sequence)$('content').replaceChildren(libraryUI.linked(data.items,page));return;
   }
   if(['center.read','analytics.read','metrics.read'].includes(page)){
-   const content=await centerUI.report(page);if(page==='analytics.read')content.prepend(await finalUI.analytics());
+   const content=await centerUI.report(page);if(page==='analytics.read')content.firstElementChild.after(await finalUI.analytics(content.lc81ReportScope));
    if(page==='center.read'&&user.permissions.includes('operation.create')&&user.workspace_actions.includes('sop.constructor')){
     const info=await api('library/info?kind=sop');
     if(!info.operations.length){
