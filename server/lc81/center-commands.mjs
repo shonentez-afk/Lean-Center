@@ -135,19 +135,21 @@ export function changeSchedule(db,a,f){
  }
  return emit(db,a,'schedule_event',s.id,'update',s.rev,p,k);
 }
-export function calendarWorkspace(db,a,{mode,from,to}){
+export function calendarWorkspace(db,a,{mode,from,to,person_id=null}){
  must(['calendar','plan'].includes(mode)&&validDate(from)&&validDate(to)&&from<=to&&Date.parse(to)-Date.parse(from)<=366*86400000,400,'Выберите период не более года');
- const personal=mode==='plan',self=personal?a.personId:null;
- if(personal){must(personalPlanWorkspace(db,a),403,'Личный план доступен только связанному сотруднику')}
- else must(has(a,'calendar.read'),403,'Календарь недоступен');
+ const personal=mode==='plan'&&(!person_id||person_id===a.personId)&&personalPlanWorkspace(db,a),self=personal?a.personId:null;
+ // Explicit personnel context is checked by the store before entering this
+ // projection. It still uses each record's calendar permission, not self.
+ if(!personal)must((mode==='calendar'||person_id)&&has(a,'calendar.read'),403,'Календарь или план недоступен');
  const items=[],add=(x,r,people)=>{
   if(!x.date||x.date>to||x.date<from&&!(personal&&x.pending&&x.date<a.day))return;
+  if(person_id&&!people.includes(person_id))return;
   if(personal){if(!people.includes(self))return}
   else if(!r||!allowed(a,'calendar.read',x.anchor,r))return;
   const {anchor,...item}=x;items.push({...item,overdue:!!x.pending&&x.date<a.day});
  };
  for(const s of rows(db,'SELECT * FROM schedule_event ORDER BY due_on,id')){
-  const v=a.read('calendar.read',s.id);if(!v||personal&&s.owner_id!==self)continue;
+  const v=a.read('calendar.read',s.id);if(!v||personal&&s.owner_id!==self||person_id&&s.owner_id!==person_id)continue;
   const r=scheduleResource(db,s,a.day);
   if(!r){
    // A legacy self row already passed the original owner-only projection.
@@ -201,7 +203,7 @@ export function calendarWorkspace(db,a,{mode,from,to}){
   add({anchor:r.id,key:'roi:'+r.id,date:r.review_due,type:'Контроль экономического эффекта',title:r.title,owner:name(a,r.owner_id),state,pending:effectPending(db,r),route:{type:'roi',id:r.id}},unitResource(r.unit_id),[r.owner_id]);
  }
  items.sort((x,y)=>Number(y.overdue)-Number(x.overdue)||x.date.localeCompare(y.date)||x.key.localeCompare(y.key));
- return {day:a.day,from,to,mode,items,can_plan:!!a.personId&&has(a,'calendar.plan')&&has(a,'calendar.read')};
+ return {day:a.day,from,to,mode,items,can_plan:!person_id&&!!a.personId&&has(a,'calendar.plan')&&has(a,'calendar.read')};
 }
 
 // Authorization is a separate layer over the existing calculation registry.

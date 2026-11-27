@@ -33,7 +33,7 @@ import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
 import {journalWorkspace,retrainingWorkspace} from './training-registers.mjs';
-import {sopEvaluationWorkspace,sopEvaluationOptions,sopEvaluationDetail,createSopEvaluation,installSopMethod} from './sop-evaluation-commands.mjs';
+import {sopEvaluationWorkspace,sopEvaluationOptions,sopEvaluationDetail,createSopEvaluation,installSopMethod,sopEvaluationsForRevision} from './sop-evaluation-commands.mjs';
 import {importTypes,importAllowed,inspectDirectoryFile,parseDirectoryFile,planDirectoryImport,makeImportToken,checkImportToken} from './import-commands.mjs';
 import {mobileOptions,exportMobile,previewMobile,commitMobile,receiptMobile} from './mobile-audit-commands.mjs';
 import {assertImport,historyOptions,historyList,historyDetail,historyArchive,loadHistoryPlan,historyPreview,buildHistoryEvents,commitHistory} from './rc1-history.mjs';
@@ -662,7 +662,11 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   mentorWorkspace(actor,revision){return read(db=>{const a=checkedAccount(db,actor,revision),d=day(db);return mentorWorkspace(db,trainingAccess(db,a,d),id=>cardAllowed(db,a,id,d))})},
   mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind))},
   changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
-  calendarWorkspace(actor,revision,query){return read(db=>calendarWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),query))},
+  calendarWorkspace(actor,revision,query){return read(db=>{
+   const a=checkedAccount(db,actor,revision),d=day(db),access=trainingAccess(db,a,d),id=query.person_id||null;
+   if(id)must(isId(id)&&cardAllowed(db,a,id,d)&&((query.mode==='plan'&&a.person_id===id&&workspaceActions(db,access,a.bootstrap===1).includes('plan.read'))||access.permissions.includes('calendar.read')),404,'План сотрудника недоступен');
+   return calendarWorkspace(db,access,{...query,person_id:id});
+  })},
   calendarOptions(actor,revision,type,sourceId=null){return read(db=>calendarOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),type,sourceId))},
   calendarDetail(actor,revision,id){return read(db=>calendarDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
   createSchedule(actor,revision,input){return mutate(db=>createSchedule(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
@@ -723,7 +727,13 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
   retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
   matrixDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...matrixDetail(db,a,id),forms:documentLinks(db,a,id,["matrix"])}})},
-  personCard(actor,revision,id){return read(db=>{const a=checkedAccount(db,actor,revision),d=day(db);return personCard(db,trainingAccess(db,a,d),id,i=>cardAllowed(db,a,i,d))})},
+  personCard(actor,revision,id){return read(db=>{
+   const a=checkedAccount(db,actor,revision),d=day(db),access=trainingAccess(db,a,d),v=libraryAccess(db,a,d);
+   must(cardAllowed(db,a,id,d),404,'Карточка сотрудника недоступна');
+   const canTwiReport=access.permissions.includes('analytics.read')&&subjectOptions(db,access).reports.some(r=>r.id==='twi_effect');
+   const canPlan=a.person_id===id&&workspaceActions(db,access,a.bootstrap===1).includes('plan.read')||access.permissions.includes('calendar.read');
+   return personCard(db,access,id,i=>cardAllowed(db,a,i,d),{libraryRead:v.read,canTwiReport,canPlan});
+  })},
   libraryInfo(actor,kind){
    return read(db=>{
     const a=account(db,actor);must(a&&['sop','frv'].includes(kind),404,'Раздел недоступен');
@@ -810,6 +820,32 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const a=checkedAccount(db,actor,revision);
    return finalizeLibrary(db,input,{...libraryAccess(db,a,day(db)),personId:a.person_id,at:at(),audit:(action,target)=>audit(db,actor,action,target)});
   })},
+  libraryCard(actor,revision,id){
+   return read(db=>{
+    const a=checkedAccount(db,actor,revision),d=day(db),v=libraryAccess(db,a,d),access=trainingAccess(db,a,d);
+    const history=isId(id)&&v.read('sop.read_history',id),effective=isId(id)&&v.read('sop.read_effective',id),entry=history||effective;
+    must(entry,404,'Карточка СОП недоступна');
+    const doc=entry.data.document_id;
+    const versions=rows(db,'SELECT id FROM document_revision WHERE document_id=? ORDER BY version_no DESC',[doc]).flatMap(({id})=>{
+     const h=v.read('sop.read_history',id)||v.read('sop.read_effective',id);
+     return h?[h.data]:[];
+    });
+    const measured=rows(db,'SELECT id FROM frv_study WHERE revision_id=? ORDER BY observed_at DESC,id',[id]).flatMap(({id})=>{
+     const f=v.read('frv.read',id);
+     return f?[projectView(db,a,'frv.read',f.data,d)]:[];
+    });
+    // Do not infer access to confidential history, evaluations or measurements
+    // from the public SOP. Reuse the existing action-specific projections.
+    let canEffect=false;
+    if(history&&access.permissions.includes('analytics.read')){
+     const o=subjectOptions(db,access);
+     canEffect=o.reports.some(r=>r.id==='twi_effect')&&subjectOptions(db,access,'twi_effect').revisions.some(r=>r.id===id);
+    }
+    const rev=history?projectView(db,a,'sop.read_history',history.data,d):entry.data;
+    const pub=effective?projectView(db,a,'sop.read_effective',effective.data,d):null;
+    return {day:d,revision:rev,versions,measured,evaluations:sopEvaluationsForRevision(db,access,id),can_evaluation:access.permissions.includes('sop.evaluation.read')&&!!history,can_effectiveness:canEffect,can_public:!!effective&&v.allows('sop.read_public','sop.read_effective',id),can_steps:!!v.read('sop.read_steps',id),can_twi:!!pub?.can_twi,can_linked_frv:!!pub?.can_linked_frv};
+   });
+  },
   async libraryDetail(actor,revision,action,id){
    const desc=read(db=>detailDescriptor(db,action,id,libraryAccess(db,checkedAccount(db,actor,revision),day(db))));
    const data=await checkedLibrarySource(desc,readFile);

@@ -27,6 +27,10 @@ function project(db,a,kind,e){
  const sop=source(a,e.revision_id),weighted=kind==='weighted_sop';
  return {id:e.id,kind,date:e.date,revision_id:e.revision_id,document_id:sop.document_id,sop:sop.code+' · '+sop.title+' · v'+sop.version_no,actor,unit:a.read('operation.read',sop.operation_id)?.data.unit_id??null,method_key:weighted?key(e):e.method_id,method:weighted?'Набор требований '+key(e).slice(0,8):'Методика v'+e.method_version,score:e.score.fraction,yes:weighted?null:e.score.yes,total:weighted?e.questions.length:e.score.total};
 }
+export function sopEvaluationsForRevision(db,a,revisionId){
+ if(!a.permissions.includes('sop.evaluation.read'))return [];
+ return [['sop_evaluation',corporateEvaluations(db)],['weighted_sop',weightedHistory(db)]].flatMap(([kind,items])=>items.filter(e=>e.revision_id===revisionId).map(e=>project(db,a,kind,e)).filter(Boolean)).sort((a,b)=>b.date.localeCompare(a.date)||a.id.localeCompare(b.id));
+}
 export function sopEvaluationWorkspace(db,a,f){
  must(a.permissions.includes('sop.evaluation.read'),403,'Оценки СОП недоступны');
  must(['sop_evaluation','weighted_sop'].includes(f.kind)&&validDate(f.from)&&validDate(f.to)&&f.from<=f.to&&f.to<=a.day&&typeof f.q==='string'&&f.q.length<=200&&Number.isSafeInteger(f.offset)&&f.offset>=0&&f.offset<=100000&&(f.method===null||typeof f.method==='string'&&f.method.length<=100),400,'Неверные фильтры');

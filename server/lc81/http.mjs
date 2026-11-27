@@ -230,7 +230,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='GET'&&p==='/api/lc81/mentor/workspace'){reply(res,200,store.mentorWorkspace(a.id,a.credential_revision));return}
    if(req.method==='GET'&&p==='/api/lc81/mentor/options'){reply(res,200,store.mentorOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='POST'&&p==='/api/lc81/mentor/change'){reply(res,200,await store.changeMentor(a.id,a.credential_revision,await body(req)));return}
-   if(req.method==='GET'&&p==='/api/lc81/calendar/view'){reply(res,200,store.calendarWorkspace(a.id,a.credential_revision,Object.fromEntries(['mode','from','to'].map(k=>[k,url.searchParams.get(k)]))));return}
+   if(req.method==='GET'&&p==='/api/lc81/calendar/view'){reply(res,200,store.calendarWorkspace(a.id,a.credential_revision,Object.fromEntries(['mode','from','to','person_id'].map(k=>[k,url.searchParams.get(k)]))));return}
    if(req.method==='GET'&&p==='/api/lc81/calendar/options'){reply(res,200,store.calendarOptions(a.id,a.credential_revision,url.searchParams.get('type'),url.searchParams.get('source_id')));return}
    if(req.method==='GET'&&p==='/api/lc81/calendar/detail'){reply(res,200,store.calendarDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/calendar/create'){reply(res,200,await store.createSchedule(a.id,a.credential_revision,await body(req,128*1024)));return}
@@ -267,6 +267,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='POST'&&p==='/api/lc81/matrix/retire'){reply(res,200,await store.retireMatrix(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/person/card'){reply(res,200,store.personCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
+   if(req.method==='GET'&&p==='/api/lc81/library/card'){reply(res,200,store.libraryCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/detail'){
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
     try{reply(res,200,{data:await store.libraryDetail(a.id,a.credential_revision,url.searchParams.get('action'),url.searchParams.get('id'))});return}finally{libraryBusy--}
