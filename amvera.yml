@@ -1,3 +1,4 @@
+# Install as root amvera.yml ONLY in a separately connected LC8.1 QA deployment branch.
 meta:
   environment: node
   toolchain:
@@ -6,6 +7,6 @@ meta:
 build:
   additionalCommands: node tools/build_folder.mjs --cloud
 run:
-  scriptName: server/main.mjs
+  scriptName: server/lc81-main.mjs
   containerPort: 8080
   persistenceMount: /data
