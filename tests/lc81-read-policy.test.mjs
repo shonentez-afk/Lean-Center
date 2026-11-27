@@ -70,7 +70,7 @@ test('limited projections, own vs assigned work, no unpublished SOP or raw data'
 test('unknown actions, invalid IDs, duplicate policies, ambiguous accounts and corrupt hierarchy deny',t=>{
  const {db,i,security,read}=fixture(t);
  for(const action of ['sop.approve_final','sop.review_ot','sop.publish','account.manage','snapshot','__proto__','person.write'])assert.equal(read(action,i.personA),null);
- assert.equal(READ_ACTIONS.length,27);assert.equal(read('person.read_basic',i.personA,'2026-02-30'),null);
+ assert.equal(READ_ACTIONS.length,31);assert.equal(read('person.read_basic',i.personA,'2026-02-30'),null);
  assert.equal(read('person.read_basic',i.personA,day,uuid()),null);
  security.policies.push({...security.policies[0]});assert.equal(read('person.read_basic',i.personA),null);security.policies.pop();
  security.accounts.push({id:uuid(),person_id:i.personA,state:'active'});assert.equal(read('person.read_basic',i.personA),null);security.accounts.pop();

@@ -111,9 +111,23 @@ try{
  await button(m.p,'Создать план').last().click();
  await m.p.getByRole('cell',{name:'Учебный план развития',exact:true}).waitFor();
  await button(m.p,'Открыть план').click();
+ await m.p.locator('#content details summary').filter({hasText:'Добавить цель'}).click();
  await m.p.locator('#content input[name=title]').fill('Учебная цель');
  await button(m.p,'Добавить цель').click();
- assert.equal(store.listResources(manager.id,'development.read').length,1);
+ await m.p.getByRole('cell',{name:'Учебный план развития',exact:true}).waitFor();
+ const planId=store.listResources(manager.id,'development.read')[0].id;assert.equal(store.developmentDetail(manager.id,1,planId).goals[0].title,'Учебная цель');
+ const skillNav=m.p.locator('#nav [data-action="skill.read"]'),skillGroup=m.p.locator('#nav details').filter({has:m.p.locator('[data-action="skill.read"]')});
+ if(!await skillGroup.evaluate(e=>e.open))await skillGroup.locator('summary').click();
+ await skillNav.click();await button(m.p,'Создать навыки').click();
+ await m.p.locator('#content details summary').filter({hasText:'Новая категория'}).click();
+ await m.p.locator('#content details').filter({has:m.p.getByText('Новая категория',{exact:true})}).locator('input[name=name]').fill('Учебная категория');
+ await button(m.p,'Создать категорию').click();
+ await button(m.p,'Создать навыки').click();
+ await m.p.locator('#content details summary').filter({hasText:'Общий навык (без операции)'}).click();
+ const newSkillForm=m.p.locator('#content details').filter({has:m.p.getByText('Общий навык (без операции)',{exact:true})});
+ await newSkillForm.locator('select[name=category_id]').selectOption({label:'Учебная категория'});
+ await newSkillForm.locator('input[name=name]').fill('Учебный общий навык');await button(m.p,'Создать навык').click();
+ await m.p.getByRole('cell',{name:'Учебный общий навык',exact:true}).waitFor();
  // Real pinned Stage43 working copy in a sandboxed HTTPS iframe.
  const op=(await store.changeDirectory(admin.id,1,{type:'operation',operation:'create',id:null,expected_revision:0,fields:{unit_id:a,equipment_id:null,workplace_id:null,code:'QA-EDIT-SOP',name:'Учебная операция',criticality:'normal'}})).id;
  const source=await makeSop('Учебный шаг с фото');

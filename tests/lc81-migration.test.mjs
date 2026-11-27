@@ -39,13 +39,18 @@ async function synthetic(t){
  const assignment=await f.addAssignment();
  const task=async owner=>(await f.save('action_item',{response_id:null,title:'Учебное мероприятие',owner_id:owner,subject_id:null,due_on:'2027-01-31',kind:'corrective',priority:'normal'})).entity_id;
  const ownTask=await task(f.trainee),otherTask=await task(personB);
+ const bareOperation=w.edit('operation',null,{unit_id:f.unit,workplace_id:f.workplace,equipment_id:null,code:'QA-NO-SKILL',name:'Учебная операция без навыка',criticality:'normal'});
+ const bareSource=await makeSop('Операция без навыка');f.sources.set(bareSource.source.sha256,bareSource);
+ const bareDoc=await f.save('document',{command:'create',code:'QA-NO-SKILL-SOP',title:'Учебная операция без навыка',operation_id:bareOperation,source:bareSource.source,projection:bareSource.projection});
+ await f.save('document',{command:'passport',revision_id:bareDoc.id,print_format:'portrait',changed_on:'2026-01-20'},bareDoc.entity_id);
+ for(const command of ['submit','approve','effect'])await f.save('document',{command,revision_id:bareDoc.id,actor_id:f.actor,note:''},bareDoc.entity_id);
  const revision=await f.revise();
  await w.acceptOwn(f.readContent);
  const snapshot=await prepareSnapshot(w);
  const source=path.join(root,'legacy-copy'),target=path.join(root,'secure-copy');
  await copyPilotCheckpoint({SQL,snapshot,readSource:f.readContent,target:source});
  const sourceHash=sha(await fs.readFile(path.join(source,PILOT_STATE)));
- return {root,source,target,sourceHash,snapshot,site,unitB,personB,adminRole,managerRole,managerAssignment,workerRole,workerAssignment,assignment,ownTask,otherTask,revision,matrixScale,generalSkill,category,bank,f};
+ return {root,source,target,sourceHash,snapshot,site,unitB,personB,adminRole,managerRole,managerAssignment,workerRole,workerAssignment,assignment,ownTask,otherTask,revision,matrixScale,generalSkill,category,bank,bareOperation,bareRevision:bareDoc.id,f};
 }
 test('migration keeps all existing v17 records and referenced sources, reuses role IDs and copies authenticated state',async t=>{
  const x=await synthetic(t),pass=password();
@@ -80,8 +85,8 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   // assuming that every register already contains records.
   for(const action of READ_ACTIONS)assert(Array.isArray(store.listResources(admin.id,action)),action);
   const revisions=store.listResources(admin.id,'sop.read_history');assert(revisions.length>=2);
-  assert.equal(store.listResources(admin.id,'sop.read_effective').length,1);
-  assert.equal(store.listResources(admin.id,'sop.read_steps')[0].steps[0].action_text,'Новая учебная редакция');
+  assert.equal(store.listResources(admin.id,'sop.read_effective').length,2);
+  assert.equal(store.listResources(admin.id,'sop.read_steps').find(r=>r.revision_id===x.revision.revision).steps[0].action_text,'Новая учебная редакция');
   assert.equal(store.listResources(admin.id,'credential.read')[0].id,x.f.certificate);
   assert.equal(store.listResources(admin.id,'appointment.read')[0].id,x.f.appointment);
   manager=await store.createAccount(admin.id,{person_id:x.f.actor,login:'manager',password:password(),generate:false});
@@ -205,7 +210,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await assert.rejects(store.openLibrary(otherEditor.id,1,saveContext),/Операция недоступна/);
   await assert.rejects(store.saveLibrary(otherEditor.id,1,req(createContext,0,'Чужой СОП','LC81-DENIED',null,draftSource.text)),/Операция недоступна/);
   worker=await store.createAccount(admin.id,{person_id:x.f.trainee,login:'worker@example.invalid',password:workerPass,generate:false});
-  const rights=['person.read_basic','task.read','task.implement_own','training.read','training.detail','training.read_sop','person.read_card','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','development.read','development.detail','task.detail','task.start'];
+  const rights=['person.read_basic','task.read','task.implement_own','training.read','training.detail','training.read_sop','person.read_card','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','development.read','development.detail','task.detail','task.start','assessment.read','assessment.detail'];
   await store.setPolicy(admin.id,{role_id:x.workerRole,revision:0,permissions:rights});
   await store.grant(admin.id,{account_id:worker.id,assignment_id:x.workerAssignment,scope:{kind:'self'},valid_to:null});
   const user=store.authenticate('worker@example.invalid',workerPass);assert.equal(user.id,worker.id);
@@ -413,7 +418,41 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const newBank=await store.saveBank(manager.id,1,{profession_id:oldBank.profession_id,reviewed_on:today,previous_id:oldBank.id,note:'Учебная актуализация',blocks:editedBlocks});
   assert.equal(store.bankDetail(manager.id,1,newBank.id).version_no,oldBank.version_no+1);
   assert.equal(store.bankDetail(manager.id,1,oldBank.id).can_revise,false);
+  // A general skill is an evidenced observation, not a fabricated SOP
+  // qualification or a manual matrix override.
+  const competence=(actor,command,fields)=>store.competencyChange(actor,1,{command,fields});
+  const skillOpts=store.competencyOptions(manager.id,1,'skill'),candidate=skillOpts.sops.find(s=>s.id===x.bareRevision);assert(candidate);
+  const newSkill=await competence(manager.id,'skill.from_sop',{category_id:x.category,revisions:[{id:candidate.id,rev:candidate.rev}]});
+  assert.equal(store.readResource(manager.id,'skill.read',newSkill.items[0].id).operation_id,x.bareOperation);
+  assert(!store.competencyOptions(manager.id,1,'skill').sops.some(s=>s.id===x.bareRevision));
+  await assert.rejects(competence(manager.id,'skill.from_sop',{category_id:x.category,revisions:[{id:candidate.id,rev:candidate.rev}]}),/уже существует/);
+  const profile={profession_id:x.f.profession,skill_id:x.generalSkill,scale_id:x.matrixScale,required_level:3,criticality:'important',valid_from:today,valid_to:null};
+  const requirement=await competence(manager.id,'requirement.create',profile);
+  await assert.rejects(competence(manager.id,'requirement.create',profile),/пересекающееся/);
+  const coverage={id:null,rev:0,unit_id:x.f.unit,skill_id:x.generalSkill,shift_code:'',min_people:2,scale_id:x.matrixScale,required_level:2};
+  const need=await competence(manager.id,'coverage.save',coverage);
+  assert.equal(store.readResource(manager.id,'coverage.read',need.id).actual,0);
+  const baseGeneral={person_id:x.f.trainee,skill_id:x.generalSkill,scale_id:x.matrixScale,assessed_on:today,observation_state:'rated',level:2,valid_until:null,evidence:'Учебное подтверждение общего навыка',feedback:'Наблюдение подтверждено',previous_assessment_id:null};
+  await assert.rejects(competence(worker.id,'assessment.general',baseGeneral),/Неверная оценка|недоступна/);
+  await assert.rejects(competence(manager.id,'assessment.general',{...baseGeneral,skill_id:x.f.skill}),/операции оцениваются/);
+  assert.equal(store.competencyOptions(manager.id,1,'assessment',x.f.trainee,x.generalSkill).previous,null);
+  const general=await competence(manager.id,'assessment.general',baseGeneral);
+  assert.equal(store.assessmentDetail(worker.id,1,general.id).items[0].level,2);
+  assert.equal(store.readResource(manager.id,'coverage.read',need.id).actual,1);
+  assert.equal(store.readResource(manager.id,'coverage.read',need.id).deficit,1);
+  const assessedMatrix=store.matrixDetail(manager.id,1,mixed.id);
+  assert.equal(assessedMatrix.cells[1][0].actual,2);assert.equal(assessedMatrix.cells[1][0].target,3);assert.equal(assessedMatrix.cells[1][1].actual,2);
+  await assert.rejects(competence(manager.id,'assessment.general',baseGeneral),/История оценки изменилась/);
+  const unobserved=await competence(manager.id,'assessment.general',{...baseGeneral,previous_assessment_id:general.id,observation_state:'not_observed',level:null});
+  assert.equal(store.assessmentDetail(manager.id,1,unobserved.id).items[0].level,null);
+  assert.equal(store.matrixDetail(manager.id,1,mixed.id).cells[1][0].actual,null);
+  assert.equal(store.readResource(manager.id,'coverage.read',need.id).actual,0);
+  assert.equal(store.assessmentDetail(manager.id,1,general.id).items[0].level,2);
+  await competence(manager.id,'requirement.close',{id:requirement.id,rev:requirement.rev,valid_to:today});
+  const revisedCoverage=await competence(manager.id,'coverage.save',{...coverage,id:need.id,rev:need.rev,min_people:1});
+  assert.equal(revisedCoverage.rev,need.rev+1);
   const card=store.personCard(manager.id,1,x.f.trainee);
+  assert(card.sections.some(s=>s.action==='assessment.read'&&s.items.some(r=>r.id===general.id&&r.can_detail)));
   assert(card.sections.find(s=>s.action==='training.read').items.some(r=>r.id===newTraining.id));
   assert(card.sections.find(s=>s.action==='matrix.read').items.some(r=>r.id===finalMatrix.id));
   const ownCard=store.personCard(worker.id,1,x.f.trainee);assert(!ownCard.sections.some(s=>s.action==='matrix.read'));

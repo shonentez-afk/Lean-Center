@@ -49,6 +49,7 @@ export function competencyOptions(db,a,kind,personId=null,skillId=null){
   if(personId!==null||skillId!==null){
    must(out.people.some(x=>x.id===personId)&&out.skills.some(x=>x.id===skillId),403,'Сотрудник или навык недоступен');
    const last=latestQualification(db,personId,skillId);
+   if(last){const row=one(db,'SELECT * FROM assessment_session WHERE id=?',[last.session_id]);must(a.read('assessment.read',row.id)&&allowed(a,'assessment.general',row.id,assessmentResource(db,row,a.day)),403,'Предыдущая оценка вне разрешённой области')}
    out.previous=last?{id:last.session_id,day:last.assessed_at.slice(0,10)}:null;
   }
  }
@@ -102,6 +103,8 @@ export function competencyChange(db,a,f){
   must(exact(v,['person_id','skill_id','scale_id','assessed_on','observation_state','level','valid_until','evidence','feedback','previous_assessment_id'])&&[v.person_id,v.skill_id,v.scale_id].every(isId)&&v.person_id!==a.personId&&day(v.assessed_on)&&v.assessed_on<=a.day&&['rated','not_observed','not_applicable'].includes(v.observation_state)&&(v.level===null||Number.isSafeInteger(v.level))&&(v.valid_until===null||day(v.valid_until))&&text(v.evidence,2000)&&text(v.feedback,2000)&&(v.previous_assessment_id===null||isId(v.previous_assessment_id)),400,'Неверная оценка общего навыка');
   const s=active(db,'skill',v.skill_id),resource=personWorkResource(db,[v.person_id,a.personId],a.day,[v.assessed_on]),r=resource&&{...resource,self:v.person_id};
   must(s&&s.operation_id===null&&who(a,v.person_id)&&allowed(a,k,v.person_id,r)&&allowed(a,'assessment.read',v.person_id,r),403,'Оценка общего навыка недоступна; операции оцениваются через СОП');
+  const last=latestQualification(db,v.person_id,v.skill_id);
+  if(last){const row=one(db,'SELECT * FROM assessment_session WHERE id=?',[last.session_id]);must(a.read('assessment.read',row.id)&&allowed(a,k,row.id,assessmentResource(db,row,a.day)),403,'Предыдущая оценка вне разрешённой области')}
   return emit(db,a,'assessment_session',uuid(),'create',0,{...v,command:'general_skill',evaluator_id:a.personId},k);
  }
  throw new PilotError(400,'Неизвестная команда компетенций');

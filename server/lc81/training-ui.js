@@ -575,7 +575,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const can=k=>!!user.person_id&&user.permissions.includes(k);
   if(page==='skill.read'){
    if(['skill.category.create','skill.create','skill.from_sop'].some(can))n.append(button('Создать навыки',()=>skillEditor(host),'primary'));
-   n.append(items.length?table(['Навык','Категория','Операция'],items.map(r=>[r.name,r.category,r.operation||'Общий навык'])):empty());
+   n.append(items.length?table(['Навык','Категория','Операция'],items.map(r=>[r.name,r.category,r.operation||(r.operation_id?'Операция':'Общий навык')])):empty());
   }else if(page==='requirement.read'){
    if(can('requirement.create'))n.append(button('Добавить требование',()=>requirementEditor(host),'primary'));
    n.append(items.length?table(['Профессия','Навык','Шкала','Уровень','Критичность','Начало','Окончание','Действия'],items.map(r=>[r.profession,r.skill,r.scale,r.required_level,criticalityNames[r.criticality],r.valid_from,r.valid_to,r.can_close?button('Закрыть требование',()=>setContent(host,panel('Закрытие требования',form([dt('valid_to','Последний день действия','')],'Закрыть',f=>saveCompetency('requirement.close',{id:r.id,rev:r.rev,valid_to:value(f,'valid_to')})))):'—'])):empty());
