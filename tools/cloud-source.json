@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "d0ddb999428a92fff6e1cc15f4027b95ecec69d3",
+  "sourceCommit": "4686501bc2a25f540b8de337982d2983be953238",
   "files": [
     {
       "path": "amvera.yml",
@@ -239,7 +239,7 @@
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "36ac94e038a5d029275b54607c7d49978a9fecf6"
+      "sha": "9295a824d20ce464fe72fba7aedcd61b0bf118c7"
     },
     {
       "path": "server/lc81/program-commands.mjs",
