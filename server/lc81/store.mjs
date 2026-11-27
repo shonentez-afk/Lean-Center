@@ -268,7 +268,11 @@ function pack(db){
 }
 async function unpack(SQL,file){
  const st=await fs.stat(file);must(st.isFile()&&st.size<=MAX+MAGIC.length+65&&st.size>MAGIC.length+165,503,'Размер QA-хранилища');
- const b=await fs.readFile(file),off=MAGIC.length+65,body=b.subarray(off);
+ return unpackBytes(SQL,await fs.readFile(file));
+}
+function unpackBytes(SQL,b){
+ must(b.length<=MAX+MAGIC.length+65&&b.length>MAGIC.length+165,503,'Размер QA-хранилища');
+ const off=MAGIC.length+65,body=b.subarray(off);
  must(b.subarray(0,MAGIC.length).equals(MAGIC)&&b.subarray(MAGIC.length,off).toString()===digest(body)+'\n',503,'Повреждён контрольный снимок');
  const db=openDb(SQL,new Uint8Array(body),{upgrade:false});
  try{checkPrivate(db);return db}catch(e){db.close();throw e}
@@ -302,7 +306,66 @@ function selectRole(db,mapped,fallback,code,name){
  must(!collision,422,'Роль уже существует: требуется явное сопоставление ID');
  return domainCreate(db,'business_role',{code,name},fallback);
 }
-export async function openSecureQA({dataDir,initialize=false,login='admin',password,write=atomicReplace,seed=null,siteTimeZone=null}){
+// One-file import for a separately approved QA deployment. The upload
+// service need only supply a readable file; runtime creates the private
+// working directory itself. Never restore onto an existing directory.
+const UPLOAD_LIMIT=64*1024*1024,UPLOAD_KEY='uploaded_qa_sha256';
+const uploadSha=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
+function uploadBytes(s,limit){
+ must(typeof s==='string'&&s.length<=Math.ceil(limit/3)*4,400,'Неверный размер вложения загрузки');
+ const b=Buffer.from(s,'base64');
+ must(b.length<=limit&&b.toString('base64')===s,400,'Неверное кодирование загрузки');return b;
+}
+export async function restoreUploadedQA({bundleFile,expectedSha,dataDir,password,siteTimeZone=null}){
+ must(path.isAbsolute(bundleFile)&&path.isAbsolute(dataDir)&&path.resolve(bundleFile)===bundleFile&&path.resolve(dataDir)===dataDir&&path.dirname(bundleFile)===path.dirname(dataDir)&&bundleFile!==dataDir&&uploadSha(expectedSha)&&validPassword(password),400,'Неверные параметры загрузки QA');
+ const info=await fs.lstat(bundleFile);
+ must(info.isFile()&&!info.isSymbolicLink()&&info.size>0&&info.size<=UPLOAD_LIMIT,400,'Неверный файл загрузки QA');
+ const input=await fs.readFile(bundleFile);
+ must(input.length===info.size&&input.length<=UPLOAD_LIMIT&&digest(input)===expectedSha,400,'Контрольная сумма загрузки QA не совпадает');
+ let pkg;try{pkg=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(input))}catch{throw new PilotError(400,'Неверный формат загрузки QA')}
+ must(keys(pkg,['format','checkpoint','marker','documents'])&&pkg.format==='LC81-QA-UPLOAD-1'&&typeof pkg.marker==='string'&&pkg.documents&&typeof pkg.documents==='object'&&!Array.isArray(pkg.documents),400,'Неверный формат загрузки QA');
+ const {SQL}=await pilotSql(),db=unpackBytes(SQL,uploadBytes(pkg.checkpoint,MAX+MAGIC.length+65));
+ try{
+  must(pkg.marker===meta(db,'database_id')+'\n',400,'Маркер загруженной базы не совпадает');
+  must(!siteTimeZone||siteClock(db).configured&&siteClock(db).zone===normalizeZone(siteTimeZone),409,'Часовой пояс уже хранится в базе; настройте его явно через администратора');
+  const refs=refsForDb(db),names=Object.keys(pkg.documents);
+  must(names.length===refs.length&&names.every(uploadSha)&&refs.every(r=>Object.hasOwn(pkg.documents,r.sha256)),400,'Набор загруженных документов не совпадает');
+  const documents=new Map();let total=0;
+  for(const r of refs){
+   const bytes=uploadBytes(pkg.documents[r.sha256],MAX_CONTENT);
+   total+=bytes.length;must(total<=PILOT_DOCUMENT_LIMIT&&bytes.length===r.size,400,'Размер загруженного документа не совпадает');
+   const text=await checkContent(r,new TextDecoder('utf-8',{fatal:true}).decode(bytes));documents.set(r.sha256,text);
+  }
+  // All imported credentials are replaced. Only the administrator gets
+  // the explicitly supplied new secret. Staff keep their existing roles
+  // and state but cannot authenticate with any previously issued password.
+  tx(db,()=>{
+   const administrator=one(db,'SELECT id FROM lc81_account WHERE bootstrap=1');
+   for(const {id,bootstrap} of rows(db,'SELECT id,bootstrap FROM lc81_account')){
+    db.run('UPDATE lc81_account SET password_hash=?,credential_revision=credential_revision+1 WHERE id=?',[hashPassword(bootstrap===1?password:generatePassword()),id]);
+   }
+   db.run('INSERT OR REPLACE INTO lc81_meta VALUES(?,?)',[UPLOAD_KEY,expectedSha]);
+   audit(db,administrator.id,'storage.qa_upload',administrator.id);
+  });checkPrivate(db);
+  // mkdir is exclusive. No modification or cleanup of preexisting storage.
+  await fs.mkdir(dataDir,{mode:0o700});
+  const lock=path.join(dataDir,'writer.lock'),handle=await fs.open(lock,'wx',0o600);
+  try{
+   await handle.close();
+   await copySources(db,dataDir,async sha=>documents.get(sha));
+   const checkpoint=pack(db);
+   await atomicReplace(path.join(dataDir,'secure.lc81'),checkpoint);
+   await atomicReplace(path.join(dataDir,'initialized'),Buffer.from(pkg.marker));
+   const checked=await unpack(SQL,path.join(dataDir,'secure.lc81'));
+   try{await checkSources(checked,dataDir);must(meta(checked,'database_id')+'\n'===pkg.marker,503,'Копия не подтверждена')}finally{checked.close()}
+   must((await fs.readFile(path.join(dataDir,'secure.lc81'))).equals(checkpoint),503,'Копия не подтверждена');
+  }finally{await fs.rm(lock,{force:true})}
+ }finally{db.close()}
+}
+async function storageStep(step,fn){
+ try{return await fn()}catch(e){if(e&&typeof e==='object')e.lc81StorageStep=step;throw e}
+}
+export async function openSecureQA({dataDir,initialize=false,login='admin',password,write=atomicReplace,seed=null,siteTimeZone=null,importDigest=null}){
  const selectedZone=siteTimeZone===null?null:normalizeZone(siteTimeZone);
  must(siteTimeZone===null||selectedZone,422,'Укажите корректный IANA часовой пояс предприятия');
  must(path.isAbsolute(dataDir)&&dataDir!==path.parse(dataDir).root,503,'Требуется отдельная абсолютная папка QA');
@@ -315,7 +378,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
  if(fresh&&!initialize){await fs.rmdir(dataDir);throw new PilotError(503,'Первичный запуск требует явной инициализации')}
  if(fresh&&(!normalizeLogin(login)||!validPassword(password))){await fs.rmdir(dataDir);throw new PilotError(503,'Требуется начальный секрет администратора')}
  const lock=path.join(dataDir,'writer.lock'),file=path.join(dataDir,'secure.lc81'),marker=path.join(dataDir,'initialized');
- const h=await fs.open(lock,'wx',0o600);await h.close();
+ const h=await storageStep('LOCK',()=>fs.open(lock,'wx',0o600));await h.close();
  let current,poisoned=false,closed=false,copying=false,tail=Promise.resolve(),queued=0;
  const release=()=>fs.rm(lock,{force:true});
  try{
@@ -348,10 +411,11 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    await write(marker,Buffer.from(meta(current,'database_id')+'\n'));
    current.close();current=null;
   }
-  current=await unpack(SQL,file);
+  current=await storageStep('CHECKPOINT',()=>unpack(SQL,file));
+  must(importDigest===null||uploadSha(importDigest)&&one(current,'SELECT value FROM lc81_meta WHERE key=?',[UPLOAD_KEY])?.value===importDigest,409,'Загрузка QA не совпадает с существующим хранилищем');
   must(!selectedZone||siteClock(current).configured&&normalizeZone(siteClock(current).zone)===selectedZone,409,'Часовой пояс уже хранится в базе; настройте его явно через администратора');
-  must((await fs.readFile(marker,'utf8'))===meta(current,'database_id')+'\n',503,'Отсутствует или повреждён маркер инициализации');
-  await checkSources(current,dataDir);
+  must((await storageStep('MARKER',()=>fs.readFile(marker,'utf8')))===meta(current,'database_id')+'\n',503,'Отсутствует или повреждён маркер инициализации');
+  await storageStep('DOCUMENTS',()=>checkSources(current,dataDir));
  }catch(e){current?.close();await release();throw e}
  const ready=()=>must(!closed&&!poisoned,503,'Защищённое хранилище требует проверки');
  const read=fn=>{ready();return fn(current)};
