@@ -1,6 +1,8 @@
 // Every section is independently authorized using existing projections.
 import {rows,one,isId} from '../../src/core/db.js';
 import {trainingAssignmentResource,matrixResource} from './read-policy.mjs';
+import {scheduleView} from './center-commands.mjs';
+import {roiView} from './roi-commands.mjs';
 import {competencyView} from './competency-commands.mjs';
 import {developmentView} from './development-commands.mjs';
 import {qualityView} from './quality-commands.mjs';
@@ -25,7 +27,9 @@ const sections=[
  ['task.read','action_item','subject_id','Мероприятия по развитию сотрудника'],
  ['audit.read','audit_session','mentor_id','Аудиты'],
  ['audit.read','audit_session','auditor_id','Проведённые аудиты'],
- ['self.read','mentor_self_evaluation','person_id','Самооценки наставника']
+ ['self.read','mentor_self_evaluation','person_id','Самооценки наставника'],
+ ['calendar.read','schedule_event','owner_id','Плановые аудиты и оценки'],
+ ['roi.read','economic_effect','owner_id','Карточки экономического эффекта']
 ];
 export function personCard(db,a,id,canRead){
  const person=isId(id)&&canRead(id)&&(a.read('person.read_directory',id)||a.read('person.read_basic',id));
@@ -33,7 +37,7 @@ export function personCard(db,a,id,canRead){
  const result=[];
  for(const [action,table,key,title] of sections){
   if(!a.permissions.includes(action))continue;
-  const items=rows(db,'SELECT id FROM '+table+' WHERE '+key+'=? ORDER BY id',[id]).flatMap(({id})=>{const v=a.read(action,id);return v?[action==='training.read'?{...v.data,can_detail:a.allows('training.detail',id,trainingAssignmentResource(db,id,a.day))}:['training.enrollment.read','preparation.read'].includes(action)?programView(db,a,action,v.data):action==='assessment.read'?competencyView(db,a,action,v.data):action==='development.read'?developmentView(db,a,action,v.data):['audit.read','self.read','task.read'].includes(action)?qualityView(db,a,action,v.data):action==='supplement.read'?workflowView(db,a,action,v.data):action==='authorization.read'?{...v.data,operation_name:a.read('operation.read',v.data.operation_id)?.data.name??null}:v.data]:[]});
+  const items=rows(db,'SELECT id FROM '+table+' WHERE '+key+'=? ORDER BY id',[id]).flatMap(({id})=>{const v=a.read(action,id);return v?[action==='training.read'?{...v.data,can_detail:a.allows('training.detail',id,trainingAssignmentResource(db,id,a.day))}:['training.enrollment.read','preparation.read'].includes(action)?programView(db,a,action,v.data):action==='calendar.read'?scheduleView(db,a,v.data):action==='roi.read'?roiView(db,a,v.data):action==='assessment.read'?competencyView(db,a,action,v.data):action==='development.read'?developmentView(db,a,action,v.data):['audit.read','self.read','task.read'].includes(action)?qualityView(db,a,action,v.data):action==='supplement.read'?workflowView(db,a,action,v.data):action==='authorization.read'?{...v.data,operation_name:a.read('operation.read',v.data.operation_id)?.data.name??null}:v.data]:[]});
   if(items.length)result.push({action,title,items});
  }
  if(a.permissions.includes('matrix.read')){

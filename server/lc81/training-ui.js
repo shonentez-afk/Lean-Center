@@ -1,6 +1,6 @@
 // Protected forms and corporate fact tables. All authority, status, scores and
 // actor identities are determined by the server.
-export function createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check}){
+export function createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked}){
  const opts=(items,field='name')=>items.map(x=>[x.id,x[field]]);
  const empty=()=>el('p','Нет доступных записей','muted');
  const state={planned:'Запланировано',in_progress:'В работе',completed:'Завершено',cancelled:'Отменено',active:'Действует',retired:'Архив',pass:'Пройдено',fail:'Не пройдено'};
@@ -166,7 +166,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    const details=el('details');details.append(el('summary',s.title+' · '+s.items.length));
    const labels={code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',evaluated_on:'Дата оценки',assessed_on:'Дата оценки',result_note:'Результат',people:'Сотрудников',skills:'Навыков'};
    const keys=Object.keys(labels).filter(k=>s.items.some(r=>Object.hasOwn(r,k))),sub=el('div');
-   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):s.action==='assessment.read'&&r.can_detail?button('Открыть оценку',()=>assessmentCard(sub,r.id)):'']);
+   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):s.action==='assessment.read'&&r.can_detail?button('Открыть оценку',()=>assessmentCard(sub,r.id)):s.action==='calendar.read'&&r.can_detail?button('Открыть плановое событие',()=>openLinked(sub,{type:'schedule',id:r.id})):s.action==='roi.read'&&r.can_detail?button('Открыть эффект',()=>openLinked(sub,{type:'roi',id:r.id})):'']);
    details.append(table([...keys.map(k=>labels[k]),'Действия'],rows),sub);n.append(details);
   }
   if(!d.sections.length)n.append(el('p','Нет связанных записей, доступных вашей учётной записи.'));
@@ -600,5 +600,10 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   }
   n.append(host);return n;
  }
- return {training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel,competencyPanel};
+ async function openRecord(host,type,id){
+  const fn={training:assignment,enrollment:enrollmentCard,preparation:preparationCard,assessment:assessmentCard,audit:(h,i)=>qualityCard(h,'audit',i),self:(h,i)=>qualityCard(h,'self',i),task:taskCard,development:developmentCard,bank:bankCard,supplement:supplementCard,person:card,matrix}[type];
+  if(!fn)throw Error('Источник недоступен');
+  return fn(host,id);
+ }
+ return {training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel,competencyPanel,openRecord};
 }

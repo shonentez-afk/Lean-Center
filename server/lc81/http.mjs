@@ -12,6 +12,10 @@ const publicFiles=new Map(await Promise.all([
  ['/portal.js','./portal.js','text/javascript; charset=utf-8'],
  ['/library-ui.js','./library-ui.js','text/javascript; charset=utf-8'],
  ['/training-ui.js','./training-ui.js','text/javascript; charset=utf-8'],
+ ['/center-ui.js','./center-ui.js','text/javascript; charset=utf-8'],
+ ['/assets/echarts.min.js','../../node_modules/echarts/dist/echarts.min.js','text/javascript; charset=utf-8'],
+ ['/shared/center-report.js','../../src/ui/center-report.js','text/javascript; charset=utf-8'],
+ ['/analytics/palette.js','../../src/analytics/palette.js','text/javascript; charset=utf-8'],
  ['/portal.css','./portal.css','text/css; charset=utf-8'],
  ['/assets/styles.css','../../src/ui/styles.css','text/css; charset=utf-8'],
  ['/assets/cloud-pilot.css','../../src/ui/cloud-pilot.css','text/css; charset=utf-8'],
@@ -146,6 +150,21 @@ export function createSecureQAServer({store,origin}){
    if(req.method==='POST'&&p==='/api/lc81/tasks/change'){reply(res,200,await store.changeTask(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/mentor/options'){reply(res,200,store.mentorOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='POST'&&p==='/api/lc81/mentor/change'){reply(res,200,await store.changeMentor(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/calendar/view'){reply(res,200,store.calendarWorkspace(a.id,a.credential_revision,Object.fromEntries(['mode','from','to'].map(k=>[k,url.searchParams.get(k)]))));return}
+   if(req.method==='GET'&&p==='/api/lc81/calendar/options'){reply(res,200,store.calendarOptions(a.id,a.credential_revision,url.searchParams.get('type'),url.searchParams.get('source_id')));return}
+   if(req.method==='GET'&&p==='/api/lc81/calendar/detail'){reply(res,200,store.calendarDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/calendar/create'){reply(res,200,await store.createSchedule(a.id,a.credential_revision,await body(req,128*1024)));return}
+   if(req.method==='POST'&&p==='/api/lc81/calendar/change'){reply(res,200,await store.changeSchedule(a.id,a.credential_revision,await body(req,128*1024)));return}
+   if(req.method==='GET'&&p==='/api/lc81/center/options'){reply(res,200,store.centerOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
+   if(req.method==='GET'&&p==='/api/lc81/center/view'){reply(res,200,store.centerWorkspace(a.id,a.credential_revision,url.searchParams.get('kind'),Object.fromEntries(['unit_id','from','to'].map(k=>[k,url.searchParams.get(k)]))));return}
+   if(req.method==='GET'&&p==='/api/lc81/center/evidence'){reply(res,200,store.metricEvidence(a.id,a.credential_revision,url.searchParams.get('kind'),Object.fromEntries(['unit_id','from','to'].map(k=>[k,url.searchParams.get(k)])),url.searchParams.get('id'),Number(url.searchParams.get('offset')||0)));return}
+   if(req.method==='GET'&&p==='/api/lc81/roi/options'){reply(res,200,store.roiOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/roi/detail'){reply(res,200,store.roiDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='GET'&&p==='/api/lc81/roi/twi-options'){reply(res,200,store.roiTwiOptions(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/roi/twi-preview'){reply(res,200,await store.previewRoiTwi(a.id,a.credential_revision,await body(req,128*1024)));return}
+   if(req.method==='POST'&&p==='/api/lc81/roi/create'){reply(res,200,await store.createRoi(a.id,a.credential_revision,await body(req,128*1024)));return}
+   if(req.method==='POST'&&p==='/api/lc81/roi/change'){reply(res,200,await store.changeRoi(a.id,a.credential_revision,await body(req,128*1024)));return}
+   if(req.method==='POST'&&p==='/api/lc81/roi/measure'){reply(res,200,await store.measureRoi(a.id,a.credential_revision,await body(req,128*1024)));return}
    if(req.method==='GET'&&p==='/api/lc81/competency/options'){reply(res,200,store.competencyOptions(a.id,a.credential_revision,url.searchParams.get('kind'),url.searchParams.get('person_id'),url.searchParams.get('skill_id')));return}
    if(req.method==='POST'&&p==='/api/lc81/competency/change'){reply(res,200,await store.competencyChange(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/assessment/detail'){reply(res,200,store.assessmentDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}

@@ -12,6 +12,8 @@ import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop} from './training-commands.mjs';
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
+import {calendarWorkspace,calendarOptions,calendarDetail,createSchedule,changeSchedule,scheduleView,centerOptions,centerWorkspace,metricEvidence} from './center-commands.mjs';
+import {roiOptions,roiView,roiDetail,createRoi,changeRoi,roiMeasureContext,measureRoi,roiTwiOptions,previewRoiTwi} from './roi-commands.mjs';
 import {competencyOptions,competencyChange,competencyView,assessmentDetail} from './competency-commands.mjs';
 import {mentorOptions,changeMentor,mentorView} from './mentor-commands.mjs';
 import {developmentOptions,createDevelopment,developmentDetail,changeDevelopment,developmentFromMatrix,bankOptions,bankDetail,saveBank,developmentView} from './development-commands.mjs';
@@ -109,6 +111,8 @@ function projectView(db,a,action,data,d){
   return {...data,trainee_name:one(db,'SELECT display_name FROM person WHERE id=?',[data.trainee_id])?.display_name||'',operation_name:one(db,'SELECT name FROM operation WHERE id=?',[data.operation_id])?.name||'',can_detail:access.allows('training.detail',data.id,resource),can_sop:access.allows('training.read_sop',data.id,resource)};
  }
  if(['program.read','training.enrollment.read','preparation.read'].includes(action))return programView(db,trainingAccess(db,a,d),action,data);
+ if(action==='calendar.read')return scheduleView(db,trainingAccess(db,a,d),data);
+ if(action==='roi.read')return roiView(db,trainingAccess(db,a,d),data);
  if(['skill.read','requirement.read','coverage.read','assessment.read'].includes(action))return competencyView(db,trainingAccess(db,a,d),action,data);
  if(['development.read','bank.read'].includes(action))return developmentView(db,trainingAccess(db,a,d),action,data);
  if(['audit.read','self.read'].includes(action))return qualityView(db,trainingAccess(db,a,d),action,data);
@@ -437,6 +441,30 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   changeTask(actor,revision,input){return mutate(db=>changeTask(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
   changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  calendarWorkspace(actor,revision,query){return read(db=>calendarWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),query))},
+  calendarOptions(actor,revision,type,sourceId=null){return read(db=>calendarOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),type,sourceId))},
+  calendarDetail(actor,revision,id){return read(db=>calendarDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  createSchedule(actor,revision,input){return mutate(db=>createSchedule(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  changeSchedule(actor,revision,input){return mutate(db=>changeSchedule(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  centerOptions(actor,revision,kind){return read(db=>centerOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
+  centerWorkspace(actor,revision,kind,scope){return read(db=>centerWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,scope))},
+  metricEvidence(actor,revision,kind,scope,id,offset){return read(db=>metricEvidence(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,scope,id,offset))},
+  roiOptions(actor,revision){return read(db=>roiOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  roiDetail(actor,revision,id){return read(db=>roiDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  createRoi(actor,revision,input){return mutate(db=>createRoi(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  changeRoi(actor,revision,input){return mutate(db=>changeRoi(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  roiTwiOptions(actor,revision,id){return read(db=>roiTwiOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  previewRoiTwi(actor,revision,input){return read(db=>previewRoiTwi(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
+  async measureRoi(actor,revision,input){
+   const descriptor=read(db=>{
+    const account=checkedAccount(db,actor,revision),d=day(),ctx=roiMeasureContext(db,trainingAccess(db,account,d),input);
+    return ctx.r.study_id?detailDescriptor(db,'frv.read_summary',ctx.r.study_id,libraryAccess(db,account,d)):null;
+   });
+   const verified=descriptor?await checkedLibrarySource(descriptor,readFile):null;
+   // The mutation resolves the record, permissions, CAS, verified source
+   // identity and current effective action evidence again after file I/O.
+   return mutate(db=>measureRoi(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input,verified));
+  },
   competencyOptions(actor,revision,kind,personId=null,skillId=null){return read(db=>competencyOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,personId,skillId))},
   competencyChange(actor,revision,input){return mutate(db=>competencyChange(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   assessmentDetail(actor,revision,id){return read(db=>assessmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},

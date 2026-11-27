@@ -9,7 +9,7 @@ import {centerProjection,personUnit} from '../../src/modules/training/center-ove
 import {centerAttention,scopedAttention} from '../../src/modules/training/center-attention.js';
 import {metricScopeValid,METRIC_RELATIONS,RELATION_LABELS} from '../../src/modules/training/metric-catalog.js';
 import {annualAuditCoverage} from '../../src/modules/training/audit-analytics.js';
-import {effectOverview,effectFacts,twiBasis} from '../../src/modules/effect/domain.js';
+import {effectOverview,effectFacts,twiBasis,effectPending} from '../../src/modules/effect/domain.js';
 import {programResource,personWorkResource,scheduleResource,trainingAssignmentResource,assessmentResource,auditResource,selfResource,enrollmentResource,preparationResource,developmentResource,taskResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
 const must=(x,s,m)=>{if(!x)throw new PilotError(s,m)};
@@ -165,6 +165,16 @@ export function calendarWorkspace(db,a,{mode,from,to}){
   const b=find(db,'twi_preparation',x.options.id),trainee=name(a,b?.trainee_id);
   const done=['Завершена','Завершено'].includes(x.state);
   addRecord('preparation',x.options.id,x.date,x.type+(trainee?' · '+trainee:''),x.ownerId,x.people,x.state,!done,x.key);
+ }
+ // Derived deadlines keep the original reference, never duplicate schedules.
+ for(const r of rows(db,"SELECT r.id,r.review_due,r.author_id,d.title,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.archived=0 AND o.archived=0 AND r.review_due IS NOT NULL")){
+  const v=a.read('sop.read_history',r.id);if(!v)continue;
+  add({anchor:r.id,key:'sop:'+r.id,date:r.review_due,type:'Пересмотр СОП',title:v.data.title||r.title,owner:name(a,r.author_id),state:'Действует',pending:true,route:{type:'sop',id:r.id}},unitResource(r.unit_id),[r.author_id]);
+ }
+ for(const r of rows(db,"SELECT * FROM economic_effect WHERE state='active'")){
+  if(!financialRecordAllowed(db,a,r.id))continue;
+  const state=r.reviewed_at?'Расчёт зарегистрирован':'Ожидает проверки';
+  add({anchor:r.id,key:'roi:'+r.id,date:r.review_due,type:'Контроль экономического эффекта',title:r.title,owner:name(a,r.owner_id),state,pending:effectPending(db,r),route:{type:'roi',id:r.id}},unitResource(r.unit_id),[r.owner_id]);
  }
  items.sort((x,y)=>Number(y.overdue)-Number(x.overdue)||x.date.localeCompare(y.date)||x.key.localeCompare(y.key));
  return {day:a.day,from,to,mode,items,can_plan:!!a.personId&&has(a,'calendar.plan')&&has(a,'calendar.read')};
