@@ -160,3 +160,37 @@ test('Amvera restores only the verified canonical npm lock; all other source cha
   await fs.writeFile(lock,original);await fs.writeFile(canonical,copy);await fs.writeFile(manifest,pkg);
  }
 });
+
+test('startup refusal explains configuration and storage problems without printing secrets or touching existing data',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'lc81-startup-diagnostics-'));
+ const password=randomBytes(24).toString('base64url'),secretCanary='QA-secret-canary-'+password,env={...process.env};
+ for(const key of Object.keys(env))if(key.startsWith('LC81_')||key.startsWith('LC_PILOT_')||key.startsWith('LC_BOOTSTRAP_')||key==='PORT')delete env[key];
+ const fresh=path.join(root,'fresh'),empty=path.join(root,'empty'),locked=path.join(root,'locked'),corrupt=path.join(root,'corrupt');
+ const settings={...env,LC81_QA:'1',LC81_DATA_DIR:fresh,LC81_ORIGIN:origin,LC81_INIT:'1',LC_BOOTSTRAP_ADMIN_PASSWORD:secretCanary};
+ function refuse(overrides,code){
+  const r=spawnSync(process.execPath,['server/lc81-main.mjs'],{env:{...settings,...overrides},encoding:'utf8',timeout:20000});
+  assert.equal(r.status,1,'startup must refuse '+code);
+  assert(r.stderr.includes('LC8.1 QA startup refused: '+code+'. No secrets logged.'),'missing safe startup code '+code);
+  assert(!((r.stdout||'')+(r.stderr||'')).includes(secretCanary),'secret must never appear in diagnostics');
+ }
+ try{
+  refuse({LC81_QA:'0'},'QA_MODE_REQUIRED');
+  refuse({LC_PILOT_USERS:secretCanary},'LEGACY_ENV_PRESENT');
+  refuse({LC81_DATA_DIR:'relative'},'DATA_PATH_INVALID');
+  refuse({LC81_ORIGIN:'https://qa.example.invalid/'},'ORIGIN_INVALID');
+  refuse({LC81_ORIGIN:'https://'+secretCanary+'@qa.example.invalid'},'ORIGIN_INVALID');
+  refuse({LC81_SITE_TIME_ZONE:'not/a/zone'},'TIME_ZONE_INVALID');
+  refuse({PORT:'invalid'},'PORT_INVALID');
+  refuse({LC81_DATA_DIR:path.join(root,'absent','child')},'DATA_PARENT_MISSING');
+  refuse({LC81_INIT:'0'},'INIT_REQUIRED');
+  refuse({LC_BOOTSTRAP_ADMIN_LOGIN:'bad login'},'BOOTSTRAP_LOGIN_INVALID');
+  refuse({LC_BOOTSTRAP_ADMIN_PASSWORD:'short'},'BOOTSTRAP_SECRET_INVALID');
+  await assert.rejects(fs.stat(fresh),{code:'ENOENT'});
+  await fs.mkdir(empty);refuse({LC81_DATA_DIR:empty},'STORAGE_INCOMPLETE');assert.deepEqual(await fs.readdir(empty),[]);
+  await fs.mkdir(locked);await fs.writeFile(path.join(locked,'writer.lock'),'existing');
+  refuse({LC81_DATA_DIR:locked},'STORAGE_LOCK_PRESENT');assert.equal(await fs.readFile(path.join(locked,'writer.lock'),'utf8'),'existing');
+  await fs.mkdir(corrupt);await fs.writeFile(path.join(corrupt,'secure.lc81'),'bad');await fs.writeFile(path.join(corrupt,'initialized'),'existing');
+  refuse({LC81_DATA_DIR:corrupt},'STORAGE_SIZE_INVALID');assert.equal(await fs.readFile(path.join(corrupt,'secure.lc81'),'utf8'),'bad');assert.equal(await fs.readFile(path.join(corrupt,'initialized'),'utf8'),'existing');
+  assert.deepEqual((await fs.readdir(corrupt)).sort(),['initialized','secure.lc81']);
+ }finally{await fs.rm(root,{recursive:true,force:true})}
+});
