@@ -146,6 +146,15 @@ export function practicalResource(db,p,day){
  const r=trainingAssignmentResource(db,p.assignment_id,day,[p.evaluator_id],p.assessed_at.slice(0,10));
  return r?{...r,self:p.person_id}:null;
 }
+export function sopEvaluationResource(db,kind,id,day){
+ if(!isId(id))return null;
+ let v;
+ if(kind==='sop_evaluation')v=one(db,"SELECT e.actor_id,e.evaluated_on AS on_date,e.revision_id,d.operation_id FROM sop_evaluation e JOIN document_revision r ON r.id=e.revision_id JOIN document d ON d.id=r.document_id WHERE e.id=? AND d.kind='sop'",[id]);
+ else if(kind==='weighted_sop')v=one(db,"SELECT json_extract(e.payload_json,'$.actor_id') actor_id,substr(e.occurred_at,1,10) on_date,r.id revision_id,d.operation_id FROM change_event e JOIN sop_stage43_checklist c ON c.id=e.entity_id JOIN document_revision r ON r.id=c.revision_id JOIN document d ON d.id=r.document_id WHERE e.id=? AND e.entity_type='sop_stage43_checklist' AND d.kind='sop'",[id]);
+ if(!v||!v.operation_id||!validDay(v.on_date))return null;
+ const res=personWorkResource(db,v.actor_id?[v.actor_id]:[],day,[v.on_date],[v.operation_id]);
+ return res?{...res,self:null,assigned:[],revision_id:v.revision_id,actor_id:v.actor_id}:null;
+}
 export function taskResource(db,t,day){
  if(!t)return null;
  const r=personWorkResource(db,[t.owner_id,...(t.subject_id?[t.subject_id]:[])],day,t.created_at?[t.created_at.slice(0,10)]:[]);
@@ -156,7 +165,9 @@ export function taskResource(db,t,day){
  if(t.source_self_id&&!add(selfResource(db,one(db,'SELECT * FROM mentor_self_evaluation WHERE id=?',[t.source_self_id]),day)))return null;
  if(t.source_assessment_id&&!add(practicalResource(db,one(db,'SELECT * FROM assessment_session WHERE id=?',[t.source_assessment_id]),day)))return null;
  if(t.source_assignment_id&&!add(trainingAssignmentResource(db,t.source_assignment_id,day)))return null;
- if(t.source_evaluation_id||t.source_weighted_event_id||t.source_weighted_position)return null;
+ if(t.source_evaluation_id&&!add(sopEvaluationResource(db,'sop_evaluation',t.source_evaluation_id,day)))return null;
+ if(t.source_weighted_event_id&&!add(sopEvaluationResource(db,'weighted_sop',t.source_weighted_event_id,day)))return null;
+ if(t.source_weighted_position&&!t.source_weighted_event_id)return null;
  if(t.goal_id){
   const p=one(db,'SELECT p.* FROM development_goal g JOIN development_plan p ON p.id=g.plan_id WHERE g.id=?',[t.goal_id]);
   if(!add(developmentResource(db,p,day)))return null;
@@ -487,7 +498,7 @@ export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
 }
 
 export function canUseTrainingResource(db,security,accountId,action,id,day,resource){
- const allowed=[...READ_ACTIONS,...TRAINING_COMMANDS,'calendar.detail','plan.read','center.read','analytics.read','metrics.read','roi.detail','frv.read_summary','training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','task.implement_own','bank.read','bank.detail','skill.read','requirement.read','coverage.read','assessment.read','assessment.detail','employment.detail','forms.read','forms.export'];
+ const allowed=[...READ_ACTIONS,...TRAINING_COMMANDS,'calendar.detail','plan.read','center.read','analytics.read','metrics.read','roi.detail','frv.read_summary','training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','task.implement_own','bank.read','bank.detail','skill.read','requirement.read','coverage.read','assessment.read','assessment.detail','employment.detail','forms.read','forms.export','sop.evaluation.read'];
  return !!resource&&allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,action,resource);
 }
 export function bootstrapTrainingScope(db,site,resource){

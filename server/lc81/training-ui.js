@@ -14,16 +14,17 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const det=el('details');det.append(el('summary',title),form(fields,submit,fn));return det;
  }
  function setContent(host,n){host.replaceChildren(n);host.scrollIntoView({block:'nearest'})}
- async function assignmentEditor(host,link=null){
+ async function assignmentEditor(host,link=null,retrain=null){
+  const context=link||retrain;
   const root=await api('training/options'),out=el('div'),op=select('operation_id','Операция',[['','— Выберите операцию —'],...opts(root.operations)]);
-  if(link){const field=op.querySelector('select');field.value=link.operation_id;field.disabled=true;if(!field.value)throw Error('Операция задания недоступна')}
+  if(context){const field=op.querySelector('select');field.value=context.operation_id;field.disabled=true;if(!field.value)throw Error('Операция задания недоступна')}
   const load=button('Выбрать операцию',async()=>{
    const id=op.querySelector('select').value;if(!id)throw Error('Выберите операцию');
    const d=await api('training/options?operation_id='+encodeURIComponent(id));
-   if(link){
-    d.people=d.people.filter(p=>p.id===link.trainee_id);d.revisions=d.revisions.filter(r=>r.id===link.revision_id);d.skills=d.skills.filter(s=>s.id===link.skill_id);d.scales=d.scales.filter(s=>s.id===link.scale_id).map(s=>({...s,levels:s.levels.filter(l=>l.value===link.target_level)}));
+   if(context){
+    d.people=d.people.filter(p=>p.id===context.trainee_id);d.revisions=d.revisions.filter(r=>r.id===context.revision_id);d.skills=d.skills.filter(s=>s.id===context.skill_id);d.scales=d.scales.filter(s=>s.id===context.scale_id).map(s=>({...s,levels:s.levels.filter(l=>l.value===context.target_level)}));
    }
-   if(!d.people.length||!d.mentors.length||!d.revisions.length||!d.skills.length||!d.scales.length||link&&!d.scales[0]?.levels.length){out.replaceChildren(el('p','Для операции нужны обучаемые, действующий инструктор с полномочием, СОП, навык и шкала.'));return}
+   if(!d.people.length||!d.mentors.length||!d.revisions.length||!d.skills.length||!d.scales.length||context&&!d.scales[0]?.levels.length){out.replaceChildren(el('p','Для операции нужны обучаемые, действующий инструктор с полномочием, СОП, навык и шкала.'));return}
    const revision=select('revision_id','Действующая редакция СОП',opts(d.revisions,'title'));
    const scale=select('scale_id','Шкала',opts(d.scales)),level=select('target_level','Целевой уровень',[]);
    function levels(){level.querySelector('select').replaceChildren(...(d.scales.find(x=>x.id===scale.querySelector('select').value)?.levels||[]).map(x=>{const n=el('option',x.value+' · '+x.label);n.value=x.value;return n}))}
@@ -33,13 +34,13 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    const segments=input('segments','Дробный инструктаж · группы шагов (например 1-3,4-6)','text',false),hazard=check('hazardous','Требуется предварительная проверка безопасности');
    function mode(){const v=variant.querySelector('select').value;realShow.hidden=realTry.hidden=v!=='smed';segments.hidden=v!=='fractional';segments.querySelector('input').required=v==='fractional'}
    variant.querySelector('select').addEventListener('change',mode);mode();
-   out.replaceChildren(form([select('trainee_id','Обучаемый',opts(d.people)),select('authorization_id','Инструктор с действующим полномочием',opts(d.mentors)),revision,select('skill_id','Навык',opts(d.skills)),scale,level,dt('assigned_on','Начало',link&&link.start_on>d.day?link.start_on:d.day),dt('due_on','Срок',link?.due_on||''),input('reason','Основание'),variant,number('followups','Контрольные проверки',2,10,2),realShow,realTry,segments,hazard,check('plan_reviewed','План TWI действующей редакции проверен')],'Создать назначение',async f=>{
+   out.replaceChildren(form([select('trainee_id','Обучаемый',opts(d.people)),select('authorization_id','Инструктор с действующим полномочием',opts(d.mentors)),revision,select('skill_id','Навык',opts(d.skills)),scale,level,dt('assigned_on','Начало',link&&link.start_on>d.day?link.start_on:d.day),dt('due_on','Срок',link?.due_on||''),fill(input('reason','Основание'),retrain?.reason),variant,number('followups','Контрольные проверки',2,10,2),realShow,realTry,segments,hazard,check('plan_reviewed','План TWI действующей редакции проверен')],'Создать назначение',async f=>{
     const v=value(f,'variant'),parts=v==='fractional'?value(f,'segments').split(',').map(s=>{const m=/^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(s);if(!m)throw Error('Укажите группы шагов, например 1-3,4-6');return {from:Number(m[1]),to:Number(m[2])}}):[];
-    await api('training/create',{operation_id:id,trainee_id:value(f,'trainee_id'),authorization_id:value(f,'authorization_id'),revision_id:value(f,'revision_id'),skill_id:value(f,'skill_id'),scale_id:value(f,'scale_id'),target_level:Number(value(f,'target_level')),assigned_on:value(f,'assigned_on'),due_on:value(f,'due_on'),reason:value(f,'reason'),variant:v,method_config:{followups:Number(value(f,'followups')),segments:parts,realShow:v==='smed'?Number(value(f,'real_show')):null,realTry:v==='smed'?Number(value(f,'real_try')):null,hazardous:checked(f,'hazardous')},plan_reviewed:checked(f,'plan_reviewed'),...(link?{enrollment_id:link.enrollment_id,program_task_id:link.program_task_id,enrollment_rev:link.enrollment_rev}:{})});
+    await api('training/create',{operation_id:id,trainee_id:value(f,'trainee_id'),authorization_id:value(f,'authorization_id'),revision_id:value(f,'revision_id'),skill_id:value(f,'skill_id'),scale_id:value(f,'scale_id'),target_level:Number(value(f,'target_level')),assigned_on:value(f,'assigned_on'),due_on:value(f,'due_on'),reason:value(f,'reason'),variant:v,method_config:{followups:Number(value(f,'followups')),segments:parts,realShow:v==='smed'?Number(value(f,'real_show')):null,realTry:v==='smed'?Number(value(f,'real_try')):null,hazardous:checked(f,'hazardous')},plan_reviewed:checked(f,'plan_reviewed'),...(link?{enrollment_id:link.enrollment_id,program_task_id:link.program_task_id,enrollment_rev:link.enrollment_rev}:retrain?{retraining_source_id:retrain.retraining_source_id}:{})});
     note('Назначение сохранено. Требуются подтверждения согласующих.');await render();
    }));
   },'primary');
-  setContent(host,panel(link?'Назначение по заданию программы':'Новое назначение',op,load,out));
+  setContent(host,panel(link?'Назначение по заданию программы':retrain?'Повторное обучение по новой редакции СОП':'Новое назначение',op,load,out));
  }
  async function assignment(host,id){
   if(!discard())return;
@@ -168,10 +169,11 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    const details=el('details');details.append(el('summary',s.title+' · '+s.items.length));
    const labels={unit:'Подразделение',profession:'Профессия',position:'Должность',shift:'Смена',code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',evaluated_on:'Дата оценки',assessed_on:'Дата оценки',result_note:'Результат',people:'Сотрудников',skills:'Навыков'};
    const keys=Object.keys(labels).filter(k=>s.items.some(r=>Object.hasOwn(r,k))),sub=el('div');
-   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='employment.read'&&r.can_transfer?button('Изменить назначение',()=>employmentEditor(sub,r.id)):s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):s.action==='assessment.read'&&r.can_detail?button('Открыть оценку',()=>assessmentCard(sub,r.id)):s.action==='calendar.read'&&r.can_detail?button('Открыть плановое событие',()=>openLinked(sub,{type:'schedule',id:r.id})):s.action==='roi.read'&&r.can_detail?button('Открыть эффект',()=>openLinked(sub,{type:'roi',id:r.id})):'']);
+   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='employment.read'&&r.can_transfer?button('Изменить назначение',()=>employmentEditor(sub,r.id)):s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):s.action==='assessment.read'&&r.can_detail?button('Открыть оценку',()=>assessmentCard(sub,r.id)):s.action==='sop.evaluation.read'?button('Открыть оценку СОП',()=>sopEvaluationCard(sub,r.kind,r.id)):s.action==='calendar.read'&&r.can_detail?button('Открыть плановое событие',()=>openLinked(sub,{type:'schedule',id:r.id})):s.action==='roi.read'&&r.can_detail?button('Открыть эффект',()=>openLinked(sub,{type:'roi',id:r.id})):'']);
    details.append(table([...keys.map(k=>labels[k]),'Действия'],rows),sub);n.append(details);
   }
   if(!d.sections.length)n.append(el('p','Нет связанных записей, доступных вашей учётной записи.'));
+  const reg=el('div');if(d.can_journal)n.append(button('Журнал инструктажей сотрудника',async()=>{if(discard())reg.replaceChildren(await registerPanel('journal',id))}));if(d.can_retraining)n.append(button('Переобучение и развитие сотрудника',async()=>{if(discard())reg.replaceChildren(await registerPanel('retraining',id))}));n.append(reg);
   setContent(host,n);
  }
  function mentor(kind,items,info){
@@ -403,9 +405,9 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
  }
  const taskStates={open:'Открыто',in_progress:'В работе',implemented:'Ожидает проверки',verified:'Эффект подтверждён',ineffective:'Эффект не подтверждён',cancelled:'Отменено'},taskKinds={corrective:'Корректирующее мероприятие',instructor_training:'Переобучение инструктора',trainee_training:'Повторное обучение',development:'Индивидуальное развитие'};
  const methodNames={rc1:'RC1 · 20 критериев',corporate:'Приложение 13 · 17 критериев',self:'Приложение 14 · 16 критериев'};
- async function developmentEditor(host){
+ async function developmentEditor(host,initial=null){
   if(!discard())return;const d=await api('development/options');
-  setContent(host,panel('Новый план развития',form([pick('person_id','Сотрудник',opts(d.people)),input('title','Цель плана'),dt('start_on','Начало',d.day),dt('due_on','Срок','')],'Создать план',async f=>{
+  setContent(host,panel('Новый план развития',form([pick('person_id','Сотрудник',opts(initial?d.people.filter(p=>p.id===initial.person_id):d.people),initial?.person_id||''),fill(input('title','Цель плана'),initial?.title),dt('start_on','Начало',d.day),dt('due_on','Срок','')],'Создать план',async f=>{
    await api('development/create',Object.fromEntries(['person_id','title','start_on','due_on'].map(k=>[k,value(f,k)])));note('План создан');await render();
   })));
  }
@@ -509,7 +511,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   if(d.cap.link&&d.candidates.type){if(d.candidates.items.length)n.append(groups('Связать повторное обучение / план',[pick('id','Назначение / план',opts(d.candidates.items,'label'))],'Сохранить связь',command('link',f=>({type:d.candidates.type,id:value(f,'id')}))));else n.append(el('p','Сначала создайте соответствующее новое назначение обучения или план в рабочем разделе.'))}
   if(d.cap.start)n.append(button('Взять в работу',command('start',()=>({}))));
   if(d.cap.implement)n.append(groups('Выполнить своё мероприятие',[input('result','Фактический результат')],'Подтвердить выполнение',async f=>{await api('tasks/implement',{id:d.id,expected_revision:d.rev,result:value(f,'result')});note('Факт выполнения подтверждён');await render()}));
-  if(d.cap.verify)n.append(groups('Независимая проверка эффекта',[pick('outcome','Результат проверки',[['effective','Эффект подтверждён'],['ineffective','Неэффективно'],['insufficient','Недостаточно данных']]),pick('audit_id','Последующий аудит',opts(d.evidence.audits,'label'),'',false),pick('assessment_id','Последующая практическая оценка',opts(d.evidence.practical,'label'),'',false),input('evidence','Обоснование и подтверждение')],'Зарегистрировать проверку',command('verify',f=>({outcome:value(f,'outcome'),audit_id:value(f,'audit_id')||null,assessment_id:value(f,'assessment_id')||null,evidence:value(f,'evidence')}))));
+  if(d.cap.verify)n.append(groups('Независимая проверка эффекта',[pick('outcome','Результат проверки',[['effective','Эффект подтверждён'],['ineffective','Неэффективно'],['insufficient','Недостаточно данных']]),pick('audit_id','Последующий аудит',opts(d.evidence.audits,'label'),'',false),pick('assessment_id','Последующая практическая оценка',opts(d.evidence.practical,'label'),'',false),pick('sop_evaluation_id','Повторная корпоративная оценка СОП',opts((d.evidence.sop||[]).filter(x=>x.kind==='sop_evaluation'),'label'),'',false),pick('weighted_event_id','Повторный взвешенный чек-лист',opts((d.evidence.sop||[]).filter(x=>x.kind==='weighted_sop'),'label'),'',false),input('evidence','Обоснование и подтверждение')],'Зарегистрировать проверку',command('verify',f=>({outcome:value(f,'outcome'),audit_id:value(f,'audit_id')||null,assessment_id:value(f,'assessment_id')||null,sop_evaluation_id:value(f,'sop_evaluation_id')||null,weighted_event_id:value(f,'weighted_event_id')||null,evidence:value(f,'evidence')}))));
   if(d.cap.cancel)n.append(groups('Отменить мероприятие',[input('reason','Основание')],'Отменить',command('cancel',f=>({reason:value(f,'reason')}))));
   if(d.verification.length)n.append(table(['Дата проверки','Результат','Основание'],d.verification.map(v=>[v.checked_at,v.outcome,v.evidence_note])));
   n.append(sub);setContent(host,n);
@@ -627,5 +629,85 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   else n.append(items.length?table(['Сотрудник','Подразделение','Профессия','Должность','Смена','Начало','Окончание','Состояние','Действия'],items.map(r=>[r.person_name,r.unit,r.profession,r.position,r.shift,r.valid_from,r.valid_to,r.state,r.can_transfer?button('Изменить назначение',()=>employmentEditor(host,r.id)):'—'])):empty());
   n.append(host);return n;
  }
- return {training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel,competencyPanel,openRecord,personnelPanel};
+
+ const queueTypes={all:'Все основания',revision:'Изменение СОП',practical:'Практическая оценка',audit:'Аудит L1',skill:'Разрыв навыков',self_eval:'Самооценка / развитие',action:'Мероприятие'};
+ const queueStates={all:'Все состояния',needs:'Требуется решение',linked:'Есть связанная запись',done:'Новое обучение завершено',blocked:'Нет действующей редакции'};
+ const actualStates={completed:'Выполнено',incomplete:'Не выполнено',started:'Начато'};
+ async function registerPanel(page,personId=null){
+  const journal=page==='journal',host=el('div'),out=el('div'),today=new Date().toISOString().slice(0,10);
+  const from=dt('journal_from','С даты',today.slice(0,8)+'01'),to=dt('journal_to','По дату',today),q=input('register_search','Поиск по сотруднику, СОП, основанию','text',false);
+  const type=select('queue_type','Основание',Object.entries(queueTypes)),status=select('queue_state','Состояние',Object.entries(queueStates));
+  const val=x=>x.querySelector('input,select').value;
+  async function load(offset=0){
+   const params=new URLSearchParams({q:val(q),offset:String(offset),...(personId?{person_id:personId}:{}),...(journal?{from:val(from),to:val(to)}:{type:val(type),state:val(status)})});
+   const d=await api('training/'+(journal?'journal':'retraining')+'?'+params);
+   const open=(r,label)=>r?button(label,()=>openLinked(host,r)):'—';
+   const headers=journal?['Дата / время','Подразделение','Инструктор','Обучаемый','СОП','Этап','Минут','Результат','Основание','Действия']:['Сотрудник','Подразделение','Основание','Содержание','Новая редакция','Срок','Состояние','Действия'];
+   const lines=d.items.map(x=>{
+    const actions=el('div',undefined,'row');
+    if(journal){
+     actions.append(button('Открыть обучение',()=>assignment(host,x.assignment_id)));
+     if(x.can_export)actions.append(button('Журнал XLSX',()=>downloadForm('journal',x.assignment_id)));
+     return [x.date,x.unit,x.mentor,x.trainee,x.sop,x.stage,x.minutes,actualStates[x.result]||x.result,x.note,actions];
+    }
+    if(x.source)actions.append(open(x.source,'Основание'));
+    if(x.next)actions.append(open(x.next,'Связанная запись'));
+    if(x.create?.type==='training')actions.append(button('Назначить переобучение',()=>assignmentEditor(host,null,x.create)));
+    if(x.create?.type==='task')actions.append(button('Создать мероприятие',()=>taskEditor(host,x.create.source)));
+    if(x.create?.type==='development')actions.append(button('Запланировать развитие',()=>developmentEditor(host,x.create)));
+    return [x.person,x.unit,queueTypes[x.type],x.description,x.current,x.due,queueStates[x.status],actions];
+   });
+   const paging=el('div',undefined,'row');if(offset)paging.append(button('Предыдущие 100',()=>load(Math.max(0,offset-100))));if(d.next!==null)paging.append(button('Следующие 100',()=>load(d.next)));
+   out.replaceChildren(el('p','Доступных записей по фильтру: '+d.total+(journal?' · Фактических минут: '+d.minutes:'')),d.items.length?table(headers,lines):empty(),paging);
+  }
+  const root=panel(journal?'Журнал заданий и проведённых инструктажей':'Единая очередь оснований для переобучения',el('p',journal?'Фактические записи из назначений. Повторения сохраняются отдельно, плановая дата не считается фактом.':'Изменения СОП, практика, аудит, дефицит навыков и мероприятия. Новые назначения не создаются автоматически. Очередь требует полной видимости исходных регистров.'),...(journal?[from,to]:[type,status]),q,button('Применить фильтр',()=>load()),out,host);
+  await load();return root;
+ }
+ const scoreText=x=>x===null?'Нет сопоставимой оценки':(100*x).toLocaleString('ru-RU',{maximumFractionDigits:1})+'%';
+ async function sopEvaluationEditor(host){
+  if(!discard())return;
+  const d=await api('sop-evaluation/options'),n=panel('Новая корпоративная оценка СОП'),sub=el('div');
+  if(d.can_install)n.append(button('Установить утверждённый чек-лист из 20 критериев',async()=>{await api('sop-evaluation/install',{kind:'builtin'});note('Методика зарегистрирована');await sopEvaluationEditor(host)}));
+  if(!d.methods.length||!d.revisions.length){n.append(el('p','Нужны доступная редакция СОП и действующая методика.'));setContent(host,n);return}
+  const revision=pick('revision_id','Редакция СОП',opts(d.revisions,'label')),method=pick('method_id','Методика',d.methods.map(x=>[x.id,'Версия '+x.version+' · '+x.criteria.length+' критериев']));
+  n.append(revision,method,button('Открыть чек-лист',()=>{
+   const rev=d.revisions.find(x=>x.id===revision.querySelector('select').value),m=d.methods.find(x=>x.id===method.querySelector('select').value);
+   if(!rev||!m)throw Error('Выберите редакцию и методику');
+   const answers=m.criteria.flatMap((q,i)=>[pick('answer_'+i,q.position+'. '+q.question,[['1','Да'],['0','Нет']]),input('note_'+i,'Комментарий','text',false)]);
+   sub.replaceChildren(form([el('p','Оценщик — текущий сотрудник. Все критерии требуют ответа. '+rev.label),dt('evaluated_on','Дата оценки',d.day),input('place','Место проведения'),...answers],'Зарегистрировать оценку',async f=>{
+    if(revision.querySelector('select').value!==rev.id||method.querySelector('select').value!==m.id)throw Error('Выбранная редакция или методика изменилась. Откройте чек-лист заново.');
+    await api('sop-evaluation/create',{revision_id:rev.id,method_id:m.id,source_sha256:rev.source_sha256,evaluated_on:value(f,'evaluated_on'),place:value(f,'place'),responses:m.criteria.map((q,i)=>({criterion_id:q.id,value:Number(value(f,'answer_'+i)),note:value(f,'note_'+i)}))});
+    note('Оценка зарегистрирована');await render();
+   }));
+  }),sub);setContent(host,n);
+ }
+ async function sopEvaluationCard(host,kind,id){
+  if(!discard())return;
+  const d=await api('sop-evaluation/detail?kind='+encodeURIComponent(kind)+'&id='+encodeURIComponent(id)),weighted=kind==='weighted_sop',sub=el('div');
+  const n=panel(weighted?'Исторический взвешенный чек-лист':'Корпоративная оценка СОП',el('p',[d.sop,d.date,d.actor||'Оценщик не указан',d.method,d.place,scoreText(d.score)].filter(Boolean).join(' · ')),button('Открыть редакцию СОП',()=>openLinked(sub,{type:'sop',id:d.revision_id})));
+  if(d.actor===null&&weighted)n.append(el('p','Оценщик не зарегистрирован. Мероприятие по этому снимку недоступно.'));
+  n.append(table(['№','Требование','Оценка',...(weighted?['Вес','Источник']:[]),'Комментарий','Действие'],d.questions.map(q=>[q.position,q.question,q.value??'—',...(weighted?[q.weight,q.source]:[]),q.note,q.can_task?button('Создать мероприятие',()=>taskEditor(sub,{kind,id,criterion_id:q.id})):'—'])));
+  if(d.tasks.length)n.append(panel('Связанные мероприятия',table(['Задача','Срок','Состояние',''],d.tasks.map(t=>[t.title,t.due_on,taskStates[t.state]||t.state,button('Открыть',()=>taskCard(sub,t.id))]))));
+  n.append(sub);setContent(host,n);
+ }
+ async function sopEvaluationPanel(){
+  const host=el('div'),out=el('div'),today=new Date().toISOString().slice(0,10),kind=select('sop_eval_kind','Вид оценки',[['sop_evaluation','Корпоративная бинарная'],['weighted_sop','Взвешенный чек-лист конструктора']]),from=dt('sop_eval_from','С даты',today.slice(0,4)+'-01-01'),to=dt('sop_eval_to','По дату',today),q=input('sop_eval_search','Поиск','text',false),method=select('sop_eval_method','Методика',[['','Все версии']]),val=x=>x.querySelector('input,select').value;
+  let canCreate=false,canInstall=false;
+  const controls=el('div',undefined,'row');
+  async function load(offset=0,reset=false){
+   const k=val(kind),m=reset?'':val(method),p=new URLSearchParams({kind:k,from:val(from),to:val(to),q:val(q),method:m,offset:String(offset)});
+   const d=await api('sop-evaluation?'+p);
+   const sel=method.querySelector('select');sel.replaceChildren(...[['','Все версии'],...d.methods.map(x=>[x.id,x.label])].map(([id,label])=>{const o=el('option',label);o.value=id;return o}));sel.value=d.methods.some(x=>x.id===m)?m:'';
+   canCreate=d.can_create;canInstall=d.can_install;controls.replaceChildren();
+   if(canCreate)controls.append(button('Новая оценка СОП',()=>sopEvaluationEditor(host),'primary'));
+   if(canInstall&&!canCreate)controls.append(button('Установить утверждённую методику',async()=>{await api('sop-evaluation/install',{kind:'builtin'});note('Методика зарегистрирована');await load()}));
+   const paging=el('div',undefined,'row');if(offset)paging.append(button('Предыдущие 100',()=>load(Math.max(0,offset-100))));if(d.next!==null)paging.append(button('Следующие 100',()=>load(d.next)));
+   out.replaceChildren(el('p','Записей: '+d.total+' · Сравнивайте только одну версию методики / одинаковый набор требований и весов.'),d.items.length?table(['Дата','СОП','Оценщик','Методика','Результат',''],d.items.map(x=>[x.date,x.sop,x.actor,x.method,scoreText(x.score),button('Открыть оценку',()=>sopEvaluationCard(host,x.kind,x.id))])):empty(),paging);
+  }
+  kind.querySelector('select').addEventListener('change',()=>run(()=>load(0,true)));
+  const root=panel('Оценки СОП',el('p','Бинарная корпоративная оценка и взвешенная методика Stage43 не объединяются. Исторические снимки не редактируются. По подтверждённому отклонению создаётся мероприятие.'),controls,kind,from,to,method,q,button('Применить фильтр',()=>load()),out,host);
+  await load();return root;
+ }
+
+ return {training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel,competencyPanel,openRecord,personnelPanel,registerPanel,sopEvaluationPanel,sopEvaluationCard};
 }

@@ -49,7 +49,7 @@ test('first admin, explicit existing roles, scoped views, blocking and restart',
  const h=await harness(t);
  assert.equal((await h.request('/api/lc81/session')).status,401);
  const a=await h.login('admin',h.adminPassword),ac=a.cookie;
- assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,94);
+ assert(a.user.admin);assert.equal(a.user.person_id,null);assert.equal(a.user.permissions.length,95);
  const templates=h.store.formsCatalog(a.user.id,1);
  assert.equal(templates.forms.length,17);
  for(const form of templates.forms){

@@ -517,9 +517,11 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.notEqual(ma.availability,'restricted');assert(ma.value>0);
   const detailMetrics=store.metricEvidence(manager.id,1,'metrics.read',scope,'training_assigned',0);
   assert.equal(detailMetrics.total,ma.value);assert(detailMetrics.items.every(q=>q.route?.type==='training'));
-  assert.equal(overview.metrics.find(m=>m.id==='sop_evaluations').availability,'restricted');
+  assert.notEqual(overview.metrics.find(m=>m.id==='sop_evaluations').availability,'restricted');
+
   assert(overview.currencies.some(x=>x.currency==='RUB'&&x.net===35000));
   const other=store.centerWorkspace(otherEditor.id,1,'analytics.read',{...scope,unit_id:x.unitB});
+  assert.equal(other.metrics.find(m=>m.id==='sop_evaluations').availability,'restricted');
   assert.equal(other.metrics.find(m=>m.id==='effect_facts').availability,'restricted');
   assert.equal(other.metrics.find(m=>m.id==='effect_facts').value,null);
   assert.equal(other.currencies,null);
@@ -567,6 +569,38 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
    if(kind==='safety_program'){assert(text.includes('Программа ОТ')&&text.includes('Результаты и основания'));const strings=new TextDecoder().decode(entries.find(x=>x.name==='xl/sharedStrings.xml').bytes);assert(strings.includes('Учебный протокол')&&strings.includes('Безопасные методы')&&strings.includes('Учебная тема ОТ'));}
    if(kind==='internship_program'){assert(text.includes('План и факт смен'));const strings=new TextDecoder().decode(entries.find(x=>x.name==='xl/sharedStrings.xml').bytes);assert(strings.includes('2 / 1')&&strings.includes('Синтетическая смена'));}
   }
+  // Registers are projections of actual records, not new writable journals.
+  const journal=store.journalWorkspace(manager.id,1,{from:today,to:today,person_id:x.f.trainee,q:'',offset:0});
+  const journalFacts=journal.items.filter(q=>q.assignment_id===newTraining.id);
+  assert.equal(journalFacts.length,doneTraining.facts.length);assert(journalFacts.every(q=>q.minutes===10&&q.note==='Учебный факт'));
+  assert.equal(store.journalWorkspace(otherEditor.id,1,{from:today,to:today,q:'',offset:0}).items.length,0);
+  assert.throws(()=>store.journalWorkspace(manager.id,1,{from:today,to:'2026-02-30',q:'',offset:0}),/Проверьте/);
+  const queue=store.retrainingWorkspace(manager.id,1,{type:'all',state:'all',person_id:null,q:'',offset:0});
+  assert(queue.items.some(q=>q.type==='audit'&&q.next?.id===action.id));
+  assert.throws(()=>store.retrainingWorkspace(otherEditor.id,1,{type:'all',state:'all',person_id:null,q:'',offset:0}),/права/);
+  // The binary method is separate from historical weighted snapshots.
+  let sopOptions=store.sopEvaluationOptions(manager.id,1);
+  if(!sopOptions.methods.length){await store.installSopMethod(manager.id,1,{kind:'builtin'});sopOptions=store.sopEvaluationOptions(manager.id,1)}
+  const sopMethod=sopOptions.methods[0],sopRev=sopOptions.revisions.find(q=>q.id===x.revision.revision);
+  assert(sopRev&&sopMethod.criteria.length===20);
+  const sopInput={revision_id:sopRev.id,method_id:sopMethod.id,source_sha256:sopRev.source_sha256,evaluated_on:today,place:'Учебное место',responses:sopMethod.criteria.map((q,i)=>({criterion_id:q.id,value:i===0?0:1,note:i===0?'Учебное отклонение':''}))};
+  await assert.rejects(store.createSopEvaluation(manager.id,1,{...sopInput,source_sha256:'0'.repeat(64)}),/изменился/);
+  await assert.rejects(store.createSopEvaluation(otherEditor.id,1,sopInput),/недоступна/);
+  await assert.rejects(store.createSopEvaluation(manager.id,1,{...sopInput,responses:sopInput.responses.slice(1)}),/критериев/);
+  const evaluation=await store.createSopEvaluation(manager.id,1,sopInput);
+  const sopDetail=store.sopEvaluationDetail(manager.id,1,'sop_evaluation',evaluation.id);
+  assert.equal(sopDetail.score,19/20);assert.equal(sopDetail.questions.length,20);assert(sopDetail.questions[0].can_task);
+  assert.throws(()=>store.sopEvaluationDetail(otherEditor.id,1,'sop_evaluation',evaluation.id),/недоступна/);
+  const sopList=store.sopEvaluationWorkspace(manager.id,1,{kind:'sop_evaluation',from:today,to:today,q:'',method:null,offset:0});
+  assert(sopList.items.some(x=>x.id===evaluation.id));assert(store.personCard(manager.id,1,x.f.actor).sections.some(s=>s.action==='sop.evaluation.read'&&s.items.some(x=>x.id===evaluation.id)));
+  const sopTaskInput={source:{kind:'sop_evaluation',id:evaluation.id,criterion_id:sopMethod.criteria[0].id},title:'Устранение отклонения СОП',owner_id:x.f.trainee,due_on:due,kind:'corrective',priority:'normal'};
+  const sopTask=await store.createTask(manager.id,1,sopTaskInput);
+  await assert.rejects(store.createTask(manager.id,1,sopTaskInput),/уже есть/);
+  assert(store.sopEvaluationDetail(manager.id,1,'sop_evaluation',evaluation.id).tasks.some(x=>x.id===sopTask.id));
+  const completedSop=await store.implementOwnTask(worker.id,1,{id:sopTask.id,expected_revision:sopTask.rev,result:'Учебная коррекция'});
+  await assert.rejects(store.changeTask(manager.id,1,{id:sopTask.id,expected_revision:completedSop.rev,command:'verify',fields:{outcome:'effective',evidence:'Не подтверждено повторной оценкой',audit_id:null,assessment_id:null,sop_evaluation_id:null,weighted_event_id:null}}),/Эффект не подтверждён/);
+  const metric=store.metricEvidence(manager.id,1,'metrics.read',scope,'sop_evaluations',0);
+  assert(metric.items.some(q=>q.route?.type==='sop_evaluation'&&q.route.id===evaluation.id));
   const pack=await store.exportForm(manager.id,1,{kind:'preparation_pack',appendix:null,id:bundle.id});
   assert.equal(pack.mime,'application/zip');const packParts=await readZip(pack.bytes);assert.deepEqual(packParts.map(x=>x.name),['TWI-03-2.xlsx','TWI-03-3.xlsx','TWI-03-4.xlsx','TWI-03-17.xlsx']);
   for(const file of packParts)assert((await readZip(file.bytes)).some(x=>x.name==='xl/workbook.xml'));

@@ -62,8 +62,8 @@ export function trainingOptions(db,access,operationId=null){
 }
 export const CREATE_FIELDS=Object.freeze(['operation_id','trainee_id','authorization_id','revision_id','skill_id','scale_id','target_level','assigned_on','due_on','reason','variant','method_config','plan_reviewed']);
 export function resolveTrainingCreate(db,input,access){
- const linked=exact(input,[...CREATE_FIELDS,'enrollment_id','program_task_id','enrollment_rev']);
- must((exact(input,CREATE_FIELDS)||linked)&&access.personId&&isId(input.operation_id)&&isId(input.trainee_id)&&isId(input.authorization_id)&&isId(input.revision_id)&&date(input.assigned_on)&&date(input.due_on)&&input.assigned_on>=access.day&&input.plan_reviewed===true,400,'Заполните назначение и подтверждение плана');
+ const linked=exact(input,[...CREATE_FIELDS,'enrollment_id','program_task_id','enrollment_rev']),repeat=exact(input,[...CREATE_FIELDS,'retraining_source_id']);
+ must((exact(input,CREATE_FIELDS)||linked||repeat)&&access.personId&&isId(input.operation_id)&&isId(input.trainee_id)&&isId(input.authorization_id)&&isId(input.revision_id)&&date(input.assigned_on)&&date(input.due_on)&&input.assigned_on>=access.day&&input.plan_reviewed===true,400,'Заполните назначение и подтверждение плана');
  must(access.read('operation.read',input.operation_id)&&access.read('sop.read_effective',input.revision_id)&&allowedPerson(db,access,input.trainee_id),403,'Данные назначения недоступны');
  const auth=one(db,'SELECT * FROM mentor_authorization WHERE id=? AND operation_id=?',[input.authorization_id,input.operation_id]);
  must(auth&&allowedPerson(db,access,auth.person_id),403,'Инструктор недоступен');
@@ -83,6 +83,13 @@ export function resolveTrainingCreate(db,input,access){
  must(access.allows('training.create',input.operation_id,resource)&&access.allows('training.read',input.operation_id,resource),403,'Назначение выходит за область полномочий');
  const r=sourceRevision(db,input.revision_id);
  must(r.operation_id===input.operation_id,422,'СОП относится к другой операции');
+ if(repeat){
+  const old=isId(input.retraining_source_id)&&one(db,'SELECT * FROM training_assignment WHERE id=?',[input.retraining_source_id]);
+  must(old&&old.state!=='cancelled'&&access.read('training.read',old.id)&&allowed(db,access,old,'training.detail')&&access.read('sop.read_history',old.sop_revision_id),404,'Прежнее обучение недоступно');
+  const prior=currentStandard(db,old.sop_revision_id);
+  must(prior&&prior.document_id===r.document_id&&prior.id!==r.id&&old.trainee_id===input.trainee_id&&old.operation_id===input.operation_id&&old.skill_id===input.skill_id&&old.scale_id===input.scale_id&&old.target_level===input.target_level,409,'Основание переобучения изменилось');
+  must(!one(db,"SELECT id FROM training_assignment WHERE trainee_id=? AND skill_id=? AND sop_revision_id=? AND state<>'cancelled'",[old.trainee_id,old.skill_id,r.id]),409,'Переобучение по новой редакции уже назначено');
+ }
  return {source:r.source,payload:{trainee_id:input.trainee_id,mentor_id:auth.person_id,supervisor_id:null,authorization_id:auth.id,revision_id:r.id,source:r.source,skill_id:input.skill_id,scale_id:input.scale_id,target_level:input.target_level,assigned_by:access.personId,assigned_on:input.assigned_on,due_on:input.due_on,reason:input.reason,variant:input.variant,method_version:'JI-2',method_config:input.method_config,shift_id:null,enrollment_id:n?.id??null,program_task_id:task?.id??null,plan_reviewed:true}};
 }
 export function createTraining(db,resolved,access){

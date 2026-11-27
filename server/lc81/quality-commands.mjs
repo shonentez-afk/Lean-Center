@@ -6,6 +6,8 @@ import {auditMethods,trainingMethods,practicalCriteria,selfLevelsForMethod,AUDIT
 import {RC1_CRITERIA} from '../../src/modules/training/builtin-forms.js';
 import {AUDIT_V03,SELF_V03} from '../../src/modules/training/standard-v03.js';
 import {auditDetails,actionRows,actionStatus,actionSource,actionSourceOf,evidenceForAction,practicalEvidenceForAction,ACTION_KINDS,ACTION_STATES,RESPONSE_LABELS} from '../../src/modules/training/audit-domain.js';
+import {sopEvidence} from '../../src/modules/library/sop-assessment-review.js';
+import {evaluationAccess} from './sop-evaluation-commands.mjs';
 import {ACTION_VERIFY_DATE_BASIS} from '../../src/modules/training/action-calendar.js';
 import {auditResource,selfResource,developmentResource,practicalResource,taskResource,trainingAssignmentResource,enrollmentResource,personWorkResource,programResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
@@ -108,6 +110,8 @@ function sourceFor(db,a,s){
   const x=find(db,'assessment_session',s.id);r=practicalResource(db,x,a.day);
   must(x&&x.assessment_kind==='practical'&&a.read('training.read',x.assignment_id)&&allowed(a,'training.detail',x.assignment_id,r),404,'Практическая оценка недоступна');
   subject=x.person_id;if(x.conclusion==='not_meet')kinds.push('trainee_training');
+ }else if(['sop_evaluation','weighted_sop'].includes(s.kind)){
+  r=evaluationAccess(db,a,s.kind,s.id);must(r&&s.criterion_id!==null,404,'Оценка СОП недоступна');kinds=['corrective'];
  }else if(s.kind==='development_goal'){
   const g=find(db,'development_goal',s.id),p=g&&find(db,'development_plan',g.plan_id);r=developmentResource(db,p,a.day);
   must(p&&g.state==='open'&&a.read('development.read',p.id)&&allowed(a,'development.detail',p.id,r),404,'Цель недоступна');subject=p.person_id;
@@ -150,7 +154,12 @@ function taskEvidence(db,a,t,r){
  const practical=practicalEvidenceForAction(db,t,ACTION_VERIFY_DATE_BASIS).filter(x=>{
   const p=find(db,'assessment_session',x.id),v=practicalResource(db,p,a.day);return x.assessed_at.slice(0,10)<=a.day&&a.read('training.read',x.assignment_id)&&allowed(a,'training.detail',x.assignment_id,v)&&allowed(a,'task.verify',t.id,join(r,v))
  }).map(x=>({id:x.id,label:x.assessed_at+' · '+x.conclusion}));
- return {audits,practical};
+ const sopKind=t.source_weighted_event_id?'weighted_sop':t.source_evaluation_id&&t.source_criterion_id?'sop_evaluation':null;
+ const candidates=sopKind?sopEvidence(db,t,ACTION_VERIFY_DATE_BASIS).filter(x=>x.date<=a.day):[];
+ const authorized=candidates.map(x=>{const v=evaluationAccess(db,a,sopKind,x.id);return v&&allowed(a,'task.verify',t.id,join(r,v))?{id:x.id,kind:sopKind,label:x.date+' · '+x.code+' · v'+x.revision_no+' · '+(x.value??'Нет оценки')}:null});
+ // No effective decision on a partial history.
+ const sop=authorized.every(Boolean)?authorized:[];
+ return {audits,practical,sop};
 }
 function taskSourceLabel(db,a,t){
  const x=actionSourceOf(db,t);if(!x)return 'Самостоятельная задача';
@@ -158,6 +167,7 @@ function taskSourceLabel(db,a,t){
  if(x.kind==='self_eval')return a.read('self.read',x.id)&&allowed(a,'self.detail',x.id,selfResource(db,find(db,'mentor_self_evaluation',x.id),a.day))?x.label:'Связанная самооценка';
  if(x.kind==='practical'||x.kind==='assignment')return x.assignment_id&&a.read('training.read',x.assignment_id)&&allowed(a,'training.detail',x.assignment_id,trainingAssignmentResource(db,x.assignment_id,a.day))?x.label:'Связанное обучение';
  if(x.kind==='development_goal'){const g=find(db,'development_goal',x.id);return g&&a.read('development.read',g.plan_id)&&allowed(a,'development.detail',g.plan_id,developmentResource(db,find(db,'development_plan',g.plan_id),a.day))?x.label:'Связанная цель'}
+ if(['sop_evaluation','weighted_sop'].includes(x.kind))return evaluationAccess(db,a,x.kind,x.id)?x.label:'Связанная оценка СОП';
  return 'Связанный документ';
 }
 export function taskDetail(db,a,id){
@@ -183,9 +193,10 @@ export function changeTask(db,a,f){
   const c=linkedCandidates(db,a,t,r);must(exact(f.fields,['type','id'])&&f.fields.type===c.type&&c.items.some(x=>x.id===f.fields.id),422,'Связанная программа недоступна');p={command:'link_followup',...f.fields};
  }else if(f.command==='cancel'){must(exact(f.fields,['reason'])&&txt(f.fields.reason),400,'Укажите причину');p={command:'cancel',...f.fields}}
  else{
-  const v=f.fields;must(a.personId!==t.owner_id&&exact(v,['outcome','evidence','audit_id','assessment_id'])&&['effective','ineffective','insufficient'].includes(v.outcome)&&txt(v.evidence)&&(v.audit_id===null||isId(v.audit_id))&&(v.assessment_id===null||isId(v.assessment_id)),403,'Нужна независимая проверка');
+  const v=f.fields,extended=exact(v,['outcome','evidence','audit_id','assessment_id','sop_evaluation_id','weighted_event_id']);must(a.personId!==t.owner_id&&(extended||exact(v,['outcome','evidence','audit_id','assessment_id']))&&['effective','ineffective','insufficient'].includes(v.outcome)&&txt(v.evidence)&&(v.audit_id===null||isId(v.audit_id))&&(v.assessment_id===null||isId(v.assessment_id)),403,'Нужна независимая проверка');
   const e=taskEvidence(db,a,t,r);
   must((v.audit_id===null||e.audits.some(x=>x.id===v.audit_id))&&(v.assessment_id===null||e.practical.some(x=>x.id===v.assessment_id)),403,'Доказательство недоступно');
+  if(extended)must((v.sop_evaluation_id===null||isId(v.sop_evaluation_id)&&e.sop.some(x=>x.kind==='sop_evaluation'&&x.id===v.sop_evaluation_id))&&(v.weighted_event_id===null||isId(v.weighted_event_id)&&e.sop.some(x=>x.kind==='weighted_sop'&&x.id===v.weighted_event_id))&&!(v.sop_evaluation_id&&v.weighted_event_id),403,'Повторная оценка СОП недоступна');
   p={command:'verify',verifier_id:a.personId,...v,verification_date_basis:ACTION_VERIFY_DATE_BASIS};
  }
  return emit(db,a,'action_item',t.id,'update',t.rev,p,action);

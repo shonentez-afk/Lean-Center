@@ -11,6 +11,7 @@ import {centerAttention,scopedAttention} from '../../src/modules/training/center
 import {metricScopeValid,METRIC_RELATIONS,RELATION_LABELS} from '../../src/modules/training/metric-catalog.js';
 import {annualAuditCoverage} from '../../src/modules/training/audit-analytics.js';
 import {effectOverview,effectFacts,twiBasis,effectPending,effectStatus} from '../../src/modules/effect/domain.js';
+import {evaluationAccess} from './sop-evaluation-commands.mjs';
 import {programResource,personWorkResource,scheduleResource,trainingAssignmentResource,assessmentResource,auditResource,selfResource,enrollmentResource,preparationResource,developmentResource,taskResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
 const must=(x,s,m)=>{if(!x)throw new PilotError(s,m)};
@@ -46,6 +47,7 @@ export function recordAccess(db,a,type,id){
  case 'bank':r=programResource(db);read='bank.read';permission='bank.detail';break;
  case 'person':return who(a,id)?{type,id,resource:personWorkResource(db,[id],day)}:null;
  case 'sop':return a.read('sop.read_history',id)?{type,id,resource:null}:null;
+ case 'sop_evaluation':case 'weighted_sop':r=evaluationAccess(db,a,type,id);return r?{type,id,resource:r}:null;
  case 'frv':return a.read('frv.read',id)?{type,id,resource:null}:null;
  case 'supplement':return a.read('supplement.read',id)&&site(db,a,'supplement.detail')?{type,id,resource:null}:null;
  case 'roi':return financialRecordAllowed(db,a,id)?{type,id,resource:null}:null;
@@ -219,6 +221,7 @@ const PER_SOURCE={
  practice:['assessment.read','assessment.detail','training.read','training.detail'],
  skill:['person.read_basic','skill.read','requirement.read','assessment.read','assessment.detail'],
  sop:['sop.read_history'],
+ sop_eval:['sop.read_history','sop.evaluation.read'],
  frv:['frv.read'],
  task:['task.read','task.detail','audit.read','audit.detail','assessment.read','assessment.detail','training.read','training.detail','training.enrollment.read','training.enrollment.detail','development.read','development.detail'],
  roi:['roi.read','roi.detail','task.read','task.detail','audit.read','audit.detail','assessment.read','assessment.detail','training.read','training.detail','training.enrollment.read','training.enrollment.detail','frv.read','frv.read_summary','development.read','development.detail']
@@ -251,9 +254,10 @@ export function financialRecordAllowed(db,a,id){
  }
  return true;
 }
-const groupFor=id=>id.startsWith('prep_')?'preparation':id.startsWith('training_')?'training':id.startsWith('twi_')?'twi':id==='audit_count'?'audit':id==='self_count'?'self':id==='assessment_planned'?'schedule':id.startsWith('practice_')?'practice':id==='skill_coverage'?'skill':id==='sop_review'?'sop':id==='frv_final'?'frv':id.startsWith('actions_')?'task':id.startsWith('effect_')?'roi':null;
+const groupFor=id=>id.startsWith('prep_')?'preparation':id.startsWith('training_')?'training':id.startsWith('twi_')?'twi':id==='audit_count'?'audit':id==='self_count'?'self':id==='assessment_planned'?'schedule':id.startsWith('practice_')?'practice':id==='skill_coverage'?'skill':id==='sop_review'?'sop':['sop_evaluations','sop_weighted'].includes(id)?'sop_eval':id==='frv_final'?'frv':id.startsWith('actions_')?'task':id.startsWith('effect_')?'roi':null;
 function evidenceLink(db,a,e){
  const o=e.options||{};
+ if(e.page==='sop_review')return recordAccess(db,a,o.kind,o.id);
  if(e.page==='audit'&&o.mode==='annual')return recordAccess(db,a,'person',o.personId);
  const pair=({preparation:['preparation',o.id],twi:['training',o.id],audit:['audit',o.auditId],practical:['assessment',o.assessmentId],self_eval:['self',o.id],calendar:['schedule',o.id],person:['person',o.personId],sop:['sop',o.revisionId],frv:['frv',o.studyId],actions:['task',o.id],roi:['roi',o.id],knowledge_bank:['bank',o.id],supplements:['supplement',o.id]})[e.page];
  return pair&&pair[1]?recordAccess(db,a,...pair):null;
@@ -279,7 +283,7 @@ function buildProjection(db,a,k,scope){
  const training=p.metrics.find(m=>m.id==='training_assigned');
  const cohortOK=can(PER_SOURCE.training)&&training.evidence.every(e=>evidenceOK(db,a,e));
  const permitted=m=>{
-  const g=groupFor(m.id);if(!g)return false; // SOP evaluation journals are not connected yet.
+  const g=groupFor(m.id);if(!g)return false;
   if(['twi','skill','roi'].includes(g)&&!full(PER_SOURCE[g]))return false;
   if(g==='roi'&&(!financialScope(db,a)||!rows(db,'SELECT id FROM economic_effect WHERE (?=\'\' OR unit_id=?)',[scope.unit_id,scope.unit_id]).every(x=>financialRecordAllowed(db,a,x.id))))return false;
   if(!can(PER_SOURCE[g]))return false;

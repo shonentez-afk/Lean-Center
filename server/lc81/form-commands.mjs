@@ -138,6 +138,7 @@ function populated(db,a,kind,id){
   must(rev&&op,403,'Для выписки требуется доступ к редакции СОП и операции');
   const facts=rows(db,'SELECT * FROM training_session WHERE assignment_id=? AND stage_code IS NOT NULL ORDER BY held_at,id',[id]);
   must(facts.length<=2000,413,'Слишком много фактов для одной выгрузки');
+  for(const x of facts){const v=trainingAssignmentResource(db,id,a.day,[x.mentor_id,x.witness_id].filter(Boolean),x.held_at.slice(0,10));must(v&&a.scope('training.detail',id,{...v,self:null,assigned:[]})&&a.scope('forms.export',id,{...v,self:null,assigned:[]}),403,'Исторический факт недоступен');}
   const data=productionRows([r],facts,{unit:()=>a.read('org.read',op.data.unit_id)?.data.name||'',person:p=>name(a,p),revision:()=>rev.data.code+' · '+rev.data.title+' · v'+rev.data.version_no});
   book=productionWorkbook(X,data,{title:STANDARD_FORMS.find(x=>x.id===t.appendix).title,date:a.day});
  }else if(kind==='supplement'){

@@ -9,6 +9,8 @@ import {developmentView} from './development-commands.mjs';
 import {qualityView} from './quality-commands.mjs';
 import {workflowView} from './mentor-workflows.mjs';
 import {programView} from './program-commands.mjs';
+import {canReadRetraining} from './training-registers.mjs';
+import {evaluationAccess} from './sop-evaluation-commands.mjs';
 import {PilotError} from '../lc74-store.mjs';
 const sections=[
  ['employment.read','person_assignment','person_id','Кадровые назначения'],
@@ -47,5 +49,10 @@ export function personCard(db,a,id,canRead){
   const matrices=rows(db,'SELECT id,roster_json,columns_json,unit_id,base_on FROM competency_matrix ORDER BY code,version_no DESC').filter(x=>JSON.parse(x.roster_json).some(r=>r.person_id===id)).flatMap(x=>{const v=a.read('matrix.read',x.id);return v?[{...v.data,can_detail:a.allows('matrix.detail',x.id,matrixResource(db,x.unit_id,JSON.parse(x.roster_json),JSON.parse(x.columns_json),a.day,x.base_on))}]:[]});
   if(matrices.length)result.push({action:'matrix.read',title:'Матрицы компетенций',items:matrices});
  }
- return {person:person.data,sections:result};
+ if(a.permissions.includes('sop.evaluation.read')){
+  const items=rows(db,'SELECT id,evaluated_on FROM sop_evaluation WHERE actor_id=? ORDER BY evaluated_on DESC,id',[id]).filter(x=>evaluationAccess(db,a,'sop_evaluation',x.id)).map(x=>({...x,kind:'sop_evaluation'}));
+  const weighted=rows(db,"SELECT id,substr(occurred_at,1,10) evaluated_on FROM change_event WHERE entity_type='sop_stage43_checklist' AND json_extract(payload_json,'$.actor_id')=? ORDER BY occurred_at DESC,id",[id]).filter(x=>evaluationAccess(db,a,'weighted_sop',x.id)).map(x=>({...x,kind:'weighted_sop'}));
+  if(items.length||weighted.length)result.push({action:'sop.evaluation.read',title:'Проведённые оценки СОП',items:[...items,...weighted]});
+ }
+ return {person:person.data,sections:result,can_journal:['training.read','training.detail','sop.read_history','operation.read','org.read'].every(k=>a.permissions.includes(k)),can_retraining:canReadRetraining(db,a)};
 }

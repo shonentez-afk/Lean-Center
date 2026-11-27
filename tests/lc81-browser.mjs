@@ -157,6 +157,11 @@ try{
  await m.p.locator('#content select[name=profession_id]').selectOption({label:'Учебная профессия браузера'});
  await button(m.p,'Оформить новое назначение').click();
  await m.p.getByRole('cell',{name:'Учебная профессия браузера',exact:true}).waitFor();
+ await goSection('journal.view');await m.p.getByRole('heading',{name:'Журнал заданий и проведённых инструктажей',exact:true}).waitFor();
+ await goSection('retraining.view');await m.p.getByRole('heading',{name:'Единая очередь оснований для переобучения',exact:true}).waitFor();
+ await goSection('sop.evaluation.read');await m.p.getByRole('heading',{name:'Оценки СОП',exact:true}).last().waitFor();
+ await button(m.p,'Новая оценка СОП').click();await button(m.p,'Установить утверждённый чек-лист из 20 критериев').click();
+ await m.p.getByText('Нужны доступная редакция СОП и действующая методика.',{exact:true}).waitFor();
  await goSection('forms.read');
  const formRow=m.p.getByRole('row').filter({has:m.p.getByRole('cell',{name:'Аудит 1-го уровня',exact:true})});
  const downloaded=m.p.waitForEvent('download');await formRow.getByRole('button',{name:'Скачать XLSX',exact:true}).click();

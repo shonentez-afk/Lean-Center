@@ -26,6 +26,8 @@ import {directoryPeople} from '../../src/modules/master-data/people-directory.js
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
+import {journalWorkspace,retrainingWorkspace} from './training-registers.mjs';
+import {sopEvaluationWorkspace,sopEvaluationOptions,sopEvaluationDetail,createSopEvaluation,installSopMethod} from './sop-evaluation-commands.mjs';
 import {formsCatalog,prepareForm,serializeForm,canExportForm} from './form-commands.mjs';
 import {refsForDb,checkContent,MAX_CONTENT,verifyDomainEvents} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
@@ -590,6 +592,13 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     return {type,definition:directorySchema(type),refs,can_create:refs.org_unit.some(x=>x.can_create),day:date};
    });
   },
+  journalWorkspace(actor,revision,f){return read(db=>journalWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
+  retrainingWorkspace(actor,revision,f){return read(db=>retrainingWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
+  sopEvaluationWorkspace(actor,revision,f){return read(db=>sopEvaluationWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
+  sopEvaluationOptions(actor,revision){return read(db=>sopEvaluationOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  sopEvaluationDetail(actor,revision,kind,id){return read(db=>sopEvaluationDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,id))},
+  createSopEvaluation(actor,revision,f){return mutate(db=>createSopEvaluation(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
+  installSopMethod(actor,revision,f){return mutate(db=>installSopMethod(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),f))},
   formsCatalog(actor,revision){return read(db=>formsCatalog(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   exportForm(actor,revision,input){
    let result;
