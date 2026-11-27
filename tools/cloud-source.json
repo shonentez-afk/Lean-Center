@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "5e0d377277bccfca66a7c766426a15ca18d0113a",
+  "sourceCommit": "bafcd00b6c2bd1eb649f714e3202e81f6d12654f",
   "files": [
     {
       "path": "amvera.yml",
@@ -171,7 +171,7 @@
     },
     {
       "path": "server/lc81/http.mjs",
-      "sha": "4057a59013af5a25bd8171710ed8851579fdbebc"
+      "sha": "9518ecba0c37bbeb7e7febfc9c950a2307cf8f0e"
     },
     {
       "path": "server/lc81/import-commands.mjs",
@@ -179,7 +179,7 @@
     },
     {
       "path": "server/lc81/library-commands.mjs",
-      "sha": "9861576fa083bb33e9df986293ae4d331765a2fc"
+      "sha": "c156c131131737377cc2eb291a499c6766425bbd"
     },
     {
       "path": "server/lc81/library-receipts.mjs",
@@ -187,7 +187,7 @@
     },
     {
       "path": "server/lc81/library-ui.js",
-      "sha": "89e75305d5d82df56772a2c923aeabd98b015218"
+      "sha": "2da1a79f8ae33c476234c64503d493b96302cc50"
     },
     {
       "path": "server/lc81/maintenance.mjs",
@@ -235,7 +235,7 @@
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "dec26c0f2f290c888e1d5f4c24d14fcf7f741b5f"
+      "sha": "00c496191f5a894c4687179846fe40e33207cf7e"
     },
     {
       "path": "server/lc81/program-commands.mjs",
@@ -266,6 +266,10 @@
       "sha": "b5207ce631c9aab61b703a91f00b6ecd5787e1ef"
     },
     {
+      "path": "server/lc81/shared-library.mjs",
+      "sha": "bb32bcfa92e89055d67d0b444dfa36d2d2c5ecf2"
+    },
+    {
       "path": "server/lc81/site-clock.mjs",
       "sha": "5433c521e0c05f34cce49bfcad382540cd285bec"
     },
@@ -279,7 +283,7 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "a85aee4168b476d00c472babdc279fd6ca51f87d"
+      "sha": "2c12afdd32237296b2167f3827fe5134ad259ea3"
     },
     {
       "path": "server/lc81/subject-reports.mjs",
