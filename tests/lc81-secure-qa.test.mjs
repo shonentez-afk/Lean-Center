@@ -515,5 +515,6 @@ test('PARITY: competence report without requirements returns an empty report, no
  assert.equal((await h.request('/api/lc81/analytics/report',{body})).status,401);
  const overview=await h.request('/api/lc81/matrix/overview',{cookie,body:{unit_id:'',profession_id:'',shift_id:'',category_id:'',workplace_id:'',q:'',gaps:false,person_page:0,skill_page:0}});
  assert.equal(overview.status,200,JSON.stringify(overview.data));
- assert.deepEqual(overview.data.cells,[]);
+ // The new fixture has one employee and no skill columns: one empty row.
+ assert.deepEqual(overview.data.cells,[[]]);
 });
