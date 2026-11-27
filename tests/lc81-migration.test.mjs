@@ -554,7 +554,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await assert.rejects(store.transferEmployment(manager.id,1,move),/недоступно/);
   // Download real original workbook layouts and check the actual Office ZIP
   // parts, rather than asserting just a filename or a successful response.
-  const exports=[['order',groupOrder.id,'15','word/document.xml'],['audit',recordedAudit.id,'RC1','xl/workbook.xml'],['self',selfResult.id,'14','xl/workbook.xml'],['practical',practical.id,'practice','xl/workbook.xml'],['bank',newBank.id,'10','xl/workbook.xml'],['matrix',finalMatrix.id,'7','xl/workbook.xml'],['training_plan',newTraining.id,'6','xl/workbook.xml'],['journal',newTraining.id,'8','xl/workbook.xml'],['supplement',supp.id,'16','xl/workbook.xml'],['preparation',bundle.id,'17','xl/workbook.xml']];
+  const exports=[['order',groupOrder.id,'15','word/document.xml'],['audit',recordedAudit.id,'RC1','xl/workbook.xml'],['self',selfResult.id,'14','xl/workbook.xml'],['practical',practical.id,'practice','xl/workbook.xml'],['bank',newBank.id,'10','xl/workbook.xml'],['matrix',finalMatrix.id,'7','xl/workbook.xml'],['training_plan',newTraining.id,'6','xl/workbook.xml'],['journal',newTraining.id,'8','xl/workbook.xml'],['supplement',supp.id,'16','xl/workbook.xml'],['preparation',bundle.id,'17','xl/workbook.xml'],['entry',ad.id,'1','xl/workbook.xml'],['adaptation',bundle.id,'2','xl/workbook.xml'],['safety_program',bundle.id,'3','xl/workbook.xml'],['internship_program',bundle.id,'4','xl/workbook.xml']];
   for(const [kind,id,tag,part] of exports){
    const file=await store.exportForm(manager.id,1,{kind,appendix:null,id});
    assert(file.filename.startsWith('TWI-03-'+tag+'-'),kind);
@@ -562,7 +562,27 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
    assert(text.length>100,kind);
    if(kind==='audit')assert(text.includes('RC1 - 20'));
    if(kind==='matrix')assert(text.includes('Исходный срез')&&text.includes('Расшифровка'));
+   if(kind==='entry')assert(text.includes('Календарь план и факт')&&text.includes('Фактические записи'));
+   if(kind==='adaptation')assert(text.includes('Выданные вопросы')&&text.includes('Комиссия')&&text.includes('Основания оценок'));
+   if(kind==='safety_program'){assert(text.includes('Программа ОТ')&&text.includes('Результаты и основания'));const strings=new TextDecoder().decode(entries.find(x=>x.name==='xl/sharedStrings.xml').bytes);assert(strings.includes('Учебный протокол')&&strings.includes('Безопасные методы')&&strings.includes('Учебная тема ОТ'));}
+   if(kind==='internship_program'){assert(text.includes('План и факт смен'));const strings=new TextDecoder().decode(entries.find(x=>x.name==='xl/sharedStrings.xml').bytes);assert(strings.includes('2 / 1')&&strings.includes('Синтетическая смена'));}
   }
+  const pack=await store.exportForm(manager.id,1,{kind:'preparation_pack',appendix:null,id:bundle.id});
+  assert.equal(pack.mime,'application/zip');const packParts=await readZip(pack.bytes);assert.deepEqual(packParts.map(x=>x.name),['TWI-03-2.xlsx','TWI-03-3.xlsx','TWI-03-4.xlsx','TWI-03-17.xlsx']);
+  for(const file of packParts)assert((await readZip(file.bytes)).some(x=>x.name==='xl/workbook.xml'));
+  assert(store.enrollmentDetail(manager.id,1,ad.id).forms.includes('entry'));
+  assert(store.preparationDetail(manager.id,1,bundle.id).forms.includes('preparation_pack'));
+  const batchItems=[{kind:'entry',id:ad.id},{kind:'order',id:groupOrder.id},{kind:'matrix',id:finalMatrix.id}];
+  const batch=await store.exportForm(manager.id,1,{kind:'batch',items:batchItems});
+  assert.equal(batch.filename,'TWI-03-BATCH.zip');assert.equal(batch.mime,'application/zip');
+  const batchParts=await readZip(batch.bytes);assert.equal(batchParts.length,3);
+  assert(batchParts[0].name.endsWith('.xlsx')&&batchParts[1].name.endsWith('.docx')&&batchParts[2].name.endsWith('.xlsx'));
+  assert((await readZip(batchParts[1].bytes)).some(x=>x.name==='word/document.xml'));
+  await assert.rejects(store.exportForm(manager.id,1,{kind:'batch',items:[batchItems[0],batchItems[0]]}),/Повторяющиеся/);
+  await assert.rejects(store.exportForm(manager.id,1,{kind:'batch',items:[batchItems[0],{kind:'order',id:x.personB}]}),/недоступна/);
+  await assert.rejects(store.exportForm(worker.id,1,{kind:'batch',items:batchItems}),/недоступна/);
+  await assert.rejects(store.exportForm(worker.id,1,{kind:'preparation_pack',appendix:null,id:bundle.id}),/недоступна/);
+  await assert.rejects(store.exportForm(otherEditor.id,1,{kind:'entry',appendix:null,id:ad.id}),/недоступна/);
   await assert.rejects(store.exportForm(worker.id,1,{kind:'matrix',appendix:null,id:finalMatrix.id}),/недоступна/);
   await assert.rejects(store.exportForm(otherEditor.id,1,{kind:'journal',appendix:null,id:newTraining.id}),/недоступна/);
   await assert.rejects(store.exportForm(admin.id,1,{kind:'order',appendix:null,id:groupOrder.id}),/недоступна/);

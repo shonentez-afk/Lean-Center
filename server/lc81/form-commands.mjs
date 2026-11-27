@@ -7,11 +7,12 @@ import {STANDARD_FORMS,standardWorkbook} from '../../src/modules/training/standa
 import {finalBlankWorkbook} from '../../src/modules/training/standard-final-prints.js';
 import {assessmentMatrixWorkbook,originalChecklistMatch,supplementMatrixWorkbook,preparationStructureWorkbook} from '../../src/modules/training/standard-prints.js';
 import {productionRows,productionWorkbook,practicalWorkbook} from '../../src/modules/training/corporate-forms.js';
-import {builtinOrderDocx} from '../../src/modules/training/local-docx.js';
+import {builtinOrderDocx,zipStored} from '../../src/modules/training/local-docx.js';
+import {entryForm,preparationForms,programFormsAvailable} from './program-form-commands.mjs';
 import {matrixFromRecord,matrixProjection,matrixWorkbook} from '../../src/modules/training/matrix-view.js';
 import {preparationRows} from '../../src/modules/training/standard-workflows.js';
 import {assessmentAnswers} from '../../src/modules/training/assessment-review.js';
-import {programResource,trainingAssignmentResource,matrixResource,assessmentResource,auditResource,selfResource,orderResource,supplementResource,preparationResource} from './read-policy.mjs';
+import {programResource,enrollmentResource,trainingAssignmentResource,matrixResource,assessmentResource,auditResource,selfResource,orderResource,supplementResource,preparationResource} from './read-policy.mjs';
 import {qualityDetail} from './quality-commands.mjs';
 import {orderDetail,supplementDetail} from './mentor-workflows.mjs';
 import {preparationDetail} from './program-commands.mjs';
@@ -40,7 +41,7 @@ function excelJS(){
 const forms=STANDARD_FORMS.map(({id,title,notes,page})=>({id,title,notes,page,format:id===15?'DOCX':'XLSX'}));
 export function formsCatalog(db,a){
  const r=programResource(db);must(r&&allowed(a,'forms.read',r.units[0],r),403,'Бланки недоступны');
- return {version:'03',forms};
+ return {version:'03',forms,batch_types:a.personId&&a.permissions.includes('forms.export')?Object.entries(recordTypes).filter(([kind,t])=>kind!=='preparation_pack'&&a.permissions.includes(t.read)&&a.permissions.includes(t.detail)&&(!programFormKinds.has(kind)||programFormsAvailable(db,a))).map(([kind,t])=>({kind,read:t.read,appendix:t.appendix})):[]};
 }
 function blank(db,form){
  if(form.id===15)return {bytes:Buffer.from(builtinOrderDocx({organization:'________________',city:'________________',order_on:'',order_number:'____ /ОДП',approved_name:'________________',supplement_from:'',instructor_amount:5000,trainer_amount:7000},[])),extension:'docx'};
@@ -48,7 +49,10 @@ function blank(db,form){
  const book=[9,13,14].includes(id)?assessmentMatrixWorkbook(X,id):id===16?supplementMatrixWorkbook(X,db):id===17?preparationStructureWorkbook(X):[6,8].includes(id)?productionWorkbook(X,Array.from({length:12},()=>({values:Array(9).fill(''),facts:[],assignment:{assigned_on:'',due_on:'',state:''}})),{title:form.title}):finalBlankWorkbook(X,id)||standardWorkbook(X,form);
  return {book,extension:'xlsx'};
 }
+const programFormKinds=new Set(['entry','adaptation','safety_program','internship_program','preparation_pack']);
 const recordTypes=Object.freeze({
+ entry:{table:'training_enrollment',read:'training.enrollment.read',detail:'training.enrollment.detail',appendix:1},
+ ...Object.fromEntries([['adaptation',2],['safety_program',3],['internship_program',4],['preparation_pack',17]].map(([k,appendix])=>[k,{table:'twi_preparation',read:'preparation.read',detail:'preparation.detail',appendix}])),
  training_plan:{table:'training_assignment',read:'training.read',detail:'training.detail',appendix:6},
  journal:{table:'training_assignment',read:'training.read',detail:'training.detail',appendix:8},
  matrix:{table:'competency_matrix',read:'matrix.read',detail:'matrix.detail',appendix:7},
@@ -73,12 +77,13 @@ function resource(db,a,kind,id){
  case 'self':return selfResource(db,r,day);
  case 'order':return orderResource(db,r,day);
  case 'supplement':return supplementResource(db,r,day,JSON.parse(r.tasks_json));
- case 'preparation':return preparationResource(db,r,day);
+ case 'entry':return find(db,'training_program',r.program_id)?.kind==='entry'?enrollmentResource(db,r,day):null;
+ case 'adaptation':case 'safety_program':case 'internship_program':case 'preparation_pack':case 'preparation':return preparationResource(db,r,day);
  }
  return null;
 }
 export function canExportForm(db,a,kind,id){
- if(!a.personId||!Object.hasOwn(recordTypes,kind)||!isId(id))return false;
+ if(!a.personId||!Object.hasOwn(recordTypes,kind)||!isId(id)||programFormKinds.has(kind)&&!programFormsAvailable(db,a))return false;
  const t=recordTypes[kind],r=resource(db,a,kind,id);
  return !!r&&!!a.read(t.read,id)&&allowed(a,t.detail,id,r)&&allowed(a,'forms.export',id,r);
 }
@@ -102,7 +107,13 @@ function populated(db,a,kind,id){
   const d=orderDetail(db,a,id);return {bytes:Buffer.from(builtinOrderDocx(d,d.members,{registered:true})),extension:'docx',tag:'15'};
  }
  const X=excelJS();let book,tag=String(t.appendix);
- if(kind==='audit'){
+ if(kind==='entry')book=entryForm(db,a,id,X);
+ else if(['adaptation','safety_program','internship_program'].includes(kind))book=preparationForms(db,a,id,X,[t.appendix])[0].book;
+ else if(kind==='preparation_pack'){
+  const docs=preparationForms(db,a,id,X,[2,3,4]);
+  const structure=populated(db,a,'preparation',id);
+  return {parts:[...docs.map(v=>({book:v.book,filename:'TWI-03-'+v.id+'.xlsx'})),{book:structure.book,filename:'TWI-03-17.xlsx'}],extension:'zip',tag:'PACK'};
+ }else if(kind==='audit'){
   const d=qualityDetail(db,a,'audit',id),method=methodOf(db,r.version_id);
   if(originalChecklistMatch(method,13))book=assessmentMatrixWorkbook(X,13,[{label:d.mentor,date:d.date,evaluator:d.auditor,feedback:d.summary,conclusion:d.state==='final'?'Зафиксирован':'Аннулирован',responses:d.questions.map(q=>({value:q.response==='yes'?1:q.response==='no'?0:null,note:q.note,state:d.labels[q.response]||q.response}))}],{method,date:d.date});
   else{must(d.method==='TWI_L1_RC1'&&d.questions.length===20,422,'Методика не соответствует приложению 13 или RC1');book=rc1Workbook(X,d);tag='RC1'}
@@ -143,6 +154,14 @@ function populated(db,a,kind,id){
  must(book,422,'Форма не сформирована');return {book,extension:'xlsx',tag};
 }
 export function prepareForm(db,a,f){
+ if(f?.kind==='batch'){
+  must(exact(f,['kind','items'])&&Array.isArray(f.items)&&f.items.length>=1&&f.items.length<=20&&f.items.every(x=>exact(x,['kind','id'])&&Object.hasOwn(recordTypes,x.kind)&&x.kind!=='preparation_pack'&&isId(x.id)),400,'Выберите от 1 до 20 документов');
+  must(new Set(f.items.map(x=>x.kind+':'+x.id)).size===f.items.length,400,'Повторяющиеся документы');
+  // Validate every selected record before constructing any workbook.
+  must(f.items.every(x=>canExportForm(db,a,x.kind,x.id)),404,'Выгрузка недоступна для одной или нескольких записей');
+  const parts=f.items.map(({kind,id},i)=>{const r=populated(db,a,kind,id);a.audit('forms.export.'+kind,id);return {...r,filename:String(i+1).padStart(2,'0')+'-TWI-03-'+r.tag+'-'+id+'.'+r.extension}});
+  return {parts,extension:'zip',filename:'TWI-03-BATCH.zip',mime:'application/zip'};
+ }
  must(exact(f,['kind','appendix','id'])&&typeof f.kind==='string',400,'Неверная форма');
  let result,target,tag;
  if(f.kind==='blank'){
@@ -153,10 +172,13 @@ export function prepareForm(db,a,f){
   result=populated(db,a,f.kind,f.id);target=f.id;tag=result.tag+'-'+target.slice(0,8);
  }
  a.audit(f.kind==='blank'?'forms.blank':'forms.export.'+f.kind,target);
- return {...result,filename:'TWI-03-'+tag+'.'+result.extension,mime:result.extension==='docx'?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
+ return {...result,filename:'TWI-03-'+tag+'.'+result.extension,mime:result.extension==='zip'?'application/zip':result.extension==='docx'?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
 }
 export async function serializeForm(result){
- try{if(result.book){result.bytes=Buffer.from(await result.book.xlsx.writeBuffer());delete result.book}}
- catch(e){throw new PilotError(422,'Не удалось сформировать XLSX: '+String(e.message||'ошибка').slice(0,180))}
+ try{
+  if(result.parts){const entries=[];let total=0;for(const part of result.parts){const bytes=part.bytes||Buffer.from(await part.book.xlsx.writeBuffer());total+=bytes.length;must(total<=30*1024*1024,413,'Комплект документов слишком велик');entries.push({name:part.filename,bytes})}result.bytes=Buffer.from(zipStored(entries));delete result.parts}
+  else if(result.book){result.bytes=Buffer.from(await result.book.xlsx.writeBuffer());delete result.book}
+ }
+ catch(e){if(e instanceof PilotError)throw e;throw new PilotError(422,'Не удалось сформировать документ: '+String(e.message||'ошибка').slice(0,180))}
  must(Buffer.isBuffer(result.bytes)&&result.bytes.length>0&&result.bytes.length<=32*1024*1024,413,'Размер документа превышает допустимый');return result;
 }

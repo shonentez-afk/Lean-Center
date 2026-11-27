@@ -161,15 +161,32 @@ function resourcePanel(items){
 }
 libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard});
 async function downloadForm(kind,id=null,appendix=null){
- const r=await fetch('/api/lc81/forms/export',{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:JSON.stringify({kind,id,appendix})});
+ const r=await fetch('/api/lc81/forms/export',{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:JSON.stringify(kind==='batch'?{kind,items:id}:{kind,id,appendix})});
  if(!r.ok){const b=await r.json().catch(()=>({}));throw Object.assign(Error(b.error||'Выгрузка не подтверждена'),{status:r.status})}
- const filename=r.headers.get('Content-Disposition')?.match(/filename="(TWI-03-[A-Za-z0-9-]+\.(?:xlsx|docx))"/)?.[1];
+ const filename=r.headers.get('Content-Disposition')?.match(/filename="(TWI-03-[A-Za-z0-9-]+\.(?:xlsx|docx|zip))"/)?.[1];
  if(!filename)throw Error('Сервер не подтвердил имя документа');
  const blob=await r.blob(),url=URL.createObjectURL(blob),link=el('a');link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
  note('Документ сформирован без подписей');
 }
 function formsPanel(d){
- return panel('Бланки и методики TWI · редакция '+d.version,el('p','17 приложений стандарта. Редактируемые формы без заполненных подписей. Выписки из зарегистрированных записей доступны непосредственно в соответствующих карточках.'),table(['№','Приложение','Применение','Файл'],d.forms.map(f=>[f.id,f.title,f.notes,button('Скачать '+f.format,()=>downloadForm('blank',null,f.id))])));
+ const root=panel('Бланки и методики TWI · редакция '+d.version,el('p','17 приложений стандарта. Редактируемые формы без заполненных подписей. Выписки из зарегистрированных записей доступны непосредственно в соответствующих карточках.'),table(['№','Приложение','Применение','Файл'],d.forms.map(f=>[f.id,f.title,f.notes,button('Скачать '+f.format,()=>downloadForm('blank',null,f.id))])));
+ if(d.batch_types?.length){
+  const types=d.batch_types,labels=Object.fromEntries(types.map(x=>[x.kind,'Приложение '+x.appendix+' · '+(d.forms.find(f=>f.id===x.appendix)?.title||x.kind)]));
+  const kind=select('kind','Документ',types.map(x=>[x.kind,labels[x.kind]])),selected=kind.querySelector('select'),records=el('div'),queue=el('div'),items=[];
+  const label=x=>[x.trainee_name||x.person_name||x.mentor_name||x.display_name,x.operation_name||x.title||x.name||x.code,x.start_on||x.assigned_on||x.assessed_on||x.observed_on||x.month,x.state,x.id.slice(0,8)].filter(Boolean).join(' · ');
+  const draw=()=>{queue.replaceChildren(el('p','Выбрано '+items.length+' / 20'),table(['Документ','Запись',''],items.map((x,i)=>[labels[x.kind],x.label,button('Убрать',()=>{items.splice(i,1);draw()})])));};
+  const load=async()=>{
+   const k=selected.value,t=types.find(x=>x.kind===k),result=await api('resources?action='+encodeURIComponent(t.read));
+   if(selected.value!==k)return;
+   const filter=input('batch_filter','Поиск по записи'),out=el('div');
+   const list=result.items.filter(x=>x.can_detail!==false&&(k!=='entry'||x.kind==='entry')&&(k!=='practical'||x.kind==='practical'));
+   const update=()=>{const q=filter.querySelector('input').value.trim().toLocaleLowerCase('ru-RU'),matches=list.filter(x=>label(x).toLocaleLowerCase('ru-RU').includes(q));out.replaceChildren(el('p','Найдено '+matches.length+' · показано не более 100. Доступ проверяется при формировании.'),table(['Запись',''],matches.slice(0,100).map(x=>[label(x),button('Добавить',()=>{if(items.some(i=>i.kind===k&&i.id===x.id))return;if(items.length>=20)throw Error('Не более 20 документов');items.push({kind:k,id:x.id,label:label(x)});draw()})])));};
+   filter.querySelector('input').addEventListener('input',update);records.replaceChildren(filter,out);update();
+  };
+  selected.addEventListener('change',()=>records.replaceChildren());draw();
+  root.append(panel('Пакетная выгрузка ZIP',el('p','Выберите до 20 записей из разрешённых разделов. При недоступности хотя бы одного источника архив не формируется. Подписи остаются пустыми.'),kind,button('Показать записи',load),records,queue,button('Скачать выбранные документы',async()=>{if(!items.length)throw Error('Добавьте документы');await downloadForm('batch',items.map(({kind,id})=>({kind,id})));})));
+ }
+ return root;
 }
 trainingUI=createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,downloadForm});
 centerUI=createCenterUI({api,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked});

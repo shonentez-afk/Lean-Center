@@ -162,6 +162,10 @@ try{
  const downloaded=m.p.waitForEvent('download');await formRow.getByRole('button',{name:'Скачать XLSX',exact:true}).click();
  const document=await downloaded;assert.equal(document.suggestedFilename(),'TWI-03-13.xlsx');
  assert.equal((await fs.readFile(await document.path())).subarray(0,4).toString('hex'),'504b0304');
+ await m.p.getByRole('heading',{name:'Пакетная выгрузка ZIP',exact:true}).waitFor();
+ await m.p.locator('#content select[name=kind]').selectOption('entry');
+ await button(m.p,'Показать записи').click();await m.p.locator('#content input[name=batch_filter]').waitFor();
+ await m.p.getByText('Выбрано 0 / 20',{exact:true}).waitFor();
  const roleData=store.adminData(admin.id),instructorRole=roleData.roles.find(r=>r.code==='INSTRUCTOR')?.id||await ref('business_role',{code:'INSTRUCTOR',name:'Инструктор'});
  await ref('role_assignment',{person_id:p2,role_id:instructorRole,valid_from:day,valid_to:null});
  await goSection('calendar.read');await m.p.locator('#content .lc81-calendar').waitFor();

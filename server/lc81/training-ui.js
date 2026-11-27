@@ -3,7 +3,7 @@
 export function createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,downloadForm}){
  const opts=(items,field='name')=>items.map(x=>[x.id,x[field]]);
  const empty=()=>el('p','Нет доступных записей','muted');
- const exportLabels={training_plan:'План / факт XLSX',journal:'Журнал инструктажа XLSX',matrix:'Матрица XLSX',practical:'Чек-лист практики XLSX',bank:'Банк вопросов XLSX',audit:'Выписка аудита XLSX',self:'Самооценка XLSX',order:'Копия приказа DOCX',supplement:'Ходатайство XLSX',preparation:'Структура подготовки XLSX'};
+ const exportLabels={entry:'Приложение 1 · план ввода XLSX',adaptation:'Приложение 2 · адаптация XLSX',safety_program:'Приложение 3 · ОТ XLSX',internship_program:'Приложение 4 · стажировка XLSX',preparation_pack:'Комплект приложений 2–4, 17 ZIP',training_plan:'План / факт XLSX',journal:'Журнал инструктажа XLSX',matrix:'Матрица XLSX',practical:'Чек-лист практики XLSX',bank:'Банк вопросов XLSX',audit:'Выписка аудита XLSX',self:'Самооценка XLSX',order:'Копия приказа DOCX',supplement:'Ходатайство XLSX',preparation:'Структура подготовки XLSX'};
  function appendExports(n,d){if(d.forms?.length){const row=el('div',undefined,'row');for(const kind of d.forms)row.append(button(exportLabels[kind]||'Скачать документ',()=>downloadForm(kind,d.id)));n.append(row)}}
  const state={planned:'Запланировано',in_progress:'В работе',completed:'Завершено',cancelled:'Отменено',active:'Действует',retired:'Архив',pass:'Пройдено',fail:'Не пройдено'};
  const dt=(name,label,day)=>{const x=input(name,label,'date');x.querySelector('input').value=day||'';return x};
@@ -264,7 +264,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   if(d.cap.result&&ordinary.length)n.append(groups('Зарегистрировать фактическое задание',[pick('task_id','Задание',ordinary.map(t=>[t.id,t.title])),dt('held_on','Фактическая дата',d.day),pick('result','Результат',[['completed','Выполнено'],['incomplete','Не выполнено']],'completed'),num('minutes','Фактически, мин.',0,1440,0),input('evidence','Подтверждение / комментарий')],'Зарегистрировать факт',command('result',f=>({task_id:value(f,'task_id'),held_on:value(f,'held_on'),result:value(f,'result'),minutes:Number(value(f,'minutes')),evidence:value(f,'evidence')}))));
   if(d.cap.finish&&d.tasks.every(t=>t.done))n.append(groups('Завершить программу',[pick('conclusion','Заключение',Object.entries(d.conclusions)),input('feedback','Обратная связь')],'Завершить',command('finish',f=>({conclusion:value(f,'conclusion'),feedback:value(f,'feedback')}))));
   if(d.cap.cancel)n.append(groups('Отменить программу',[input('feedback','Основание отмены')],'Отменить программу',command('cancel',f=>({conclusion:null,feedback:value(f,'feedback')}))));
-  n.append(sub);setContent(host,n);
+  n.append(sub);appendExports(n,d);setContent(host,n);
  }
  async function preparationEditor(host){
   if(!discard())return;
