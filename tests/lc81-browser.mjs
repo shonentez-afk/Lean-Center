@@ -213,11 +213,26 @@ try{
  await goSection('plan.read');await m.p.locator('#content').getByRole('heading',{name:'Мой план работы',exact:true}).waitFor();
  await goSection('center.read');await m.p.locator('#content').getByRole('heading',{name:'Оперативный обзор',exact:true}).waitFor();
  await button(m.p,'Квартал').click();
+ await indicator(m.p,'saved').waitFor();
+ const siteDay=store.adminData(admin.id).clock.day;
+ const quarterStart=siteDay.slice(0,4)+'-'+String(Math.floor((Number(siteDay.slice(5,7))-1)/3)*3+1).padStart(2,'0')+'-01';
+ assert.equal(await m.p.locator('#content input[name=from]').inputValue(),quarterStart);
+ assert.equal(await m.p.locator('#content input[name=to]').inputValue(),siteDay);
+ const analyticsGroup=m.p.locator('#nav details[data-group="Аналитика"]');
+ if(!await analyticsGroup.evaluate(e=>e.open))await analyticsGroup.locator('summary').click();
  const prevDate=day.slice(0,4)+'-01-01';
  await m.p.locator('#content input[name=from]').fill(prevDate);await m.p.locator('#content input[name=from]').dispatchEvent('change');
  await button(m.p,'Обновить').click();await m.p.getByRole('heading',{name:'Оперативный обзор',exact:true}).waitFor();
  await goSection('sop.read_effective');await m.p.getByRole('heading',{name:'Каталог действующих СОП предприятия',exact:true}).waitFor();
+ assert(await analyticsGroup.evaluate(e=>e.open),'Analytics menu group must stay open');
  await m.p.evaluate(()=>history.back());await m.p.getByRole('heading',{name:'Оперативный обзор',exact:true}).waitFor();assert.equal(await m.p.locator('#content input[name=from]').inputValue(),prevDate);
+ await indicator(m.p,'saved').waitFor();
+ await m.p.evaluate(()=>history.forward());await m.p.getByRole('heading',{name:'Каталог действующих СОП предприятия',exact:true}).waitFor();
+ await indicator(m.p,'saved').waitFor();
+ await m.p.evaluate(()=>history.back());await m.p.getByRole('heading',{name:'Оперативный обзор',exact:true}).waitFor();
+ assert.equal(await m.p.locator('#content input[name=from]').inputValue(),prevDate);
+ assert(await analyticsGroup.evaluate(e=>e.open),'Analytics menu group must survive back/forward');
+ await indicator(m.p,'saved').waitFor();
  await button(m.p,'ИИ-помощник отчёта').click();await m.p.getByRole('dialog',{name:'Контекстный помощник'}).waitFor();await button(m.p,'Закрыть помощник').click();
  await goSection('analytics.read');await m.p.locator('#content').getByRole('heading',{name:'Аналитика за период',exact:true}).waitFor();
  await m.p.getByRole('heading',{name:'Расширенные отчёты LC7',exact:true}).waitFor();
@@ -401,6 +416,69 @@ try{
  await store.setState(admin.id,reader.id,'blocked');
  await r.p.reload();await r.p.locator('#login-panel').waitFor();
  assert.equal(await r.p.locator('#workspace').isVisible(),false);
+
+ // PARITY-R1: check every editable work-role profile in the actual HTTPS
+ // portal. Unit-tree roles get one local unit; p2 in the other unit is a
+ // negative control. Existing scenarios cover the two system roles.
+ const rolePresets=store.adminData(admin.id).rolePresets;
+ assert.equal(rolePresets.length,16);
+ assert(rolePresets.every(x=>x.status==='ready'));
+ const roleResults=[];
+ for(const preset of rolePresets){
+  const result={role:preset.key,scope:preset.scope,opened:[],failures:[],checks:[]};
+  roleResults.push(result);
+  let current;
+  try{
+   const login='parity-'+preset.key.replaceAll('_','-'),password=pass();
+   const scopes=preset.scope==='unit_tree'?[{kind:'unit_tree',unit_id:a}]:preset.scope==='assigned'?[{kind:'assigned'},{kind:'self'}]:[{kind:'self'}];
+   const saved=await store.provisionAccount(admin.id,{person_id:null,new_person:{employee_code:'PARITY-'+preset.key.toUpperCase(),display_name:'Учебный профиль '+preset.name,unit_id:a},login,password,generate:false,manager:false,access:{role_id:preset.role_id,scopes}});
+   current=await profile(login,password,{width:1440,height:900});
+   const {p}=current;
+   await p.bringToFront();await p.locator('html:not(.lc81-access-check)').waitFor();
+   const session=await p.evaluate(async()=>{const r=await fetch('/api/lc81/session',{cache:'no-store'});return {status:r.status,...await r.json()}});
+   assert.equal(session.status,200);assert.equal(session.user.person_id,saved.person_id);assert.equal(session.user.admin,false);
+   const actions=session.user.workspace_actions,permissions=session.user.permissions;
+   const navActions=await p.locator('#nav [data-action]').evaluateAll(ns=>ns.map(n=>n.dataset.action));
+   assert.equal(new Set(navActions).size,navActions.length,'Duplicate menu destinations');
+   assert.deepEqual([...navActions].sort(),[...actions].sort(),'Menu differs from authorized workspaces');
+   for(const action of ['sop.constructor','sop.read_effective','frv.read'])assert(navActions.includes(action),'Shared library missing: '+action);
+   for(const action of ['admin','forms.read','audit.history.read','program.read'])assert(!navActions.includes(action),'Unapproved site-wide workspace: '+action);
+   assert.equal(await p.locator('#status.error').count(),0,'Landing page failed');
+   for(const action of navActions){
+    try{
+     await p.locator('html:not(.lc81-access-check)').waitFor({timeout:8000});
+     const nav=p.locator('#nav [data-action="'+action+'"]'),group=nav.locator('xpath=ancestor::details');
+     if(await group.count()&&!await group.evaluate(e=>e.open))await group.locator('summary').click({timeout:8000});
+     await nav.click({timeout:8000});
+     await p.locator('#nav [data-action="'+action+'"][aria-current="page"]').waitFor({timeout:8000});
+     await indicator(p,'saved').waitFor({timeout:8000});
+     assert(await p.locator('#content').evaluate(e=>e.childElementCount>0),'Empty destination');
+     assert.equal(await p.locator('#status.error').count(),0,'Workspace error: '+(await p.locator('#status').textContent()));
+     if(action==='internship.view'){
+      assert.equal(await p.getByRole('heading',{name:'Шаблоны стажировки',exact:true}).count(),0,'Unauthorized site-wide template panel');
+      await p.getByRole('heading',{name:'Персональные программы стажировки',exact:true}).waitFor({timeout:8000});
+     }
+     result.opened.push(action);
+    }catch(e){result.failures.push({action,message:String(e.message||e).slice(0,400)})}
+   }
+   const statuses=await p.evaluate(async({own,foreign})=>{
+    const get=async path=>(await fetch('/api/lc81/'+path,{cache:'no-store'})).status;
+    return {admin:await get('admin'),forms:await get('forms'),foreignBasic:await get('resources?action=person.read_basic&id='+foreign),foreignDirectory:await get('resources?action=person.read_directory&id='+foreign),foreignCard:await get('person/card?id='+foreign),ownCard:await get('person/card?id='+own)};
+   },{own:saved.person_id,foreign:p2});
+   assert.equal(statuses.admin,403);assert.equal(statuses.forms,403);
+   for(const key of ['foreignBasic','foreignDirectory','foreignCard'])assert.equal(statuses[key],404,key);
+   assert.equal(statuses.ownCard,permissions.includes('person.read_card')?200:404,'Own card permission');
+   result.checks.push('admin denied','site forms denied','foreign basic/directory/card denied','own card matches permission');
+  }catch(e){result.failures.push({action:'profile',message:String(e.message||e).slice(0,600)})}
+  finally{if(current){
+   await current.p.evaluate(async()=>{await fetch('/api/lc81/logout',{method:'POST',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:'{}'})}).catch(()=>{});
+   await current.ctx.close();
+  }}
+ }
+ await fs.mkdir('artifacts',{recursive:true});
+ await fs.writeFile('artifacts/lc81-role-parity.json',JSON.stringify({kind:'synthetic role workspace regression',profiles:roleResults,notes:'16 configurable profiles; bootstrap and site manager covered by existing scenarios. Entry and record checks are not complete business-operation parity.'},null,2)+'\n');
+ console.log('LC8.1 role parity '+JSON.stringify({profiles:roleResults.length,opened:roleResults.reduce((n,r)=>n+r.opened.length,0),failed:roleResults.flatMap(r=>r.failures.map(f=>({role:r.role,...f})))}));
+ assert.equal(roleResults.flatMap(r=>r.failures).length,0,'Role workspace regression: see lc81-role-parity.json');
  assert.deepEqual(errors,[]);
  await fs.mkdir('artifacts',{recursive:true});
  await m.p.bringToFront();await m.p.locator('html:not(.lc81-access-check)').waitFor();

@@ -488,7 +488,7 @@ async function render(){
   }
   if(page==='internship.view'){
    const root=el('div');
-   for(const action of ['program.read','training.enrollment.read'])if(user.permissions.includes(action)){
+   for(const action of ['program.read','training.enrollment.read'])if(user.workspace_actions.includes(action)){
     const d=await api('resources?action='+action);root.append(trainingUI.programPanel(action,d.items,user,'internship'));
    }
    if(serial===sequence)$('content').replaceChildren(root);return;
