@@ -85,29 +85,50 @@ test('pinned protected Amvera recipe: new storage, persistent state, offline bac
  }finally{try{await stop()}finally{await fs.rm(root,{recursive:true,force:true})}}
 });
 
-test('Amvera may reformat only the pinned QA deployment recipe; semantic changes remain denied',async()=>{
+test('Amvera generated recipe accepts the observed safe configuration and rejects the previous server',async()=>{
  const file='amvera.yml',original=await fs.readFile(file),identity=cloudIdentity();
- // Simulate a platform editor: no comment, CRLF, different indentation,
- // changed key order and quoting of plain strings.
+ // Exact observed platform shape, including YAML document marker,
+ // platform defaults and single-writer restart. Only scriptName was fixed.
+ const observed=[
+  '---','meta:','  environment: nodejs','  toolchain:',
+  '    name: npm','    version: 22','build:','  skip: false',
+  '  additionalCommands: node tools/build_folder.mjs --cloud',
+  '  artifacts:',"    '*': /",'run:','  persistenceMount: /data',
+  '  scriptName: server/lc81-main.mjs','  scriptArguments: null',
+  '  nodeArguments: null','  command: null','  containerPort: 8080',
+  '  singleton: true','  zeroDowntime: false',''
+ ].join('\n');
+ assert.equal(original.toString('utf8'),observed);
  const formatted=[
-  'run:', '    persistenceMount: "/data"', '    containerPort: 8080',
-  '    scriptName: server/lc81-main.mjs # QA', 'meta:',
+  '--- # generated','run:','    persistenceMount: "/data"','    containerPort: 8080',
+  '    scriptName: server/lc81-main.mjs # QA','    command: null','    nodeArguments: null',
+  '    scriptArguments: null','    zeroDowntime: false','    singleton: true','meta:',
   '    toolchain:', '        version: 22', "        name: 'npm'",
   '    environment: node','build:',
-  '    additionalCommands: node tools/build_folder.mjs --cloud',''
+  '    additionalCommands: node tools/build_folder.mjs --cloud','    skip: false',
+  '    artifacts:','        "*": /',''
  ].join('\r\n');
  try{
-  await fs.writeFile(file,formatted);
-  assert.deepEqual(cloudIdentity(),identity);
+  for(const text of [observed,formatted,observed.trimEnd()]){await fs.writeFile(file,text);assert.deepEqual(cloudIdentity(),identity)}
   const variations=[
-   formatted.replace('server/lc81-main.mjs','server/main.mjs'),
-   formatted.replace('8080','9090'),formatted.replace('"/data"','"/tmp"'),
-   formatted.replace('--cloud','--cloud && echo unsafe'),
-   formatted.replace('version: 22','version: 20'),
-   formatted.replace('containerPort: 8080','containerPort: 8080\r\n    containerPort: 8080'),
-   formatted.replace('environment: node','environment: &e node'),
-   formatted+'extra: value\r\n',
-   formatted.replace('    environment: node','      environment: node')
+   observed.replace('server/lc81-main.mjs','server/main.mjs'),
+   observed.replace('8080','9090'),observed.replace('/data','/tmp'),
+   observed.replace('--cloud','--cloud && echo unsafe'),
+   observed.replace('version: 22','version: 20'),
+   observed.replace('containerPort: 8080','containerPort: 8080\n  containerPort: 8080'),
+   observed.replace('environment: nodejs','environment: &e nodejs'),
+   observed+'extra: value\n',
+   observed.replace('singleton: true','singleton: false'),
+   observed.replace('zeroDowntime: false','zeroDowntime: true'),
+   observed.replace('command: null','command: node server/main.mjs'),
+   observed.replace('nodeArguments: null','nodeArguments: --require evil.js'),
+   observed.replace('scriptArguments: null','scriptArguments: extra'),
+   observed.replace('skip: false','skip: true'),
+   observed.replace("'*': /","'*': /tmp"),
+   observed.replace("'*': /","'*': /\n    extra: /"),
+   observed.replace('  singleton: true\n',''),
+   observed.replace('  environment: nodejs','    environment: nodejs'),
+   observed+'---\n'
   ];
   for(const text of variations){await fs.writeFile(file,text);assert.throws(()=>cloudIdentity(),/Cloud source changed: amvera.yml/)}
  }finally{await fs.writeFile(file,original)}

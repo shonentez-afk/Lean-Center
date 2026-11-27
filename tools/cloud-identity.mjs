@@ -8,25 +8,28 @@ const gitBlob=bytes=>createHash('sha1').update(Buffer.from('blob '+bytes.length+
 // tags, duplicate/unknown fields, sequences, complex scalars and other modes.
 const qaRecipePath='deploy/lc81-amvera/amvera.yml';
 const qaFields=new Map([
- ['meta.environment','node'],['meta.toolchain.name','npm'],['meta.toolchain.version',22],
- ['build.additionalCommands','node tools/build_folder.mjs --cloud'],
- ['run.scriptName','server/lc81-main.mjs'],['run.containerPort',8080],['run.persistenceMount','/data']
+ ['meta.environment','nodejs'],['meta.toolchain.name','npm'],['meta.toolchain.version',22],
+ ['build.skip',false],['build.additionalCommands','node tools/build_folder.mjs --cloud'],['build.artifacts.*','/'],
+ ['run.scriptName','server/lc81-main.mjs'],['run.containerPort',8080],['run.persistenceMount','/data'],
+ ['run.scriptArguments',null],['run.nodeArguments',null],['run.command',null],['run.singleton',true],['run.zeroDowntime',false]
 ]);
-const qaBlocks=new Set(['meta','meta.toolchain','build','run']);
+const qaBlocks=new Set(['meta','meta.toolchain','build','build.artifacts','run']);
 function qaRecipe(bytes){
- const stack=[{indent:-1,key:'',childIndent:0}],seen=new Set();
+ const stack=[{indent:-1,key:'',childIndent:0}],seen=new Set();let header=false;
  for(let line of new TextDecoder('utf-8',{fatal:true}).decode(bytes).split(/\r?\n/)){
-  // The seven approved values contain no # characters. Inline comments
+  // The approved values contain no # characters. Inline comments
   // are allowed only after whitespace. Anything ambiguous fails closed.
   if(/^\s*(?:#.*)?$/.test(line))continue;
+  if(/^--- *(?:#.*)?$/.test(line)){if(header||seen.size)return false;header=true;continue}
   line=line.replace(/ +#.*$/,'').replace(/ +$/,'');
-  const m=/^( *)([A-Za-z][A-Za-z0-9]*):(?: +(.*))?$/.exec(line);
+  const m=/^( *)([A-Za-z][A-Za-z0-9]*|'\*'|"\*"):(?: +(.*))?$/.exec(line);
   if(!m)return false;
   const indent=m[1].length;while(stack.length>1&&indent<=stack.at(-1).indent)stack.pop();
   const parent=stack.at(-1);
   if(indent<=parent.indent||parent.childIndent!==undefined&&parent.childIndent!==indent)return false;
   parent.childIndent=indent;
-  const key=parent.key?parent.key+'.'+m[2]:m[2];
+  const name=m[2]==="'*'"||m[2]==='"*"'?'*':m[2];
+  const key=parent.key?parent.key+'.'+name:name;
   if(seen.has(key))return false;seen.add(key);
   if(m[3]===undefined){
    if(!qaBlocks.has(key))return false;
@@ -34,7 +37,8 @@ function qaRecipe(bytes){
   }
   if(!qaFields.has(key))return false;
   const expected=qaFields.get(key),raw=m[3];
-  if(typeof expected==='number'){if(raw!==String(expected))return false}
+  if(expected===null||typeof expected==='number'||typeof expected==='boolean'){if(raw!==String(expected))return false}
+  else if(key==='meta.environment'&&['node',"'node'",'"node"'].includes(raw)){} // documented spelling also accepted
   else if(raw!==expected&&raw!=="'"+expected+"'"&&raw!=='"'+expected+'"')return false;
  }
  return seen.size===qaFields.size+qaBlocks.size&&[...qaFields.keys(),...qaBlocks].every(k=>seen.has(k));
