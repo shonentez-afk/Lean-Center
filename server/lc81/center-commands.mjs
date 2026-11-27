@@ -166,6 +166,20 @@ export function calendarWorkspace(db,a,{mode,from,to}){
   const done=['Завершена','Завершено'].includes(x.state);
   addRecord('preparation',x.options.id,x.date,x.type+(trainee?' · '+x.title:''),x.ownerId,x.people,x.state,!done,x.key);
  }
+ // Annual milestones are derived from the original corporate rules.
+ const annualByPerson=new Map(annualAuditCoverage(db,a.day.slice(0,4),a.day).map(x=>[x.personId,x]));
+ for(const x of standardCalendar(db,a.day,{kind:'normative'})){
+  if(x.page==='audit'){
+   const p=annualByPerson.get(x.options.personId);
+   if(!p||!who(a,p.personId)||!p.certificates.every(c=>a.read('credential.read',c.id))||![...p.audits,...p.unlinked,...p.duplicates].every(q=>recordAccess(db,a,'audit',q.id)))continue;
+   const r=personWorkResource(db,[p.personId],a.day);
+   if(!r)continue;
+   add({anchor:p.personId,key:x.key,date:x.date,type:x.type,title:name(a,p.personId),owner:name(a,x.ownerId),state:x.state,pending:true,route:{type:'person',id:p.personId}},{...r,self:p.personId},x.people);
+  }else if(x.page==='knowledge_bank'){
+   const link=recordAccess(db,a,'bank',x.options.id);if(!link)continue;
+   add({anchor:link.id,key:x.key,date:x.date,type:x.type,title:x.title,owner:name(a,x.ownerId),state:x.state,pending:true,route:routeOf(link)},link.resource,x.people);
+  }
+ }
  // Derived deadlines keep the original reference, never duplicate schedules.
  for(const r of rows(db,"SELECT r.id,r.review_due,r.author_id,d.title,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.archived=0 AND o.archived=0 AND r.review_due IS NOT NULL")){
   const v=a.read('sop.read_history',r.id);if(!v)continue;
