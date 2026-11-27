@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "41831c7245f1cc22a83e591fd9a91961860affd2",
+  "sourceCommit": "aee85cd1c8fa52fb9ab3c15248d181343cd644df",
   "files": [
     {
       "path": "amvera.yml",
@@ -131,7 +131,7 @@
     },
     {
       "path": "server/lc81/center-commands.mjs",
-      "sha": "778ead11a9cbef4f861f1d3588334683f007a01d"
+      "sha": "865bfeb0cb04e6e434b76e15c25b67d90b69bbbb"
     },
     {
       "path": "server/lc81/center-ui.js",
@@ -167,11 +167,11 @@
     },
     {
       "path": "server/lc81/form-commands.mjs",
-      "sha": "9d970371b497f05d40a7dc42884ec106d06fbec0"
+      "sha": "e50bb42578ddb9ea87198457c2d52cfa49633b6a"
     },
     {
       "path": "server/lc81/http.mjs",
-      "sha": "e406555e9b1a2ed31d05fe2e52c7b64da6b2a865"
+      "sha": "1f0d4a6186058ccb7b2590456a19160f8fa67be1"
     },
     {
       "path": "server/lc81/import-commands.mjs",
@@ -227,15 +227,15 @@
     },
     {
       "path": "server/lc81/portal.css",
-      "sha": "624f181511be692c00b70113a910b7cac0457a0f"
+      "sha": "3529d3d1cc5141b01394185de64630d01c1b7452"
     },
     {
       "path": "server/lc81/portal.html",
-      "sha": "ae1b4141a23b2e6575684225e56abe8d7773aef8"
+      "sha": "14ad7cdc0be9a4736fd50682eb2303ce0e7c2382"
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "771753b6b25c7331ad95419cc4dffbd834f44256"
+      "sha": "dec26c0f2f290c888e1d5f4c24d14fcf7f741b5f"
     },
     {
       "path": "server/lc81/program-commands.mjs",
@@ -251,7 +251,7 @@
     },
     {
       "path": "server/lc81/rc1-history.mjs",
-      "sha": "59415b7db627dea308f9b52c75895b3642040eb0"
+      "sha": "4d4aa496b8a3ae9aaabd46e0f9d97c8382f92848"
     },
     {
       "path": "server/lc81/read-policy.mjs",
@@ -279,7 +279,7 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "fa3954ec3bb46e25468dfc74c39af4ca559c5b88"
+      "sha": "a85aee4168b476d00c472babdc279fd6ca51f87d"
     },
     {
       "path": "server/lc81/subject-reports.mjs",
@@ -296,6 +296,14 @@
     {
       "path": "server/lc81/training-ui.js",
       "sha": "94b66d848a98c150a1f91e2b71e27fa955c42ee2"
+    },
+    {
+      "path": "server/lc81/workspace-access.mjs",
+      "sha": "eb6fee4ff3003042be66afef285b280be23ba49f"
+    },
+    {
+      "path": "server/lc81/workspace-scope.mjs",
+      "sha": "2a65cb8b329732b73b98f430ae50b6345dc940d7"
     },
     {
       "path": "server/main.mjs",
