@@ -127,7 +127,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
    if(req.method==='POST'&&p==='/api/lc81/admin/manager-policy'){reply(res,200,await store.upgradeManagerPolicy(a.id,await body(req),a.credential_revision));return}
    if(req.method==='GET'&&p==='/editor/frame'){
     const kind=url.searchParams.get('kind'),tab=url.searchParams.get('tab')||null;
-    must(['sop','frv'].includes(kind)&&a.permissions.some(x=>x===kind+'.create'||x===kind+'.edit_draft'||kind==='sop'&&x==='sop.revise'),403,'Редактор недоступен');
+    must(['sop','frv'].includes(kind)&&(!!a.person_id||a.permissions.some(x=>x===kind+'.create'||x===kind+'.edit_draft'||kind==='sop'&&x==='sop.revise')),403,'Редактор недоступен');
     const html=editorFrame(url.searchParams.get('session'),kind,tab);
     reply(res,200,html,'text/html; charset=utf-8',{'X-Frame-Options':'SAMEORIGIN','Content-Security-Policy':"sandbox allow-scripts allow-modals; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src data: blob:; object-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'; child-src 'none'"});
     return;
@@ -251,7 +251,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,cloudFet
     try{reply(res,200,{data:await store.libraryDetail(a.id,a.credential_revision,url.searchParams.get('action'),url.searchParams.get('id'))});return}finally{libraryBusy--}
    }
    if(req.method==='POST'&&['/api/lc81/library/open','/api/lc81/library/save'].includes(p)){
-    must(a.permissions.some(x=>['sop.create','sop.edit_draft','sop.revise','frv.create','frv.edit_draft'].includes(x)),403,'Редактор недоступен');
+    must(!!a.person_id||a.permissions.some(x=>['sop.create','sop.edit_draft','sop.revise','frv.create','frv.edit_draft'].includes(x)),403,'Редактор недоступен');
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
     try{
      const result=p.endsWith('/open')?await store.openLibrary(a.id,a.credential_revision,await body(req)):await store.saveLibrary(a.id,a.credential_revision,await body(req,2*30*1024*1024+65536));

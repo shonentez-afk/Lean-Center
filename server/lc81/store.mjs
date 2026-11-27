@@ -8,6 +8,7 @@ import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-st
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
 import {workspaceActions} from './workspace-access.mjs';
+import {sharedLibrary,SHARED_LIBRARY_READS,SHARED_LIBRARY_WORKSPACES} from './shared-library.mjs';
 import {siteClock,normalizeZone,SITE_ZONE_KEY} from './site-clock.mjs';
 import {changeOwnPassword,resetAccountPassword,renameAccount,grantStatus,endRole,endEmployment} from './admin-commands.mjs';
 import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource} from './read-policy.mjs';
@@ -85,10 +86,11 @@ function sessionView(db,a,withWorkspace=true){
  const d=day(db),sec=security(db,a.id),effective=sec.grants.filter(g=>grantStatus(db,g,d,config(db).site)==='effective').sort((x,y)=>x.id.localeCompare(y.id)).map(g=>[g.id,g.assignment_id,g.employment_id,g.policy_revision,g.scope,g.valid_from,g.valid_to]);
  const restricted=effective.some(g=>g[4].kind!=='unit_tree'||g[4].unit_id!==config(db).site);
  const assigned=effective.some(g=>g[4].kind==='assigned');
- const types=restricted?['org_unit','person_assignment','person','operation','role_assignment',...(assigned?['training_assignment','training_enrollment','action_item','schedule_event']:[])]:[];
+ const types=restricted?['org_unit','person_assignment','person','operation','role_assignment',...(assigned?['training_assignment','training_enrollment','action_item','schedule_event']:[])]:a.person_id?['org_unit','operation']:[];
  const epoch=types.length?one(db,'SELECT count(*) n FROM change_event WHERE entity_type IN ('+types.map(()=>'?').join(',')+')',types).n:0;
  const stamp=createHash('sha256').update(JSON.stringify([a.id,a.credential_revision,d,view.permissions,effective,epoch])).digest('hex');
- return {...view,workspace_actions:workspaceActions(db,trainingAccess(db,a,d),a.bootstrap===1),access_stamp:stamp};
+ const work=workspaceActions(db,trainingAccess(db,a,d),a.bootstrap===1);
+ return {...view,workspace_actions:[...new Set([...work,...(a.person_id?SHARED_LIBRARY_WORKSPACES:[])])].sort(),access_stamp:stamp};
 }
 function auditView(db){return rows(db,"SELECT a.id,a.actor_account_id,a.action,a.target_id,a.occurred_at,m.value reason FROM lc81_audit a LEFT JOIN lc81_meta m ON m.key='reason:'||a.target_id ORDER BY a.occurred_at DESC,a.id LIMIT 100")}
 function security(db,accountId){
@@ -113,9 +115,12 @@ function directoryView(db,a,action,data,d){
  const def=DIRECTORIES[type];
  return {...data,can_update:directoryAllowed(db,a,def.update,action,data.id,d),can_archive:!!def.archive&&directoryAllowed(db,a,def.archive,action,data.id,d)};
 }
-function photoAllowed(db,a,id,d){return !!readFor(db,a,'sop.read_steps',id,d)&&(a.bootstrap===1||canReadSopPhoto(db,security(db,a.id),a.id,id,d))}
+function photoAllowed(db,a,id,d){return !!sharedLibrary(db,a,config(db).site,d).read('sop.read_steps',id)||!!readFor(db,a,'sop.read_steps',id,d)&&(a.bootstrap===1||canReadSopPhoto(db,security(db,a.id),a.id,id,d))}
 function libraryAccess(db,a,d){
- return {read:(action,id)=>readFor(db,a,action,id,d),allows:(action,anchor,id)=>(LIBRARY_COMMANDS.includes(action)||DETAIL_ACTIONS.includes(action))&&(a.bootstrap===1?action!=='frv.finalize'&&!!readManagerProjection(db,config(db).site,anchor,id,d):canUseLibrary(db,security(db,a.id),a.id,action,anchor,id,d)),readScope:(kind,id)=>a.bootstrap===1?!!readManagerProjection(db,config(db).site,'operation.read',id,d):canReadLibraryAtOperation(db,security(db,a.id),a.id,kind,id,d),permissions:permissionsFor(db,a)};
+ const shared=sharedLibrary(db,a,config(db).site,d);
+ const fullAllows=(action,anchor,id)=>(LIBRARY_COMMANDS.includes(action)||DETAIL_ACTIONS.includes(action))&&!!readFor(db,a,anchor,id,d)&&(a.bootstrap===1?action!=='frv.finalize':canUseLibrary(db,security(db,a.id),a.id,action,anchor,id,d));
+ const read=(action,id)=>readFor(db,a,action,id,d)||shared.read(action,id);
+ return {read,fullAllows,allows:(action,anchor,id)=>action==='sop.read_public'?anchor==='sop.read_effective'&&!!read(anchor,id):fullAllows(action,anchor,id)||shared.allows(action,anchor,id),readScope:(kind,id)=>shared.readScope(kind,id)||(a.bootstrap===1?!!readManagerProjection(db,config(db).site,'operation.read',id,d):canReadLibraryAtOperation(db,security(db,a.id),a.id,kind,id,d)),permissions:[...new Set([...permissionsFor(db,a),...(shared.enabled?SHARED_LIBRARY_READS:[])])]};
 }
 function trainingAccess(db,a,d){
  const clock=siteClock(db);d=clock.day;
@@ -160,7 +165,7 @@ function projectView(db,a,action,data,d){
  }
  if(action==='sop.read_effective'){
   const v=libraryAccess(db,a,d),id=data.revision_id;
-  return {...data,can_twi:v.allows('sop.read_twi',action,id),can_linked_frv:v.allows('sop.read_linked_frv',action,id)};
+  return {...data,can_twi:v.allows('sop.read_twi',action,id),can_linked_frv:v.allows('sop.read_linked_frv',action,id),can_revise:!!v.read('sop.read_history',id)&&!one(db,"SELECT id FROM document_revision WHERE document_id=? AND state IN ('draft','review','approved')",[data.document_id])&&v.allows('sop.revise','sop.read_history',id)};
  }
  if(action==='frv.read'){
   const v=libraryAccess(db,a,d);
@@ -448,13 +453,14 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   },
   readResource(actor,action,id){return read(db=>{
    const a=account(db,actor);if(!a)return null;
-   const v=a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day(db)):readAuthorized(db,security(db,actor),actor,action,id,day(db));
+   const d=day(db),v=SHARED_LIBRARY_READS.includes(action)?libraryAccess(db,a,d).read(action,id):readFor(db,a,action,id,d);
    return v?projectView(db,a,action,v.data,day(db)):null;
   })},
   listResources(actor,action){return read(db=>{
-   const a=account(db,actor);must(a,401,'Необходим вход');must(READ_ACTIONS.includes(action)&&permissionsFor(db,a).includes(action),404,'Раздел недоступен');
+   const a=account(db,actor);must(a,401,'Необходим вход');const d=day(db),shared=SHARED_LIBRARY_READS.includes(action),access=shared?libraryAccess(db,a,d):null;
+   must(READ_ACTIONS.includes(action)&&(shared?access.permissions:permissionsFor(db,a)).includes(action),404,'Раздел недоступен');
    const table=RESOURCE_TABLES[action];
-   const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,day(db)):readAuthorized(db,s,actor,action,id,day(db))).filter(Boolean).map(v=>projectView(db,a,action,v.data,day(db)));
+   const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>shared?access.read(action,id):a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,d):readAuthorized(db,s,actor,action,id,d)).filter(Boolean).map(v=>projectView(db,a,action,v.data,d));
   })},
   trainingOptions(actor,revision,operationId=null){return read(db=>trainingOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),operationId))},
   async createTraining(actor,revision,input){
@@ -600,7 +606,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     must(contextStamp(next)===contextStamp(ctx),409,'Документ изменился при открытии');
     const a=checkedAccount(db,actor,revision),d=day(db);
     // Only visible directory entries. Omit protected role names and unrelated personnel.
-    const people=directoryPeople(db,d).filter(p=>readFor(db,a,'person.read_directory',p.id,d)).map(({id,employee_code,display_name,position,unit})=>({id,employee_code,display_name,position,unit,roles:[]}));
+    const people=directoryPeople(db,d).filter(p=>p.id===a.person_id||readFor(db,a,'person.read_directory',p.id,d)).map(({id,employee_code,display_name,position,unit})=>({id,employee_code,display_name,position,unit,roles:[]}));
     return {context:ctx.input,expected_revision:ctx.expected,title:ctx.title,code:ctx.code,observed_at:ctx.observed_at,operation:ctx.operation,people,text};
    });
   },
