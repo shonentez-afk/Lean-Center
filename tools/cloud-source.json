@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "62794feb3da1c85002a79b5d897bc99eb8b091a3",
+  "sourceCommit": "b5d5dd7bc9c234baebfe39df1fa1adde26fb54d9",
   "files": [
     {
       "path": "amvera.yml",
@@ -107,15 +107,19 @@
     },
     {
       "path": "server/lc81-main.mjs",
-      "sha": "b701fe59df6421564287042345ee3a01aeb06c21"
+      "sha": "47e8a8cde5970d2186d19e2883959a4a10f9c930"
     },
     {
       "path": "server/lc81-maintenance.mjs",
-      "sha": "da99188ecfc0f903c6ee0e44603496fa9b3f2297"
+      "sha": "69ce7edc54bedeb6d67a5630a1d06ecaf2db1d73"
     },
     {
       "path": "server/lc81/access-contract.mjs",
-      "sha": "273e9e7433ca3260ac4f92d0e76d2621a7e5274a"
+      "sha": "431b535690f98c9fd93106996f5f701c2e2f2df0"
+    },
+    {
+      "path": "server/lc81/admin-commands.mjs",
+      "sha": "56ee5284350ff0f212d93d2e42d0b8606a8a57c5"
     },
     {
       "path": "server/lc81/assistant-commands.mjs",
@@ -127,7 +131,7 @@
     },
     {
       "path": "server/lc81/center-commands.mjs",
-      "sha": "35c4a47712e5c17a16e06ffd73fae5b614c3d23d"
+      "sha": "e1093644ccc5a617dca7e65358d3d892e77610d5"
     },
     {
       "path": "server/lc81/center-ui.js",
@@ -163,7 +167,7 @@
     },
     {
       "path": "server/lc81/http.mjs",
-      "sha": "55c080a428b7b98a66970eb1a06d0c8a1846c88c"
+      "sha": "dcec40c3f08a8d8b83fb2cab8597165f8fa865d3"
     },
     {
       "path": "server/lc81/import-commands.mjs",
@@ -171,7 +175,7 @@
     },
     {
       "path": "server/lc81/library-commands.mjs",
-      "sha": "fff365c9ee53e6dec9c52c79e9cb1c7827846ef7"
+      "sha": "9861576fa083bb33e9df986293ae4d331765a2fc"
     },
     {
       "path": "server/lc81/library-receipts.mjs",
@@ -183,7 +187,7 @@
     },
     {
       "path": "server/lc81/maintenance.mjs",
-      "sha": "9d46223186cd6a3ff752b661a8fe8b2b7ec862f1"
+      "sha": "5af0e398ce67e60d4e6a8df35ba0f6eb9cbf286b"
     },
     {
       "path": "server/lc81/matrix-commands.mjs",
@@ -198,6 +202,10 @@
       "sha": "da886216fa89668cf71cb9e7b7c9282700527805"
     },
     {
+      "path": "server/lc81/mentor-workspace.mjs",
+      "sha": "743d8ae5eb68978cc58730f4c272da04ac00988c"
+    },
+    {
       "path": "server/lc81/mobile-audit-commands.mjs",
       "sha": "9a7d153122035d664dedb2cebaef32f4b75b3278"
     },
@@ -207,7 +215,7 @@
     },
     {
       "path": "server/lc81/person-card.mjs",
-      "sha": "7c74eadbdf435e565189f83cad0782adfef5a931"
+      "sha": "e585ccd4807233f86224467749623ba80c356bb1"
     },
     {
       "path": "server/lc81/personnel-commands.mjs",
@@ -223,11 +231,11 @@
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "b05bc9c4738b704a2711645eefd0e06f6609ebe8"
+      "sha": "0283a41c83a6772bdf455d93e040cbcb8f6bf570"
     },
     {
       "path": "server/lc81/program-commands.mjs",
-      "sha": "31d352395a9a69b7a1761d5cc898808eb5998047"
+      "sha": "52e3fa9d0de098b053042a02cff0057a3a8c9c04"
     },
     {
       "path": "server/lc81/program-form-commands.mjs",
@@ -243,11 +251,15 @@
     },
     {
       "path": "server/lc81/roi-commands.mjs",
-      "sha": "87b31f3963b4478740f089242021139fb4965764"
+      "sha": "557ff80afeb1ed8af938d0b9689a8788d70d19c9"
     },
     {
       "path": "server/lc81/security-schema.sql",
       "sha": "b5207ce631c9aab61b703a91f00b6ecd5787e1ef"
+    },
+    {
+      "path": "server/lc81/site-clock.mjs",
+      "sha": "5433c521e0c05f34cce49bfcad382540cd285bec"
     },
     {
       "path": "server/lc81/sop-evaluation-commands.mjs",
@@ -259,7 +271,7 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "5665a2951f39b56ae450a4e8c0045418f2da419d"
+      "sha": "8b5d2d0079f4253144d5ae16910866f5e745a510"
     },
     {
       "path": "server/lc81/training-commands.mjs",
@@ -271,7 +283,7 @@
     },
     {
       "path": "server/lc81/training-ui.js",
-      "sha": "1b9570bfbde4612caa2e2cb66852c58f8fa9eb3f"
+      "sha": "0401a03846540f21683c4b9bf9750facb05ac5fb"
     },
     {
       "path": "server/main.mjs",
@@ -355,7 +367,7 @@
     },
     {
       "path": "src/modules/library/domain.js",
-      "sha": "9efc787dd65f4ad72d4b8e2b4fab1ea5a274d185"
+      "sha": "1fc776d379f558afc5755f4283ebf0156d526a08"
     },
     {
       "path": "src/modules/library/frv-effect.js",
@@ -695,7 +707,7 @@
     },
     {
       "path": "tools/lc81-inventory.mjs",
-      "sha": "dff7b6e04b992b5f5f9105c153a137c21d587fa8"
+      "sha": "695441801fab62287749537d01637a66a0e9f931"
     },
     {
       "path": "tools/package_folder.py",
