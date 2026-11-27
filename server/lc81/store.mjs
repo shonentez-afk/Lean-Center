@@ -91,6 +91,7 @@ function libraryAccess(db,a,d){
 function trainingAccess(db,a,d){
  return {accountId:a.id,personId:a.person_id,credentialRevision:a.credential_revision,day:d,at:at(),permissions:permissionsFor(db,a),
  read:(action,id)=>readFor(db,a,action,id,d),
+ scope:(action,id,resource)=>a.bootstrap===1?(READ_ACTIONS.includes(action)||DETAIL_ACTIONS.includes(action))&&bootstrapTrainingScope(db,config(db).site,resource):canUseTrainingResource(db,security(db,a.id),a.id,action,id,d,resource),
  allows:(action,id,resource)=>a.bootstrap===1?DETAIL_ACTIONS.includes(action)&&bootstrapTrainingScope(db,config(db).site,resource):canUseTrainingResource(db,security(db,a.id),a.id,action,id,d,resource),
  audit:(action,target)=>audit(db,a.id,action,target),
  actorAccess:(id,revision)=>{const other=account(db,id);return other&&other.credential_revision===revision?trainingAccess(db,other,d):null}};

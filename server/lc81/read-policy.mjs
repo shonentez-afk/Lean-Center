@@ -1,6 +1,7 @@
 // LC8.1 QA: server-only policy/projection foundation. Used by the isolated HTTP service.
 // All account, grant, policy and date inputs MUST come from trusted server state.
 // No client-supplied role, scope, actor, SQL, or resource attributes are accepted.
+import {scheduleKind,scheduleScopeDate} from '../../src/modules/training/center-planning.js';
 import {one,rows,isId} from '../../src/core/primitives.js';
 
 import {READ_ACTIONS,PERMISSIONS,DIRECTORY_COMMANDS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
@@ -73,6 +74,25 @@ export function orderResource(db,o,day){
 export function supplementResource(db,n,day,tasks=[]){
  const r=personWorkResource(db,[n.person_id,n.manager_id],day,tasks.map(t=>t.done_on));
  return r?{...r,self:n.person_id,assigned:n.state==='draft'?[n.manager_id]:[]}:null;
+}
+// The calendar never accepts an arbitrary source table. Resolve the
+// three LC5 planning types, including linked fact participants.
+export function scheduleResource(db,s,day){
+ if(!s||!s.owner_id||!s.source_id)return null;
+ const type=scheduleKind(s),on=scheduleScopeDate(db,s,day),owner=personWorkResource(db,[s.owner_id],day,[on]);
+ if(!owner)return null;
+ let r=null,extra=null;
+ if(type==='audit'||type==='practical'){
+  r=trainingAssignmentResource(db,s.source_id,day,[s.owner_id],on);
+  if(type==='audit'&&s.completed_audit_id)extra=auditResource(db,one(db,'SELECT * FROM audit_session WHERE id=?',[s.completed_audit_id]),day);
+  if(type==='practical'&&s.completed_assessment_id)extra=assessmentResource(db,one(db,'SELECT * FROM assessment_session WHERE id=?',[s.completed_assessment_id]),day);
+  if(s.completed_audit_id&&!extra||s.completed_assessment_id&&!extra)return null;
+ }else if(type==='self_eval'&&s.source_id===s.owner_id){
+  r=selfResource(db,{person_id:s.owner_id,evaluated_on:on},day);
+  if(s.completed_self_id){extra=selfResource(db,one(db,'SELECT * FROM mentor_self_evaluation WHERE id=?',[s.completed_self_id]),day);if(!extra)return null}
+ }
+ if(!r)return null;
+ return {data:{},self:s.owner_id,units:[...new Set([...owner.units,...r.units,...(extra?.units||[])])],assigned:[]};
 }
 export function skillResource(db,s){
  if(!s||s.archived)return null;
@@ -364,12 +384,11 @@ function resolve(db,action,id,day){
   return {data,self:null,units:[unit_id,...sourceUnits],participantUnits:unitsFor(db,r.owner_id,day),assigned:[]};
  }
  if(action==='calendar.read'){
-  const r=one(db,'SELECT id,kind,owner_id,due_on,state FROM schedule_event WHERE id=?',[id]);
-  if(!r||!activePerson(db,r.owner_id))return null;
-  const {owner_id,...data}=r;
-  // Source relations are not yet fully classified. Expose only the owner's
-  // generic calendar entry; never the source id or another person's calendar.
-  return {data,self:owner_id,units:[],assigned:[]};
+  const s=one(db,'SELECT * FROM schedule_event WHERE id=?',[id]);
+  if(!s||!activePerson(db,s.owner_id))return null;
+  const data={id:s.id,kind:s.kind,due_on:s.due_on,state:s.state,rev:s.rev},r=scheduleResource(db,s,day);
+  // Unresolved historic plans retain minimal own-calendar visibility.
+  return r?{...r,data}:{data,self:s.owner_id,units:[],assigned:[]};
  }
  return null;
 }
@@ -402,7 +421,7 @@ function decide(db,security,accountId,action,resourceId,day,resourceAction=actio
   if(!role||assignment?.person_id!==account.person_id||assignment.role_id!==role.id||!activePeriod(assignment,day))continue;
   const policy=unique(security.policies,x=>x?.role_id===role.id);
   if(!policy||!Number.isSafeInteger(policy.revision)||policy.revision<1||grant.policy_revision!==policy.revision||!Array.isArray(policy.permissions)||!policy.permissions.includes(action))continue;
-  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result','preparation.shift','supplement.create','supplement.revise','supplement.decide','self.create','task.start'].includes(x)),'matrix.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
+  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result','preparation.shift','supplement.create','supplement.revise','supplement.decide','self.create','task.start','calendar.complete'].includes(x)),'matrix.detail','center.read','analytics.read','metrics.read','roi.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
  }
  return null;
 }
@@ -443,7 +462,7 @@ export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
 }
 
 export function canUseTrainingResource(db,security,accountId,action,id,day,resource){
- const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','task.implement_own','bank.read','bank.detail','skill.read','requirement.read','coverage.read','assessment.read','assessment.detail'];
+ const allowed=[...READ_ACTIONS,...TRAINING_COMMANDS,'calendar.detail','plan.read','center.read','analytics.read','metrics.read','roi.detail','frv.read_summary','training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','task.implement_own','bank.read','bank.detail','skill.read','requirement.read','coverage.read','assessment.read','assessment.detail'];
  return !!resource&&allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,action,resource);
 }
 export function bootstrapTrainingScope(db,site,resource){
