@@ -28,7 +28,7 @@ function refreshIndicator(){
 }
 const note=(text,bad=false)=>{const s=$('status');s.hidden=!text;s.textContent=text;s.className='status'+(bad?' error':'');refreshIndicator()};
 async function api(url,data){
- const options={cache:'no-store',credentials:'same-origin'},write=data!==undefined&&!['login','logout','library/open','tasks/options'].includes(url);
+ const options={cache:'no-store',credentials:'same-origin'},write=data!==undefined&&!['login','logout','library/open','tasks/options','matrix/suggest'].includes(url);
  if(data!==undefined)Object.assign(options,{method:'POST',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:JSON.stringify(data)});
  if(write){saving=true;saveFailed=false;refreshIndicator()}
  try{

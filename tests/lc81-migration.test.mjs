@@ -428,6 +428,9 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await assert.rejects(competence(manager.id,'skill.from_sop',{category_id:x.category,revisions:[{id:candidate.id,rev:candidate.rev}]}),/уже существует/);
   const profile={profession_id:x.f.profession,skill_id:x.generalSkill,scale_id:x.matrixScale,required_level:3,criticality:'important',valid_from:today,valid_to:null};
   const requirement=await competence(manager.id,'requirement.create',profile);
+  const suggestion=store.suggestMatrix(manager.id,1,{unit_id:x.f.unit,base_on:today,filters:{shift_id:null,profession_id:null,workplace_id:null,category_id:null},scale_id:x.matrixScale,person_ids:[x.f.trainee],include_sops:false});
+  assert(suggestion.keys.includes(x.generalSkill+':null'));assert.equal(suggestion.missing,0);
+  assert.throws(()=>store.suggestMatrix(manager.id,1,{unit_id:x.f.unit,base_on:today,filters:{shift_id:null,profession_id:null,workplace_id:null,category_id:null},scale_id:x.matrixScale,person_ids:[x.personB],include_sops:false}),/недоступны/);
   await assert.rejects(competence(manager.id,'requirement.create',profile),/пересекающееся/);
   const coverage={id:null,rev:0,unit_id:x.f.unit,skill_id:x.generalSkill,shift_code:'',min_people:2,scale_id:x.matrixScale,required_level:2};
   const need=await competence(manager.id,'coverage.save',coverage);

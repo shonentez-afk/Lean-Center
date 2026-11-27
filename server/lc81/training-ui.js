@@ -115,7 +115,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
     const ordered=[...(oldKeys||[]).filter(k=>lookup.has(k)),...items.map(r=>r.key).filter(k=>!oldKeys?.includes(k))];
     box.append(el('legend',title),button('Выбрать все',()=>{for(const c of list.querySelectorAll('input[type=checkbox]')){c.checked=true;c.dispatchEvent(new Event('change',{bubbles:true}))}}),button('Снять все',()=>{for(const c of list.querySelectorAll('input[type=checkbox]')){c.checked=false;c.dispatchEvent(new Event('change',{bubbles:true}))}}),list);
     for(const k of ordered){const row=el('div'),c=check(prefix+k,lookup.get(k).label,selected.has(k));row.dataset.key=k;row.append(c,button('↑',()=>{if(row.previousElementSibling)list.insertBefore(row,row.previousElementSibling)}),button('↓',()=>{if(row.nextElementSibling)list.insertBefore(row.nextElementSibling,row)}));list.append(row)}
-    return {box,keys:()=>[...list.children].filter(row=>row.querySelector('input').checked).map(row=>row.dataset.key)};
+    return {box,keys:()=>[...list.children].filter(row=>row.querySelector('input').checked).map(row=>row.dataset.key),selectKeys:keys=>{const selected=new Set(keys);for(const row of list.children){const c=row.querySelector('input');c.checked=selected.has(row.dataset.key);c.dispatchEvent(new Event('change',{bubbles:true}))}}};
    };
    const people=picker('Строки · сотрудники',roster,'p_',previous?.roster.map(r=>r.person_id)),columns=picker('Столбцы · навыки и СОП',cols,'c_',previous?.columns.map(c=>c.skill_id+':'+c.document_id));
    const code=input('code','Код матрицы'),title=input('title','Название');code.querySelector('input').value=previous?.code||'';title.querySelector('input').value=previous?.title||'';if(previous)code.querySelector('input').readOnly=true;
@@ -123,7 +123,13 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    const scale=select('scale_id','Шкала',opts(d.scales));if(previous)scale.querySelector('select').value=previous.scale_id;
    const missing=(previous?.roster.filter(r=>!roster.some(x=>x.key===r.person_id)).length||0)+(previous?.columns.filter(c=>!cols.some(x=>x.key===c.skill_id+':'+c.document_id)).length||0);
    const warn=el('p',missing?'Часть прежнего состава недоступна в выбранных фильтрах: '+missing+'. Проверьте новый состав перед сохранением.':'Порядок строк и столбцов можно изменить стрелками.','muted');
-   out.replaceChildren(form([warn,code,title,scale,dt('target_on','Целевая дата',previous?.target_on||''),people.box,columns.box],'Сохранить матрицу',async f=>{
+   const summary=el('p','','muted'),include=check('include_sops','Дополнить всеми доступными СОП');
+   const suggest=button('Подобрать по требованиям профессий',async()=>{
+    if(JSON.stringify(filters())!==JSON.stringify(q)||unit.querySelector('select').value!==u||base.querySelector('input').value!==b)throw Error('Фильтры изменились. Повторно выберите состав');
+    const r=await api('matrix/suggest',{unit_id:u,base_on:b,filters:q,scale_id:scale.querySelector('select').value,person_ids:people.keys(),include_sops:include.querySelector('input').checked});
+    columns.selectKeys(r.keys);summary.textContent='Подобрано '+r.keys.length+' навыков · требований '+r.requirements+' · без доступной колонки '+r.missing+' · неоднозначных '+r.ambiguous+' · профессий без профиля '+r.unprofiled+'. Проверьте состав перед сохранением.';
+   });
+   out.replaceChildren(form([warn,code,title,scale,dt('target_on','Целевая дата',previous?.target_on||''),people.box,include,suggest,summary,columns.box],'Сохранить матрицу',async f=>{
     const current=filters();if(JSON.stringify(current)!==JSON.stringify(q)||unit.querySelector('select').value!==u||base.querySelector('input').value!==b)throw Error('Фильтры изменились. Повторно выберите состав');
     await api('matrix/save',{code:value(f,'code'),title:value(f,'title'),unit_id:u,scale_id:value(f,'scale_id'),base_on:b,target_on:value(f,'target_on'),...q,person_ids:people.keys(),columns:columns.keys().map(k=>{const r=d.columns.find(x=>x.skill_id+':'+x.document_id===k);return {skill_id:r.skill_id,document_id:r.document_id}}),previous_id:previous?.id??null,previous_rev:previous?.rev??0});
     note('Матрица сохранена · уровни взяты из подтверждённых оценок');await render();

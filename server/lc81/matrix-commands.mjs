@@ -1,6 +1,7 @@
 // Existing corporate matrix calculation, no manually assigned scores.
 import {one,rows,uuid,isId,applyEvent} from '../../src/core/db.js';
 import {matrixRoster,columnChoices,matrixBaseline,matrixProjection,matrixFromRecord,LEVEL_TEXT} from '../../src/modules/training/matrix-view.js';
+import {autoMatrix} from '../../src/modules/training/matrix-assistant.js';
 import {matrixResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
 const must=(ok,status,msg)=>{if(!ok)throw new PilotError(status,msg)};
@@ -23,6 +24,14 @@ export function matrixInfo(db,a,unit=null,baseOn=a.day,filters={}){
  const roster=matrixRoster(db,baseOn,unit,shift_id||'',profession_id||'').filter(r=>readablePerson(a,r.person_id)&&today.has(r.person_id));
  const columns=columnChoices(db,unit,workplace_id||'',category_id||'').filter(x=>x.skill_id&&(x.document_id===null||a.read('operation.read',x.operation_id)&&rows(db,"SELECT id FROM document_revision WHERE document_id=? AND state='effective'",[x.document_id]).some(v=>a.read('sop.read_effective',v.id))));
  return {units,day:a.day,baseOn,shifts,professions,categories,workplaces,roster,columns:columns.map(({skill_id,document_id,title,skill,operation_id})=>({skill_id,document_id,title,skill,operation_id})),scales:scaleFor(db)};
+}
+export function suggestMatrix(db,a,f){
+ must(exact(f,['unit_id','base_on','filters','scale_id','person_ids','include_sops'])&&isId(f.unit_id)&&date(f.base_on)&&isId(f.scale_id)&&exact(f.filters,['shift_id','profession_id','workplace_id','category_id'])&&Array.isArray(f.person_ids)&&f.person_ids.length>0&&f.person_ids.length<=300&&new Set(f.person_ids).size===f.person_ids.length&&f.person_ids.every(isId)&&typeof f.include_sops==='boolean',400,'Неверный состав для подбора');
+ const d=matrixInfo(db,a,f.unit_id,f.base_on,f.filters);
+ must(d.scales.some(s=>s.id===f.scale_id)&&f.person_ids.every(id=>d.roster.some(r=>r.person_id===id)),403,'Состав или шкала недоступны');
+ const selected=d.roster.filter(r=>f.person_ids.includes(r.person_id)),catalog=d.columns.map(c=>({...c,key:c.skill_id+':'+c.document_id}));
+ const s=autoMatrix(db,selected,catalog,f.base_on,f.scale_id,{allSops:f.include_sops});
+ return {keys:s.keys,missing:s.missing.length,ambiguous:s.ambiguous.length,unprofiled:s.unprofiled.length,requirements:s.requirements};
 }
 function authorizeMatrix(db,a,m,action){
  must(a.read('matrix.read',m.id)&&a.allows(action,m.id,matrixResource(db,m.unit_id,m.roster,m.columns,a.day,m.base_on)),403,'Матрица недоступна');

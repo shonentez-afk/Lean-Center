@@ -10,7 +10,7 @@ import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,va
 import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource} from './read-policy.mjs';
 import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop} from './training-commands.mjs';
-import {matrixInfo,saveMatrix,retireMatrix,matrixDetail} from './matrix-commands.mjs';
+import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
 import {competencyOptions,competencyChange,competencyView,assessmentDetail} from './competency-commands.mjs';
 import {mentorOptions,changeMentor,mentorView} from './mentor-commands.mjs';
@@ -439,6 +439,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   competencyOptions(actor,revision,kind,personId=null,skillId=null){return read(db=>competencyOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,personId,skillId))},
   competencyChange(actor,revision,input){return mutate(db=>competencyChange(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   assessmentDetail(actor,revision,id){return read(db=>assessmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  suggestMatrix(actor,revision,input){return read(db=>suggestMatrix(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   matrixInfo(actor,revision,unit=null,baseOn=null,filters={}){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return matrixInfo(db,a,unit,baseOn??a.day,filters)})},
   saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
