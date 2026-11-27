@@ -137,7 +137,7 @@ function resolve(db,action,id,day){
   const {unit_id,mentor_id,enrollment_id,...data}=r;
   if(enrollment_id){
    const composite=trainingAssignmentResource(db,id,day);if(!composite)return null;
-   return {...composite,data};
+   return {...composite,data,assigned:r.state==='planned'||r.state==='in_progress'?composite.assigned:[]};
   }
   return {data,self:r.trainee_id,units:[unit_id],participantUnits:unitsFor(db,r.trainee_id,day),assigned:r.state==='planned'||r.state==='in_progress'?[r.trainee_id,mentor_id].filter(Boolean):[]};
  }

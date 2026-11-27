@@ -169,7 +169,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const editorRole=(await store.createReference(admin.id,'business_role',{code:'LC81-OTHER-EDITOR',name:'Редактор другого участка'})).id;
   const editorAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.personB,role_id:editorRole,valid_from:'2020-01-01',valid_to:null})).id;
   const otherEditor=await store.createAccount(admin.id,{person_id:x.personB,login:'other-editor',password:password(),generate:false});
-  await store.setPolicy(admin.id,{role_id:editorRole,revision:0,permissions:['operation.read','sop.read_history','sop.create','sop.edit_draft','sop.revise','frv.read','sop.from_frv','credential.read','credential.register','person.read_basic']});
+  await store.setPolicy(admin.id,{role_id:editorRole,revision:0,permissions:['operation.read','sop.read_history','sop.create','sop.edit_draft','sop.revise','frv.read','sop.from_frv','credential.read','credential.register','person.read_basic','program.read','program.create','program.detail','training.enrollment.read','training.enrollment.detail','training.enrollment.create']});
   await store.grant(admin.id,{account_id:otherEditor.id,assignment_id:editorAssignment,scope:{kind:'unit_tree',unit_id:x.unitB},valid_to:null});
   await assert.rejects(store.changeMentor(otherEditor.id,1,mentorCmd('credential',certificateFields)),/Самоназначение|недоступны|область/);
   assert(!store.mentorOptions(otherEditor.id,1,'credential').people.some(p=>p.id===x.f.mentor));
@@ -177,7 +177,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await assert.rejects(store.openLibrary(otherEditor.id,1,saveContext),/Операция недоступна/);
   await assert.rejects(store.saveLibrary(otherEditor.id,1,req(createContext,0,'Чужой СОП','LC81-DENIED',null,draftSource.text)),/Операция недоступна/);
   worker=await store.createAccount(admin.id,{person_id:x.f.trainee,login:'worker@example.invalid',password:workerPass,generate:false});
-  const rights=['person.read_basic','task.read','task.implement_own','training.read','training.detail','training.read_sop','person.read_card'];
+  const rights=['person.read_basic','task.read','task.implement_own','training.read','training.detail','training.read_sop','person.read_card','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail'];
   await store.setPolicy(admin.id,{role_id:x.workerRole,revision:0,permissions:rights});
   await store.grant(admin.id,{account_id:worker.id,assignment_id:x.workerAssignment,scope:{kind:'self'},valid_to:null});
   const user=store.authenticate('worker@example.invalid',workerPass);assert.equal(user.id,worker.id);
@@ -201,7 +201,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const aData=store.adminData(admin.id),instructorRole=aData.roles.find(r=>r.code==='INSTRUCTOR').id;
   const instructorAssignment=aData.assignments.find(r=>r.person_id===x.f.mentor&&r.role_id===instructorRole).id;
   const instructor=await store.createAccount(admin.id,{person_id:x.f.mentor,login:'secure-instructor',password:password(),generate:false});
-  await store.setPolicy(admin.id,{role_id:instructorRole,revision:0,permissions:['training.read','training.detail','training.stage','training.read_sop']});
+  await store.setPolicy(admin.id,{role_id:instructorRole,revision:0,permissions:['training.read','training.detail','training.stage','training.read_sop','training.enrollment.read','training.enrollment.detail','training.enrollment.result']});
   await store.grant(admin.id,{account_id:instructor.id,assignment_id:instructorAssignment,scope:{kind:'assigned'},valid_to:null});
   const headRole=(await store.createReference(admin.id,'business_role',{code:'QA-HEAD-LC81',name:'Руководитель обучения QA'})).id;
   const headAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.f.other,role_id:headRole,valid_from:'2020-01-01',valid_to:null})).id;
@@ -212,7 +212,37 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const options=store.trainingOptions(manager.id,1,x.f.operation);assert(options.people.some(x=>x.id===create.trainee_id));assert(options.mentors.some(x=>x.id===create.authorization_id));
   await assert.rejects(store.createTraining(otherEditor.id,1,create),/недоступны|полномочий/);
   await assert.rejects(store.createTraining(manager.id,1,{...create,assigned_by:x.f.mentor}),/Заполните/);
-  newTraining=await store.createTraining(manager.id,1,create);
+  const generic=(part,title)=>({part,title,hours:1,day_offset:0,sop_revision_id:null,skill_id:null,scale_id:null,target_level:null});
+  const sopTask={part:'practice',title:'Учебная операция по СОП',hours:2,day_offset:0,sop_revision_id:x.revision.revision,skill_id:x.f.skill,scale_id:x.matrixScale,target_level:2};
+  const prog=(code,standard_kind,tasks)=>({code,title:'Учебный шаблон '+code,standard_kind,profession_id:x.f.profession,position_id:null,tasks,previous_id:null,previous_rev:0});
+  const payload=prog('LC81-PROG','production',[generic('general','Теоретическая тема'),sopTask]);
+  assert(store.programOptions(manager.id,1).sops.some(s=>s.id===x.revision.revision));
+  await assert.rejects(store.saveProgram(otherEditor.id,1,payload),/недоступен/);
+  assert.deepEqual(store.listResources(otherEditor.id,'program.read'),[]);
+  const template=await store.saveProgram(manager.id,1,payload);
+  const enroll=(p,until=due)=>({program_id:p.id,program_rev:p.rev,trainee_id:x.f.trainee,mentor_id:x.f.mentor,manager_id:x.f.actor,start_on:today,due_on:until,reason:'Синтетическая программа',internship_start:null,internship_end:null,entry_start:null,entry_end:null});
+  const personal=await store.createEnrollment(manager.id,1,enroll(template));
+  assert.throws(()=>store.enrollmentDetail(otherEditor.id,1,personal.id),/недоступна/);
+  const personalView=store.enrollmentDetail(manager.id,1,personal.id);
+  assert.equal(personalView.tasks.length,2);assert(personalView.tasks[1].link);
+  assert.equal(store.enrollmentDetail(worker.id,1,personal.id).cap.result,false);
+  const next=await store.saveProgram(manager.id,1,{...payload,title:'Новая версия программы',previous_id:template.id,previous_rev:template.rev});
+  assert.equal(store.programDetail(manager.id,1,next.id).version_no,2);
+  assert.equal(store.programDetail(manager.id,1,template.id).state,'retired');
+  assert.equal(store.enrollmentDetail(manager.id,1,personal.id).version_no,1);
+  await assert.rejects(store.createEnrollment(manager.id,1,enroll(template)),/изменён/);
+  const enrollmentCmd=(actor,command,fields,rev=store.enrollmentDetail(manager.id,1,personal.id).rev)=>store.changeEnrollment(actor,1,{id:personal.id,expected_revision:rev,command,fields});
+  const resultFields={task_id:personalView.tasks[0].id,held_on:today,result:'completed',minutes:60,evidence:'Учебный факт темы'};
+  await assert.rejects(enrollmentCmd(worker.id,'result',resultFields),/наставник|руководитель/);
+  await assert.rejects(enrollmentCmd(manager.id,'result',{...resultFields,task_id:personalView.tasks[1].id}),/фактом инструктажа/);
+  await assert.rejects(enrollmentCmd(manager.id,'finish',{conclusion:'basic',feedback:'До завершения заданий'}),/Сначала завершите/);
+  await enrollmentCmd(instructor.id,'result',resultFields);
+  await assert.rejects(enrollmentCmd(instructor.id,'result',resultFields,personal.rev),/изменена/);
+  const link={enrollment_id:personal.id,program_task_id:personalView.tasks[1].id,enrollment_rev:store.enrollmentDetail(manager.id,1,personal.id).rev};
+  await assert.rejects(store.createTraining(manager.id,1,{...create,...link,target_level:3}),/не соответствует/);
+  newTraining=await store.createTraining(manager.id,1,{...create,...link});
+  assert.equal(store.enrollmentDetail(manager.id,1,personal.id).tasks[1].assignment_id,newTraining.id);
+  await assert.rejects(store.createTraining(manager.id,1,{...create,...link}),/не соответствует|уже есть/);
   const cmd=(actor,command,fields,rev=store.trainingDetail(manager.id,1,newTraining.id).rev)=>store.changeTraining(actor,1,{id:newTraining.id,expected_revision:rev,command,fields});
   const own=store.trainingDetail(worker.id,1,newTraining.id);assert.equal(own.approved,false);assert.equal(own.cap.admit,false);
   assert.equal(store.trainingSop(worker.id,1,newTraining.id).steps.length,1);
@@ -239,6 +269,25 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const practical=store.trainingDetail(manager.id,1,newTraining.id).practical;
   await cmd(manager.id,'qualify',{assessed_on:today,practical_id:practical.id,observation_state:'rated',level:2,valid_until:null,evidence:'Учебное решение',feedback:'Уровень подтверждён'});
   await cmd(manager.id,'admit',{decided_on:today,valid_until:null,decision:'granted',evidence:'Учебное основание допуска',feedback:'Допуск зарегистрирован'});
+  assert(store.enrollmentDetail(manager.id,1,personal.id).tasks.every(t=>t.done));
+  await enrollmentCmd(manager.id,'finish',{conclusion:'basic',feedback:'Все задания подтверждены'});
+  assert.equal(store.enrollmentDetail(manager.id,1,personal.id).state,'completed');
+  assert(store.personCard(manager.id,1,x.f.trainee).sections.some(s=>s.action==='training.enrollment.read'&&s.items.some(r=>r.id===personal.id)));
+  // A preparation bundle uses the existing shared-task mapping. Both forms
+  // must reference the same fact; no duplicate JI-2 assignment from adaptation.
+  const longer=new Date(Date.now()+60*86400000).toISOString().slice(0,10),tomorrow=new Date(Date.now()+86400000).toISOString().slice(0,10);
+  const ap=await store.saveProgram(manager.id,1,prog('LC81-ADAPT','adaptation',[generic('general','Ввод'),generic('individual','Профессия'),sopTask,generic('knowledge','Проверка знаний')]));
+  const sp=await store.saveProgram(manager.id,1,prog('LC81-SAFETY','safety',[generic('general','Безопасные методы')]));
+  const jp=await store.saveProgram(manager.id,1,prog('LC81-INTERN','internship',[sopTask]));
+  const ad=await store.createEnrollment(manager.id,1,enroll(ap,longer)),sd=await store.createEnrollment(manager.id,1,enroll(sp)),jd=await store.createEnrollment(manager.id,1,enroll(jp));
+  const prep={trainee_id:x.f.trainee,category:'new',adaptation_id:ad.id,safety_id:sd.id,internship_id:jd.id,revisions:{adaptation:ad.rev,safety:sd.rev,internship:jd.rev},shifts:[{date:today,shift_id:x.f.shift},{date:tomorrow,shift_id:x.f.shift}],note:'Учебный комплект'};
+  const bundle=await store.createPreparation(manager.id,1,prep);
+  assert.equal(store.preparationDetail(manager.id,1,bundle.id).planned_shifts.length,2);
+  assert.equal(store.preparationDetail(worker.id,1,bundle.id).status,'В процессе подготовки');
+  assert(store.enrollmentDetail(manager.id,1,ad.id).tasks.find(t=>t.sop).shared);
+  assert.equal(store.enrollmentDetail(manager.id,1,ad.id).tasks.find(t=>t.sop).link,null);
+  assert(store.enrollmentDetail(manager.id,1,jd.id).tasks.find(t=>t.sop).link);
+  await assert.rejects(store.createPreparation(manager.id,1,prep),/уже связан/);
   const qualified=store.trainingDetail(manager.id,1,newTraining.id);assert.equal(qualified.qualification.level,2);assert.equal(qualified.admission,'Допуск зарегистрирован');
   // Matrix constructor uses the actual assessment; the second employee is
   // deliberately unassessed, so their cell must be null, never zero.

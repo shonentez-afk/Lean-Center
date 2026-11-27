@@ -81,6 +81,19 @@ try{
  await button(m.p,'Подтвердить отзыв').click();
  await m.p.getByRole('cell',{name:'Отозван',exact:true}).waitFor();
  assert(store.listResources(manager.id,'credential.read')[0].revoked_at);
+ // Program constructor through the same protected portal.
+ const programNav=m.p.locator('#nav [data-action="program.read"]'),programGroup=m.p.locator('#nav details').filter({has:m.p.locator('[data-action="program.read"]')});
+ if(!await programGroup.evaluate(e=>e.open))await programGroup.locator('summary').click();
+ await programNav.click();await button(m.p,'Создать шаблон').click();
+ await m.p.locator('#content input[name=code]').fill('QA-BROWSER-PROG');
+ await m.p.locator('#content input[name=title]').fill('Учебная программа');
+ await m.p.locator('#content input[name=t1_title]').fill('Учебная тема');
+ await m.p.locator('#content input[name=t1_hours]').fill('1');
+ await button(m.p,'Создать шаблон').last().click();
+ await m.p.getByRole('cell',{name:'QA-BROWSER-PROG',exact:true}).waitFor();
+ await button(m.p,'Открыть шаблон').click();
+ await m.p.getByRole('cell',{name:'Учебная тема',exact:true}).waitFor();
+ assert.equal(store.listResources(manager.id,'program.read').length,1);
  // Real pinned Stage43 working copy in a sandboxed HTTPS iframe.
  const op=(await store.changeDirectory(admin.id,1,{type:'operation',operation:'create',id:null,expected_revision:0,fields:{unit_id:a,equipment_id:null,workplace_id:null,code:'QA-EDIT-SOP',name:'Учебная операция',criticality:'normal'}})).id;
  const source=await makeSop('Учебный шаг с фото');
