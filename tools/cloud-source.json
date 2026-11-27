@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "386a106f59480e415558043b71c4af526a4bd209",
+  "sourceCommit": "ac6264557680280fd74142cac988b77a17369aaa",
   "files": [
     {
       "path": "amvera.yml",
@@ -107,7 +107,7 @@
     },
     {
       "path": "server/lc81-main.mjs",
-      "sha": "8402fe5529a64b05644bfe0da1fb4c08b16724c8"
+      "sha": "874460541031b370a978b68e0133ce2a41fcf918"
     },
     {
       "path": "server/lc81-maintenance.mjs",
@@ -154,8 +154,12 @@
       "sha": "024ae4db31824c80003a5a11e4bd16325935b577"
     },
     {
+      "path": "server/lc81/editor-cloud.mjs",
+      "sha": "1e901d6451dd390ede55aa9930ade2dcce8ec740"
+    },
+    {
       "path": "server/lc81/editor-frame.mjs",
-      "sha": "9833784c565d8b0307f60a65619155c602d22e2e"
+      "sha": "3e6787fafb8f2a06a810837eb05382f3986ed4e2"
     },
     {
       "path": "server/lc81/editor-memory.js",
@@ -171,7 +175,7 @@
     },
     {
       "path": "server/lc81/http.mjs",
-      "sha": "9518ecba0c37bbeb7e7febfc9c950a2307cf8f0e"
+      "sha": "f5ab89aa48ccd3bc131d0c3a58dda4d7d2074972"
     },
     {
       "path": "server/lc81/import-commands.mjs",
@@ -187,7 +191,7 @@
     },
     {
       "path": "server/lc81/library-ui.js",
-      "sha": "02f0b152d746107d2254de8a7e7864209daf1c65"
+      "sha": "7139dbe6f9dccb966becf7f08cbd988056e443b0"
     },
     {
       "path": "server/lc81/maintenance.mjs",
@@ -231,11 +235,11 @@
     },
     {
       "path": "server/lc81/portal.html",
-      "sha": "14ad7cdc0be9a4736fd50682eb2303ce0e7c2382"
+      "sha": "1bc2571cd8fea700564a4537b64653ce1cf5fb33"
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "7a0a1a1bf79b6e34af4754868d6b92dd9666a445"
+      "sha": "b85d1e50955a9dd112ae0cc4655642893ea08552"
     },
     {
       "path": "server/lc81/program-commands.mjs",
@@ -283,7 +287,7 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "8caaad61f71dadf27efa9bda395b7caa37e4a02e"
+      "sha": "30cab3edaea7622d668fd48aff237b3b25437b6d"
     },
     {
       "path": "server/lc81/subject-reports.mjs",
@@ -403,7 +407,7 @@
     },
     {
       "path": "src/modules/library/lean-bridge.js",
-      "sha": "9b3d988c7ee60a9b366d411ccce7af216bacf7ba"
+      "sha": "95c0e78deae18a0afc7826dab628afa9a92a7c2f"
     },
     {
       "path": "src/modules/library/linked-materials.js",
@@ -675,7 +679,7 @@
     },
     {
       "path": "tools/build_editor.mjs",
-      "sha": "fb3df569aabe72ae211c8721884bb1fb0fd66984"
+      "sha": "59a2c0a3e192435bf9620200e4679e05c3998044"
     },
     {
       "path": "tools/build_folder.mjs",
