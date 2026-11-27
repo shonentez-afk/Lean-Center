@@ -74,6 +74,62 @@ export function supplementResource(db,n,day,tasks=[]){
  const r=personWorkResource(db,[n.person_id,n.manager_id],day,tasks.map(t=>t.done_on));
  return r?{...r,self:n.person_id,assigned:n.state==='draft'?[n.manager_id]:[]}:null;
 }
+export function auditResource(db,a,day){
+ if(!a||!a.operation_id||!a.mentor_id||!a.auditor_id||!a.trainee_id||!a.observed_at)return null;
+ const r=personWorkResource(db,[a.mentor_id,a.auditor_id,a.trainee_id],day,[a.observed_at.slice(0,10)],[a.operation_id]);
+ if(!r)return null;
+ const t=a.assignment_id?trainingAssignmentResource(db,a.assignment_id,day):null;
+ if(a.assignment_id&&!t)return null;
+ return {...r,units:[...new Set([...r.units,...(t?.units||[])])],self:a.mentor_id,assigned:[]};
+}
+export function selfResource(db,s,day){
+ if(!s)return null;const r=personWorkResource(db,[s.person_id],day,[s.evaluated_on]);
+ return r?{...r,self:s.person_id}:null;
+}
+export function developmentResource(db,p,day,extraSkills=[]){
+ if(!p)return null;
+ const skills=[...rows(db,'SELECT skill_id FROM development_goal WHERE plan_id=? AND skill_id IS NOT NULL',[p.id??'']).map(g=>g.skill_id),...extraSkills];
+ const ops=[];for(const id of new Set(skills)){const s=one(db,'SELECT operation_id FROM skill WHERE id=?',[id]);if(!s)return null;if(s.operation_id)ops.push(s.operation_id)}
+ const r=personWorkResource(db,[p.person_id],day,[p.start_on],ops);
+ return r?{...r,self:p.person_id}:null;
+}
+export function practicalResource(db,p,day){
+ if(!p||!p.assignment_id||!p.operation_id)return null;
+ const r=trainingAssignmentResource(db,p.assignment_id,day,[p.evaluator_id],p.assessed_at.slice(0,10));
+ return r?{...r,self:p.person_id}:null;
+}
+export function taskResource(db,t,day){
+ if(!t)return null;
+ const r=personWorkResource(db,[t.owner_id,...(t.subject_id?[t.subject_id]:[])],day,t.created_at?[t.created_at.slice(0,10)]:[]);
+ if(!r)return null;
+ const rs=[r],add=x=>{if(!x)return false;rs.push(x);return true};
+ // Only resolved, supported source types get a detailed composite resource.
+ if(t.comparison_self_id&&!add(selfResource(db,one(db,'SELECT * FROM mentor_self_evaluation WHERE id=?',[t.comparison_self_id]),day)))return null;
+ if(t.source_self_id&&!add(selfResource(db,one(db,'SELECT * FROM mentor_self_evaluation WHERE id=?',[t.source_self_id]),day)))return null;
+ if(t.source_assessment_id&&!add(practicalResource(db,one(db,'SELECT * FROM assessment_session WHERE id=?',[t.source_assessment_id]),day)))return null;
+ if(t.source_assignment_id&&!add(trainingAssignmentResource(db,t.source_assignment_id,day)))return null;
+ if(t.source_evaluation_id||t.source_weighted_event_id||t.source_weighted_position)return null;
+ if(t.goal_id){
+  const p=one(db,'SELECT p.* FROM development_goal g JOIN development_plan p ON p.id=g.plan_id WHERE g.id=?',[t.goal_id]);
+  if(!add(developmentResource(db,p,day)))return null;
+ }
+ if(t.finding_id){
+  const finding=one(db,'SELECT * FROM finding WHERE id=?',[t.finding_id]);if(!finding)return null;
+  if(finding.audit_response_id){
+   const a=one(db,'SELECT a.* FROM audit_response r JOIN audit_session a ON a.id=r.audit_id WHERE r.id=?',[finding.audit_response_id]);
+   if(!add(auditResource(db,a,day)))return null;
+  }else if(finding.document_revision_id){
+   const d=one(db,'SELECT d.operation_id FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=?',[finding.document_revision_id]);
+   if(!d||!add(personWorkResource(db,[t.owner_id],day,[],[d.operation_id])))return null;
+  }else if(finding.study_id){
+   const d=one(db,'SELECT operation_id FROM frv_study WHERE id=?',[finding.study_id]);if(!d||!add(personWorkResource(db,[t.owner_id],day,[],[d.operation_id])))return null;
+  }else return null;
+ }
+ if(t.followup_assignment_id&&!add(trainingAssignmentResource(db,t.followup_assignment_id,day)))return null;
+ if(t.followup_enrollment_id&&!add(enrollmentResource(db,one(db,'SELECT * FROM training_enrollment WHERE id=?',[t.followup_enrollment_id]),day)))return null;
+ if(t.followup_plan_id&&!add(developmentResource(db,one(db,'SELECT * FROM development_plan WHERE id=?',[t.followup_plan_id]),day)))return null;
+ return {data:{},self:t.owner_id,units:[...new Set(rs.flatMap(x=>x.units))],assigned:[]};
+}
 export function trainingResource(db,operationId,people,day,extraDay=null){
  const op=one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[operationId]);
  if(!op||!lineage(db,op.unit_id)||!Array.isArray(people)||!people.length)return null;
@@ -151,12 +207,12 @@ function resolve(db,action,id,day){
   return {data,self:r.trainee_id,units:[unit_id],participantUnits:unitsFor(db,r.trainee_id,day),assigned:r.state==='planned'||r.state==='in_progress'?[r.trainee_id,mentor_id].filter(Boolean):[]};
  }
  if(action==='task.read'){
-  const r=one(db,'SELECT id,title,due_on,state,owner_id,rev FROM action_item WHERE id=?',[id]);
-  if(!r||!activePerson(db,r.owner_id))return null;
-  // Owner-based access; standalone tasks also support unit scope. Linked finding/goal scope is not yet verified.
-  const {owner_id,...data}=r;
-  const standalone=one(db,`SELECT id FROM action_item WHERE id=? AND ${['finding_id','goal_id','subject_id','source_assessment_id','source_self_id','comparison_self_id','source_criterion_id','source_assignment_id','source_evaluation_id','source_weighted_event_id','source_weighted_position','followup_assignment_id','followup_enrollment_id','followup_plan_id'].map(k=>k+' IS NULL').join(' AND ')}`,[id]);
-  return {data,self:owner_id,units:standalone?unitsFor(db,owner_id,day):[],assigned:[]};
+  const r=one(db,'SELECT * FROM action_item WHERE id=?',[id]);if(!r||!activePerson(db,r.owner_id))return null;
+  const data={id:r.id,title:r.title,due_on:r.due_on,state:r.state,rev:r.rev};
+  const resource=taskResource(db,r,day);
+  // Keep minimal own-task visibility for legacy unsupported links, but
+  // never expose full evidence or allow unit-scope management of them.
+  return resource?{...resource,data}:{data,self:r.owner_id,units:[],assigned:[]};
  }
  if(action==='org.read'){
   const r=one(db,'SELECT id,code,name,kind,parent_id,rev FROM org_unit WHERE id=? AND archived=0',[id]);
@@ -222,24 +278,29 @@ function resolve(db,action,id,day){
   const n=one(db,'SELECT * FROM twi_supplement WHERE id=?',[id]),r=n&&supplementResource(db,n,day,JSON.parse(n.tasks_json));
   return r?{...r,data:{id:n.id,person_id:n.person_id,role:n.role,month:n.month,state:n.state,rev:n.rev}}:null;
  }
- if(action==='credential.read'||action==='appointment.read'||action==='development.read'){
+ if(action==='development.read'){
+  const p=one(db,'SELECT * FROM development_plan WHERE id=?',[id]),r=developmentResource(db,p,day);
+  return r?{...r,data:{id:p.id,person_id:p.person_id,title:p.title,start_on:p.start_on,due_on:p.due_on,state:p.state,rev:p.rev}}:null;
+ }
+ if(action==='self.read'){
+  const s=one(db,'SELECT id,person_id,method_id,evaluated_on,rev FROM mentor_self_evaluation WHERE id=?',[id]),r=selfResource(db,s,day);
+  return r?{...r,data:s}:null;
+ }
+ if(action==='bank.read'){
+  const b=one(db,'SELECT id,profession_id,version_no,reviewed_on,rev FROM twi_knowledge_bank WHERE id=?',[id]),r=programResource(db);
+  return b&&r?{...r,data:b}:null;
+ }
+ if(action==='credential.read'||action==='appointment.read'){
   const sql={
    'credential.read':'SELECT id,person_id,kind,role,issued_on,valid_until,revoked_at,rev FROM mentor_credential WHERE id=?',
-   'appointment.read':'SELECT id,person_id,role,order_on,valid_from,valid_to,revoked_at,rev FROM mentor_appointment WHERE id=?',
-   'development.read':'SELECT id,person_id,title,start_on,due_on,state FROM development_plan WHERE id=?'
+   'appointment.read':'SELECT id,person_id,role,order_on,valid_from,valid_to,revoked_at,rev FROM mentor_appointment WHERE id=?'
   }[action];
   const r=one(db,sql,[id]);if(!r||!activePerson(db,r.person_id))return null;
   return {data:r,self:r.person_id,units:unitsFor(db,r.person_id,day),assigned:[]};
  }
  if(action==='audit.read'){
-  const r=one(db,'SELECT a.id,a.mentor_id,a.auditor_id,a.trainee_id,a.operation_id,a.observed_at,a.state,o.unit_id FROM audit_session a JOIN operation o ON o.id=a.operation_id WHERE a.id=? AND o.archived=0',[id]);
-  if(!r||!lineage(db,r.unit_id)||!activePerson(db,r.mentor_id))return null;
-  const {unit_id,auditor_id,trainee_id,...data}=r;
-  // Scope must contain the operation and all assessed participants; no free
-  // text, responses, evidence, or named trainee data is projected.
-  const subjectUnits=[...unitsFor(db,r.mentor_id,day),...(trainee_id?unitsFor(db,trainee_id,day):[])];
-  const complete=unitsFor(db,r.mentor_id,day).length>0&&(!trainee_id||unitsFor(db,trainee_id,day).length>0);
-  return {data,self:r.mentor_id,units:[unit_id],participantUnits:complete?subjectUnits:[],assigned:r.state==='draft'?[auditor_id]:[]};
+  const a=one(db,'SELECT * FROM audit_session WHERE id=?',[id]),r=auditResource(db,a,day);
+  return r?{...r,data:{id:a.id,mentor_id:a.mentor_id,operation_id:a.operation_id,observed_at:a.observed_at,state:a.state,rev:a.rev}}:null;
  }
  if(action==='roi.read'){
   const r=one(db,'SELECT id,title,owner_id,unit_id,study_id,action_id,currency,method,review_due,state FROM economic_effect WHERE id=?',[id]);
@@ -290,7 +351,7 @@ function decide(db,security,accountId,action,resourceId,day,resourceAction=actio
   if(!role||assignment?.person_id!==account.person_id||assignment.role_id!==role.id||!activePeriod(assignment,day))continue;
   const policy=unique(security.policies,x=>x?.role_id===role.id);
   if(!policy||!Number.isSafeInteger(policy.revision)||policy.revision<1||grant.policy_revision!==policy.revision||!Array.isArray(policy.permissions)||!policy.permissions.includes(action))continue;
-  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result','preparation.shift','supplement.create','supplement.revise','supplement.decide'].includes(x)),'matrix.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
+  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result','preparation.shift','supplement.create','supplement.revise','supplement.decide','self.create','task.start'].includes(x)),'matrix.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
  }
  return null;
 }
@@ -331,7 +392,7 @@ export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
 }
 
 export function canUseTrainingResource(db,security,accountId,action,id,day,resource){
- const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail'];
+ const allowed=[...TRAINING_COMMANDS,'training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','bank.read','bank.detail'];
  return !!resource&&allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,action,resource);
 }
 export function bootstrapTrainingScope(db,site,resource){
