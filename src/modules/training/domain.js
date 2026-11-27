@@ -273,7 +273,7 @@ export function applyTrainingEvent(db,e,old){
     if(program.kind==='internship'&&!program.standard_kind)invariant(p.internship_start&&p.internship_end&&p.entry_start&&p.entry_end,'Укажите оба периода из формы стажировки');
    }
    invariant(rows(db,'SELECT day_offset FROM training_program_task WHERE program_id=?',[program.id]).every(x=>plusDays(p.start_on,x.day_offset)<=p.due_on),'Срок персональной программы должен включать все задания');
-   hasRole(db,p.trainee_id,p.start_on,['trainee']);hasRole(db,p.mentor_id,p.start_on,['mentor','instructor']);person(db,p.manager_id);invariant(p.trainee_id!==p.mentor_id,'Сотрудник не может обучать себя');
+   hasRole(db,p.trainee_id,p.start_on,['trainee']);hasRole(db,p.mentor_id,p.start_on,program.standard_kind==='internship'?['mentor','instructor','internship_mentor']:['mentor','instructor']);person(db,p.manager_id);invariant(p.trainee_id!==p.mentor_id,'Сотрудник не может обучать себя');
    const a=one(db,"SELECT * FROM person_assignment WHERE person_id=? AND valid_from<=? AND coalesce(valid_to,'9999-12-31')>=? ORDER BY valid_from DESC LIMIT 1",[p.trainee_id,p.start_on,p.start_on]);
    invariant((!program.profession_id||a?.profession_id===program.profession_id)&&(!program.position_id||a?.position_id===program.position_id),'Программа не соответствует действующему назначению сотрудника');
    invariant(!one(db,"SELECT id FROM training_enrollment WHERE program_id=? AND trainee_id=? AND state='active'",[p.program_id,p.trainee_id]),'Такая персональная программа уже активна');

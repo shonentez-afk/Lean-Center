@@ -4,6 +4,7 @@ export const personKey=value=>String(value??'').normalize('NFKC').toLocaleLowerC
 const aliases={
  instructor:['instructor','trainer','internal_trainer','internal trainer','twi_instructor','инструктор','инструктор twi','внутренний тренер','вт'],
  mentor:['mentor','наставник','twi_mentor'],
+ internship_mentor:['internship_mentor','наставник стажировки','наставник программы стажировки','lc81_twi_internship_mentor'],
  trainee:['trainee','learner','обучаемый','стажер','twi_trainee'],
  evaluator:['evaluator','assessor','оценщик','аудитор']
 };

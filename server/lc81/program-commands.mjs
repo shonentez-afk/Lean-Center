@@ -83,7 +83,7 @@ export function enrollmentOptions(db,a){
  must(a.personId&&a.permissions.includes('training.enrollment.create'),403,'Назначение программы недоступно');
  const action='training.enrollment.create',people=directoryPeople(db,a.day).filter(p=>readPerson(a,p.id)&&allowed(a,action,p.id,personWorkResource(db,[p.id],a.day)));
  const pick=(kinds)=>people.filter(p=>p.roles.some(r=>kinds.some(k=>matchesRoleKind(r,k)))).map(p=>({id:p.id,name:p.display_name}));
- return {day:a.day,programs:rows(db,"SELECT * FROM training_program WHERE state='active' ORDER BY code").filter(p=>a.read('program.read',p.id)).map(p=>({id:p.id,label:programLabel(p),kind:p.kind,standard_kind:p.standard_kind,version_no:p.version_no,rev:p.rev})),trainees:pick(['trainee']),mentors:pick(['mentor','instructor']),managers:people.map(p=>({id:p.id,name:p.display_name}))};
+ return {day:a.day,programs:rows(db,"SELECT * FROM training_program WHERE state='active' ORDER BY code").filter(p=>a.read('program.read',p.id)).map(p=>({id:p.id,label:programLabel(p),kind:p.kind,standard_kind:p.standard_kind,version_no:p.version_no,rev:p.rev})),trainees:pick(['trainee']),mentors:pick(['mentor','instructor','internship_mentor']),managers:people.map(p=>({id:p.id,name:p.display_name}))};
 }
 export function createEnrollment(db,a,f){
  const action='training.enrollment.create';
