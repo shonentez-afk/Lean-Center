@@ -265,7 +265,9 @@ try{
  assert.equal(await button(r.p,'Добавить').count(),0);assert.equal(await button(r.p,'Изменить').count(),0);
  await button(r.p,'Меню').click();await r.p.locator('#nav').waitFor();
  assert.equal(await r.p.locator('#nav [data-action=admin]').count(),0);
- assert.equal(await r.p.locator('#nav [data-action="sop.constructor"]').count(),0);
+ assert.equal(await r.p.locator('#nav [data-action="sop.constructor"]').count(),1);
+ assert.equal(await r.p.locator('#nav [data-action="sop.read_effective"]').count(),1);
+ assert.equal(await r.p.locator('#nav [data-action="frv.read"]').count(),1);
  assert(await r.p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'mobile page overflow');
  const blocked=await r.p.evaluate(async()=>{const x=await fetch('/api/lc81/admin');return x.status});assert.equal(blocked,403);
  // QA-01: names of rights alone are insufficient to expose a workspace.
@@ -285,7 +287,8 @@ try{
  await store.revoke(admin.id,readerGrant.id);
  for(const p of [r.p,second]){
   await p.bringToFront();await p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor({state:'detached',timeout:20000});
-  await p.getByText('Вам пока не назначены права на рабочие разделы.',{exact:false}).waitFor();
+  await p.locator('#nav [data-action="person.read_directory"]').waitFor({state:'detached'});
+  assert.equal(await p.locator('#nav [data-action="sop.constructor"]').count(),1);
  }
  await second.close();
  const aa=await profile('admin',adminPassword,{width:1440,height:900});

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,createHash,randomUUID} from 'node:crypto';
 import {openSecureQA,ADMIN_ROLE,MANAGER_ROLE} from '../server/lc81/store.mjs';
 import {readZip} from '../src/modules/training/local-docx.js';
 import {createSecureQAServer} from '../server/lc81/http.mjs';
@@ -326,4 +326,45 @@ test('QA-02: 32 distinct valid employees behind the same peer and password chang
  // The peer budget still counts failures; rotating login names cannot bypass.
  for(let i=0;i<30;i++)assert.equal((await h.request('/api/lc81/login',{body:{login:'invalid-'+i,password:secret()}})).status,401);
  const blocked=await h.request('/api/lc81/login',{body:{login:'shift-0',password:accounts[0].password}});assert.equal(blocked.status,429);assert(Number(blocked.retryAfter)>0);
+});
+
+// Shared access does not turn an employee into an enterprise manager.
+test('shared library: grantless employees, own drafts, final summaries and HTTP denials',async t=>{
+ const h=await harness(t),admin=await h.login('admin',h.adminPassword),ac=admin.cookie,d=await h.admin(ac);
+ const ref=async(type,payload)=>(await h.post(ac,'reference',{type,payload})).id;
+ const ua=await ref('org_unit',{code:'SHARED-A',name:'Учебный A',kind:'Участок',parent_id:d.site}),ub=await ref('org_unit',{code:'SHARED-B',name:'Учебный B',kind:'Участок',parent_id:d.site});
+ const op=await h.request('/api/lc81/directory/change',{cookie:ac,body:{type:'operation',operation:'create',id:null,expected_revision:0,fields:{code:'SHARED-OP',name:'Учебная операция',unit_id:ub,equipment_id:null,workplace_id:null,criticality:'normal'}}});assert.equal(op.status,200,JSON.stringify(op.data));const opId=op.data.id;
+ const create=async(code,unit)=>{
+  const p=(await h.request('/api/lc81/directory/change',{cookie:ac,body:{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:code,display_name:code,unit_id:unit}}})).data.id;
+  const password=secret(),account=await h.post(ac,'account',{person_id:p,login:code.toLowerCase(),password,generate:false});return {...await h.login(code.toLowerCase(),password),id:account.id};
+ };
+ const A=await create('SHARED-W1',ua),B=await create('SHARED-W2',ub),read=(u,action,id=null)=>h.request('/api/lc81/resources?action='+action+(id?'&id='+id:''),{cookie:u.cookie}),post=(u,route,body)=>h.request('/api/lc81/library/'+route,{cookie:u.cookie,body});
+ for(const u of [A,B]){assert.deepEqual(u.user.permissions,[]);for(const k of ['sop.read_effective','sop.read_history','sop.constructor','frv.read'])assert(u.user.workspace_actions.includes(k));assert.equal((await read(u,'operation.read')).status,404);assert.equal((await read(u,'person.read_directory')).status,404);assert.equal((await h.request('/api/lc81/forms',{cookie:u.cookie})).status,403);assert((await h.request('/api/lc81/library/info?kind=sop',{cookie:u.cookie})).data.operations.some(x=>x.id===opId));}
+ const context=(kind,command='create',id=null,revision_id=null,origin_id=null,origin_revision=null)=>({kind,command,id,revision_id,operation_id:opId,origin_id,origin_revision});
+ const payload={schemaVersion:2,document:{id:randomUUID(),number:'Черновик',status:'Черновик',version:1},constructor:{schemaVersion:4,meta:{operation:'Учебная операция'},steps:[{id:1,action:'Учебный шаг',keyMoments:['КМ'],reason:'Причина',durationSeconds:10,hasPhoto:false}],twi:{enabled:false}},photoAssets:{}};
+ const text=JSON.stringify({...payload,integrity:{algorithm:'SHA-256',sha256:createHash('sha256').update(JSON.stringify(payload)).digest('hex')}});
+ const request=(ctx,rev,title,code,observed_at,text)=>({request_id:randomUUID(),context:ctx,expected_revision:rev,title,code,observed_at,text});
+ const createCtx=context('sop'),draftReq=request(createCtx,0,'Свой СОП','SHARED-SOP',null,text);
+ assert.equal((await post(A,'open',createCtx)).status,200);
+ const saved=await post(A,'save',draftReq);assert.equal(saved.status,200,JSON.stringify(saved.data));const sop=saved.data;
+ assert.equal((await post(A,'save',draftReq)).data.duplicate,true);
+ assert.equal((await read(A,'sop.read_history',sop.revision_id)).data.data.can_edit,true);
+ assert.equal((await read(B,'sop.read_history',sop.revision_id)).status,404);
+ assert.equal((await read(B,'sop.read_history')).data.items.length,0);
+ const edit=context('sop','save',sop.id,sop.revision_id);
+ assert.equal((await post(B,'open',edit)).status,403);assert.equal((await post(B,'save',request(edit,sop.rev,'Подмена',null,null,text))).status,403);
+ assert.equal((await post(B,'passport',{id:sop.id,revision_id:sop.revision_id,expected_revision:sop.rev,print_format:'portrait',changed_on:day})).status,403);
+ assert.equal((await post(A,'open',edit)).status,200);
+ const frvText=JSON.stringify({schemaVersion:'FRV-1.3',study:{studyId:'SHARED-FRV',operationId:'Учебная операция',operator:'PRIVATE-OPERATOR-TEST'},cycles:[{id:'c1',phase:'baseline',observations:[{id:'o1',actionRaw:'Замер',valueType:'VA',durationSec:12,standardCandidate:true}]}],standard:{outdated:false,steps:[{action:'Замер',plannedTimeSec:12,sourceObservationIds:['o1'],keyMoment:'КМ',reason:'Причина',valueType:'VA'}]}});
+ const fr=await post(A,'save',request(context('frv'),0,'Своё ФРВ',null,day,frvText));assert.equal(fr.status,200,JSON.stringify(fr.data));const f=fr.data;
+ assert.equal((await read(B,'frv.read',f.id)).status,404);
+ assert.equal((await post(B,'open',context('frv','save',f.id))).status,403);
+ assert.equal((await post(B,'finalize',{id:f.id,expected_revision:f.rev,note:''})).status,403);
+ const final=await post(A,'finalize',{id:f.id,expected_revision:f.rev,note:''});assert.equal(final.status,200,JSON.stringify(final.data));
+ const publicFrv=await read(B,'frv.read',f.id);assert.equal(publicFrv.status,200);assert.equal(publicFrv.data.data.can_edit,false);assert(!JSON.stringify(publicFrv.data).includes('PRIVATE-OPERATOR-TEST'));
+ const sum=await h.request('/api/lc81/library/detail?action=frv.read_summary&id='+f.id,{cookie:B.cookie});assert.equal(sum.status,200);assert.equal(sum.data.data.baselineCount,1);assert(!JSON.stringify(sum.data).includes('PRIVATE-OPERATOR-TEST'));
+ const from=await post(B,'open',context('sop','create',null,null,f.id,final.data.rev));assert.equal(from.status,200,JSON.stringify(from.data));assert.equal(JSON.parse(from.data.text).constructor.meta.executor,'');assert(!from.data.text.includes('PRIVATE-OPERATOR-TEST'));
+ assert.equal((await post(B,'open',context('frv','save',f.id))).status,403);
+ await h.post(ac,'state',{id:A.id,state:'blocked'});assert.equal((await read(A,'sop.read_history')).status,401);assert.equal((await post(A,'open',edit)).status,401);
+ assert.equal((await read(B,'sop.read_history',sop.revision_id)).status,404);
 });

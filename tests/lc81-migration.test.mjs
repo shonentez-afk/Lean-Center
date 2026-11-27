@@ -201,7 +201,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(JSON.parse(origin.text).constructor.steps[0].frvSource.observedTimeSec,12);
   fromFrv=await store.saveLibrary(manager.id,1,req(originCtx,0,'Проект из замеров','LC81-FRV-SOP',null,origin.text));
   assert.equal(store.readResource(manager.id,'sop.read_history',fromFrv.revision_id).state,'draft');
-  // Cross-unit editor with the same action names still cannot open this operation.
+  // Shared enterprise authoring is independent of scoped management rights.
   const editorRole=(await store.createReference(admin.id,'business_role',{code:'LC81-OTHER-EDITOR',name:'Редактор другого участка'})).id;
   const editorAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.personB,role_id:editorRole,valid_from:'2020-01-01',valid_to:null})).id;
   const otherEditor=await store.createAccount(admin.id,{person_id:x.personB,login:'other-editor',password:password(),generate:false});
@@ -209,9 +209,12 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await store.grant(admin.id,{account_id:otherEditor.id,assignment_id:editorAssignment,scope:{kind:'unit_tree',unit_id:x.unitB},valid_to:null});
   await assert.rejects(store.changeMentor(otherEditor.id,1,mentorCmd('credential',certificateFields)),/Самоназначение|недоступны|область/);
   assert(!store.mentorOptions(otherEditor.id,1,'credential').people.some(p=>p.id===x.f.mentor));
-  await assert.rejects(store.openLibrary(otherEditor.id,1,createContext),/Операция недоступна/);
-  await assert.rejects(store.openLibrary(otherEditor.id,1,saveContext),/Операция недоступна/);
-  await assert.rejects(store.saveLibrary(otherEditor.id,1,req(createContext,0,'Чужой СОП','LC81-DENIED',null,draftSource.text)),/Операция недоступна/);
+  assert.equal((await store.openLibrary(otherEditor.id,1,createContext)).expected_revision,0);
+  await assert.rejects(store.openLibrary(otherEditor.id,1,saveContext),/Редакция недоступна|Нет права/);
+  const sharedDraft=await store.saveLibrary(otherEditor.id,1,req(createContext,0,'Собственный проект','LC81-SHARED-OWN',null,draftSource.text));
+  assert(store.readResource(otherEditor.id,'sop.read_history',sharedDraft.revision_id).can_edit);
+  assert.equal(store.readResource(otherEditor.id,'sop.read_history',savedDraft.revision_id),null);
+  assert.equal(store.readResource(otherEditor.id,'operation.read',op),null,'library options must not widen directory rights');
   worker=await store.createAccount(admin.id,{person_id:x.f.trainee,login:'worker@example.invalid',password:workerPass,generate:false});
   const rights=['person.read_basic','task.read','task.implement_own','training.read','training.detail','training.read_sop','person.read_card','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','development.read','development.detail','task.detail','task.start','assessment.read','assessment.detail','plan.read','calendar.read','calendar.detail'];
   await store.setPolicy(admin.id,{role_id:x.workerRole,revision:0,permissions:rights});
@@ -222,7 +225,17 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const tasks=store.listResources(worker.id,'task.read');
   assert.deepEqual(tasks.map(r=>r.id),[x.ownTask]);assert.equal(tasks[0].can_implement,true);
   assert.equal(store.readResource(worker.id,'task.read',x.otherTask),null);
-  await assert.rejects(store.sopPhoto(worker.id,user.credential_revision,x.revision.revision,1),/недоступно/);
+  assert.equal((await store.sopPhoto(worker.id,user.credential_revision,x.revision.revision,1)).type,'image/png');
+  assert(store.listResources(worker.id,'sop.read_effective').some(r=>r.revision_id===x.revision.revision));
+  assert.equal(store.readResource(worker.id,'sop.read_history',sharedDraft.revision_id),null);
+  assert.equal(store.readResource(worker.id,'sop.read_history',savedDraft.revision_id),null);
+  assert.equal((await store.libraryDetail(worker.id,1,'frv.read_summary',frv.id)).baselineCount,1);
+  assert.equal((await store.libraryDetail(worker.id,1,'sop.read_public',x.revision.revision)).meta.operation!==undefined,true);
+  const visibleSop=store.readResource(worker.id,'sop.read_effective',x.bareRevision);
+  const proposal=await store.openLibrary(worker.id,1,ctx('sop','revise',x.bareOperation,visibleSop.document_id,x.bareRevision));
+  const publicCopy=JSON.parse(proposal.text);assert.equal(publicCopy.constructor.meta.approverName,'');assert.equal(publicCopy.constructor.twi.enabled,false);assert(!publicCopy.constructor.leanCenterPeople);
+  await assert.rejects(store.openLibrary(worker.id,1,ctx('sop','save',op,sharedDraft.id,sharedDraft.revision_id)),/Редакция недоступна|Нет права/);
+  await assert.rejects(store.sopPhoto(worker.id,1,x.f.doc.id,1),/недоступно/);
   await assert.rejects(store.changeDirectory(worker.id,user.credential_revision,{type:'person',operation:'update',id:x.personB,expected_revision:1,fields:{employee_code:'QA-B',display_name:'Чужая запись'}}),/недоступен/);
 
   await assert.rejects(store.implementOwnTask(worker.id,user.credential_revision,{id:x.otherTask,expected_revision:1,result:'Чужое'}),/своё/);
