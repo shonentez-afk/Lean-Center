@@ -194,6 +194,8 @@ export function createSecureQAServer({store,origin}){
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
     try{const r=await store.sopPhoto(a.id,a.credential_revision,url.searchParams.get('revision_id'),Number(pos));reply(res,200,r.bytes,r.type);return}finally{libraryBusy--}
    }
+   if(req.method==='GET'&&p==='/api/lc81/forms'){reply(res,200,store.formsCatalog(a.id,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/forms/export'){const result=await store.exportForm(a.id,a.credential_revision,await body(req));reply(res,200,result.bytes,result.mime,{'Content-Disposition':'attachment; filename="'+result.filename+'"'});return}
    if(req.method==='GET'&&p==='/api/lc81/employment/detail'){reply(res,200,store.employmentDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&p==='/api/lc81/employment/transfer'){reply(res,200,await store.transferEmployment(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/directory/info'){reply(res,200,store.directoryInfo(a.id,url.searchParams.get('type')));return}

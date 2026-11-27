@@ -26,6 +26,7 @@ import {directoryPeople} from '../../src/modules/master-data/people-directory.js
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
+import {formsCatalog,prepareForm,serializeForm,canExportForm} from './form-commands.mjs';
 import {refsForDb,checkContent,MAX_CONTENT,verifyDomainEvents} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
 const SITE='8c810000-0000-4000-8000-000000000003';
@@ -101,6 +102,9 @@ function trainingAccess(db,a,d){
 }
 function cardAllowed(db,a,id,d){
  return a.bootstrap===1?!!readManagerProjection(db,config(db).site,'person.read_basic',id,d):canReadPersonCard(db,security(db,a.id),a.id,id,d);
+}
+function documentLinks(db,a,id,kinds){
+ return kinds.filter(k=>canExportForm(db,a,k,id));
 }
 function projectView(db,a,action,data,d){
  if(action==='person.read_basic'||action==='person.read_directory'){
@@ -401,7 +405,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    });
   },
   changeTraining(actor,revision,input){return mutate(db=>changeTraining(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  trainingDetail(actor,revision,id){return read(db=>trainingDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  trainingDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...trainingDetail(db,a,id),forms:documentLinks(db,a,id,["training_plan","journal"])}})},
   trainingSop(actor,revision,id){return read(db=>trainingSop(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
   programOptions(actor,revision){return read(db=>programOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   saveProgram(actor,revision,input){return mutate(db=>saveProgram(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
@@ -415,13 +419,13 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   createPreparation(actor,revision,input){return mutate(db=>createPreparation(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   preparationFactOptions(actor,revision,id,on){return read(db=>preparationFactOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id,on))},
   recordPreparationFact(actor,revision,input){return mutate(db=>recordPreparationFact(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  preparationDetail(actor,revision,id){return read(db=>preparationDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  preparationDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...preparationDetail(db,a,id),forms:documentLinks(db,a,id,["preparation"])}})},
   orderOptions(actor,revision){return read(db=>orderOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   registerOrder(actor,revision,input){return mutate(db=>registerOrder(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  orderDetail(actor,revision,id){return read(db=>orderDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  orderDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...orderDetail(db,a,id),forms:documentLinks(db,a,id,["order"])}})},
   supplementOptions(actor,revision){return read(db=>supplementOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   createSupplement(actor,revision,input){return mutate(db=>createSupplement(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  supplementDetail(actor,revision,id){return read(db=>supplementDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  supplementDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...supplementDetail(db,a,id),forms:documentLinks(db,a,id,["supplement"])}})},
   changeSupplement(actor,revision,input){return mutate(db=>changeSupplement(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   developmentOptions(actor,revision){return read(db=>developmentOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   createDevelopment(actor,revision,input){return mutate(db=>createDevelopment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
@@ -429,14 +433,14 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   changeDevelopment(actor,revision,input){return mutate(db=>changeDevelopment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   developmentFromMatrix(actor,revision,input){return mutate(db=>developmentFromMatrix(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   bankOptions(actor,revision){return read(db=>bankOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  bankDetail(actor,revision,id){return read(db=>bankDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  bankDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...bankDetail(db,a,id),forms:documentLinks(db,a,id,["bank"])}})},
   saveBank(actor,revision,input){return mutate(db=>saveBank(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   qualityOptions(actor,revision,kind){return read(db=>qualityOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind))},
   installMentorMethod(actor,revision,input){return mutate(db=>installMentorMethod(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   createAudit(actor,revision,input){return mutate(db=>createAudit(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   createSelf(actor,revision,input){return mutate(db=>createSelf(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   voidAudit(actor,revision,input){return mutate(db=>voidAudit(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  qualityDetail(actor,revision,kind,id){return read(db=>qualityDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,id))},
+  qualityDetail(actor,revision,kind,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...qualityDetail(db,a,kind,id),forms:documentLinks(db,a,id,[kind])}})},
   taskOptions(actor,revision,source){return read(db=>taskOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),source))},
   createTask(actor,revision,input){return mutate(db=>createTask(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   taskDetail(actor,revision,id){return read(db=>taskDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
@@ -469,12 +473,12 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   },
   competencyOptions(actor,revision,kind,personId=null,skillId=null){return read(db=>competencyOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),kind,personId,skillId))},
   competencyChange(actor,revision,input){return mutate(db=>competencyChange(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
-  assessmentDetail(actor,revision,id){return read(db=>assessmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  assessmentDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...assessmentDetail(db,a,id),forms:documentLinks(db,a,id,["practical"])}})},
   suggestMatrix(actor,revision,input){return read(db=>suggestMatrix(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   matrixInfo(actor,revision,unit=null,baseOn=null,filters={}){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return matrixInfo(db,a,unit,baseOn??a.day,filters)})},
   saveMatrix(actor,revision,input){return mutate(db=>saveMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
   retireMatrix(actor,revision,input){return mutate(db=>retireMatrix(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
-  matrixDetail(actor,revision,id){return read(db=>matrixDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  matrixDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day());return {...matrixDetail(db,a,id),forms:documentLinks(db,a,id,["matrix"])}})},
   personCard(actor,revision,id){return read(db=>{const a=checkedAccount(db,actor,revision),d=day();return personCard(db,trainingAccess(db,a,d),id,i=>cardAllowed(db,a,i,d))})},
   libraryInfo(actor,kind){
    return read(db=>{
@@ -585,6 +589,11 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     }
     return {type,definition:directorySchema(type),refs,can_create:refs.org_unit.some(x=>x.can_create),day:date};
    });
+  },
+  formsCatalog(actor,revision){return read(db=>formsCatalog(db,trainingAccess(db,checkedAccount(db,actor,revision),day())))},
+  exportForm(actor,revision,input){
+   let result;
+   return mutate(db=>{result=prepareForm(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input);return result},async()=>{await serializeForm(result)});
   },
   employmentDetail(actor,revision,id){return read(db=>employmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
   transferEmployment(actor,revision,input){return mutate(db=>transferEmployment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},

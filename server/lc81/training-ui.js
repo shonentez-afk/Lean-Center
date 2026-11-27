@@ -1,8 +1,10 @@
 // Protected forms and corporate fact tables. All authority, status, scores and
 // actor identities are determined by the server.
-export function createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked}){
+export function createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,downloadForm}){
  const opts=(items,field='name')=>items.map(x=>[x.id,x[field]]);
  const empty=()=>el('p','Нет доступных записей','muted');
+ const exportLabels={training_plan:'План / факт XLSX',journal:'Журнал инструктажа XLSX',matrix:'Матрица XLSX',practical:'Чек-лист практики XLSX',bank:'Банк вопросов XLSX',audit:'Выписка аудита XLSX',self:'Самооценка XLSX',order:'Копия приказа DOCX',supplement:'Ходатайство XLSX',preparation:'Структура подготовки XLSX'};
+ function appendExports(n,d){if(d.forms?.length){const row=el('div',undefined,'row');for(const kind of d.forms)row.append(button(exportLabels[kind]||'Скачать документ',()=>downloadForm(kind,d.id)));n.append(row)}}
  const state={planned:'Запланировано',in_progress:'В работе',completed:'Завершено',cancelled:'Отменено',active:'Действует',retired:'Архив',pass:'Пройдено',fail:'Не пройдено'};
  const dt=(name,label,day)=>{const x=input(name,label,'date');x.querySelector('input').value=day||'';return x};
  const optional=(name,label,items)=>{const x=select(name,label,[['','— Не выбрано —'],...items]);x.querySelector('select').required=false;return x};
@@ -82,7 +84,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    for(const q of d.practical.negative)n.append(button('Мероприятие: '+q.question,()=>taskEditor(related,{kind:'practical',id:d.practical.id,criterion_id:q.id})));
    n.append(related);
   }
-  setContent(host,n);
+  appendExports(n,d);setContent(host,n);
  }
  async function sop(host,id){
   if(!discard())return;
@@ -152,7 +154,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   }
   if(d.can_revise)n.append(button('Создать новую версию матрицы',()=>matrixEditor(host,d),'primary'));
   if(d.can_retire)n.append(groups('Закрыть матрицу',[input('reason','Причина')],'Закрыть',async f=>{await api('matrix/retire',{id:d.id,expected_revision:d.rev,reason:value(f,'reason')});note('Матрица закрыта');await render()}));
-  setContent(host,n);
+  appendExports(n,d);setContent(host,n);
  }
  function matrices(items,user){
   const host=el('div'),n=panel('Матрицы компетенций');
@@ -330,7 +332,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   n.append(el('p','ОТ: '+(d.safety_current?'Актуальный протокол':'Нет актуального протокола')+' · Стажировка: '+(d.internship_current?'Актуальный итог':'Нет актуального итога')+' · Вопросы: '+(d.questions_issued?'Выданы':'Не выданы')+' · Комиссия: '+(d.commission_current?'Актуальное решение':'Нет актуального решения')));
   if(d.facts.length)n.append(table(['Этап','Дата','Смена','Мин.','Результат','Реквизиты','Комментарий'],d.facts.map(x=>[preparationNames[x.kind],x.date,x.shift,x.minutes,resultNames[x.result]||x.result,x.reference,x.note])));
   for(const [kind,label] of Object.entries(preparationNames))if(d.cap[kind])n.append(button(label,()=>prepFactEditor(sub,d,kind),'primary'));
-  n.append(sub);setContent(host,n);
+  n.append(sub);appendExports(n,d);setContent(host,n);
  }
  function programPanel(page,items,user){
   const host=el('div'),n=panel(page==='program.read'?'Шаблоны программ':page==='training.enrollment.read'?'Персональные программы':'Комплекты подготовки');
@@ -364,7 +366,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
  async function orderCard(host,id){
   if(!discard())return;const d=await api('order/detail?id='+encodeURIComponent(id));
   const n=panel('Приказ № '+d.order_number+' от '+d.order_on,el('p',d.organization+' · '+d.city+' · подписант '+d.approved_name),el('p','Действует '+d.valid_from+' — '+(d.valid_to||'без срока')+' · '+d.evidence),el('p','По приказу: инструктор '+(d.instructor_amount??'не установлено')+' руб. · ВТ '+(d.trainer_amount??'не установлено')+' руб. · с '+(d.supplement_from||'—')),table(['Сотрудник','Должность','Роль','Ознакомление','Состояние'],d.members.map(m=>[m.person_name,m.position_name,mentorRoles[m.role]||m.role,m.acknowledged_on,m.revoked_at?'Отозвано':'Зарегистрировано'])));
-  setContent(host,n);
+  appendExports(n,d);setContent(host,n);
  }
  function supplementTasksEditor(catalog,previous=[]){
   const host=el('div'),entries=[];
@@ -392,7 +394,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const command=(c,get)=>async f=>{await api('supplement/change',{id:d.id,expected_revision:d.rev,command:c,fields:get(f)});note('Запись подтверждена сервером');await render()};
   if(d.can_revise){const e=supplementTasksEditor(d.catalog,d.tasks);n.append(groups('Уточнить выполненные задачи',[e.host],'Сохранить задачи',command('revise',f=>({tasks:e.tasks(f)}))))}
   if(d.can_decide){if(d.status.eligible)n.append(groups('Согласовать',[input('note','Основание решения')],'Согласовать',command('approve',f=>({note:value(f,'note')}))));n.append(groups('Отклонить',[input('note','Основание решения')],'Отклонить',command('decline',f=>({note:value(f,'note')}))))}
-  setContent(host,n);
+  appendExports(n,d);setContent(host,n);
  }
  function mentorWorkflow(page,items,user){
   const order=page==='order.read',host=el('div'),n=panel(order?'Групповые приказы наставников':'Ходатайства о доплате');
@@ -459,7 +461,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   if(d.changes.length)n.append(table(['Блок','Прежних вопросов','Изменено','Требуется','Статус'],d.changes.map(x=>[x.title,x.previous,x.changed,x.required,x.ok?'Выполнено':'Не выполнено'])));
   for(const b of d.blocks){const det=el('details');det.append(el('summary',b.title+' · '+b.questions.length),table(['№','Вопрос'],b.questions.map(q=>[q.number,q.text])));n.append(det)}
   if(d.can_revise)n.append(button('Создать новую редакцию',()=>bankEditor(host,d),'primary'));
-  setContent(host,n);
+  appendExports(n,d);setContent(host,n);
  }
  async function qualityEditor(host,kind){
   if(!discard())return;const d=await api('quality/options?kind='+kind),n=panel(kind==='audit'?'Новый аудит первого уровня':'Новая самооценка'),sub=el('div');
@@ -489,7 +491,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    if(d.can_void)n.append(groups('Аннулировать ошибочную запись',[input('reason','Основание')],'Аннулировать',async f=>{await api('quality/void',{id:d.id,expected_revision:d.rev,reason:value(f,'reason')});note('Запись аннулирована');await render()}));
    if(d.void_reason)n.append(el('p','Основание аннулирования: '+d.void_reason));
   }else n.append(table(['№','Раздел','Критерий','Уровень','Комментарий','Действие'],d.questions.map(q=>[q.position,q.section,q.question,q.value===null?'—':q.value+' · '+d.levels[q.value],q.note,d.can_task?button('Мероприятие',()=>taskEditor(sub,{kind:'self_eval',id:d.id,criterion_id:q.id})):'—'])),el('p',d.feedback||''));
-  n.append(sub);setContent(host,n);
+  n.append(sub);appendExports(n,d);setContent(host,n);
  }
  async function taskEditor(host,source=null){
   if(!discard())return;const d=await api('tasks/options',source);
@@ -574,7 +576,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
  }
  async function assessmentCard(host,id){
   if(!discard())return;const d=await api('assessment/detail?id='+encodeURIComponent(id)),sub=el('div'),n=panel((assessmentKinds[d.kind]||d.kind)+' · '+(d.person||''),el('p',d.assessed_on+' · оценщик '+(d.evaluator||'—')),table(['Навык','Шкала','Уровень / состояние','Действует до','Основание'],d.items.map(x=>[x.skill,x.scale,x.level??competencyStates[x.observation_state],x.valid_until,x.evidence_note])),el('p',d.feedback||''));
-  if(d.assignment_id)n.append(button('Открыть связанное обучение',()=>assignment(sub,d.assignment_id)),sub);setContent(host,n);
+  if(d.assignment_id)n.append(button('Открыть связанное обучение',()=>assignment(sub,d.assignment_id)),sub);appendExports(n,d);setContent(host,n);
  }
  function competencyPanel(page,items,user){
   const host=el('div'),n=panel({'skill.read':'Каталог навыков','requirement.read':'Требования к профессиям','coverage.read':'Покрытие по участкам и сменам','assessment.read':'Оценки компетенций'}[page]);
