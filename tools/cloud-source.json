@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "2c1e19b668e437fe4a5da94c13e94b2ae3415fc6",
+  "sourceCommit": "af9396ae6475c8e83c8e3bbeb392451d7deada8e",
   "files": [
     {
       "path": "amvera.yml",
@@ -151,11 +151,15 @@
     },
     {
       "path": "server/lc81/form-commands.mjs",
-      "sha": "2df1dbcf52bf4e94de3bd926395a5d3d1a01c6de"
+      "sha": "9d970371b497f05d40a7dc42884ec106d06fbec0"
     },
     {
       "path": "server/lc81/http.mjs",
-      "sha": "211bd96cddc9e94048973230255c0672fce32d27"
+      "sha": "8b062550450e15016c1dea2cf3f7ab7c2dd3a286"
+    },
+    {
+      "path": "server/lc81/import-commands.mjs",
+      "sha": "6f6bafc6025162aa71e40105d54a72ef9c610584"
     },
     {
       "path": "server/lc81/library-commands.mjs",
@@ -203,7 +207,7 @@
     },
     {
       "path": "server/lc81/portal.js",
-      "sha": "4a7ca2a096f0176680c585ff33940edc732b9ee9"
+      "sha": "116a9bc3e6465311a2c57e4b703f6eafbfe123ec"
     },
     {
       "path": "server/lc81/program-commands.mjs",
@@ -239,7 +243,7 @@
     },
     {
       "path": "server/lc81/store.mjs",
-      "sha": "24a20fc3e013a7efc8ad116416f9b2c89fd22467"
+      "sha": "ab9dd2638684f7a83a03b73b84f3c6f320b8a704"
     },
     {
       "path": "server/lc81/training-commands.mjs",
@@ -387,7 +391,7 @@
     },
     {
       "path": "src/modules/master-data/import-xlsx.js",
-      "sha": "d483ffd5a053314b2c6a985baa5bef4792dbbec9"
+      "sha": "df7d3f026118eefaf6fbe6abdc73b6d009ff12b8"
     },
     {
       "path": "src/modules/master-data/people-directory.js",
@@ -675,7 +679,7 @@
     },
     {
       "path": "tools/lc81-inventory.mjs",
-      "sha": "80206a65049e0b5f6a1374ca2d3aca4eee5a7ae1"
+      "sha": "a0d548bba19b6349fb7cb72d197f842d7144adf7"
     },
     {
       "path": "tools/package_folder.py",
