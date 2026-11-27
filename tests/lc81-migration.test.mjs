@@ -422,6 +422,9 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   // qualification or a manual matrix override.
   const competence=(actor,command,fields)=>store.competencyChange(actor,1,{command,fields});
   const skillOpts=store.competencyOptions(manager.id,1,'skill'),candidate=skillOpts.sops.find(s=>s.id===x.bareRevision);assert(candidate);
+  assert(Number.isSafeInteger(candidate.rev)&&candidate.rev>0);
+  await assert.rejects(competence(manager.id,'skill.from_sop',{category_id:x.category,revisions:[{id:candidate.id,rev:candidate.rev-1}]}),/Редакция СОП изменилась/);
+  assert(store.competencyOptions(manager.id,1,'skill').sops.some(s=>s.id===x.bareRevision),'stale request must not create a skill');
   const newSkill=await competence(manager.id,'skill.from_sop',{category_id:x.category,revisions:[{id:candidate.id,rev:candidate.rev}]});
   assert.equal(store.readResource(manager.id,'skill.read',newSkill.items[0].id).operation_id,x.bareOperation);
   assert(!store.competencyOptions(manager.id,1,'skill').sops.some(s=>s.id===x.bareRevision));

@@ -33,7 +33,8 @@ export function competencyOptions(db,a,kind,personId=null,skillId=null){
  if(kind==='skill'){
   out.can_category=!!a.personId&&site(db,a,'skill.category.create');out.can_general=!!a.personId&&site(db,a,'skill.create')&&site(db,a,'skill.read');
   out.sops=a.personId?columnChoices(db).filter(c=>!c.skill_id&&c.document_id&&a.read('operation.read',c.operation_id)&&allowed(a,'skill.from_sop',c.operation_id,skillResource(db,{operation_id:c.operation_id}))&&allowed(a,'skill.read',c.operation_id,skillResource(db,{operation_id:c.operation_id}))).flatMap(c=>{
-   const r=one(db,"SELECT id,rev FROM document_revision WHERE document_id=? AND state='effective'",[c.document_id]);return r&&a.read('sop.read_effective',r.id)?[{id:r.id,rev:r.rev,label:c.title}]:[];
+   // Revision rows have no rev column: optimistic concurrency uses the parent document.
+   const r=one(db,"SELECT r.id,d.rev FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.document_id=? AND r.state='effective' AND d.archived=0",[c.document_id]);return r&&a.read('sop.read_effective',r.id)?[{id:r.id,rev:r.rev,label:c.title}]:[];
   }):[];
  }else if(kind==='requirement'){
   out.can_create=!!a.personId&&site(db,a,'requirement.create')&&site(db,a,'requirement.read');
@@ -70,7 +71,7 @@ export function competencyChange(db,a,f){
   must(exact(v,['category_id','revisions'])&&active(db,'skill_category',v.category_id)&&Array.isArray(v.revisions)&&v.revisions.length>0&&v.revisions.length<=100&&v.revisions.every(r=>exact(r,['id','rev'])&&isId(r.id)&&Number.isSafeInteger(r.rev))&&new Set(v.revisions.map(r=>r.id)).size===v.revisions.length,400,'Выберите категорию и редакции СОП');
   const pending=[];
   for(const r of v.revisions){
-   const x=a.read('sop.read_effective',r.id),current=one(db,"SELECT r.id,r.rev,r.state,d.operation_id,d.code,d.archived FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=? AND d.kind='sop'",[r.id]);
+   const x=a.read('sop.read_effective',r.id),current=one(db,"SELECT r.id,d.rev,r.state,d.operation_id,d.code,d.archived FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.id=? AND d.kind='sop'",[r.id]);
    const resource=current&&skillResource(db,{operation_id:current.operation_id});
    must(x&&current&&!current.archived&&current.state==='effective'&&a.read('operation.read',current.operation_id)&&allowed(a,k,current.operation_id,resource)&&allowed(a,'skill.read',current.operation_id,resource),403,'Редакция СОП недоступна');
    must(r.rev===current.rev,409,'Редакция СОП изменилась');
