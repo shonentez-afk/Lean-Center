@@ -217,7 +217,32 @@ export function matrixResource(db,unit,roster,columns,day,baseOn){
  }
  return {data:{},self:null,units:[...new Set(units)],assigned:[]};
 }
+const siteCatalogs=Object.freeze({'profession.read':'profession','position.read':'position','shift.read':'work_shift','category.read':'skill_category','scale.read':'rating_scale','role.read':'business_role'});
+export function employmentResource(db,x,day){
+ if(!x||!activePerson(db,x.person_id)||!lineage(db,x.unit_id))return null;
+ const u=unitsFor(db,x.person_id,day);if(u.length!==1)return null;
+ return {data:{},self:x.person_id,units:[...new Set([...u,x.unit_id])],assigned:[]};
+}
 function resolve(db,action,id,day){
+ if(Object.hasOwn(siteCatalogs,action)){
+  const t=siteCatalogs[action],x=one(db,'SELECT * FROM '+t+' WHERE id=? AND archived=0',[id]),r=programResource(db);
+  if(!x||!r)return null;
+  const data={id:x.id,name:x.name,rev:x.rev};
+  if(['profession','position','work_shift','business_role'].includes(t))data.code=x.code;
+  if(t==='rating_scale'){data.version_no=x.version_no;data.levels=rows(db,'SELECT value,label FROM rating_level WHERE scale_id=? ORDER BY value',[id]).map(l=>l.value+': '+l.label).join('\n')}
+  return {...r,data};
+ }
+ if(action==='employment.read'){
+  const x=one(db,'SELECT * FROM person_assignment WHERE id=?',[id]),r=employmentResource(db,x,day);
+  return r?{...r,data:{id:x.id,person_id:x.person_id,unit_id:x.unit_id,profession_id:x.profession_id,position_id:x.position_id,shift_id:x.shift_id,shift_code:x.shift_code,valid_from:x.valid_from,valid_to:x.valid_to,rev:x.rev}}:null;
+ }
+ if(action==='role_assignment.read'){
+  const x=one(db,'SELECT * FROM role_assignment WHERE id=?',[id]);
+  if(!x||!activePerson(db,x.person_id))return null;
+  const u=unitsFor(db,x.person_id,day),v=unitsFor(db,x.person_id,x.valid_from);
+  if(u.length!==1||v.length!==1)return null;
+  return {data:{id:x.id,person_id:x.person_id,role_id:x.role_id,valid_from:x.valid_from,valid_to:x.valid_to,rev:x.rev},self:x.person_id,units:[...new Set([...u,...v])],assigned:[]};
+ }
  if(action==='skill.read'){
   const s=one(db,'SELECT * FROM skill WHERE id=?',[id]),r=skillResource(db,s);
   return r?{...r,data:{id:s.id,name:s.name,category_id:s.category_id,operation_id:s.operation_id,rev:s.rev}}:null;
@@ -462,7 +487,7 @@ export function canReadLibraryAtOperation(db,security,accountId,kind,id,day){
 }
 
 export function canUseTrainingResource(db,security,accountId,action,id,day,resource){
- const allowed=[...READ_ACTIONS,...TRAINING_COMMANDS,'calendar.detail','plan.read','center.read','analytics.read','metrics.read','roi.detail','frv.read_summary','training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','task.implement_own','bank.read','bank.detail','skill.read','requirement.read','coverage.read','assessment.read','assessment.detail'];
+ const allowed=[...READ_ACTIONS,...TRAINING_COMMANDS,'calendar.detail','plan.read','center.read','analytics.read','metrics.read','roi.detail','frv.read_summary','training.detail','training.read_sop','matrix.detail','training.read','matrix.read','credential.read','appointment.read','authorization.read','program.read','program.detail','training.enrollment.read','training.enrollment.detail','preparation.read','preparation.detail','order.read','order.detail','supplement.read','supplement.detail','development.read','development.detail','audit.read','audit.detail','self.read','self.detail','task.read','task.detail','task.implement_own','bank.read','bank.detail','skill.read','requirement.read','coverage.read','assessment.read','assessment.detail','employment.detail'];
  return !!resource&&allowed.includes(action)&&!!decide(db,security,accountId,action,id,day,action,resource);
 }
 export function bootstrapTrainingScope(db,site,resource){

@@ -164,9 +164,9 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const d=await api('person/card?id='+encodeURIComponent(id)),n=panel('Карточка сотрудника · '+d.person.display_name,el('p',[d.person.employee_code,d.person.unit,d.person.position].filter(Boolean).join(' · ')));
   for(const s of d.sections){
    const details=el('details');details.append(el('summary',s.title+' · '+s.items.length));
-   const labels={code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',evaluated_on:'Дата оценки',assessed_on:'Дата оценки',result_note:'Результат',people:'Сотрудников',skills:'Навыков'};
+   const labels={unit:'Подразделение',profession:'Профессия',position:'Должность',shift:'Смена',code:'Код',title:'Название',due_on:'Срок',state:'Состояние',start_on:'Начало',month:'Месяц',version_no:'Версия',role:'Роль',kind:'Вид',issued_on:'Выдан',valid_until:'Срок действия',order_on:'Дата приказа',valid_from:'Начало',valid_to:'Окончание',operation_name:'Операция',revoked_at:'Отозвано',observed_at:'Дата наблюдения',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',base_on:'Срез',target_on:'Цель',evaluated_on:'Дата оценки',assessed_on:'Дата оценки',result_note:'Результат',people:'Сотрудников',skills:'Навыков'};
    const keys=Object.keys(labels).filter(k=>s.items.some(r=>Object.hasOwn(r,k))),sub=el('div');
-   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):s.action==='assessment.read'&&r.can_detail?button('Открыть оценку',()=>assessmentCard(sub,r.id)):s.action==='calendar.read'&&r.can_detail?button('Открыть плановое событие',()=>openLinked(sub,{type:'schedule',id:r.id})):s.action==='roi.read'&&r.can_detail?button('Открыть эффект',()=>openLinked(sub,{type:'roi',id:r.id})):'']);
+   const rows=s.items.map(r=>[...keys.map(k=>k==='state'?state[r[k]]||r[k]:r[k]),s.action==='employment.read'&&r.can_transfer?button('Изменить назначение',()=>employmentEditor(sub,r.id)):s.action==='training.read'&&r.can_detail?button('Открыть обучение',()=>assignment(sub,r.id)):s.action==='matrix.read'&&r.can_detail?button('Открыть матрицу',()=>matrix(sub,r.id)):s.action==='training.enrollment.read'&&r.can_detail?button('Открыть программу',()=>enrollmentCard(sub,r.id)):s.action==='preparation.read'&&r.can_detail?button('Открыть комплект',()=>preparationCard(sub,r.id)):s.action==='supplement.read'&&r.can_detail?button('Открыть ходатайство',()=>supplementCard(sub,r.id)):s.action==='development.read'&&r.can_detail?button('Открыть план',()=>developmentCard(sub,r.id)):s.action==='audit.read'&&r.can_detail?button('Открыть аудит',()=>qualityCard(sub,'audit',r.id)):s.action==='self.read'&&r.can_detail?button('Открыть самооценку',()=>qualityCard(sub,'self',r.id)):s.action==='task.read'&&r.can_detail?button('Открыть мероприятие',()=>taskCard(sub,r.id)):s.action==='assessment.read'&&r.can_detail?button('Открыть оценку',()=>assessmentCard(sub,r.id)):s.action==='calendar.read'&&r.can_detail?button('Открыть плановое событие',()=>openLinked(sub,{type:'schedule',id:r.id})):s.action==='roi.read'&&r.can_detail?button('Открыть эффект',()=>openLinked(sub,{type:'roi',id:r.id})):'']);
    details.append(table([...keys.map(k=>labels[k]),'Действия'],rows),sub);n.append(details);
   }
   if(!d.sections.length)n.append(el('p','Нет связанных записей, доступных вашей учётной записи.'));
@@ -605,5 +605,25 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   if(!fn)throw Error('Источник недоступен');
   return fn(host,id);
  }
- return {training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel,competencyPanel,openRecord};
+ async function employmentEditor(host,id){
+  if(!discard())return;
+  const d=await api('employment/detail?id='+encodeURIComponent(id)),n=panel('Кадровое назначение · '+(d.person_name||'Сотрудник'),el('p',[d.unit,d.profession,d.position,d.shift,d.valid_from,d.valid_to].filter(Boolean).join(' · ')));
+  if(d.can_transfer){
+   const options=(key,label,current)=>{const list=d.references[key]||[];const found=list.some(x=>x.id===current);const choices=opts(list);if(current&&!found)choices.push([current,'Существующая ссылка (нет доступа)']);const field=optional(key,label,choices);field.querySelector('select').value=current||'';return field};
+   const unit=pick('unit_id','Новое подразделение',opts(d.units),d.unit_id),start=dt('valid_from','Дата начала нового назначения',d.earliest);
+   start.querySelector('input').min=d.earliest;
+   n.append(el('p','Предыдущее назначение будет закрыто днём, предшествующим новому. История и документы сохраняются. Бизнес-роли и выданные права автоматически не изменяются.'),form([unit,options('profession_id','Профессия',d.profession_id),options('position_id','Должность',d.position_id),options('shift_id','Смена',d.shift_id),start],'Оформить новое назначение',async f=>{
+    await api('employment/transfer',{id:d.id,expected_revision:d.rev,unit_id:value(f,'unit_id'),profession_id:value(f,'profession_id')||null,position_id:value(f,'position_id')||null,shift_id:value(f,'shift_id')||null,valid_from:value(f,'valid_from')});note('Кадровое назначение сохранено');await render();
+   }));
+  }else n.append(el('p','Перемещение недоступно: закрытое, будущее или уже имеющее преемника назначение, либо недостаточно полномочий.'));
+  setContent(host,n);
+ }
+ function personnelPanel(page,items){
+  const host=el('div'),role=page==='role_assignment.read',n=panel(role?'История назначений бизнес-ролей':'Кадровые назначения');
+  n.append(el('p',role?'Бизнес-роли не равны правам приложения. Управление ролями и грантами остаётся отдельной административной операцией.':'История назначения сохраняется. При перемещении нужны единые полномочия на исходное и целевое подразделения.'));
+  if(role)n.append(items.length?table(['Сотрудник','Роль','Начало','Окончание','Состояние'],items.map(r=>[r.person_name,r.role,r.valid_from,r.valid_to,r.state])):empty());
+  else n.append(items.length?table(['Сотрудник','Подразделение','Профессия','Должность','Смена','Начало','Окончание','Состояние','Действия'],items.map(r=>[r.person_name,r.unit,r.profession,r.position,r.shift,r.valid_from,r.valid_to,r.state,r.can_transfer?button('Изменить назначение',()=>employmentEditor(host,r.id)):'—'])):empty());
+  n.append(host);return n;
+ }
+ return {training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel,competencyPanel,openRecord,personnelPanel};
 }

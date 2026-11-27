@@ -8,7 +8,7 @@ import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-st
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
 import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource} from './read-policy.mjs';
-import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
+import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,SITE_REFERENCE_TYPES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop} from './training-commands.mjs';
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
@@ -25,6 +25,7 @@ import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
+import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
 import {refsForDb,checkContent,MAX_CONTENT,verifyDomainEvents} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
 const SITE='8c810000-0000-4000-8000-000000000003';
@@ -111,6 +112,7 @@ function projectView(db,a,action,data,d){
   return {...data,trainee_name:one(db,'SELECT display_name FROM person WHERE id=?',[data.trainee_id])?.display_name||'',operation_name:one(db,'SELECT name FROM operation WHERE id=?',[data.operation_id])?.name||'',can_detail:access.allows('training.detail',data.id,resource),can_sop:access.allows('training.read_sop',data.id,resource)};
  }
  if(['program.read','training.enrollment.read','preparation.read'].includes(action))return programView(db,trainingAccess(db,a,d),action,data);
+ if(['employment.read','role_assignment.read'].includes(action))return personnelView(db,trainingAccess(db,a,d),action,data);
  if(action==='calendar.read')return scheduleView(db,trainingAccess(db,a,d),data);
  if(action==='roi.read')return roiView(db,trainingAccess(db,a,d),data);
  if(['skill.read','requirement.read','coverage.read','assessment.read'].includes(action))return competencyView(db,trainingAccess(db,a,d),action,data);
@@ -575,15 +577,17 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     const d=DIRECTORIES[type],date=day();
     must(permissionsFor(db,a).includes(d.read),404,'Справочник недоступен');
     const refs={};
-    for(const [t,action] of [['org_unit','org.read'],['equipment','equipment.read'],['workplace','workplace.read']]){
+    for(const [t,action] of [['org_unit','org.read'],['equipment','equipment.read'],['workplace','workplace.read'],['profession','profession.read'],['position','position.read'],['work_shift','shift.read']]){
      refs[t]=rows(db,'SELECT id FROM '+t+' WHERE archived=0 ORDER BY id').flatMap(({id})=>{
       const r=readFor(db,a,action,id,date);
-      return r?[{id,label:r.data.name,unit_id:r.data.unit_id??null,can_create:t==='org_unit'&&directoryAllowed(db,a,d.create,'org.read',id,date)}]:[];
+      return r?[{id,label:r.data.name,unit_id:r.data.unit_id??null,can_create:t==='org_unit'&&(!SITE_REFERENCE_TYPES.includes(type)||id===config(db).site)&&directoryAllowed(db,a,d.create,'org.read',id,date)}]:[];
      });
     }
     return {type,definition:directorySchema(type),refs,can_create:refs.org_unit.some(x=>x.can_create),day:date};
    });
   },
+  employmentDetail(actor,revision,id){return read(db=>employmentDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),id))},
+  transferEmployment(actor,revision,input){return mutate(db=>transferEmployment(db,trainingAccess(db,checkedAccount(db,actor,revision),day()),input))},
   changeDirectory(actor,revision,input){
    return mutate(db=>{
     const a=account(db,actor);must(a&&a.credential_revision===revision,401,'Сеанс завершён');
