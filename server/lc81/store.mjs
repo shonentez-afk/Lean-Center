@@ -22,6 +22,7 @@ import {roiOptions,roiView,roiDetail,createRoi,changeRoi,roiMeasureContext,measu
 import {competencyOptions,competencyChange,competencyView,assessmentDetail} from './competency-commands.mjs';
 import {mentorOptions,changeMentor,mentorView} from './mentor-commands.mjs';
 import {mentorWorkspace} from './mentor-workspace.mjs';
+import {candidateOptions,candidateEvidence,recordCandidateEvidence,voidCandidateEvidence} from './certification-evidence.mjs';
 import {developmentOptions,createDevelopment,developmentDetail,changeDevelopment,developmentFromMatrix,bankOptions,bankDetail,saveBank,developmentView} from './development-commands.mjs';
 import {qualityOptions,installMentorMethod,createAudit,createSelf,voidAudit,qualityDetail,taskOptions,createTask,taskDetail,changeTask,qualityView} from './quality-commands.mjs';
 import {workflowView,orderOptions,registerOrder,orderDetail,supplementOptions,createSupplement,supplementDetail,changeSupplement} from './mentor-workflows.mjs';
@@ -675,6 +676,10 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   taskDetail(actor,revision,id){return read(db=>taskDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
   changeTask(actor,revision,input){return mutate(db=>changeTask(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   mentorWorkspace(actor,revision){return read(db=>{const a=checkedAccount(db,actor,revision),d=day(db);return mentorWorkspace(db,trainingAccess(db,a,d),id=>cardAllowed(db,a,id,d))})},
+  candidateOptions(actor,revision){return read(db=>candidateOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  candidateEvidence(actor,revision,id,from,to){return read(db=>candidateEvidence(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id,from,to))},
+  recordCandidateEvidence(actor,revision,f){return mutate(db=>recordCandidateEvidence(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  voidCandidateEvidence(actor,revision,f){return mutate(db=>voidCandidateEvidence(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind))},
   changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   calendarWorkspace(actor,revision,query){return read(db=>{

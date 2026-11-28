@@ -360,10 +360,52 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   search.querySelector('input').addEventListener('input',()=>{if(!body.querySelector('[data-lc-work-form]'))draw()});
   n.append(quick,quickHost,tabs,search,body,reg,assistant({type:'person',id}));draw();setContent(host,n);
  }
+ async function candidatePanel(host){
+  if(!discard())return;
+  const opt=await api('mentor/candidate-options'),detail=el('div'),nested=el('div');
+  const person=pick('candidate_id','Кандидат / инструктор',opts(opt.people)),from=dt('candidate_from','Период с',opt.day.slice(0,4)+'-01-01'),to=dt('candidate_to','По',opt.day);
+  const load=async()=>{
+   if(!discard())return;
+   const val=x=>x.querySelector('input,select').value,id=val(person);
+   if(!id)throw Error('Выберите сотрудника');
+   const d=await api('mentor/candidate?'+new URLSearchParams({id,from:val(from),to:val(to)}));
+   const score=x=>x===null?'Нет оценки':(100*x).toFixed(1)+'%';
+   const link=x=>x.type?button('Открыть основание',()=>openLinked(nested,{type:x.type,id:x.id})):'Документ подготовки';
+   const n=panel('Подготовка к сертификации · '+d.name,el('p','Стандарт 03, §4.4.6–4.4.10. Фактические основания из доступных регистров и подтверждённых документов кандидата; сертификат выдаётся отдельно.', 'muted'),
+    table(['Требование','Норма','Подтверждено','Результат'],d.checks.map(x=>[x.label,x.required,x.score?score(x.actual):x.actual,x.ok?'Подтверждено доступными фактами':'Требуется подтверждение'])),
+    el('p','Суммы относятся к выбранному периоду. Одна операция с одним учеником в день учитывается один раз, чтобы не задвоить бумажный документ и факт центра. При необходимости подтвердите отдельные наблюдения вручную. Наличие всех строк не заменяет решение комиссии.','muted'));
+   n.append(panel('СОП',d.sops.length?table(['Редакция','Участие',''],d.sops.map(x=>[x.label,x.source,link(x)])):empty()));
+   n.append(panel('Классические инструктажи',d.instructions.length?table(['Дата','СОП','Присутствие ВТ','Источник',''],d.instructions.map(x=>[x.day,x.label,x.observed?'Подтверждено':'Не подтверждено',x.source,link(x)])):empty()));
+   n.append(panel('Приложения 13 и 14',d.evaluations.length?table(['Дата','Оценка','Источник',''],d.evaluations.map(x=>[x.day,score(x.score),x.source,link(x)])):empty(),d.self.length?table(['Самооценка',''],d.self.map(x=>[x.day,link(x)])):empty()));
+   n.append(panel('Годовой контроль аудитов L1',d.annual?el('p',d.annual.year+': '+d.annual.actual+' из '+d.annual.required+' · осталось '+d.annual.remaining+' · повторные отчёты '+d.annual.duplicates+' · несвязанные '+d.annual.unlinked):el('p','Нет подтверждённого годового расчёта в текущей области доступа.'),el('p','Консервативный предварительный зачёт: полный корпоративный аудит приложения 13, один наблюдавшийся инструктаж за дату; RC1 отдельно ('+d.rc1_in_period+' доступных отчётов в выбранном периоде). Правило зачёта подлежит утверждению предприятием.','muted')));
+   if(d.saved.length)n.append(panel('Подтверждённые документы кандидата',table(['Дата','Вид','Реквизиты','Состояние',''],d.saved.map(x=>[x.day,d.kinds[x.kind],x.reference,x.voided?'Аннулирован: '+x.void_reason:'Зарегистрирован',x.can_void?button('Аннулировать',()=>{
+    if(!discard())return;setContent(nested,panel('Аннулирование факта подготовки',form([input('reason','Причина')],'Аннулировать',async f=>{await api('mentor/candidate-void',{id:x.id,reason:value(f,'reason')});note('Основание аннулировано');nested.replaceChildren();await load()})));
+   }):'—']))));
+   if(d.can_record){
+    const type=pick('candidate_kind','Подтверждаемый факт',Object.entries(d.kinds)),editor=el('div');
+    n.append(panel('Подтвердить факт подготовки',el('p','ВТ регистрирует реально проведённое под контролем обучение или подписанный исходный документ, не выдавая кандидату полномочия.'),type,button('Открыть форму',()=>{
+     const k=type.querySelector('select').value;if(!k)throw Error('Выберите вид факта');
+     let controls,get;
+     if(k==='sop'){controls=[pick('revision_id','Редакция СОП',opts(d.revisions,'label')),input('contribution','Участие кандидата')];get=f=>({revision_id:value(f,'revision_id'),contribution:value(f,'contribution')})}
+     else if(k==='ji'){controls=[pick('revision_id','СОП',opts(d.revisions,'label')),pick('trainee_id','Ученик',opts(d.trainees)),check('present','Я лично присутствовал как ВТ'),check('confirmed','Подтверждаю фактическое проведение полного инструктажа 1+3+4+1 под контролем')];get=f=>({revision_id:value(f,'revision_id'),trainee_id:value(f,'trainee_id'),present:checked(f,'present'),confirmed:checked(f,'confirmed')})}
+     else if(k==='app13'||k==='app14'){
+      const questions=k==='app13'?d.app13:d.app14,choices=k==='app13'?[['1','Да'],['0','Нет']]:[['0','0'],['1','1 — знает, понимает'],['2','2 — умеет'],['3','3 — делает постоянно']];
+      controls=questions.map((q,i)=>pick('a_'+i,(i+1)+'. '+q,choices));get=f=>({answers:questions.map((q,i)=>Number(value(f,'a_'+i)))});
+     }else{controls=[input('description','Участники / комиссия, содержание и подтверждённый итог')];get=f=>({description:value(f,'description')})}
+     editor.replaceChildren(form([dt('held_on','Фактическая дата',d.day),input('reference','Реквизиты подписанного основания'),...controls],'Зарегистрировать основание',async f=>{
+      await api('mentor/candidate',{person_id:d.id,kind:k,held_on:value(f,'held_on'),reference:value(f,'reference'),fields:get(f)});note('Подтверждение сохранено');await load();
+     }));
+    }),editor));
+   }
+   detail.replaceChildren(n,nested);
+  };
+  setContent(host,panel('Подготовка кандидатов',person,from,to,button('Показать подтверждения',load),detail));
+ }
  function mentor(kind,items,info){
   const names={credential:'Документы о подготовке наставников',appointment:'Приказы о назначении',authorization:'Полномочия по операциям'};
   const roles={instructor:'Инструктор',mentor:'Наставник',internal_trainer:'Внутренний тренер'},types={certificate:'Сертификат',attendance:'Свидетельство'};
   const host=el('div'),n=panel(names[kind]),status=r=>r.revoked_at?'Отозван':kind==='authorization'?(r.valid_now?'Действует':'Не действует на текущую дату'):'Зарегистрирован';
+  if(kind==='credential')n.append(button('Подготовка к сертификации',()=>candidatePanel(host),'primary'));
   const headers=kind==='credential'?['Сотрудник','Вид','Роль','Выдан','Действует до']:kind==='appointment'?['Сотрудник','Роль','Дата приказа','С','По']:['Сотрудник','Операция','С','По'];
   n.append(items.length?table([...headers,'Состояние','Действия'],items.map(r=>[
    ...(kind==='credential'?[r.person_name,types[r.kind]||r.kind,roles[r.role]||r.role,r.issued_on,r.valid_until]:kind==='appointment'?[r.person_name,roles[r.role]||r.role,r.order_on,r.valid_from,r.valid_to]:[r.person_name,r.operation_name,r.valid_from,r.valid_to]),

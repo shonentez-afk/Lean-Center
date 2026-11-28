@@ -233,6 +233,10 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='POST'&&p==='/api/lc81/tasks/create'){reply(res,200,await store.createTask(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/tasks/change'){reply(res,200,await store.changeTask(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/mentor/workspace'){reply(res,200,store.mentorWorkspace(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/mentor/candidate-options'){reply(res,200,store.candidateOptions(a.id,a.credential_revision));return}
+   if(req.method==='GET'&&p==='/api/lc81/mentor/candidate'){reply(res,200,store.candidateEvidence(a.id,a.credential_revision,url.searchParams.get('id'),url.searchParams.get('from'),url.searchParams.get('to')));return}
+   if(req.method==='POST'&&p==='/api/lc81/mentor/candidate'){reply(res,200,await store.recordCandidateEvidence(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/mentor/candidate-void'){reply(res,200,await store.voidCandidateEvidence(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/mentor/options'){reply(res,200,store.mentorOptions(a.id,a.credential_revision,url.searchParams.get('kind')));return}
    if(req.method==='POST'&&p==='/api/lc81/mentor/change'){reply(res,200,await store.changeMentor(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/calendar/view'){reply(res,200,store.calendarWorkspace(a.id,a.credential_revision,Object.fromEntries(['mode','from','to','person_id'].map(k=>[k,url.searchParams.get(k)]))));return}
