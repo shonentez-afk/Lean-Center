@@ -4,17 +4,18 @@ import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {fixture,SQL,makeSop} from './lc4-fixture.mjs';
 import {completedMonths,seedAnnualModules} from './lc826-annual-modules-fixture.mjs';
+import {seedAnnualPreparations} from './lc828-annual-preparation-fixture.mjs';
 import {prepareSnapshot,uuid} from '../src/core/db.js';
 import {copyPilotCheckpoint} from '../server/lc74-store.mjs';
 import {migratePilotCopy} from '../server/lc81/maintenance.mjs';
 import {openSecureQA} from '../server/lc81/store.mjs';
 export const context=(command,operation_id,id=null,revision_id=null)=>({kind:'sop',command,id,revision_id,operation_id,origin_id:null,origin_revision:null});
 export const request=(context,expected_revision,title,text)=>({request_id:uuid(),context,expected_revision,title,code:null,observed_at:null,text});
-export async function setupApproval({pushConfig=null,pushSender=undefined,annualHistory=false,annualModules=false}={}){
+export async function setupApproval({pushConfig=null,pushSender=undefined,annualHistory=false,annualModules=false,annualPreparation=false}={}){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'lc83-approval-'));
  let f,store;
  try{
-  const months=annualModules?completedMonths():null;
+  const months=annualModules||annualPreparation?completedMonths():null;
   f=await fixture(months?{startOn:months[0]}:{});const w=f.w,site=w.edit('org_unit',null,{code:'LC83-SITE',name:'Учебный завод',kind:'Предприятие',parent_id:null});
   w.edit('org_unit',f.unit,{code:'QA',name:'Учебный участок',kind:'Участок',parent_id:site});
   const unitB=w.edit('org_unit',null,{code:'LC83-B',name:'Другой участок',kind:'Участок',parent_id:site});
@@ -32,8 +33,10 @@ export async function setupApproval({pushConfig=null,pushSender=undefined,annual
   const cert=(await f.save('mentor_credential',{person_id:people.twi.person,kind:'certificate',role:'internal_trainer',number:'LC83-VT',issuer:'Учебный центр',issued_on:'2020-01-01',valid_until:null,evidence:'Учебный сертификат',registered_by:f.actor})).entity_id;
   await f.save('mentor_appointment',{person_id:people.twi.person,credential_id:cert,role:'internal_trainer',order_number:'LC83-ORDER',order_on:'2020-01-01',approved_by:f.actor,valid_from:'2020-01-01',valid_to:null,acknowledged_on:'2020-01-01',evidence:'Учебный приказ'});
   const assignment=await f.addAssignment();
-  let history=null,modules=null;
-  if(annualModules){assign(f.actor,roles.twi);modules=await seedAnnualModules(f,months)}
+  let history=null,modules=null,preparations=null;
+  if(annualModules||annualPreparation)assign(f.actor,roles.twi);
+  if(annualModules)modules=await seedAnnualModules(f,months);
+  if(annualPreparation)preparations=await seedAnnualPreparations(f,months,{unitB,trainer:people.twi.person});
   if(annualHistory){
    // Twelve completed calendar months of valid native task events, not
    // directly inserted fake SQL rows. No notification journal exists yet.
@@ -87,6 +90,6 @@ export async function setupApproval({pushConfig=null,pushSender=undefined,annual
   };
   const effective=(name='observer')=>store.listResources(users[name].id,'sop.read_effective').map(x=>x.revision_id);
   const cleanup=async()=>{await store.close();f.w.close();await fs.rm(root,{recursive:true,force:true})};
-  return {root,target,store,admin,users,people,password,day,history,modules,old,document,operation,assignment,skill:f.skill,scale:f.scale,unit:f.unit,unitB,detail,draft,passport,edit,route,submit,decision,change,impact,effective,cleanup};
+  return {root,target,store,admin,users,people,password,day,history,modules,preparations,old,document,operation,assignment,skill:f.skill,scale:f.scale,unit:f.unit,unitB,detail,draft,passport,edit,route,submit,decision,change,impact,effective,cleanup};
  }catch(e){if(store)await store.close();if(f)f.w.close();await fs.rm(root,{recursive:true,force:true});throw e}
 }

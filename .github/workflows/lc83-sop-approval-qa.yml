@@ -49,7 +49,7 @@ jobs:
           bash -n deploy/cloudcore/host-snapshot.sh
           node deploy/cloudcore/pin-source.mjs
           node --check deploy/cloudcore/smoke.mjs
-          for script in tests/lc83-approval-fixture.mjs tests/lc826-annual-modules-fixture.mjs tests/lc826-annual-modules.test.mjs tests/lc83-sop-approval.test.mjs tests/lc83-sop-approval-browser.mjs tests/lc81-secure-qa.test.mjs tests/lc81-migration.test.mjs tests/lc81-browser.mjs tests/lc81-parity-r2-browser.mjs tests/lc53-mobile-browser.mjs tests/lc74-cloud-browser.mjs; do node --check "$script"; done
+          for script in tests/lc83-approval-fixture.mjs tests/lc826-annual-modules-fixture.mjs tests/lc826-annual-modules.test.mjs tests/lc828-annual-preparation-fixture.mjs tests/lc828-annual-preparation.test.mjs tests/lc83-sop-approval.test.mjs tests/lc83-sop-approval-browser.mjs tests/lc81-secure-qa.test.mjs tests/lc81-migration.test.mjs tests/lc81-browser.mjs tests/lc81-parity-r2-browser.mjs tests/lc53-mobile-browser.mjs tests/lc74-cloud-browser.mjs; do node --check "$script"; done
           node tools/build_folder.mjs --cloud
           node --test tests/lc81-amvera-smoke.test.mjs
           git diff --exit-code -- package-lock.json
@@ -74,6 +74,12 @@ jobs:
         run: |
           set -euo pipefail
           node --test tests/lc826-annual-modules.test.mjs
+
+      - name: D4.2 annual preparation, mobile handoff, personnel and concurrent protected writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/lc828-annual-preparation.test.mjs
 
       - name: Package the Ubuntu x64 runtime and application
         shell: bash
