@@ -176,22 +176,39 @@ try{
  const goSection=async action=>{
   const p=m.p,nav=p.locator('#nav [data-action="'+action+'"]'),group=nav.locator('xpath=ancestor::details');
   await p.bringToFront();
-  // A click can be ignored while the previous protected action is still
-  // finishing or the returning tab is verifying access. Only retry
-  // idempotent navigation; never retry a write, bypass permissions or force clicks.
+  // Wait for live access and the protected navigation state. On mobile,
+  // successful navigation closes the sidebar, so the active button must
+  // remain attached, not visible. No forced clicks or repeated writes.
   for(let attempt=0;attempt<5;attempt++){
    await p.locator('html:not(.lc81-access-check)').waitFor();
    await indicator(p,'saved').waitFor();
+   await p.locator('#nav[aria-busy="false"]').waitFor({state:'attached',timeout:30000});
    await nav.waitFor({state:'attached'});
-   if(await p.locator('#menu').isVisible()&&await p.locator('#menu').getAttribute('aria-expanded')!=='true')await p.locator('#menu').click();
+   const mobile=await p.locator('#menu').isVisible();
+   if(mobile&&await p.locator('#menu').getAttribute('aria-expanded')!=='true')await p.locator('#menu').click();
    if(await group.count()&&!await group.evaluate(e=>e.open))await group.locator('summary').click();
+   const title=(await nav.textContent()).trim();
    try{
     await nav.click({timeout:3000});
-    await p.locator('#nav [data-action="'+action+'"][aria-current="page"]').waitFor({timeout:3000});
-    await indicator(p,'saved').waitFor();
+    await p.locator('#nav [data-action="'+action+'"][aria-current="page"]').waitFor({state:'attached',timeout:30000});
+    await indicator(p,'saved').waitFor({timeout:30000});
+    await p.locator('#nav[aria-busy="false"]').waitFor({state:'attached',timeout:30000});
+    await p.locator('#content > *').first().waitFor({state:'attached',timeout:30000});
+    const heading=p.locator('#page-heading h1');
+    await heading.waitFor({state:'visible'});
+    assert.equal((await heading.textContent()).trim(),title,'Wrong page: '+action);
     assert.equal(await p.locator('#status.error').count(),0,'Navigation failed: '+action);
+    if(mobile){
+     assert.equal(await p.locator('#menu').getAttribute('aria-expanded'),'false','Mobile menu did not close: '+action);
+     await p.locator('#nav').waitFor({state:'hidden'});
+     assert(await heading.evaluate(e=>document.activeElement===e),'Mobile focus did not reach page heading: '+action);
+    }
     return;
-   }catch(e){if(attempt===4)throw new Error('Navigation did not settle: '+action+'; status: '+(await p.locator('#status').textContent()),{cause:e})}
+   }catch(e){
+    // Retry only an intercepted/idempotent click, never a failed assertion
+    // about the rendered section, or an operation that changes data.
+    if(e instanceof assert.AssertionError||attempt===4)throw new Error('Navigation did not settle: '+action+'; status: '+(await p.locator('#status').textContent()),{cause:e})
+   }
   }
  };
  await goSection('profession.read');
@@ -353,6 +370,7 @@ try{
   await m.p.setViewportSize({width,height:844});
   for(const action of responsive){await goSection(action);assert(await m.p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Page overflow '+width+' '+action);mobileOpenings++}
  }
+ assert.equal(mobileOpenings,40,'Every responsive opening must be completed');
  await m.p.setViewportSize({width:1440,height:900});
  console.log('R61_QA05_RESPONSIVE_OPENINGS '+mobileOpenings);
  const r=await profile('reader',readerPassword,{width:390,height:844});await r.p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();
@@ -377,7 +395,16 @@ try{
  // banner lifecycle without weakening the real server's policy decisions.
  const failUrl='**/api/lc81/resources?action=org.read';
  await r.p.route(failUrl,route=>route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({error:'QA: отказ предыдущего раздела'})}),{times:1});
- const goReader=async(p,k)=>{if(await p.locator('#menu').isVisible()&&await p.locator('#menu').getAttribute('aria-expanded')!=='true')await button(p,'Меню').click();const nav=p.locator('#nav [data-action="'+k+'"]'),group=nav.locator('xpath=ancestor::details');if(await group.count()&&!await group.evaluate(e=>e.open))await group.locator('summary').click();await nav.click()};
+ const goReader=async(p,k)=>{
+  await p.locator('html:not(.lc81-access-check)').waitFor();
+  await p.locator('#nav[aria-busy="false"]').waitFor({state:'attached',timeout:30000});
+  if(await p.locator('#menu').isVisible()&&await p.locator('#menu').getAttribute('aria-expanded')!=='true')await button(p,'Меню').click();
+  const nav=p.locator('#nav [data-action="'+k+'"]'),group=nav.locator('xpath=ancestor::details');
+  if(await group.count()&&!await group.evaluate(e=>e.open))await group.locator('summary').click();
+  await nav.click();
+  await p.locator('#nav [data-action="'+k+'"][aria-current="page"]').waitFor({state:'attached',timeout:30000});
+  await p.locator('#nav[aria-busy="false"]').waitFor({state:'attached',timeout:30000});
+ };
  await goReader(r.p,'org.read');await r.p.locator('#status.error').filter({hasText:'QA: отказ предыдущего раздела'}).waitFor();
  await goReader(r.p,'person.read_directory');await r.p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();await r.p.locator('#status.error').waitFor({state:'detached'});
  await r.p.waitForFunction(()=>document.activeElement===document.querySelector('#page-heading h1'));
