@@ -12,6 +12,7 @@ import {prepareSnapshot,one,rows,uuid} from '../src/core/db.js';
 import {RC1_CRITERIA} from '../src/modules/training/builtin-forms.js';
 import {openSecureQA} from '../server/lc81/store.mjs';
 import {createSecureQAServer} from '../server/lc81/http.mjs';
+import {excelJS} from '../server/lc81/form-commands.mjs';
 import {copyPilotCheckpoint} from '../server/lc74-store.mjs';
 import {migratePilotCopy} from '../server/lc81/maintenance.mjs';
 
@@ -34,7 +35,8 @@ try{
  const sess=one(f.w.working,'SELECT id FROM training_session WHERE assignment_id=?',[assignment]);
  const criteria=rows(f.w.working,'SELECT id FROM checklist_criterion WHERE version_id=? ORDER BY position',[method]);
  await f.save('audit_session',{assignment_id:assignment,assignment_rev:f.getAssignment(assignment).rev,method_id:method,auditor_id:f.actor,session_id:sess.id,observed_on:date,responses:criteria.map(q=>({criterion_id:q.id,value:1,note:''})),feedback:'QA'});
- await f.save('action_item',{response_id:null,title:'Просроченная учебная задача R2',owner_id:f.trainee,subject_id:null,due_on:'2026-01-31',kind:'corrective',priority:'normal'});
+ const ordinaryTask=(await f.save('action_item',{response_id:null,title:'Просроченная учебная задача R2',owner_id:f.trainee,subject_id:null,due_on:'2026-01-31',kind:'corrective',priority:'normal'})).entity_id;
+ const rolloutTask=(await f.save('action_item',{response_id:null,title:'Учебная задача внедрения R6',owner_id:f.mentor,subject_id:null,due_on:'2027-01-31',kind:'corrective',priority:'normal'})).entity_id;
  const generalSkill=f.w.edit('skill',null,{category_id:one(f.w.working,'SELECT category_id FROM skill WHERE id=?',[f.skill]).category_id,operation_id:null,name:'Учебный общий навык R2'});
  await f.w.acceptOwn(f.readContent);
  const snapshot=await prepareSnapshot(f.w);
@@ -57,6 +59,9 @@ try{
  await store.saveLibrary(manager.id,1,req(originCtx,0,'Учебный СОП из ФРВ R2','QA-R2-FRV-SOP',null,origin.text));
  raw.cycles[0].observations[0].durationSec=24;
  await store.saveLibrary(manager.id,1,req(ctx('frv','save',f.operation,frv.id),frv.rev,'Учебный источник ФРВ R2',null,date,JSON.stringify(raw)));
+ const rolloutRaw=structuredClone(raw);rolloutRaw.study.studyId='QA-R6-ROLLOUT';
+ const rolloutStudy=await store.saveLibrary(manager.id,1,req(ctx('frv','create',f.operation),0,'Учебное завершённое ФРВ R6',null,date,JSON.stringify(rolloutRaw)));
+ await store.finalizeLibrary(manager.id,1,{id:rolloutStudy.id,expected_revision:rolloutStudy.rev,note:'QA'});
  const assess=(person,state,level,assessed_on,valid_until,previous_assessment_id=null)=>store.competencyChange(manager.id,1,{command:'assessment.general',fields:{person_id:person,skill_id:generalSkill,scale_id:f.scale,assessed_on,observation_state:state,level,valid_until,evidence:'Учебное подтверждение',feedback:'Учебная обратная связь',previous_assessment_id}});
  const prior=await assess(f.trainee,'rated',2,date,null);
  await assess(f.trainee,'not_observed',null,siteDay,null,prior.id);
@@ -157,6 +162,71 @@ try{
  await content.getByRole('heading',{name:'Состав и основания внедрения',exact:true}).waitFor();
  await content.getByRole('cell',{name:'Ученик Тестовый',exact:true}).waitFor();
  await content.locator('select[name=skill_id]').waitFor();
+ const chooseTask=content.locator('select[name=task_id]');
+ assert.equal(await chooseTask.locator('option[value="'+ordinaryTask+'"]').count(),0,'Ordinary employee must not appear as rollout instructor');
+ assert.equal(await chooseTask.locator('option[value="'+rolloutTask+'"]').count(),1);
+ await chooseTask.selectOption(rolloutTask);
+ await content.locator('select[name=baseline_id]').selectOption(rolloutStudy.id);
+ await content.locator('input[name=trial_on]').fill(siteDay);
+ await content.locator('input[name=trial_reference]').fill('QA апробация R6');
+ await content.locator('select[name=skill_id]').selectOption(f.skill);
+ await content.locator('select[name=scale_id]').selectOption(f.scale);
+ await content.getByRole('checkbox',{name:'Ученик Тестовый',exact:true}).check();
+ await content.locator('input[name=roster_confirmed]').check();
+ await content.locator('input[name=roster_note]').fill('QA подтверждённый исполнитель');
+ await button('Сохранить состав').click();
+ await content.getByText('Версия отчёта 1 · Сбор подтверждений',{exact:true}).waitFor();
+ await content.getByRole('cell',{name:'Инструктор подтверждён',exact:true}).waitFor();
+ const downloadRollout=async(name,version)=>{
+  const pending=p.waitForEvent('download');
+  await button(name).click();
+  const file=await pending;
+  assert.match(file.suggestedFilename(),new RegExp('-V'+version+'\\.xlsxawait content.locator('.lc81-card-tabs').waitFor();
+ await ready();console.log('TWI03_R4_ROLLOUT_FORM_OK');
+
+ await go('matrix.read');await button('Общая матрица всех навыков').click();
+ for(const state of ['none','not_observed','not_applicable','expired'])await content.locator('[data-assessment-state='+state+']').first().waitFor();
+ await content.locator('button[data-assessment-state=not_observed]').click();
+ const history=heading('История оценок навыка').locator('xpath=..');
+ await history.waitFor();
+ await history.getByRole('cell',{name:'Не наблюдалось',exact:true}).waitFor();
+ await history.getByRole('cell',{name:'2',exact:true}).waitFor();
+ assert.equal(await history.getByRole('button',{name:'Открыть оценку',exact:true}).count(),2);
+ await rowWith(history,'2').getByRole('button',{name:'Открыть оценку',exact:true}).click();
+ const assessment=content.getByRole('heading',{name:/^Общий навык · /}).locator('xpath=..');
+ await assessment.waitFor();await assessment.getByRole('cell',{name:'2',exact:true}).waitFor();
+ await ready();
+ assert.deepEqual(errors,[]);
+ console.log('PARITY_R2_MATRIX_HISTORY_OK');
+}finally{
+ await browser?.close();
+ await close(proxy);await close(server);await store?.close();
+ f?.w.close();
+ await fs.rm(root,{recursive:true,force:true});
+}
+));
+  const wb=new (excelJS().Workbook)();
+  await wb.xlsx.load(await fs.readFile(await file.path()));
+  assert.equal(wb.worksheets.length,5);
+  assert.equal(wb.getWorksheet('Состав и текущие факты').getCell('A2').text,'Ученик Тестовый');
+  assert.equal(wb.getWorksheet('Решение руководителя').getCell('B2').text,'Решение не зарегистрировано');
+  return wb;
+ };
+ await downloadRollout('Скачать отчёт XLSX',1);
+ await button('Уточнить состав и основания').click();
+ await content.locator('input[name=roster_confirmed]').check();
+ await content.locator('input[name=change_reason]').fill('QA уточнение состава R6');
+ await button('Сохранить состав').click();
+ await content.getByText('Версия отчёта 2 · Сбор подтверждений',{exact:true}).waitFor();
+ await downloadRollout('Скачать отчёт XLSX',2);
+ const previous=await downloadRollout('XLSX v1',1);
+ assert(previous.getWorksheet('Отчёт внедрения').getRows(1,previous.getWorksheet('Отчёт внедрения').rowCount).some(row=>row.getCell(2).text==='Историческая'));
+ const guest=await browser.newContext({ignoreHTTPSErrors:true});
+ try {
+  const denied=await guest.request.post(url+'/api/lc81/forms/export',{headers:{Origin:url,'X-LC81-Request':'1'},data:{kind:'rollout_report',id:f.doc.id,version:1}});
+  assert.equal(denied.status(),401);
+ }finally{await guest.close()}
+ await ready();console.log('TWI03_R6_ROLLOUT_BROWSER_DOWNLOAD_OK');
  await button('← К СОП').click();await content.locator('.lc81-card-tabs').waitFor();
  await ready();console.log('TWI03_R4_ROLLOUT_FORM_OK');
 
