@@ -65,3 +65,7 @@
  .header-meta .version{font-size:10px}
  .lc81-paging{justify-content:space-between}
 }
+
+/* LC8.3 route setup stays readable on narrow screens. */
+.lc83-route-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(130px,1fr);gap:10px;align-items:end}.lc83-hash{overflow-wrap:anywhere;font-family:monospace;font-size:12px}.lc83-state{font-weight:600;color:var(--tn-red)}
+@media(max-width:600px){.lc83-route-row{grid-template-columns:minmax(0,1fr);gap:4px}}

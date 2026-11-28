@@ -3,7 +3,7 @@
 const context=(kind,command,operation_id,id=null,revision_id=null,origin_id=null,origin_revision=null)=>({kind,command,id,revision_id,operation_id,origin_id,origin_revision});
 const stateLabel={draft:'Черновик',review:'На согласовании',approved:'Согласован (прежний порядок)',effective:'Действует',superseded:'Заменён',withdrawn:'Выведен',final:'Завершено',archived:'Архив'};
 const max=30*1024*1024;
-export function createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh,render,discard,check,assistant,openLinked,twiReport,assignRollout,downloadForm}){
+export function createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh,render,discard,check,assistant,openLinked,twiReport,assignRollout,downloadForm,openApproval}){
  let active=null;
  function clear(){
   const s=active;active=null;
@@ -150,6 +150,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
  function editActions(r,kind){
   const row=el('div',undefined,'row');
   if(kind==='sop'){
+   if(r.approval&&openApproval)row.append(button('Согласование СОП',()=>openApproval(r.revision_id)));
    if(r.can_edit||r.can_revise){
     const ctx=()=>context('sop',r.can_edit?'save':'revise',r.operation_id,r.document_id,r.revision_id);
     row.append(button(r.can_edit?'Открыть редактор':'Создать редакцию',()=>launch(ctx()),'primary'),importButton(ctx));
@@ -187,7 +188,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
  }
  function history(items){
   const host=el('div'),action=r=>{const box=el('div');box.append(button('Карточка СОП',()=>card(host,r.revision_id)),editActions(r,'sop'));return box};
-  return panel('Редакции и черновики СОП',el('p','Согласование и утверждение в защищённом режиме появятся после LC8.3.','muted'),items.length?table(['Код','Название','Редакция','Состояние','Формат','Пересмотр','Действия'],items.map(r=>[r.code,r.title,'v'+r.version_no,stateLabel[r.state]||r.state,r.print_format||'—',r.review_due,action(r)])):el('p','Нет доступных записей','empty'),host)}
+  return panel('Редакции и черновики СОП',el('p','Черновики направляются по обязательному маршруту ОТ, главный инженер, ВТ, директор и ввод в действие.','muted'),items.length?table(['Код','Название','Редакция','Состояние','Формат','Пересмотр','Действия'],items.map(r=>[r.code,r.title,'v'+r.version_no,r.approval?.status||stateLabel[r.state]||r.state,r.print_format||'—',r.review_due,action(r)])):el('p','Нет доступных записей','empty'),host)}
  function frv(items){return panel('ФРВ',items.length?table(['Название','Дата','Состояние','Действия','Результаты'],items.map(r=>[r.title,r.observed_at,stateLabel[r.state]||r.state,editActions(r,'frv'),r.can_summary?detailButton(r,'frv.read_summary','Замеры'):'—'])):el('p','Нет доступных записей','empty'))}
  function linked(items,action){const key=action==='sop.read_twi'?'can_twi':'can_linked_frv',title=action==='sop.read_twi'?'Планы инструктажа TWI':'ФРВ по действующим СОП';const visible=items.filter(r=>r[key]);return panel(title,visible.length?table(['Код','Название','Редакция','Материал'],visible.map(r=>[r.code,r.title,'v'+r.version_no,detailButton(r,action,'Открыть')])):el('p','Нет доступных материалов','empty'))}
  // The eight original card areas share one exact server-checked revision.
@@ -236,7 +237,8 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
  async function card(host,id,initial='steps',trail=[]){
   if(!discard())return;
   const d=await api('library/card?id='+encodeURIComponent(id)),r=d.revision;
-  const n=panel('Карточка СОП · '+r.code+' · v'+r.version_no,el('h3',r.title),el('p',(stateLabel[r.state]||r.state)+' · '+(r.effective_at?'Введён: '+r.effective_at.slice(0,10):'Редакция '+r.version_no),'muted'));
+  const n=panel('Карточка СОП · '+r.code+' · v'+r.version_no,el('h3',r.title),el('p',(r.approval?.status||stateLabel[r.state]||r.state)+' · '+(r.effective_at?'Введён: '+r.effective_at.slice(0,10):'Редакция '+r.version_no),'muted'));
+  if(r.approval&&openApproval)n.append(button('Согласование СОП',()=>openApproval(id)));
   if(d.can_rollout)n.append(button('Внедрение новой операции / редакции',()=>rolloutPanel(host,id,()=>card(host,id,initial,trail))));
   if(trail.length)n.append(button('Назад к редакции v'+trail[trail.length-1].version,()=>card(host,trail[trail.length-1].id,'versions',trail.slice(0,-1))));
   const tabs=el('div',undefined,'lc81-card-tabs row'),body=el('div'),nested=el('div');let selected=null,serial=0;
@@ -264,9 +266,9 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
     if(doc?.description)content.append(el('p',doc.description));
     content.append(table(['Шаг','Действие','Ключевые моменты','Причина','Секунды','Фото'],steps.steps.map(s=>[s.position,s.action_text,s.key_points.join(' · '),s.reason_text,s.duration_seconds,photo(s,steps.can_read_photo)])));
    }else if(key==='passport'){
-    const doc=await meta(),fields=[['Код',r.code],['Название',r.title],['Редакция','v'+r.version_no],['Состояние',stateLabel[r.state]||r.state],...Object.entries({created_at:'Создана',effective_at:'Ввод в действие',review_due:'Срок пересмотра',changed_on:'Изменена',print_format:'Формат А3'}).filter(([k])=>Object.hasOwn(r,k)).map(([k,label])=>[label,k==='print_format'?({portrait:'Вертикальный',landscape:'Горизонтальный'}[r[k]]||'—'):r[k]])];
+    const doc=await meta(),fields=[['Код',r.code],['Название',r.title],['Редакция','v'+r.version_no],['Состояние',r.approval?.status||stateLabel[r.state]||r.state],...Object.entries({created_at:'Создана',effective_at:'Ввод в действие',review_due:'Срок пересмотра',changed_on:'Изменена',print_format:'Формат А3'}).filter(([k])=>Object.hasOwn(r,k)).map(([k,label])=>[label,k==='print_format'?({portrait:'Вертикальный',landscape:'Горизонтальный'}[r[k]]||'—'):r[k]])];
     if(doc)fields.push(...Object.entries(doc.meta).filter(([,v])=>v).map(([k,v])=>[fieldNames[k]||k,v]));
-    content.append(table(['Реквизит','Значение'],fields),el('p','Согласование и ввод в действие остаются отдельным защищённым процессом LC8.3. Исторический статус не является новым согласованием.','muted'),editActions(r,'sop'));
+    content.append(table(['Реквизит','Значение'],fields),el('p','Согласование и ввод в действие выполняются по отдельному маршруту LC8.3. Прежний исторический статус не является новым утверждением.','muted'),editActions(r,'sop'));
    }else if(key==='versions'){
     content.append(table(['Редакция','Название','Состояние','Введена','Действия'],d.versions.map(v=>['v'+v.version_no,v.title,stateLabel[v.state]||v.state,v.effective_at,v.revision_id===id?'Открыта':button('Открыть редакцию',()=>openVersion(v))])));
     content.append(el('p','Показаны только редакции, доступные текущей учётной записи.','muted'));
