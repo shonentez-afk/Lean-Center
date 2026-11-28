@@ -1,3 +1,4 @@
+import {renderPushDevices,leavePushDevice,reconcilePushDevice} from './push-ui.js';
 // Protected workspace: reuse accepted navigation, registry controls, corporate
 // CSS and unsaved-form guard. Never load SQL.js or a snapshot in the browser.
 import {createTrainingUI} from '/training-ui.js';
@@ -74,7 +75,7 @@ async function run(fn){
 }
 function closeProtectedViews(){if($('lc82-bell')){$('lc82-bell').textContent='🔔 Уведомления';$('lc82-bell').setAttribute('aria-label','Уведомления');noticeCounterAt=0}for(const d of document.querySelectorAll('dialog.lc81-password-dialog,dialog.lc72-context-dialog,dialog.lc82-notification-dialog')){if(d.open)d.close();else d.remove()}libraryUI?.clear();$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren()}
 function showLogin(){authGeneration++;sequence++;user=null;navigationStarted=false;historyReplay=false;navAccount=null;navOpen.clear();centerUI?.resetReports();history.replaceState(null,'');accessRefreshPending=false;maskAccess(false);closeProtectedViews();saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
-function showUser(a){user=a;maskAccess(false);$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Изменить пароль',ownPasswordDialog),button('Выйти',async()=>{if(!discard()||!$('issued').hidden&&!confirm('Выданный пароль ещё открыт. Завершить сеанс?'))return;await api('logout',{});showLogin();note('Выход выполнен')}));if(a.notifications_enabled){const bell=button('🔔 Уведомления',openNotifications,'lc82-bell');bell.id='lc82-bell';bell.setAttribute('aria-label','Уведомления');$('identity').prepend(bell);noticeCounterAt=0;void refreshNoticeCounter(true)}refreshIndicator()}
+function showUser(a){user=a;maskAccess(false);$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Изменить пароль',ownPasswordDialog),button('Выйти',async()=>{if(!discard()||!$('issued').hidden&&!confirm('Выданный пароль ещё открыт. Завершить сеанс?'))return;let pushError=false;try{await leavePushDevice(api)}catch{pushError=true}await api('logout',{});showLogin();note(pushError?'Выход выполнен. Проверьте отключение уведомлений в настройках браузера.':'Выход выполнен',pushError)}));if(a.notifications_enabled){const bell=button('🔔 Уведомления',openNotifications,'lc82-bell');bell.id='lc82-bell';bell.setAttribute('aria-label','Уведомления');$('identity').prepend(bell);noticeCounterAt=0;void refreshNoticeCounter(true)}refreshIndicator()}
 function panel(title,...children){const n=el('section',undefined,'panel');n.append(el('h2',title),...children);return n}
 function table(headers,values){const wrap=el('div',undefined,'tablewrap lc81-rows');const t=el('table'),h=el('thead'),tr=el('tr');for(const v of headers)tr.append(el('th',v));h.append(tr);t.append(h);const b=el('tbody');for(const row of values){const r=el('tr');for(const v of row){const d=el('td');d.append(v instanceof Node?v:el('span',v??'—'));r.append(d)}b.append(r)}t.append(b);wrap.append(t);return wrap}
 function input(name,label,type='text',required=true){const n=el('input');n.name=name;n.type=type;n.required=required;if(type==='password')n.autocomplete='new-password';const l=el('label',label,'field');l.append(n);return l}
@@ -119,11 +120,11 @@ async function openNotifications(){
   const labels={approval:'Согласование СОП',familiarization:'Ознакомление',training:'Обучение TWI',audit:'Аудиты и оценки',task:'Мероприятия',information:'Информационные события'};
   const rkeys=['approval','familiarization','training'],pkeys=[...rkeys,'audit','task','information'];
   const reminders=el('fieldset');reminders.append(el('legend','Дополнительные напоминания внутри портала'),...rkeys.map(k=>check('reminder_'+k,labels[k]+(v.policy[k]===null?' · выключено предприятием':' · за '+v.policy[k]+' дн.'),v.reminders[k])));
-  const push=el('fieldset');push.append(el('legend','Предпочтения будущего Web Push'),el('p','Внешняя отправка пока не подключена. Эти настройки не включают браузерную подписку.'),...pkeys.map(k=>check('push_'+k,labels[k],v.push_types[k])));
+  const push=el('fieldset');push.append(el('legend','Типы Web Push'),el('p','Настройки действуют только после явного подключения личного устройства. Аудиты и мероприятия зарезервированы для дальнейшего подключения событий.'),...pkeys.map(k=>check('push_'+k,labels[k],v.push_types[k])));
   const window=el('fieldset'),start=input('window_start','Начало','time',false),end=input('window_end','Окончание','time',false);
   start.querySelector('input').required=false;end.querySelector('input').required=false;
   start.querySelector('input').value=v.delivery_window?.start??'';end.querySelector('input').value=v.delivery_window?.end??'';
-  window.append(el('legend','Разрешённое окно будущей доставки'),check('window_enabled','Ограничить доставку временем и днями',!!v.delivery_window),start,end,el('p','Часовой пояс предприятия: '+v.zone+'. Если окончание раньше начала, окно продолжается после полуночи. Дни относятся к началу окна. Реальный график вводится вручную.'),...[ 'Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((l,i)=>check('day_'+(i+1),l,v.delivery_window?.days.includes(i+1)??false)));
+  window.append(el('legend','Разрешённое окно доставки Web Push'),check('window_enabled','Ограничить доставку временем и днями',!!v.delivery_window),start,end,el('p','Часовой пояс предприятия: '+v.zone+'. Если окончание раньше начала, окно продолжается после полуночи. Дни относятся к началу окна. Реальный график вводится вручную.'),...[ 'Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((l,i)=>check('day_'+(i+1),l,v.delivery_window?.days.includes(i+1)??false)));
   const f=form([el('p','Обязательные события и рабочие поручения остаются доступны. Можно отключить дополнительные напоминания, не закрывая задания.'),reminders,push,window],'Сохранить настройки',async f=>{
    const checked=k=>f.elements.namedItem(k).checked;
    const delivery_window=checked('window_enabled')?{days:[1,2,3,4,5,6,7].filter(n=>checked('day_'+n)),start:value(f,'window_start'),end:value(f,'window_end')}:null;
@@ -134,7 +135,13 @@ async function openNotifications(){
   enable.addEventListener('change',update);update();f.lcResetForm?.();
   body.replaceChildren(el('h3','Настройки уведомлений'),f);summary.textContent='Настройки пользователя';allRead.disabled=true;
  });
- tools.append(reload,allRead,prefs);d.append(head,summary,tabs,tools,body);document.body.append(d);
+ const devices=button('Устройства Web Push',async()=>{
+  if(!d.isConnected)return;
+  body.replaceChildren(el('p','Подготовка устройств…','muted'));
+  allRead.disabled=true;summary.textContent='Устройства';
+  await renderPushDevices(body,{api,el,button,input,table,run});
+ });
+ tools.append(reload,allRead,prefs,devices);d.append(head,summary,tabs,tools,body);document.body.append(d);
  d.addEventListener('close',()=>{d.remove();if(trigger?.isConnected)trigger.focus({preventScroll:true})},{once:true});
  d.showModal();
  async function load(cursor=null){
@@ -181,7 +188,7 @@ function ownPasswordDialog(){
  const f=form([old,input('new_password','Новый пароль (12–128 байт)','password'),input('new_password_confirm','Повторите новый пароль','password')],'Сменить пароль',async f=>{
   if(value(f,'new_password')!==value(f,'new_password_confirm'))throw Error('Пароли не совпадают');
   await api('password/change',{current_password:value(f,'current_password'),new_password:value(f,'new_password')});
-  f.reset();f.lcResetForm?.();d.close();showLogin();note('Пароль изменён. Все прежние сеансы завершены. Войдите с новым паролем.');
+  f.reset();f.lcResetForm?.();d.close();try{await leavePushDevice(api)}catch{}showLogin();note('Пароль изменён. Все прежние сеансы и прежние Push-подписки требуют повторного подключения. Войдите с новым паролем.');
  });
  body.append(el('p','После изменения пароля потребуется повторный вход на всех устройствах.'),f);d.append(head,body);document.body.append(d);
  d.addEventListener('close',()=>{f.reset();d.remove();if(trigger?.isConnected)trigger.focus()},{once:true});d.showModal();
@@ -201,7 +208,13 @@ function notificationAdminPanel(v){
  });
  settings.lcResetForm?.();
  const state={pending:'В очереди',retry:'Повторная попытка',completed:'Выполнено',cancelled:'Отменено как неактуальное',failed:'Ошибка'};
- return panel('Фоновые уведомления',el('p',v.enabled&&!v.worker_disabled?'Внутренний обработчик разрешён':'Обработчик выключен настройкой размещения'),el('p','Часовой пояс: '+v.zone+(v.clock_configured?' · закреплён':' · не настроен')+' · лимит пакета: '+v.batch_limit),table(['Состояние задания','Количество'],Object.keys(state).map(k=>[state[k],v.counts[k]])),el('p','Готовы к обработке: '+v.ready+' · незавершённых ознакомлений без активного аккаунта: '+v.missing_accounts),el('p','Последнее завершение: '+(v.last_finished||'ещё нет')+' · внешняя отправка отключена.'),el('p','Последний проход текущего процесса: '+(v.last_scan?({running:'выполняется',ok:'завершён',deferred:'отложен из-за занятости хранилища',error:'ошибка'}[v.last_scan.state]||'—')+' · '+(v.last_scan.finished_at||v.last_scan.started_at):'ещё нет (сбрасывается при перезапуске)'),'muted'),button('Обновить состояние',()=>render()),el('h3','Политика напоминаний предприятия'),el('p','Сроки СОП, ознакомления и обучения берутся из действующих записей. Пока категория отключена, дополнительных напоминаний нет. Существующие обязательные уведомления продолжают работать.'),settings);
+ const pv=v.push,ps={pending:'В очереди',retry:'Повтор',sending:'Передача',accepted:'Принято сервисом',cancelled:'Отменено',expired:'Истекло',failed:'Ошибка',uncertain:'Результат не подтверждён'};
+ const pushBox=panel('Web Push',el('p',pv.enabled?'Доставка разрешена':pv.configured?'Транспорт настроен, доставка выключена':'Транспорт не настроен в окружении размещения'),el('p','Активных устройств текущего размещения: '+pv.active_devices),table(['Состояние доставки','Количество'],Object.keys(ps).map(k=>[ps[k],pv.counts[k]])),el('p','Принятие сервисом не является подтверждением получения или прочтения. При восстановлении копии используйте отдельное окружение без боевых ключей.','muted'));
+ if(pv.enabled||pv.configured)pushBox.append(button(pv.enabled?'Отключить Web Push для всех':'Разрешить Web Push',async()=>{
+  if(!confirm(pv.enabled?'Отключить внешнюю доставку? Внутренняя лента продолжит работать.':'Разрешить доставку на явно подключённых личных устройствах?'))return;
+  await api('admin/push-policy',{expected_revision:pv.rev,enabled:!pv.enabled});await render();
+ }));
+ return panel('Фоновые уведомления',el('p',v.enabled&&!v.worker_disabled?'Внутренний обработчик разрешён':'Обработчик выключен настройкой размещения'),el('p','Часовой пояс: '+v.zone+(v.clock_configured?' · закреплён':' · не настроен')+' · лимит пакета: '+v.batch_limit),table(['Состояние задания','Количество'],Object.keys(state).map(k=>[state[k],v.counts[k]])),el('p','Готовы к обработке: '+v.ready+' · незавершённых ознакомлений без активного аккаунта: '+v.missing_accounts),el('p','Последнее завершение: '+(v.last_finished||'ещё нет')+' · внутренний обработчик.'),el('p','Последний проход текущего процесса: '+(v.last_scan?({running:'выполняется',ok:'завершён',deferred:'отложен из-за занятости хранилища',error:'ошибка'}[v.last_scan.state]||'—')+' · '+(v.last_scan.finished_at||v.last_scan.started_at):'ещё нет (сбрасывается при перезапуске)'),'muted'),button('Обновить состояние',()=>render()),el('h3','Политика напоминаний предприятия'),el('p','Сроки СОП, ознакомления и обучения берутся из действующих записей. Пока категория отключена, дополнительных напоминаний нет. Существующие обязательные уведомления продолжают работать.'),settings,pushBox);
 }
 function adminPanel(d){
  const people=new Map(d.people.map(x=>[x.id,x.display_name])),roles=new Map(d.roles.map(x=>[x.id,x.name])),units=new Map(d.units.map(x=>[x.id,x.name])),accounts=new Map(d.accounts.map(x=>[x.id,x.login]));
@@ -785,5 +798,17 @@ window.addEventListener('focus',()=>{if(user)void checkAccess(true)});
 window.addEventListener('pagehide',()=>{if(user)maskAccess(true)});
 window.addEventListener('pageshow',e=>{if(e.persisted&&user)void checkAccess(true)});
 window.addEventListener('beforeunload',e=>{if(user&&(dirty()||saving||!$('issued').hidden)){e.preventDefault();e.returnValue=''}});
-$('login').addEventListener('submit',e=>{e.preventDefault();run(async()=>{const f=e.currentTarget;const b=await api('login',{login:value(f,'login'),password:value(f,'password')});f.reset();showUser(b.user);page=landingPage(b.user);provisionManager=false;note('Вход выполнен');await render()})});
-run(async()=>{try{const b=await api('session');showUser(b.user);page=landingPage(b.user);provisionManager=false;await render()}catch(e){if(e.status!==401)throw e;showLogin()}});
+// Opaque notification deep link, held only in this page until login. Never
+// trust a URL for access; the same read endpoint and domain detail recheck it.
+const noticeMatch=/^#lc82-notice=([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.exec(location.hash);
+let clickedNotice=noticeMatch?.[1]??null;
+if(clickedNotice)history.replaceState(history.state,'',location.pathname+location.search);
+async function afterPushLogin(){
+ try{await reconcilePushDevice(api,user?.notifications_enabled===true)}catch(e){if(e.name!=='AbortError')note('Не удалось проверить подключённое устройство. Откройте настройки Web Push.',true)}
+ if(!clickedNotice||!user)return;
+ const id=clickedNotice;clickedNotice=null;
+ try{const r=await api('notifications/read',{id});await openLinked($('content'),r.route);void refreshNoticeCounter(true)}
+ catch(e){if(e.status===401){clickedNotice=id;throw e}if(e.name!=='AbortError')note('Уведомление больше недоступно. Проверьте Мой план и колокольчик.',true)}
+}
+$('login').addEventListener('submit',e=>{e.preventDefault();run(async()=>{const f=e.currentTarget;const b=await api('login',{login:value(f,'login'),password:value(f,'password')});f.reset();showUser(b.user);page=landingPage(b.user);provisionManager=false;note('Вход выполнен');await render();await afterPushLogin()})});
+run(async()=>{try{const b=await api('session');showUser(b.user);page=landingPage(b.user);provisionManager=false;await render();await afterPushLogin()}catch(e){if(e.status!==401)throw e;showLogin()}});

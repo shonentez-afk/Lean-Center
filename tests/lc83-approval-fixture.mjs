@@ -9,7 +9,7 @@ import {migratePilotCopy} from '../server/lc81/maintenance.mjs';
 import {openSecureQA} from '../server/lc81/store.mjs';
 export const context=(command,operation_id,id=null,revision_id=null)=>({kind:'sop',command,id,revision_id,operation_id,origin_id:null,origin_revision:null});
 export const request=(context,expected_revision,title,text)=>({request_id:uuid(),context,expected_revision,title,code:null,observed_at:null,text});
-export async function setupApproval(){
+export async function setupApproval({pushConfig=null,pushSender=undefined}={}){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'lc83-approval-'));
  let f,store;
  try{
@@ -35,7 +35,7 @@ export async function setupApproval(){
   await copyPilotCheckpoint({SQL,snapshot:await prepareSnapshot(w),readSource:f.readContent,target:source});
   const password=randomBytes(24).toString('base64url');
   await migratePilotCopy({source,target,siteId:site,adminRoleId:adminRole,managerRoleId:managerRole,login:'admin',password,siteTimeZone:'UTC'});
-  store=await openSecureQA({dataDir:target});
+  store=await openSecureQA({dataDir:target,pushConfig,...(pushSender?{pushSender}:{})});
   const admin=store.authenticate('admin',password),users={};
   const account=async(name,person_id)=>users[name]={...await store.createAccount(admin.id,{person_id,login:name,password,generate:false}),person_id};
   const grant=async(name,assignment_id,unit_id)=>store.grant(admin.id,{account_id:users[name].id,assignment_id,scope:{kind:'unit_tree',unit_id},valid_to:null});

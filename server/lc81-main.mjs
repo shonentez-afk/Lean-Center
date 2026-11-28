@@ -7,7 +7,8 @@ import {createSecureQAServer} from './lc81/http.mjs';
 import {normalizeLogin,validPassword} from './lc81/credentials.mjs';
 import {normalizeZone} from './lc81/site-clock.mjs';
 import {startSopPublicationScheduler} from './lc81/sop-publication-scheduler.mjs';
-import {startNotificationBackground} from './lc81/notification-scheduler.mjs';
+import {startNotificationBackground,startPushDelivery} from './lc81/notification-scheduler.mjs';
+import {loadPushConfig} from './lc81/web-push-transport.mjs';
 class StartupError extends Error{
  constructor(code){super(code);this.code=code}
 }
@@ -55,6 +56,7 @@ async function main(){
  requireSetting(env.LC82_BACKGROUND_ENABLED===undefined||['0','1'].includes(env.LC82_BACKGROUND_ENABLED),'NOTIFICATION_BACKGROUND_SETTING_INVALID');
  const loopbackOnly=env.LC81_LOOPBACK_ONLY;
  requireSetting(loopbackOnly===undefined||loopbackOnly==='1','LOOPBACK_SETTING_INVALID');
+ let pushConfig;try{pushConfig=loadPushConfig(env,origin,dataDir)}catch{throw new StartupError('PUSH_CONFIGURATION_INVALID')}
  const bindHost=loopbackOnly==='1'?'127.0.0.1':'0.0.0.0';
  const port=Number(env.PORT||8080);
  requireSetting(Number.isInteger(port)&&port>0&&port<=65535,'PORT_INVALID');
@@ -85,17 +87,17 @@ async function main(){
   requireSetting(checkpoint?.isFile()&&marker?.isFile(),'STORAGE_INCOMPLETE');
  }
  phase='STORAGE_OPEN';
- const store=await openSecureQA({dataDir,initialize,login,password,siteTimeZone,importDigest});
+ const store=await openSecureQA({dataDir,initialize,login,password,siteTimeZone,importDigest,pushConfig});
  phase='HTTP_CREATE';
  let server;
  try{server=createSecureQAServer({store,origin,cloudAiEnabled:env.LC81_CLOUD_AI==='1',editorAiEnabled:env.LC81_EDITOR_AI==='1'});}catch(e){await store.close();throw e}
  phase='HTTP_LISTEN';
- let stopping=false,scheduler=null,noticeWorker=null;
- const stopWorkers=()=>Promise.all([scheduler?.stop(),noticeWorker?.stop()]);
+ let stopping=false,scheduler=null,noticeWorker=null,pushWorker=null;
+ const stopWorkers=()=>Promise.all([scheduler?.stop(),noticeWorker?.stop(),pushWorker?.stop()]);
  server.on('error',async e=>{report(e);stopping=true;try{await stopWorkers();await store.close()}catch{}process.exitCode=1});
  server.listen(port,bindHost,()=>{
   console.log('LC8.1 QA authentication and limited projections listening');
-  if(!stopping&&schedulerDisabled!=='1'){scheduler=startSopPublicationScheduler(store);if(env.LC82_BACKGROUND_ENABLED!=='0'&&env.LC82_INBOX_ENABLED!=='0')noticeWorker=startNotificationBackground(store);}
+  if(!stopping&&schedulerDisabled!=='1'){scheduler=startSopPublicationScheduler(store);if(env.LC82_BACKGROUND_ENABLED!=='0'&&env.LC82_INBOX_ENABLED!=='0')noticeWorker=startNotificationBackground(store);if(pushConfig)pushWorker=startPushDelivery(store);}
  });
  const shutdown=()=>{if(stopping)return;stopping=true;const stopped=stopWorkers();server.close(async()=>{try{await stopped;await store.close()}catch{process.exitCode=1}})};
  process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);

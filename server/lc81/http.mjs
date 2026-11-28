@@ -14,6 +14,8 @@ const must=(ok,status,msg)=>{if(!ok)throw new PilotError(status,msg)};
 const publicFiles=new Map(await Promise.all([
  ['/', './portal.html','text/html; charset=utf-8'],
  ['/portal.js','./portal.js','text/javascript; charset=utf-8'],
+ ['/sw.js','./sw.js','text/javascript; charset=utf-8'],
+ ['/push-ui.js','./push-ui.js','text/javascript; charset=utf-8'],
  ['/library-ui.js','./library-ui.js','text/javascript; charset=utf-8'],
  ['/sop-approval-ui.js','./sop-approval-ui.js','text/javascript; charset=utf-8'],
  ['/training-ui.js','./training-ui.js','text/javascript; charset=utf-8'],
@@ -39,7 +41,7 @@ const publicFiles=new Map(await Promise.all([
 const keys=(o,k)=>o&&typeof o==='object'&&!Array.isArray(o)&&Object.keys(o).length===k.length&&k.every(x=>Object.hasOwn(o,x));
 function reply(res,status,value,type='application/json; charset=utf-8',headers={}){
  const bytes=Buffer.isBuffer(value)?value:Buffer.from(JSON.stringify(value),'utf8');
- res.writeHead(status,{'Content-Type':type,'Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; frame-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",...headers});res.end(bytes);
+ res.writeHead(status,{'Content-Type':type,'Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self'; frame-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",...headers});res.end(bytes);
 }
 async function body(req,max=32768){
  must(/^application\/json(?:;|$)/i.test(req.headers['content-type']||''),415,'Ожидается JSON');
@@ -84,7 +86,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
   try{
    const url=new URL(req.url,'http://localhost'),p=url.pathname;
    if(req.method==='GET'&&p==='/healthz'){reply(res,store.healthy?200:503,{ok:store.healthy,mode:'LC8.1-QA',complete:false,sourceCommit});return}
-   if(req.method==='GET'&&publicFiles.has(p)){const f=publicFiles.get(p);reply(res,200,f.bytes,f.type);return}
+   if(req.method==='GET'&&publicFiles.has(p)){const f=publicFiles.get(p);reply(res,200,f.bytes,f.type,p==='/sw.js'?{'Service-Worker-Allowed':'/'}:{});return}
    // No legacy bearer authentication, full snapshot, source download or generic event package.
    must(!p.startsWith('/api/v1/'),404,'Маршрут недоступен в LC8.1');
    if(req.method==='POST')must(req.headers.origin===origin&&req.headers['x-lc81-request']==='1',403,'Запрос другого происхождения запрещён');
@@ -286,6 +288,11 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='POST'&&p==='/api/lc81/matrix/retire'){reply(res,200,await store.retireMatrix(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/person/card'){reply(res,200,store.personCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
+   if(req.method==='GET'&&p==='/api/lc81/notifications/push'){reply(res,200,store.pushDevices(a.id,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/notifications/push/register'){reply(res,200,await store.registerPushDevice(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/notifications/push/revoke'){reply(res,200,await store.revokePushDevice(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/notifications/push/test'){reply(res,200,await store.queuePushTest(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/push-policy'){reply(res,200,await store.setPushPolicy(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/notifications/preferences'){reply(res,200,store.notificationPreferences(a.id,a.credential_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/notifications/preferences'){reply(res,200,await store.saveNotificationPreferences(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/admin/notification-background'){reply(res,200,store.notificationBackgroundStatus(a.id,a.credential_revision));return}

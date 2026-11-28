@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startSopPublicationScheduler} from '../server/lc81/sop-publication-scheduler.mjs';
-import {startNotificationBackground} from '../server/lc81/notification-scheduler.mjs';
+import {startNotificationBackground,startPushDelivery} from '../server/lc81/notification-scheduler.mjs';
+import {createECDH,createPublicKey,verify,randomBytes} from 'node:crypto';
+import {encryptPush,vapidFromPrivate,vapidAuthorization,pushEndpoint,publicIPv4,loadPushConfig} from '../server/lc81/web-push-transport.mjs';
+import {deliverySeconds} from '../server/lc81/web-push.mjs';
 import {setupApproval} from './lc83-approval-fixture.mjs';
 import {makeSop,SQL} from './lc4-fixture.mjs';
 import {uuid,one,rows,tx} from '../src/core/db.js';
@@ -563,4 +566,101 @@ test('LC822 queue-scale fixture: 500 recipients, 1000 events, bounded retry, exa
   checkBackgroundIntegrity(db);
   console.log('LC822_QUEUE_500_RECIPIENTS_1000_EVENTS_OK',JSON.stringify({queued,completed,retried,rounds,elapsed_ms:Date.now()-start,scope:'synthetic queue fixture; not VPS or full checkpoint load'}));
  }finally{db.close()}
+});
+
+test('LC823 RFC8291 ciphertext vector, VAPID ES256 and strict destination allowlist',()=>{
+ // Public IETF test vector (RFC8291 section 5 and appendix A); no real
+ // credentials or endpoints. Independent expected ciphertext.
+ const ua='BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4';
+ const auth='BTBZMqHH6r4Tts7J_aSIgg',sender=Buffer.from('yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw','base64url'),salt=Buffer.from('DGv6ra1nlYgDCS1FRnbzlw','base64url');
+ const body=encryptPush({p256dh:ua,auth},'When I grow up, I want to be a watermelon',{salt,senderPrivate:sender});
+ const expected='DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN';
+ assert.equal(body.toString('base64url'),expected);
+ const cfg=vapidFromPrivate(sender.toString('base64url'),'mailto:qa@example.invalid');
+ const endpoint='https://fcm.googleapis.com/fcm/send/qa-token',now=Date.parse('2026-11-28T10:00:00Z');
+ const header=vapidAuthorization(cfg,endpoint,now),m=/^vapid t=([^.]+\.[^.]+)\.([^,]+), k=(.+)$/.exec(header);assert(m);assert.equal(m[3],cfg.public_key);
+ const payload=JSON.parse(Buffer.from(m[1].split('.')[1],'base64url'));assert.equal(payload.aud,'https://fcm.googleapis.com');assert.equal(payload.exp,now/1000+3600);
+ assert(verify('sha256',Buffer.from(m[1]),{key:createPublicKey(cfg.key),dsaEncoding:'ieee-p1363'},Buffer.from(m[2],'base64url')));
+ for(const url of ['http://fcm.googleapis.com/fcm/send/qa','https://fcm.googleapis.com.evil.invalid/fcm/send/qa','https://127.0.0.1/fcm/send/qa','https://169.254.169.254/','https://fcm.googleapis.com:444/fcm/send/qa','https://user@fcm.googleapis.com/fcm/send/qa','https://fcm.googleapis.com/fcm/send/qa#secret','https://fcm.googleapis.com/other','https://example.invalid/'])assert.equal(pushEndpoint(url),null,url);
+ for(const ip of ['127.0.0.1','10.1.1.1','169.254.169.254','192.168.1.1','172.16.0.1','100.64.0.1','::ffff:127.0.0.1','192.0.2.1','198.51.100.1','203.0.113.1'])assert.equal(publicIPv4(ip),false);
+ assert(publicIPv4('8.8.8.8'));assert(pushEndpoint('https://updates.push.services.mozilla.com/wpush/v2/qa-token'));assert(pushEndpoint('https://wns2.notify.windows.com/channel?token=qa'));
+ const env={LC82_PUSH_ENABLED:'1',LC82_PUSH_ORIGIN:'https://qa.invalid',LC82_PUSH_DATA_DIR:'/tmp/qa',LC82_PUSH_INSTANCE:'a'.repeat(64),LC82_VAPID_PRIVATE:sender.toString('base64url'),LC82_VAPID_SUBJECT:'mailto:qa@example.invalid'};
+ assert.equal(loadPushConfig({},'https://qa.invalid','/tmp/qa'),null);
+ assert.equal(loadPushConfig({...env,LC81_SCHEDULER_DISABLED:'1'},'https://qa.invalid','/tmp/qa'),null);
+ assert.throws(()=>loadPushConfig(env,'https://copy.invalid','/tmp/qa'));
+ assert.throws(()=>loadPushConfig(env,'https://qa.invalid','/tmp/other'));
+ assert.notEqual(loadPushConfig(env,'https://qa.invalid','/tmp/qa').binding,loadPushConfig({...env,LC82_PUSH_INSTANCE:'b'.repeat(64)},'https://qa.invalid','/tmp/qa').binding);
+ console.log('LC823_RFC8291_VAPID_DESTINATION_OK');
+});
+test('LC823 quiet hours use the enterprise clock and an overnight start day',()=>{
+ const w={days:[1],start:'20:00',end:'08:00'},clock=at=>({configured:true,at,offset_minutes:0});
+ assert.equal(deliverySeconds(w,clock('2026-11-30T19:59:00.000Z')),0);
+ assert.equal(deliverySeconds(w,clock('2026-11-30T20:00:00.000Z')),300);
+ assert.equal(deliverySeconds(w,clock('2026-12-01T07:59:30.000Z')),30);
+ assert.equal(deliverySeconds(w,clock('2026-12-01T08:00:00.000Z')),0);
+ assert.equal(deliverySeconds(w,clock('2026-12-01T21:00:00.000Z')),0);
+ assert.equal(deliverySeconds(w,{...clock('2026-11-30T13:00:00.000Z'),offset_minutes:420}),300);
+ assert.equal(deliverySeconds(null,{...clock('2026-11-30T20:00:00.000Z'),configured:false}),0);
+ console.log('LC823_QUIET_WINDOW_OVERNIGHT_OK');
+});
+test('LC823 device consent, live notice delivery, revoke, provider gone, interruption and isolated restore',async t=>{
+ const ec=createECDH('prime256v1');ec.generateKeys();
+ const privateKey=Buffer.concat([Buffer.alloc(32-ec.getPrivateKey().length),ec.getPrivateKey()]).toString('base64url');
+ const cfg={...vapidFromPrivate(privateKey,'mailto:qa@example.invalid'),binding:'d'.repeat(64),origin:'https://qa.invalid'},sent=[];
+ let response={status:201};
+ const transport=async(config,device,notice_id,opts)=>{sent.push({device:device.id,notice_id,ttl:opts.ttl});return response};
+ const x=await setupApproval({pushConfig:cfg,pushSender:transport});t.after(x.cleanup);
+ const {store,users,admin}=x;
+ const status=()=>store.notificationBackgroundStatus(admin.id,1).push;
+ const sub=n=>{const key=createECDH('prime256v1');key.generateKeys();return {endpoint:'https://fcm.googleapis.com/fcm/send/qa-'+n,expirationTime:null,keys:{p256dh:key.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}}};
+ const a={label:'Телефон QA',subscription:sub(1),confirmed:true},b={label:'ПК QA',subscription:sub(2),confirmed:true};
+ assert.equal(status().enabled,false);assert.equal(store.pushDevices(users.safety.id,1).public_key,null);
+ await assert.rejects(store.registerPushDevice(users.safety.id,1,a),/не включён/);
+ await assert.rejects(store.setPushPolicy(users.safety.id,1,{expected_revision:0,enabled:true}),/администратора/);
+ await store.setPushPolicy(admin.id,1,{expected_revision:0,enabled:true});
+ assert.equal(store.pushDevices(users.safety.id,1).public_key,cfg.public_key);
+ const prefs=store.notificationPreferences(users.safety.id,1);
+ await store.saveNotificationPreferences(users.safety.id,1,{expected_revision:prefs.rev,reminders:prefs.reminders,push_types:{...prefs.push_types,approval:true},delivery_window:null});
+ const id=(await x.passport(await x.draft('Web Push QA'))).revision_id;
+ const first=await x.submit(id,'sequential');
+ const d1=await store.registerPushDevice(users.safety.id,1,a),d2=await store.registerPushDevice(users.safety.id,1,b);
+ assert.equal((await store.registerPushDevice(users.safety.id,1,a)).id,d1.id);
+ assert.equal(store.pushDevices(users.safety.id,1).devices.length,2);
+ assert(!JSON.stringify(store.pushDevices(users.safety.id,1)).includes('fcm.googleapis'));
+ await assert.rejects(store.registerPushDevice(users.observer.id,1,a),/другого аккаунта/);
+ await assert.rejects(store.revokePushDevice(users.observer.id,1,{id:d1.id}),/недоступно/);
+ assert.equal((await store.runPushDelivery()).enqueued,0);assert.equal(sent.length,0);
+ await x.change('safety',id,'safety','return','Новый раунд QA');
+ const second=await x.submit(id,'sequential');assert.notEqual(first.id,second.id);
+ const n=store.notificationFeed(users.safety.id,1,{filter:'actions'}).items[0];assert.equal(n.route.round_id,second.id);
+ assert.equal((await store.runPushDelivery({enqueueOnly:true})).enqueued,2);assert.equal(status().counts.pending,2);
+ await store.revokePushDevice(users.safety.id,1,{id:d2.id});
+ assert.equal((await store.runPushDelivery()).finished,1);assert.equal(sent.length,1);assert.equal(sent[0].device,d1.id);assert.equal(sent[0].notice_id,n.id);assert(sent[0].ttl<=300);
+ assert.equal(status().counts.accepted,1);assert.equal(status().counts.cancelled,1);
+ assert.equal(store.notificationFeed(users.safety.id,1,{filter:'actions'}).items[0].read_at,null);
+ assert.equal((await store.runPushDelivery()).enqueued,0);assert.equal(sent.length,1);
+ await assert.rejects(store.readNotification(users.observer.id,1,{id:n.id}),/недоступно/);
+ await store.readNotification(users.safety.id,1,{id:n.id});assert.equal(store.notificationFeed(users.safety.id,1,{filter:'actions'}).total,1);
+ const d3=await store.registerPushDevice(users.safety.id,1,{label:'Потерянный телефон',subscription:sub(3),confirmed:true});
+ await store.queuePushTest(users.safety.id,1,{id:d3.id});
+ await assert.rejects(store.queuePushTest(users.safety.id,1,{id:d3.id}),/раза в минуту/);
+ response={status:410};await store.runPushDelivery();
+ assert.equal(store.pushDevices(users.safety.id,1).devices.find(v=>v.id===d3.id).state,'expired');
+ assert.equal(sent.at(-1).notice_id,null);
+ await store.queuePushTest(users.safety.id,1,{id:d1.id});
+ assert.equal((await store.runPushDelivery({claimOnly:true})).claimed,1);
+ assert.equal(status().counts.sending,1);const calls=sent.length;
+ await store.close();const backup=path.join(x.root,'lc823-copy');await copySecureCheckpoint(x.target,backup);
+ const isolated=await openSecureQA({dataDir:backup,pushSender:transport});
+ try{assert.equal(isolated.notificationBackgroundStatus(admin.id,1).push.enabled,false);assert.equal((await isolated.runPushDelivery()).claimed,0);assert.equal(sent.length,calls)}finally{await isolated.close()}
+ const restored=await openSecureQA({dataDir:x.target,pushConfig:cfg,pushSender:transport});
+ try{
+  await restored.runPushDelivery();
+  assert.equal(restored.notificationBackgroundStatus(admin.id,1).push.counts.uncertain,1);assert.equal(sent.length,calls);
+  await restored.setPushPolicy(admin.id,1,{expected_revision:1,enabled:false});
+  assert.equal(restored.pushDevices(users.safety.id,1).enabled,false);
+  assert.equal(restored.notificationFeed(users.safety.id,1,{filter:'actions'}).total,1);
+  assert.equal((await restored.runPushDelivery()).enqueued,0);
+ }finally{await restored.close()}
+ console.log('LC823_DEVICES_QUEUE_REVOKE_PROVIDER_RESTORE_OK');
 });

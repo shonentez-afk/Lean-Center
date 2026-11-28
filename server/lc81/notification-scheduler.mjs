@@ -10,3 +10,14 @@ export function startNotificationBackground(store,{intervalMs=60000,onError=()=>
  const timer=setInterval(tick,intervalMs);timer.unref?.();tick();
  return {async stop(){stopped=true;clearInterval(timer);await running}};
 }
+
+export function startPushDelivery(store,{intervalMs=15000,onError=()=>console.error('LC82_PUSH_WORKER_ERROR')}={}){
+ if(!Number.isSafeInteger(intervalMs)||intervalMs<1)throw Error('Invalid push worker interval');
+ let running=null,stopped=false;
+ const tick=()=>{
+  if(stopped||running)return;
+  running=Promise.resolve().then(()=>store.runPushDelivery()).catch(()=>onError()).finally(()=>{running=null});
+ };
+ const timer=setInterval(tick,intervalMs);timer.unref?.();tick();
+ return {async stop(){stopped=true;clearInterval(timer);await running}};
+}

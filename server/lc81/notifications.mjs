@@ -23,6 +23,16 @@ function project(db,a,n){
 function visible(db,a){
  return sourceRows(db,a).flatMap(n=>{const v=project(db,a,n);return v?[{n,v}]:[]});
 }
+// Outbound transport sees only currently visible notices, never the raw
+// journal or a separately guessed recipient. Two insertion watermarks avoid
+// replaying historical events on device opt-in or administrator re-enable.
+export function pushNoticeWatermarks(db){
+ return {original:exists(db,journal)?one(db,'SELECT coalesce(max(rowid),0) n FROM lc83_sop_notice').n:0,background:exists(db,'lc822_notification_job')?one(db,'SELECT coalesce(max(notice_ordinal),0) n FROM lc822_notification_job').n:0};
+}
+export function pushNoticeCandidates(db,a,device){
+ if(!notificationsEnabled()||!a?.personId)return [];
+ return visible(db,a).filter(x=>!x.v.read_at&&x.n.ordinal>(x.n.source==='background'?device.background_after:device.original_after)).map(x=>x.v);
+}
 const newest=(a,b)=>b.v.occurred_at.localeCompare(a.v.occurred_at)||b.v.id.localeCompare(a.v.id);
 const actions=(a,b)=>Number(b.v.overdue)-Number(a.v.overdue)||String(a.v.due_on??'9999-12-31').localeCompare(String(b.v.due_on??'9999-12-31'))||newest(a,b);
 export function notificationFeed(db,a,{filter='all',cursor=null,limit=30}={}){

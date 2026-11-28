@@ -34,6 +34,8 @@ import {directoryPeople} from '../../src/modules/master-data/people-directory.js
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {internalTrainerAppointment} from '../../src/modules/training/domain.js';
 import {notificationsEnabled,notificationFeed,readNotification,readAllNotifications,checkNotificationIntegrity} from './notifications.mjs';
+import {pushDevices,registerPushDevice,revokePushDevice,queuePushTest,setPushPolicy,pushAdminStatus,pushNeedsRecovery,recoverPush,discoverPush,enqueuePush,pushReady,claimPush,recheckPush,releaseChangedPush,finishPush,checkPushIntegrity} from './web-push.mjs';
+import {sendWebPush} from './web-push-transport.mjs';
 import {backgroundEnabled,notificationPreferences,saveNotificationPreferences,saveReminderPolicy,discoverBackground,enqueueBackground,readyBackground,drainBackground,backgroundStatus,checkBackgroundIntegrity} from './notification-background.mjs';
 import {approvalPlanItems,approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,compareApprovalSnapshots,approvalImpactContext,saveApprovalImpact,preparePublicationSchedule,schedulePublication,cancelPublication,duePublications,prepareScheduledPublication,executeScheduledPublication,blockDuePublication,checkApprovalIntegrity} from './sop-approval.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
@@ -322,6 +324,7 @@ function checkPrivate(db){
  checkFamiliarizationIntegrity(db);
  checkNotificationIntegrity(db);
  checkBackgroundIntegrity(db);
+ checkPushIntegrity(db);
 }
 const digest=b=>createHash('sha256').update(b).digest('hex');
 function pack(db){
@@ -427,7 +430,7 @@ export async function restoreUploadedQA({bundleFile,expectedSha,dataDir,password
 async function storageStep(step,fn){
  try{return await fn()}catch(e){if(e&&typeof e==='object')e.lc81StorageStep=step;throw e}
 }
-export async function openSecureQA({dataDir,initialize=false,login='admin',password,write=atomicReplace,seed=null,siteTimeZone=null,importDigest=null}){
+export async function openSecureQA({dataDir,initialize=false,login='admin',password,write=atomicReplace,seed=null,siteTimeZone=null,importDigest=null,pushConfig=null,pushSender=sendWebPush}){
  const selectedZone=siteTimeZone===null?null:normalizeZone(siteTimeZone);
  must(siteTimeZone===null||selectedZone,422,'Укажите корректный IANA часовой пояс предприятия');
  must(path.isAbsolute(dataDir)&&dataDir!==path.parse(dataDir).root,503,'Требуется отдельная абсолютная папка QA');
@@ -554,7 +557,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
  function checkedAccount(db,actor,revision){const a=account(db,actor);must(a&&a.credential_revision===revision,401,'Сеанс завершён');return a}
  const resolveCtx=(db,actor,revision,input)=>resolveLibraryContext(db,input,libraryAccess(db,checkedAccount(db,actor,revision),day(db)));
  // Volatile process heartbeat: no write just to prove that an empty scan ran.
- let notificationScan=null;
+ let notificationScan=null,pushRunning=false;
  return {
   get healthy(){return !closed&&!poisoned},
   authenticate(login,password){return read(db=>{
@@ -984,11 +987,11 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const a=checkedAccount(db,actor,revision);
    return finalizeLibrary(db,input,{...libraryAccess(db,a,day(db)),personId:a.person_id,at:at(),audit:(action,target)=>audit(db,actor,action,target)});
   })},
-  notificationPreferences(actor,revision){return read(db=>notificationPreferences(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db))))},
-  saveNotificationPreferences(actor,revision,f){return mutate(db=>saveNotificationPreferences(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  notificationPreferences(actor,revision){return read(db=>{const a=approvalAccess(db,checkedAccount(db,actor,revision),day(db));return {...notificationPreferences(db,a),push_available:!!pushConfig&&pushDevices(db,a,pushConfig).enabled}})},
+  saveNotificationPreferences(actor,revision,f){return mutate(db=>{const a=approvalAccess(db,checkedAccount(db,actor,revision),day(db));return {...saveNotificationPreferences(db,a,f),push_available:!!pushConfig&&pushDevices(db,a,pushConfig).enabled}})},
   notificationBackgroundStatus(actor,revision){return read(db=>{
    requireAdmin(db,actor,revision);const clock=siteClock(db);
-   return {...backgroundStatus(db,clock,id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)}),last_scan:notificationScan};
+   return {...backgroundStatus(db,clock,id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)}),last_scan:notificationScan,push:pushAdminStatus(db,pushConfig)};
   })},
   setNotificationPolicy(actor,revision,f){return mutate(db=>{
    requireAdmin(db,actor,revision);return saveReminderPolicy(db,actor,siteClock(db),f,(action,target)=>audit(db,actor,action,target));
@@ -1013,6 +1016,45 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     else{notificationScan={started_at,finished_at:new Date().toISOString(),state:'error'};throw e}
    }
    notificationScan={started_at,finished_at:new Date().toISOString(),state:result.deferred?'deferred':'ok',...result};
+   return result;
+  },
+  pushDevices(actor,revision){return read(db=>pushDevices(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),pushConfig))},
+  registerPushDevice(actor,revision,f){return mutate(db=>registerPushDevice(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),pushConfig,f))},
+  revokePushDevice(actor,revision,f){return mutate(db=>revokePushDevice(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),pushConfig,f))},
+  queuePushTest(actor,revision,f){return mutate(db=>queuePushTest(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),pushConfig,f))},
+  setPushPolicy(actor,revision,f){return mutate(db=>{requireAdmin(db,actor,revision);return setPushPolicy(db,actor,siteClock(db),pushConfig,f,(action,target)=>audit(db,actor,action,target))})},
+  // Internal process-only runner, with an injectable transport for isolated
+  // tests. Persist a claim before outbound I/O, never hold the writer while
+  // waiting on a provider. No HTTP runner and no real network in CI.
+  async runPushDelivery({enqueueOnly=false,claimOnly=false}={}){
+   const result={enqueued:0,claimed:0,finished:0,deferred:0};
+   if(!pushConfig||!backgroundEnabled()||process.env.LC81_SCHEDULER_DISABLED==='1')return result;
+   if(pushRunning)return {...result,deferred:1};
+   pushRunning=true;
+   const ctx=db=>{const clock=siteClock(db);return {clock,accessFor:id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)}}};
+   try{
+    if(read(db=>pushNeedsRecovery(db)))await mutate(db=>recoverPush(db,siteClock(db)));
+    const candidates=read(db=>{const c=ctx(db);return discoverPush(db,c.clock,pushConfig,c.accessFor)});
+    if(candidates.length)result.enqueued=await mutate(db=>{const c=ctx(db);return enqueuePush(db,c.clock,pushConfig,c.accessFor,candidates)});
+    if(enqueueOnly)return result;
+    const claims=[];
+    for(let i=0;i<4;i++){
+     if(!read(db=>pushReady(db,siteClock(db),pushConfig)))break;
+     const claim=await mutate(db=>{const c=ctx(db);return claimPush(db,c.clock,pushConfig,c.accessFor)});
+     if(!claim)break;
+     claims.push(claim);result.claimed++;
+     if(claimOnly)return result;
+    }
+    const outcomes=await Promise.allSettled(claims.map(async claim=>{
+     const fresh=read(db=>{const c=ctx(db);return recheckPush(db,c.clock,pushConfig,c.accessFor,claim)});
+     if(!fresh||fresh.changed){await mutate(db=>{const c=ctx(db);return releaseChangedPush(db,c.clock,pushConfig,c.accessFor,claim)});return 0}
+     let response=null;
+     try{response=await pushSender(pushConfig,fresh.device,fresh.notice_id,{ttl:fresh.ttl})}catch{}
+     return mutate(db=>finishPush(db,siteClock(db),claim,response));
+    }));
+    for(const o of outcomes){if(o.status==='fulfilled')result.finished+=o.value;else if(o.reason instanceof PilotError&&o.reason.status===429)result.deferred++;else throw o.reason}
+   }catch(e){if(e instanceof PilotError&&e.status===429)result.deferred++;else throw e}
+   finally{pushRunning=false}
    return result;
   },
   notificationFeed(actor,revision,filter){return read(db=>notificationFeed(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),filter))},

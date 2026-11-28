@@ -32,9 +32,9 @@ try{
  const url='https://127.0.0.1:'+proxy.address().port;
  server=createSecureQAServer({store:x.store,origin:url});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  browser=await chromium.launch({headless:true});const errors=[];
- async function profile(name,mobile=false){
+ async function profile(name,mobile=false,fragment=''){
   const ctx=await browser.newContext({ignoreHTTPSErrors:true,viewport:mobile?{width:390,height:844}:{width:1440,height:900}}),p=await ctx.newPage();
-  p.on('pageerror',e=>errors.push(String(e)));p.on('dialog',d=>d.dismiss());await p.goto(url);
+  p.on('pageerror',e=>errors.push(String(e)));p.on('dialog',d=>d.dismiss());await p.goto(url+fragment);
   await p.locator('#login input[name=login]').fill(name);await p.locator('#login input[name=password]').fill(x.password);await p.getByRole('button',{name:'Войти',exact:true}).click();await p.locator('#workspace').waitFor();
   const content=p.locator('#content'),button=name=>content.getByRole('button',{name,exact:true});
   const ready=async()=>{await p.bringToFront();await p.locator('html:not(.lc81-access-check)').waitFor();await p.locator('#nav[aria-busy="false"]').waitFor({state:'attached'});await p.locator('#save-indicator[data-kind="saved"]').waitFor();assert.equal(await p.locator('#status.error').count(),0)};
@@ -161,7 +161,23 @@ try{
  await inbox.getByRole('heading',{name:'Требуется ознакомление с СОП',exact:true}).waitFor();
  const saved=x.store.notificationPreferences(x.users.observer.id,1);
  assert.deepEqual(saved.delivery_window,{days:[1],start:'20:00',end:'08:00'});assert.equal(saved.push_available,false);
+ await inbox.getByRole('button',{name:'Устройства Web Push',exact:true}).click();
+ await inbox.getByRole('heading',{name:'Устройства Web Push',exact:true}).waitFor();
+ await inbox.getByText('Web Push отключён администратором либо отсутствует настройка сервера.',{exact:true}).waitFor();
+ assert.equal(await inbox.getByRole('button',{name:'Включить Push на этом устройстве',exact:true}).count(),0);
  await inbox.getByRole('button',{name:'Закрыть',exact:true}).click();await prefsProfile.ctx.close();
+ const notice=x.store.notificationFeed(x.users.observer.id,1,{}).items.find(v=>v.kind==='familiarization_required');assert(notice);
+ const deep=await profile('observer',true,'/#lc82-notice='+notice.id);
+ await deep.button('Подтвердить ознакомление').waitFor();
+ await deep.ready();assert(x.store.notificationFeed(x.users.observer.id,1,{}).items.find(v=>v.id===notice.id).read_at);
+ assert.equal(x.store.familiarizationList(x.users.observer.id,1,{kind:'mine',revision_id:id}).items[0].state,'pending');
+ const sw=await deep.ctx.request.get(url+'/sw.js');assert.equal(sw.status(),200);assert.equal(sw.headers()['service-worker-allowed'],'/');assert.equal(sw.headers()['cache-control'],'no-store');
+ assert((await sw.text()).includes('У вас новое действие в портале'));
+ await deep.ctx.close();
+ const wrong=await profile('engineering',false,'/#lc82-notice='+notice.id);
+ await wrong.p.locator('#status').getByText('Уведомление больше недоступно. Проверьте Мой план и колокольчик.',{exact:true}).waitFor();
+ assert.equal(await wrong.button('Подтвердить ознакомление').count(),0);await wrong.ctx.close();
+ console.log('LC823_BROWSER_DISABLED_DEVICE_AND_EXACT_DEEP_LINK_OK');
  const admin=await profile('admin');await admin.go('admin.notifications');
  await admin.content.getByRole('heading',{name:'Фоновые уведомления',exact:true}).waitFor();
  await admin.content.locator('select[name=familiarization]').selectOption('0');
