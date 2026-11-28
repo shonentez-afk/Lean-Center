@@ -148,6 +148,17 @@ try{
  assert.equal(await saved.getByRole('cell',{name:'12',exact:true}).count(),1);
  await ready();
  console.log('PARITY_R2_FRV_SNAPSHOT_OK');
+ await go('sop.read_effective');
+ await rowWith(content,'QA-LC4').getByRole('button',{name:'Открыть СОП',exact:true}).click();
+ await button('Внедрение новой операции / редакции').click();
+ await content.getByRole('heading',{name:/^Внедрение новой операции · /}).waitFor();
+ await content.getByText('Отчёт по этой редакции ещё не создан.',{exact:false}).waitFor();
+ await button('Сформировать отчёт о внедрении').click();
+ await content.getByRole('heading',{name:'Состав и основания внедрения',exact:true}).waitFor();
+ await content.getByRole('cell',{name:'Ученик Тестовый',exact:true}).waitFor();
+ await content.locator('select[name=skill_id]').waitFor();
+ await button('← К СОП').click();await content.locator('.lc81-card-tabs').waitFor();
+ await ready();console.log('TWI03_R4_ROLLOUT_FORM_OK');
 
  await go('matrix.read');await button('Общая матрица всех навыков').click();
  for(const state of ['none','not_observed','not_applicable','expired'])await content.locator('[data-assessment-state='+state+']').first().waitFor();

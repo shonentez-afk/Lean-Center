@@ -39,7 +39,7 @@ function skillScale(db,a,c,skillId,scaleId){
  const skill=isId(skillId)&&one(db,'SELECT * FROM skill WHERE id=? AND operation_id=? AND archived=0',[skillId,c.r.operation_id]);
  const scale=isId(scaleId)&&one(db,'SELECT * FROM rating_scale WHERE id=? AND archived=0',[scaleId]);
  const levels=scale?rows(db,'SELECT value,label FROM rating_level WHERE scale_id=? ORDER BY value',[scaleId]):[];
- return skill&&scale&&a.read('skill.read',skillId)&&a.read('scale.read',scaleId)&&levels.map(x=>x.value).join(',')==='1,2,3,4'?{skill,scale}:null;
+ return skill&&scale&&a.read('skill.read',skillId)&&scope(a,'scale.read',scaleId,c.resource)&&levels.map(x=>x.value).join(',')==='1,2,3,4'?{skill,scale}:null;
 }
 function taskView(db,a,id){
  const t=isId(id)&&one(db,'SELECT * FROM action_item WHERE id=?',[id]);
@@ -111,7 +111,7 @@ export function rolloutDetail(db,a,id){
   options.tasks=rows(db,"SELECT id FROM action_item WHERE state<>'cancelled' ORDER BY due_on,id").map(x=>taskView(db,a,x.id)).filter(Boolean);
   options.studies=rows(db,"SELECT id FROM frv_study WHERE operation_id=? AND state='final' ORDER BY observed_at,id",[c.r.operation_id]).flatMap(x=>{const s=study(db,a,c,x.id);return s?[studyPublic(s)]:[]});
   options.skills=rows(db,'SELECT id,name FROM skill WHERE operation_id=? AND archived=0 ORDER BY name',[c.r.operation_id]).filter(x=>a.read('skill.read',x.id));
-  options.scales=rows(db,'SELECT id,name FROM rating_scale WHERE archived=0 ORDER BY name').filter(x=>a.read('scale.read',x.id)&&rows(db,'SELECT value FROM rating_level WHERE scale_id=? ORDER BY value',[x.id]).map(l=>l.value).join(',')==='1,2,3,4');
+  options.scales=rows(db,'SELECT id,name FROM rating_scale WHERE archived=0 ORDER BY name').filter(x=>scope(a,'scale.read',x.id,c.resource)&&rows(db,'SELECT value FROM rating_level WHERE scale_id=? ORDER BY value',[x.id]).map(l=>l.value).join(',')==='1,2,3,4');
   const suggestions=new Set(rows(db,"SELECT DISTINCT trainee_id FROM training_assignment WHERE operation_id=? AND state<>'cancelled'",[c.r.operation_id]).map(x=>x.trainee_id));
   options.people=directoryPeople(db,a.day).filter(x=>who(a,x.id)&&activeEmployment(db,x.id,a.day)&&canWrite(a,c,trainingResource(db,c.r.operation_id,[x.id],a.day))).map(x=>({id:x.id,name:x.display_name,unit:x.unit,position:x.position,suggested:suggestions.has(x.id)}));
  }
@@ -121,7 +121,7 @@ export function rolloutDetail(db,a,id){
   const ac=x.accepted_json?JSON.parse(x.accepted_json):null;
   return [{version:x.version,created_on:x.created_at.slice(0,10),reason:p.change_reason,accepted_on:ac?.on??null}];
  }):[];
- return {revision_id:id,title:c.r.code+' · v'+c.r.version_no+' · '+c.r.title,day:a.day,report,can_edit,options,versions};
+ return {revision_id:id,operation_id:c.r.operation_id,title:c.r.code+' · v'+c.r.version_no+' · '+c.r.title,day:a.day,report,can_edit,options,versions};
 }
 export function prepareRollout(db,a,f){
  must(exact(f,['revision_id','expected_version','task_id','baseline_id','control_id','trial_on','trial_reference','skill_id','scale_id','roster','roster_confirmed','roster_note','change_reason'])&&isId(f.revision_id)&&Number.isSafeInteger(f.expected_version)&&f.expected_version>=0&&isId(f.task_id)&&isId(f.baseline_id)&&(f.control_id===null||isId(f.control_id)&&f.control_id!==f.baseline_id)&&date(f.trial_on)&&f.trial_on<=a.day&&txt(f.trial_reference)&&f.roster_confirmed===true&&txt(f.roster_note)&&txt(f.change_reason)&&Array.isArray(f.roster)&&f.roster.length>=1&&f.roster.length<=200&&f.roster.every(x=>exact(x,['person_id','target_level'])&&isId(x.person_id)&&[1,2,3,4].includes(x.target_level))&&new Set(f.roster.map(x=>x.person_id)).size===f.roster.length,400,'Укажите задачу, фактическую апробацию, полный состав исполнителей и целевые уровни');

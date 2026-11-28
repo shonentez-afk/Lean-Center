@@ -14,8 +14,8 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const det=el('details');det.append(el('summary',title),form(fields,submit,fn));return det;
  }
  function setContent(host,n){host.replaceChildren(n);host.scrollIntoView({block:'nearest'})}
- async function assignmentEditor(host,link=null,retrain=null,personId=null){
-  const context=link||retrain;
+ async function assignmentEditor(host,link=null,retrain=null,personId=null,rollout=null,onSaved=null){
+  const context=link||retrain||rollout;
   const root=await api('training/options'),out=el('div'),op=select('operation_id','Операция',[['','— Выберите операцию —'],...opts(root.operations)]);
   if(context){const field=op.querySelector('select');field.value=context.operation_id;field.disabled=true;if(!field.value)throw Error('Операция задания недоступна')}
   const load=button('Выбрать операцию',async()=>{
@@ -47,13 +47,13 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    const segments=input('segments','Дробный инструктаж · группы шагов (например 1-3,4-6)','text',false),hazard=check('hazardous','Требуется предварительная проверка безопасности');
    function mode(){const v=variant.querySelector('select').value;realShow.hidden=realTry.hidden=v!=='smed';segments.hidden=v!=='fractional';segments.querySelector('input').required=v==='fractional'}
    variant.querySelector('select').addEventListener('change',mode);mode();
-   out.replaceChildren(form([select('trainee_id','Обучаемый',opts(d.people)),select('authorization_id','Инструктор с действующим полномочием',opts(d.mentors)),revision,select('skill_id','Навык',opts(d.skills)),scale,level,dt('assigned_on','Начало',link&&link.start_on>d.day?link.start_on:d.day),dt('due_on','Срок',link?.due_on||''),...(!context?[scenario,scenarioHelp,rapidConfirm]:[]),fill(input('reason','Причина / производственная задача'),retrain?.reason),variant,number('followups','Контрольные проверки',2,10,2),realShow,realTry,segments,hazard,check('plan_reviewed','План TWI действующей редакции проверен')],'Создать назначение',async f=>{
+   out.replaceChildren(form([select('trainee_id','Обучаемый',opts(d.people)),select('authorization_id','Инструктор с действующим полномочием',opts(d.mentors)),revision,select('skill_id','Навык',opts(d.skills)),scale,level,dt('assigned_on','Начало',link&&link.start_on>d.day?link.start_on:d.day),dt('due_on','Срок',link?.due_on||''),...(!context?[scenario,scenarioHelp,rapidConfirm]:[]),fill(input('reason','Причина / производственная задача'),retrain?.reason||rollout?.reason),variant,number('followups','Контрольные проверки',2,10,2),realShow,realTry,segments,hazard,check('plan_reviewed','План TWI действующей редакции проверен')],'Создать назначение',async f=>{
     const v=value(f,'variant'),parts=v==='fractional'?value(f,'segments').split(',').map(s=>{const m=/^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(s);if(!m)throw Error('Укажите группы шагов, например 1-3,4-6');return {from:Number(m[1]),to:Number(m[2])}}):[];
-    const created=await api('training/create',{operation_id:id,trainee_id:value(f,'trainee_id'),authorization_id:value(f,'authorization_id'),revision_id:value(f,'revision_id'),skill_id:value(f,'skill_id'),scale_id:value(f,'scale_id'),target_level:Number(value(f,'target_level')),assigned_on:value(f,'assigned_on'),due_on:value(f,'due_on'),reason:value(f,'reason'),...(!context?{scenario:value(f,'scenario'),...(value(f,'scenario')==='rapid'&&checked(f,'rapid_confirm')?{rapid_confirm:true}:{})}:{}),variant:v,method_config:{followups:Number(value(f,'followups')),segments:parts,realShow:v==='smed'?Number(value(f,'real_show')):null,realTry:v==='smed'?Number(value(f,'real_try')):null,hazardous:checked(f,'hazardous')},plan_reviewed:checked(f,'plan_reviewed'),...(link?{enrollment_id:link.enrollment_id,program_task_id:link.program_task_id,enrollment_rev:link.enrollment_rev}:retrain?{retraining_source_id:retrain.retraining_source_id}:{})});
-    note(created.rapid_confirmed?'Назначение создано и первое согласование подтверждено. Требуется решение второго руководителя.':'Назначение сохранено. Добавьте его в план производственного обучения для согласования.');await render();
+    const created=await api('training/create',{operation_id:id,trainee_id:value(f,'trainee_id'),authorization_id:value(f,'authorization_id'),revision_id:value(f,'revision_id'),skill_id:value(f,'skill_id'),scale_id:value(f,'scale_id'),target_level:Number(value(f,'target_level')),assigned_on:value(f,'assigned_on'),due_on:value(f,'due_on'),reason:value(f,'reason'),...(!context?{scenario:value(f,'scenario'),...(value(f,'scenario')==='rapid'&&checked(f,'rapid_confirm')?{rapid_confirm:true}:{})}:rollout?{scenario:'changed_operation'}:{}),variant:v,method_config:{followups:Number(value(f,'followups')),segments:parts,realShow:v==='smed'?Number(value(f,'real_show')):null,realTry:v==='smed'?Number(value(f,'real_try')):null,hazardous:checked(f,'hazardous')},plan_reviewed:checked(f,'plan_reviewed'),...(link?{enrollment_id:link.enrollment_id,program_task_id:link.program_task_id,enrollment_rev:link.enrollment_rev}:retrain?{retraining_source_id:retrain.retraining_source_id}:{})});
+    note(created.rapid_confirmed?'Назначение создано и первое согласование подтверждено. Требуется решение второго руководителя.':'Назначение сохранено. Добавьте его в план производственного обучения для согласования.');if(onSaved)await onSaved();else await render();
    }));
   },'primary');
-  setContent(host,panel(link?'Назначение по заданию программы':retrain?'Повторное обучение по новой редакции СОП':personId?'Назначение обучения выбранному сотруднику':'Новое назначение',op,load,out));
+  setContent(host,panel(link?'Назначение по заданию программы':retrain?'Повторное обучение по новой редакции СОП':rollout?'Инструктаж исполнителя при внедрении СОП':personId?'Назначение обучения выбранному сотруднику':'Новое назначение',op,load,out));
  }
  async function assignment(host,id,focus='overview'){
   if(!discard())return;
@@ -967,5 +967,5 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   await load();return root;
  }
 
- return {training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel,competencyPanel,openRecord,personnelPanel,registerPanel,sopEvaluationPanel,sopEvaluationCard};
+ return {rolloutAssignmentEditor:(host,context,onSaved)=>assignmentEditor(host,null,null,null,context,onSaved),training,matrices,card,mentor,programPanel,mentorWorkflow,qualityPanel,competencyPanel,openRecord,personnelPanel,registerPanel,sopEvaluationPanel,sopEvaluationCard};
 }

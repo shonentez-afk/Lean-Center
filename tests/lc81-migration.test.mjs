@@ -923,7 +923,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
  assert.equal(sha(await fs.readFile(path.join(x.source,PILOT_STATE))),x.sourceHash);
 });
 
-test('TWI03 R1/R2: shared plan, atomic JI, competence, rapid control, candidate evidence and revision decision',async t=>{
+test('TWI03 R1–R4: shared plan, atomic JI, competence, rapid control, candidate evidence and rollout',async t=>{
  const x=await synthetic(t,{twiR2:true}),pass=password();
  await migratePilotCopy({source:x.source,target:x.target,siteId:x.site,adminRoleId:x.adminRole,managerRoleId:x.managerRole,password:pass});
  let store=await openSecureQA({dataDir:x.target});
@@ -980,6 +980,32 @@ test('TWI03 R1/R2: shared plan, atomic JI, competence, rapid control, candidate 
   assert.deepEqual(new Set([trace.getCell('B2').text,trace.getCell('B3').text]),new Set([first.id,second.id]));
   await assert.rejects(store.exportForm(worker.id,1,{kind:'production_plan',appendix:null,id:p.id}),/недоступны/);
   await assert.rejects(store.exportForm(manager.id,1,{kind:'production_plan',appendix:null,id:stalePlan.id}),/недоступны/);
+  // A report joins the existing records; it never manufactures training,
+  // competence, permission to work or task completion.
+  const rolloutRev=x.revision.revision;
+  const makeStudy=async(phase,seconds,title,op=x.f.operation,finalize=true)=>{
+   const raw={schemaVersion:'FRV-1.3',study:{studyId:'QA-ROLLOUT-'+uuid(),operationId:'Учебная операция',status:'Draft'},cycles:[{id:'c1',cycleNo:1,phase,observations:[{id:'o1',actionRaw:'Учебный замер',valueType:'VA',durationSec:seconds,standardCandidate:true}]}],standard:{outdated:false,steps:[{action:'Учебный замер',plannedTimeSec:seconds,sourceObservationIds:['o1'],keyMoment:'КМ',reason:'Причина',valueType:'VA'}]}};
+   const v=await store.saveLibrary(manager.id,1,{request_id:uuid(),context:{kind:'frv',command:'create',id:null,revision_id:null,operation_id:op,origin_id:null,origin_revision:null},expected_revision:0,title,code:null,observed_at:day,text:JSON.stringify(raw)});
+   if(finalize)await store.finalizeLibrary(manager.id,1,{id:v.id,expected_revision:v.rev,note:'QA'});
+   return v.id;
+  };
+  const initialFrv=await makeStudy('baseline',20,'QA ФРВ до'),controlFrv=await makeStudy('improved',15,'QA ФРВ после'),draftFrv=await makeStudy('baseline',21,'QA ФРВ черновик',x.f.operation,false);
+  const draftRollout={revision_id:rolloutRev,expected_version:0,task_id:x.ownTask,baseline_id:initialFrv,control_id:null,trial_on:day,trial_reference:'QA: документ апробации',skill_id:x.f.skill,scale_id:x.matrixScale,roster:[{person_id:x.f.trainee,target_level:2},{person_id:x.personB,target_level:2}],roster_confirmed:true,roster_note:'QA полный состав двух исполнителей',change_reason:'QA внедрение'};
+  assert(store.libraryCard(manager.id,1,rolloutRev).can_rollout);
+  assert(store.rolloutDetail(manager.id,1,rolloutRev).options.people.some(x=>x.id===draftRollout.roster[1].person_id));
+  assert.throws(()=>store.rolloutDetail(worker.id,1,rolloutRev),/недоступен/);
+  await assert.rejects(store.saveRollout(worker.id,1,draftRollout),/полномочий/);
+  await assert.rejects(store.saveRollout(manager.id,1,{...draftRollout,roster_confirmed:false}),/полный состав/);
+  await assert.rejects(store.saveRollout(manager.id,1,{...draftRollout,baseline_id:draftFrv}),/недоступны/);
+  await assert.rejects(store.saveRollout(manager.id,1,{...draftRollout,baseline_id:controlFrv}),/циклов «до»/);
+  const savedRollout=await store.saveRollout(manager.id,1,draftRollout);
+  assert.equal(savedRollout.version,1);
+  const pendingRollout=store.rolloutDetail(manager.id,1,rolloutRev).report;
+  assert.equal(pendingRollout.baseline.mean_seconds,20);assert(!pendingRollout.ready);
+  assert.equal(pendingRollout.participants.filter(x=>x.ready).length,0);
+  const acceptRequest={revision_id:rolloutRev,expected_version:1,roster_confirmed:true,quality:'QA контроль качества',report:'QA фактическое исполнение соответствует СОП'};
+  await assert.rejects(store.acceptRollout(manager.id,1,acceptRequest),/не готов/);
+  await assert.rejects(store.saveRollout(manager.id,1,draftRollout),/изменился/);
   const d=store.trainingDetail(manager.id,1,first.id),fact=stage_code=>({stage_code,held_at:day+'T08:00',duration_minutes:10,result:'completed',notes:'Учебный факт',witness_id:null,mentor_ack:true,trainee_ack:true});
   await assert.rejects(store.recordInstructionProtocol(manager.id,1,{id:first.id,expected_revision:d.rev,facts:[fact('prepare')]}),/назначенный инструктор/);
   await assert.rejects(store.recordInstructionProtocol(instructor.id,1,{id:first.id,expected_revision:d.rev,facts:[fact('prepare'),fact('try1')]}),/предыдущий этап/);
@@ -1021,6 +1047,21 @@ test('TWI03 R1/R2: shared plan, atomic JI, competence, rapid control, candidate 
   await store.recordAssessmentResult(manager.id,1,{...re,practical:{...re.practical,rapid_control:control}});
   assert.deepEqual(store.trainingDetail(manager.id,1,second.id).rapid_control,control);
   assert.equal(store.trainingDetail(manager.id,1,second.id).admission,'Нет решения');
+  const beforeAccept=store.rolloutDetail(manager.id,1,rolloutRev).report;
+  assert.equal(beforeAccept.participants.filter(x=>x.ready).length,2);
+  assert(!beforeAccept.ready&&beforeAccept.blockers.some(x=>x.includes('ФРВ')));
+  const updatedRollout=await store.saveRollout(manager.id,1,{...draftRollout,expected_version:1,control_id:controlFrv,change_reason:'QA контрольные замеры'});
+  assert.equal(updatedRollout.version,2);
+  const readyRollout=store.rolloutDetail(manager.id,1,rolloutRev).report;
+  assert(readyRollout.ready&&readyRollout.can_accept);assert.equal(readyRollout.control.mean_seconds,15);
+  await assert.rejects(store.acceptRollout(manager.id,1,acceptRequest),/изменился/);
+  const acceptance=await store.acceptRollout(manager.id,1,{...acceptRequest,expected_version:2});
+  assert(acceptance.accepted);
+  const acceptedRollout=store.rolloutDetail(manager.id,1,rolloutRev);
+  assert(acceptedRollout.report.acceptance.current);assert.equal(acceptedRollout.versions.length,2);
+  await assert.rejects(store.acceptRollout(manager.id,1,{...acceptRequest,expected_version:2}),/не готов/);
+  assert.equal(store.trainingDetail(manager.id,1,first.id).admission,'Нет решения');
+  assert.equal(store.taskDetail(manager.id,1,x.ownTask).state,'open');
   const rv=await store.revisionChange(manager.id,1,x.f.doc.id,x.revision.revision);
   assert.equal(rv.same_work_content,false);
   const review={old_id:x.f.doc.id,new_id:x.revision.revision,expected_revision:0,decision:'editorial',reason:'QA проверка'};
@@ -1055,6 +1096,8 @@ test('TWI03 R1/R2: shared plan, atomic JI, competence, rapid control, candidate 
   await assert.rejects(store.changeTraining(manager.id,1,{id:ed.id,expected_revision:ed.rev,command:'approve_head',fields:{note:'QA'}}),/разными/);
   await store.changeTraining(head.id,1,{id:ed.id,expected_revision:ed.rev,command:'approve_head',fields:{note:'QA оперативное согласование'}});
   assert(store.trainingDetail(manager.id,1,ed.id).approved);
+  const staleRollout=store.rolloutDetail(manager.id,1,rolloutRev).report;
+  assert(!staleRollout.acceptance.current&&staleRollout.blockers.length>0);
   const before=store.productionPlans(manager.id,1).plans.find(z=>z.id===p.id);
   await store.close();store=await openSecureQA({dataDir:x.target});
   assert.deepEqual(store.productionPlans(manager.id,1).plans.find(z=>z.id===p.id),before);
@@ -1062,5 +1105,7 @@ test('TWI03 R1/R2: shared plan, atomic JI, competence, rapid control, candidate 
   assert.equal(store.trainingDetail(manager.id,1,second.id).scenario,'rapid');
   assert.deepEqual(store.trainingDetail(manager.id,1,second.id).rapid_control,control);
   assert.equal(store.candidateEvidence(manager.id,1,candidate,from,day).checks[1].actual,0);
+  const reopenedRollout=store.rolloutDetail(manager.id,1,rolloutRev);
+  assert.deepEqual(reopenedRollout.report,staleRollout);assert.equal(reopenedRollout.versions.length,2);
  }finally{await store.close()}
 });
