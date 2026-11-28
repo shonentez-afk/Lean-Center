@@ -15,7 +15,7 @@ import {changeOwnPassword,resetAccountPassword,renameAccount,grantStatus,endRole
 import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource} from './read-policy.mjs';
 import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,SITE_REFERENCE_TYPES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop} from './training-commands.mjs';
-import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix,matrixOverviewOptions,matrixOverview,profileOptions,professionProfile,saveProfessionProfile} from './matrix-commands.mjs';
+import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix,matrixOverviewOptions,matrixOverview,matrixAssessmentHistory,profileOptions,professionProfile,saveProfessionProfile} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
 import {calendarWorkspace,calendarOptions,calendarDetail,createSchedule,changeSchedule,scheduleView,centerOptions,centerWorkspace,metricEvidence} from './center-commands.mjs';
 import {roiOptions,roiView,roiDetail,createRoi,changeRoi,roiMeasureContext,measureRoi,roiTwiOptions,previewRoiTwi} from './roi-commands.mjs';
@@ -40,7 +40,7 @@ import {assertImport,historyOptions,historyList,historyDetail,historyArchive,loa
 import {subjectOptions,subjectReport,subjectWorkbook,frvReportDetail} from './subject-reports.mjs';
 import {assistantOptions,assistantContext,assistantRequest,assistantRecords} from './assistant-commands.mjs';
 import {formsCatalog,prepareForm,serializeForm,canExportForm} from './form-commands.mjs';
-import {refsForDb,checkContent,MAX_CONTENT,verifyDomainEvents} from '../../src/modules/library/domain.js';
+import {refsForDb,checkContent,MAX_CONTENT,verifyDomainEvents,frvOriginSnapshot,inspectSource} from '../../src/modules/library/domain.js';
 export const ADMIN_ROLE='8c810000-0000-4000-8000-000000000001',MANAGER_ROLE='8c810000-0000-4000-8000-000000000002';
 const SITE='8c810000-0000-4000-8000-000000000003';
 const MAGIC=Buffer.from('LC81QA1\n'),MAX=24*1024*1024;
@@ -123,6 +123,16 @@ function libraryAccess(db,a,d){
  const read=(action,id)=>readFor(db,a,action,id,d)||shared.read(action,id);
  return {read,fullAllows,allows:(action,anchor,id)=>action==='sop.read_public'?anchor==='sop.read_effective'&&!!read(anchor,id):fullAllows(action,anchor,id)||shared.allows(action,anchor,id),readScope:(kind,id)=>shared.readScope(kind,id)||(a.bootstrap===1?!!readManagerProjection(db,config(db).site,'operation.read',id,d):canReadLibraryAtOperation(db,security(db,a.id),a.id,kind,id,d)),permissions:[...new Set([...permissionsFor(db,a),...(shared.enabled?SHARED_LIBRARY_READS:[])])]};
 }
+// A revision and its historical FRV source are independently protected.
+// The shared final-study floor does not disclose previously replaced sources.
+function readableFrvOrigin(db,v,id){
+ if(!isId(id)||!(v.read('sop.read_history',id)||v.read('sop.read_effective',id)))return null;
+ const x=frvOriginSnapshot(db,id);
+ if(!x||!v.read('frv.read',x.study_id)||!v.allows('frv.read_summary','frv.read',x.study_id))return null;
+ if(!x.current&&!v.fullAllows('frv.read_summary','frv.read',x.study_id)&&!v.allows('frv.edit_draft','frv.read',x.study_id))return null;
+ return x;
+}
+const publicFrvOrigin=({study_id,title,state,created_at,current})=>({study_id,title,state,created_at,current});
 // Start with real, server-authorized choices even on a newly initialized site.
 function libraryOptions(db,a,kind,d){
  const access=libraryAccess(db,a,d);
@@ -725,6 +735,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   suggestMatrix(actor,revision,input){return read(db=>suggestMatrix(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   matrixOverviewOptions(actor,revision){return read(db=>matrixOverviewOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
   matrixOverview(actor,revision,f){return read(db=>{const a=checkedAccount(db,actor,revision),d=day(db);return matrixOverview(db,trainingAccess(db,a,d),f,id=>cardAllowed(db,a,id,d))})},
+  matrixAssessmentHistory(actor,revision,personId,skillId,offset){return read(db=>matrixAssessmentHistory(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),personId,skillId,offset))},
   profileOptions(actor,revision){return read(db=>profileOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
   professionProfile(actor,revision,profession,scale,effective){return read(db=>professionProfile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),profession,scale,effective))},
   saveProfessionProfile(actor,revision,f){return mutate(db=>saveProfessionProfile(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
@@ -848,7 +859,23 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     }
     const pub=effective?projectView(db,a,'sop.read_effective',effective.data,d):null;
     const rev=history?projectView(db,a,'sop.read_history',history.data,d):(pub||entry.data);
-    return {day:d,revision:rev,versions,measured,evaluations:sopEvaluationsForRevision(db,access,id),can_evaluation:access.permissions.includes('sop.evaluation.read')&&!!history,can_effectiveness:canEffect,can_public:!!effective&&v.allows('sop.read_public','sop.read_effective',id),can_steps:!!v.read('sop.read_steps',id),can_twi:!!pub?.can_twi,can_linked_frv:!!pub?.can_linked_frv};
+    const origin=readableFrvOrigin(db,v,id);
+    return {day:d,revision:rev,versions,measured,origin:origin?publicFrvOrigin(origin):null,evaluations:sopEvaluationsForRevision(db,access,id),can_evaluation:access.permissions.includes('sop.evaluation.read')&&!!history,can_effectiveness:canEffect,can_public:!!effective&&v.allows('sop.read_public','sop.read_effective',id),can_steps:!!v.read('sop.read_steps',id),can_twi:!!pub?.can_twi,can_linked_frv:!!pub?.can_linked_frv};
+   });
+  },
+  async libraryOrigin(actor,revision,id){
+   const descriptor=db=>{
+    const a=checkedAccount(db,actor,revision),d=day(db),x=readableFrvOrigin(db,libraryAccess(db,a,d),id);
+    must(x,404,'Исходные замеры недоступны');return x;
+   };
+   const x=read(descriptor),text=await checkContent(x.source,await readFile(x.source));
+   const inspected=await inspectSource(text,'frv');
+   must(inspected.source.sha256===x.source.sha256&&inspected.source.size===x.source.size,503,'Исходник не подтверждён');
+   const summary=projectLibraryDetail('frv.read_summary',JSON.parse(text));
+   return read(db=>{
+    const latest=descriptor(db);
+    must(latest.study_id===x.study_id&&latest.source.sha256===x.source.sha256,409,'Связь с исходным ФРВ изменилась');
+    return {...publicFrvOrigin(latest),summary};
    });
   },
   async libraryDetail(actor,revision,action,id){

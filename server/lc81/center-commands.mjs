@@ -141,8 +141,8 @@ export function calendarWorkspace(db,a,{mode,from,to,person_id=null}){
  // Explicit personnel context is checked by the store before entering this
  // projection. It still uses each record's calendar permission, not self.
  if(!personal)must((mode==='calendar'||person_id)&&has(a,'calendar.read'),403,'Календарь или план недоступен');
- const items=[],add=(x,r,people)=>{
-  if(!x.date||x.date>to||x.date<from&&!(personal&&x.pending&&x.date<a.day))return;
+ const includeOverdue=mode==='plan',items=[],add=(x,r,people)=>{
+  if(!x.date||x.date>to||x.date<from&&!(includeOverdue&&x.pending&&x.date<a.day))return;
   if(person_id&&!people.includes(person_id))return;
   if(personal){if(!people.includes(self))return}
   else if(!r||!allowed(a,'calendar.read',x.anchor,r))return;

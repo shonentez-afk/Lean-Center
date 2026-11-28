@@ -263,6 +263,10 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='POST'&&p==='/api/lc81/matrix/suggest'){reply(res,200,store.suggestMatrix(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/matrix/overview-options'){reply(res,200,store.matrixOverviewOptions(a.id,a.credential_revision));return}
    if(req.method==='POST'&&p==='/api/lc81/matrix/overview'){reply(res,200,store.matrixOverview(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/matrix/history'){
+    const offset=url.searchParams.get('offset')??'0';must(/^\d{1,5}$/.test(offset),400,'Неверная страница');
+    reply(res,200,store.matrixAssessmentHistory(a.id,a.credential_revision,url.searchParams.get('person_id'),url.searchParams.get('skill_id'),Number(offset)));return;
+   }
    if(req.method==='GET'&&p==='/api/lc81/matrix/profile-options'){reply(res,200,store.profileOptions(a.id,a.credential_revision));return}
    if(req.method==='GET'&&p==='/api/lc81/matrix/profile'){reply(res,200,store.professionProfile(a.id,a.credential_revision,url.searchParams.get('profession_id'),url.searchParams.get('scale_id'),url.searchParams.get('effective')));return}
    if(req.method==='POST'&&p==='/api/lc81/matrix/profile'){reply(res,200,await store.saveProfessionProfile(a.id,a.credential_revision,await body(req)));return}
@@ -273,6 +277,10 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='GET'&&p==='/api/lc81/person/card'){reply(res,200,store.personCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/card'){reply(res,200,store.libraryCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='GET'&&p==='/api/lc81/library/origin'){
+    must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
+    try{reply(res,200,await store.libraryOrigin(a.id,a.credential_revision,url.searchParams.get('id')));return}finally{libraryBusy--}
+   }
    if(req.method==='GET'&&p==='/api/lc81/library/detail'){
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
     try{reply(res,200,{data:await store.libraryDetail(a.id,a.credential_revision,url.searchParams.get('action'),url.searchParams.get('id'))});return}finally{libraryBusy--}

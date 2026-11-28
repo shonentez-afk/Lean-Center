@@ -65,6 +65,7 @@ export function createCenterUI({api,run,button,panel,table,el,input,select,form,
    const open=d.items.filter(x=>x.pending),late=d.items.filter(x=>x.overdue),n=panel(personal?(personId?'План работы сотрудника':'Мой план работы'):(personId?'Календарь сотрудника · ':'Календарь · ')+period.from.slice(0,7),el('p','Дата центра '+d.day+' · '+d.items.length+' событий · открыто '+open.length+' · просрочено '+late.length));
    if(d.can_plan){const commands=el('div',undefined,'row');commands.append(button('Запланировать аудит',()=>scheduleEditor(sub,'audit'),'primary'),button('Запланировать оценку',()=>scheduleEditor(sub,'practical')),button('Запланировать самооценку',()=>scheduleEditor(sub,'self_eval')));n.append(commands)}
    if(personal){
+    n.append(el('p','Открытые просроченные события до начала периода включаются в план. Календарь сохраняет выбранные границы.','muted'));
     const filter=pick('filter','Показать',[['open','Открытые и просроченные'],['all','Все события'],['late','Только просроченные']],'open');
     const show=()=>{const f=filter.querySelector('select').value;list.replaceChildren(agenda(f==='open'?open:f==='late'?late:d.items,sub))};
     filter.querySelector('select').addEventListener('change',()=>{if(discard())show()});n.append(filter);show();
@@ -128,6 +129,19 @@ export function createCenterUI({api,run,button,panel,table,el,input,select,form,
    const header=panel(kind==='center.read'?'Оперативный обзор':kind==='analytics.read'?'Аналитика за период':'Дерево показателей',el('p','Дата среза: '+data.day+' · '+s.from+' — '+s.to+' · '+(d.units.find(u=>u.id===s.unit_id)?.name||'Всё предприятие')),el('p','Отдельные показатели используют исходные определения LC7. Недоступные источники не заменяются нулями.','muted'));
    const cards=el('div',undefined,'lc81-grid');
    const groups=new Map();for(const m of metrics){if(!groups.has(m.group))groups.set(m.group,[]);groups.get(m.group).push(m)}
+   const addMonthlyCharts=()=>{
+     const openMonth=(month,id)=>{
+      const b=bounds(month),selected={...s,from:b.from>s.from?b.from:s.from,to:b.to<s.to?b.to:s.to};
+      return show(id,0,selected);
+     };
+     const addChart=(title,labels,series,headers,values,ids)=>{
+      const drill=(i,j)=>labels[i]&&ids[j]?openMonth(labels[i],ids[j]):undefined;
+      const h=el('div',undefined,'lc81-chart'),p=panel(title,h,table(headers,values.map((row,i)=>[row[0],...row.slice(1).map((v,j)=>button(String(v),()=>drill(i,j),'lc81-number-link'))])));header.append(p);
+      requestAnimationFrame(()=>{if(h.isConnected)localChart(h,labels,series,{onClick:(i,j)=>{if(h.isConnected)void run(()=>drill(i,j))}})});
+     };
+     if(data.cohortMonths?.length){const x=data.cohortMonths;addChart('Назначения обучения по месяцам когорты',x.map(r=>r.id),[{name:'Назначено',data:x.map(r=>r.assignments)},{name:'Завершено из назначенных',data:x.map(r=>r.completed)}],['Месяц','Назначено','Завершено'],x.map(r=>[r.id,r.assignments,r.completed]),['training_assigned','training_completed'])}
+     if(data.auditMonths?.length){const x=data.auditMonths;addChart('Факты аудита L1',x.map(r=>r.id),[{name:'Аудиты',data:x.map(r=>r.count)}],['Месяц','Аудиты'],x.map(r=>[r.id,r.count]),['audit_count'])}
+   };
    if(kind==='center.read'){
     const primary=['prep_completed','twi_first','training_overdue','skill_coverage','audit_count','actions_overdue','effect_pending'];
     for(const m of metrics.filter(x=>primary.includes(x.id))){
@@ -143,20 +157,10 @@ export function createCenterUI({api,run,button,panel,table,el,input,select,form,
      attention.append(det);
     }
     if(!attention.querySelector('details'))attention.append(empty('Нет доступных предупреждений. Это не означает отсутствие отклонений в недоступных разделах.'));
-    header.append(attention);
+    header.append(attention);addMonthlyCharts();
    }else{
     if(kind==='analytics.read'){
-     const openMonth=(month,id)=>{
-      const b=bounds(month),selected={...s,from:b.from>s.from?b.from:s.from,to:b.to<s.to?b.to:s.to};
-      return show(id,0,selected);
-     };
-     const addChart=(title,labels,series,headers,values,ids)=>{
-      const drill=(i,j)=>labels[i]&&ids[j]?openMonth(labels[i],ids[j]):undefined;
-      const h=el('div',undefined,'lc81-chart'),p=panel(title,h,table(headers,values.map((row,i)=>[row[0],...row.slice(1).map((v,j)=>button(String(v),()=>drill(i,j),'lc81-number-link'))])));header.append(p);
-      requestAnimationFrame(()=>{if(h.isConnected)localChart(h,labels,series,{onClick:(i,j)=>{if(h.isConnected)void run(()=>drill(i,j))}})});
-     };
-     if(data.cohortMonths?.length){const x=data.cohortMonths;addChart('Назначения обучения по месяцам когорты',x.map(r=>r.id),[{name:'Назначено',data:x.map(r=>r.assignments)},{name:'Завершено из назначенных',data:x.map(r=>r.completed)}],['Месяц','Назначено','Завершено'],x.map(r=>[r.id,r.assignments,r.completed]),['training_assigned','training_completed'])}
-     if(data.auditMonths?.length){const x=data.auditMonths;addChart('Факты аудита L1',x.map(r=>r.id),[{name:'Аудиты',data:x.map(r=>r.count)}],['Месяц','Аудиты'],x.map(r=>[r.id,r.count]),['audit_count'])}
+     addMonthlyCharts();
      if(data.auditGroups?.length)header.append(panel('Аудиты по отдельным методикам и версиям',table(['Методика','Версия','Аудитов','Наблюдалось','Да','Результат'],data.auditGroups.map(x=>[x.methodCode,x.version,x.count,x.observed,x.passed,x.observed?fmt(100*x.passed/x.observed)+'%':'—']))));
      if(data.annual!==null)header.append(panel('Годовой контроль L1 · '+data.day.slice(0,4),data.annual.length?table(['Инструктор','Норма','Зачтено','Осталось','Состояние'],data.annual.map(x=>[x.person,x.required,x.actual,x.remaining,x.status])):empty()));
      if(data.currencies!==null)header.append(panel('Подтверждённые денежные факты · валюты не суммируются',data.currencies.length?table(['Валюта','Фактов','Валовый эффект','Затраты','Инвестиции','Чистый эффект'],data.currencies.map(x=>[x.currency,x.count,money(x.gross,x.currency),money(x.recurring,x.currency),money(x.investment,x.currency),money(x.net,x.currency)])):empty('За период нет действующих подтверждённых денежных фактов')));

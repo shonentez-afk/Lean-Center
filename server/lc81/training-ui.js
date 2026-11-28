@@ -168,14 +168,26 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   const unit=select('unit_id','Подразделение',[...(d.all?[['','Все подразделения']]:[]),...opts(d.units)]);unit.querySelector('select').value=d.default_unit;
   const fields={unit_id:unit,profession_id:optional('profession_id','Профессия',opts(d.professions)),shift_id:optional('shift_id','Смена',opts(d.shifts)),category_id:optional('category_id','Категория',opts(d.categories)),workplace_id:optional('workplace_id','Рабочее место',opts(d.workplaces)),q:input('q','Поиск сотрудника','search',false)};
   const gaps=check('gaps','Только сотрудники с выявленными разрывами'),transpose=check('transpose','Навыки строками');
-  let pp=0,sp=0;
+  let pp=0,sp=0,historySerial=0;
+  const labels={none:'Нет оценки',not_observed:'Не наблюдалось',not_applicable:'Неприменимо',expired:'Срок истёк'};
+  const assessmentLabel=(state,level)=>state==='rated'?String(level):state==='expired'?String(level)+' · '+labels.expired:labels[state]||'—';
+  async function history(person,skill,offset=0){
+   if(!discard())return;const serial=++historySerial;
+   const d=await api('matrix/history?'+new URLSearchParams({person_id:person.id,skill_id:skill.id,offset:String(offset)}));
+   if(serial!==historySerial)return;
+   const nested=el('div'),n=panel('История оценок навыка',el('p',d.person+' · '+d.skill+' · срез '+d.day),el('p','Только разрешённые подтверждённые записи; предыдущие оценки не заменяют последнюю.','muted'),d.items.length?table(['Дата','Результат','Действительна до','Оценщик','Состояние записи','Действия'],d.items.map(r=>[r.assessed_on,assessmentLabel(r.state,r.level),r.valid_until,r.evaluator,r.latest?'Последняя':'История',button('Открыть оценку',()=>openLinked(nested,{type:'assessment',id:r.id}))])):empty());
+   if(offset)n.append(button('Предыдущие 50',()=>history(person,skill,Math.max(0,offset-50))));
+   if(d.next!==null)n.append(button('Следующие 50',()=>history(person,skill,d.next)));
+   n.append(nested);setContent(detail,n);
+  }
   async function draw(){
+   historySerial++;detail.replaceChildren();
    const request={...Object.fromEntries(Object.entries(fields).map(([k,f])=>[k,f.querySelector('input,select').value])),gaps:gaps.querySelector('input').checked,person_page:pp,skill_page:sp};
    const x=await api('matrix/overview',request);pp=x.person_page;sp=x.skill_page;
    const cell=(i,j)=>{
     const z=x.cells[i][j];if(z.restricted)return el('span','Недоступно','muted');
-    const label=(z.actual??'—')+(z.target===null?'':' / '+z.target),v=z.assessment_id?button(label,()=>openLinked(detail,{type:'assessment',id:z.assessment_id})):el('span',label);
-    v.classList.add('lc81-overview-cell');if(z.gap)v.classList.add('lc81-gap');if(z.actual!==null)v.dataset.level=String(z.actual);
+    const label=assessmentLabel(z.assessment_state,z.actual)+(z.target===null?'':' / '+z.target),v=z.assessment_id?button(label,()=>history(x.people[i],x.skills[j])):el('span',label);
+    v.classList.add('lc81-overview-cell');if(z.gap)v.classList.add('lc81-gap');if(z.assessment_state==='rated')v.dataset.level=String(z.actual);v.dataset.assessmentState=z.assessment_state;
     v.title=z.reason+(z.admission?' · '+z.admission:'');return v;
    };
    const person=p=>p.can_card?button(p.name,()=>card(detail,p.id)):p.name;

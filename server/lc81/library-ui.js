@@ -198,11 +198,18 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   const n=panel('Карточка СОП · '+r.code+' · v'+r.version_no,el('h3',r.title),el('p',(stateLabel[r.state]||r.state)+' · '+(r.effective_at?'Введён: '+r.effective_at.slice(0,10):'Редакция '+r.version_no),'muted'));
   if(trail.length)n.append(button('Назад к редакции v'+trail[trail.length-1].version,()=>card(host,trail[trail.length-1].id,'versions',trail.slice(0,-1))));
   const tabs=el('div',undefined,'lc81-card-tabs row'),body=el('div'),nested=el('div');let selected=null,serial=0;
-  const keys=[['steps','Шаги',d.can_steps],['passport','Паспорт',true],['versions','Версии',true],['frv','ФРВ',d.can_linked_frv||d.measured.length>0],['twi','План TWI',d.can_twi],['effect','Эффективность TWI',d.can_effectiveness],['evaluation','Оценка СОП',d.can_evaluation],['materials','Материалы',d.can_public||d.measured.length>0]];
+  const keys=[['steps','Шаги',d.can_steps],['passport','Паспорт',true],['versions','Версии',true],['frv','ФРВ',d.can_linked_frv||d.measured.length>0||!!d.origin],['twi','План TWI',d.can_twi],['effect','Эффективность TWI',d.can_effectiveness],['evaluation','Оценка СОП',d.can_evaluation],['materials','Материалы',d.can_public||d.measured.length>0||!!d.origin]];
   const fieldNames={branch:'Филиал',department:'Подразделение',workplace:'Рабочее место',operation:'Операция',sopNumber:'Номер',safety:'Безопасность',tools:'Инструменты',material:'Материалы'};
   const meta=async()=>d.can_public?(await api('library/detail?action=sop.read_public&id='+encodeURIComponent(id))).data:null;
   const openVersion=x=>card(host,x.revision_id,'passport',[...trail,{id,version:r.version_no}]);
   const measured=()=>d.measured.length?table(['Исследование','Дата','Состояние','Фактические замеры'],d.measured.map(f=>[f.title,f.observed_at,stateLabel[f.state]||f.state,f.can_summary?detailButton(f,'frv.read_summary','Открыть замеры'):'—'])):el('p','Нет доступных связанных фактических исследований.','muted');
+  const sourceSnapshot=async()=>{
+   if(!d.origin)return null;
+   const o=await api('library/origin?id='+encodeURIComponent(id)),s=o.summary;
+   const n=panel('Сохранённый снимок исходного ФРВ',el('p',o.title+' · '+o.created_at.slice(0,10)),el('p',o.current?'Источник совпадает с текущими замерами.':'Исследование изменилось после создания этой редакции. Ниже — сохранённый исходный снимок, не новые замеры.','muted'),el('p','Фактические замеры на момент создания СОП · полных до: '+s.baselineCount+' · после: '+s.improvedCount+' · незаполнено: '+s.missing),table(['Цикл','Фаза','Сек.','Полный'],s.cycles.map(x=>[x.index,x.phase,x.seconds,x.complete?'Да':'Нет'])));
+   n.append(detailButton({id:o.study_id},'frv.read_summary','Открыть текущие замеры исследования'));
+   return n;
+  };
   const getSteps=async()=> (await api('resources?action=sop.read_steps&id='+encodeURIComponent(id))).data;
   const photo=(s,can)=>{const cell=el('div');if(can){const b=button('Показать фото',()=>{if(cell.querySelector('img'))return;const im=el('img',undefined,'lc81-image');im.alt='Фото шага '+s.position;im.addEventListener('error',()=>{im.remove();cell.append(el('span','Фото отсутствует','muted'));b.disabled=false},{once:true});im.src='/api/lc81/sop/photo?revision_id='+encodeURIComponent(id)+'&position='+s.position;cell.append(im);b.disabled=true});cell.append(b)}return cell};
   async function show(key,guard=true){
@@ -223,6 +230,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
     content.append(el('p','Показаны только редакции, доступные текущей учётной записи.','muted'));
    }else if(key==='frv'){
     if(d.can_linked_frv)content.append(detailButton(r,'sop.read_linked_frv','Расчёт ФРВ по шагам'));
+    const source=await sourceSnapshot();if(source)content.append(source);
     content.append(el('h3','Связанные исследования с фактическими замерами'),measured());
    }else if(key==='twi')content.append(detailButton(r,'sop.read_twi','Открыть план TWI'));
    else if(key==='effect')content.append(twiReport({revision_id:id,day:d.day}));
@@ -231,7 +239,8 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
    }else if(key==='materials'){
     const doc=await meta();if(doc)content.append(table(['Материал','Содержание'],['safety','tools','material','workplace'].filter(k=>doc.meta[k]).map(k=>[fieldNames[k],doc.meta[k]])));
     if(d.can_steps)content.append(button('Фото и материалы шагов',()=>show('steps')));
-    content.append(el('h3','Исходные исследования'),measured());
+    const source=await sourceSnapshot();if(source)content.append(source);
+    content.append(el('h3','Исследования, связанные с редакцией'),measured());
    }
    if(request!==serial)return;body.replaceChildren(content);
   }
