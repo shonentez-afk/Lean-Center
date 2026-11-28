@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+import {startSopPublicationScheduler} from '../server/lc81/sop-publication-scheduler.mjs';
 import {setupApproval} from './lc83-approval-fixture.mjs';
 import {copySecureCheckpoint} from '../server/lc81/maintenance.mjs';
 import {openSecureQA} from '../server/lc81/store.mjs';
@@ -126,7 +128,12 @@ test('LC83 durable scheduled publication: future, cancellation, restart, exact o
  const target=path.join(x.root,'scheduled-copy');await copySecureCheckpoint(x.target,target);
  const restarted=await openSecureQA({dataDir:target});try{
   assert(restarted.listResources(x.users.observer.id,'sop.read_effective').some(r=>r.revision_id===x.old));
-  assert.deepEqual(await restarted.runDueSopPublications(),{executed:1,blocked:0,deferred:0});
+  const failures=[],scheduler=startSopPublicationScheduler(restarted,{intervalMs:20,onError:()=>failures.push('tick error')});
+  try{
+   const deadline=Date.now()+15000;
+   while(restarted.approvalDetail(x.users.author.id,1,id).publication.record.state==='pending'&&Date.now()<deadline)await delay(20);
+  }finally{await scheduler.stop()}
+  assert.deepEqual(failures,[]);
   assert.deepEqual(await restarted.runDueSopPublications(),{executed:0,blocked:0,deferred:0});
   const result=restarted.approvalDetail(x.users.author.id,1,id);
   assert.equal(result.round.state,'effective');assert.equal(result.publication.record.id,due.id);assert.equal(result.publication.record.state,'executed');assert.equal(result.publication.history.length,2);
@@ -147,4 +154,17 @@ test('LC83 scheduled publication fails closed when reviewer grant is revoked',as
  assert.equal(x.detail('author',id).publication.record.state,'blocked');
  assert.equal(x.detail('author',id).round.state,'approved');assert(x.effective().includes(x.old));assert(!x.effective().includes(id));
  console.log('LC83_SCHEDULE_REVOKED_GRANT_BLOCK_OK');
+});
+
+test('LC83 scheduler serializes ticks and drains the in-flight task before shutdown',async()=>{
+ let calls=0,release,started;
+ const gate=new Promise(resolve=>release=resolve),entered=new Promise(resolve=>started=resolve),errors=[];
+ const scheduler=startSopPublicationScheduler({async runDueSopPublications(){calls++;started();await gate}},{intervalMs:5,onError:()=>errors.push('tick error')});
+ try{
+  await entered;await delay(25);assert.equal(calls,1);
+  let drained=false;const stopped=scheduler.stop().then(()=>{drained=true});
+  await delay(15);assert.equal(drained,false);release();await stopped;
+  await delay(15);assert.equal(calls,1);assert.deepEqual(errors,[]);
+ }finally{release();await scheduler.stop()}
+ console.log('LC83_SCHEDULER_SERIAL_DRAIN_OK');
 });

@@ -80,8 +80,33 @@ try{
    await impactForm.getByRole('button',{name:'Зарегистрировать оценку влияния',exact:true}).click();
    await m.content.getByText('Переобучение ·', {exact:false}).first().waitFor();await m.ready();
    assert.equal(x.detail('author',id).impact.record?.decision,'retrain');await m.ctx.close();
-   await q.p.bringToFront();await q.go('sop.approvals');await q.button('Открыть согласование').click();
-   await q.button('Ввести в действие').click();await q.ready();
+   await q.p.bringToFront();await q.ready();
+   await q.button('← Назад к списку').click();await q.button('Открыть согласование').click();
+   await q.button('Ввести в действие').waitFor();
+   const scheduleForm=q.content.locator('form').filter({has:q.p.locator('input[name=publication_due_on]')});
+   const tomorrow=new Date(Date.parse(x.day)+86400000).toISOString().slice(0,10);
+   async function plan(date){
+    await scheduleForm.locator('input[name=publication_due_on]').fill(date);
+    await scheduleForm.locator('textarea[name=note]').fill('Плановый ввод · проверка браузера');
+    await scheduleForm.getByRole('button',{name:'Запланировать ввод',exact:true}).click();
+    await q.content.getByText('Запланирован ввод · '+date,{exact:true}).first().waitFor();
+    await q.ready();assert.equal(x.detail('author',id).publication.record.state,'pending');
+   }
+   await plan(tomorrow);
+   assert.equal(await q.button('Ввести в действие').count(),0);
+   assert.equal((await x.store.runDueSopPublications()).executed,0);
+   assert(x.effective().includes(x.old));
+   const cancelForm=q.content.locator('form').filter({has:q.p.getByRole('button',{name:'Отменить запланированный ввод',exact:true})});
+   await cancelForm.locator('textarea[name=note]').fill('Перенос даты ввода');
+   await cancelForm.getByRole('button',{name:'Отменить запланированный ввод',exact:true}).click();
+   await q.content.getByText('Утверждён · ожидает ввода',{exact:true}).first().waitFor();await q.ready();
+   assert.equal(x.detail('author',id).publication.record.state,'cancelled');
+   await plan(x.day);
+   assert.equal((await x.store.runDueSopPublications()).executed,1);
+   await q.button('← Назад к списку').click();await q.button('Открыть согласование').click();
+   await q.content.getByText('Введён в действие',{exact:true}).first().waitFor();await q.ready();
+   assert.equal(x.detail('author',id).publication.record.state,'executed');
+   console.log('LC83_BROWSER_SCHEDULE_CANCEL_EXECUTE_OK');
   }
   await q.ctx.close();
  }
