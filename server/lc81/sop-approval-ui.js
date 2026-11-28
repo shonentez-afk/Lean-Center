@@ -2,7 +2,7 @@
 export function createApprovalUI({api,button,panel,table,el,input,select,form,value,note,discard,render,refresh}){
  const url=(action,id,round=null)=>'sop-approval/'+action+'?id='+encodeURIComponent(id)+(round?'&round_id='+encodeURIComponent(round):'');
  const commandLabel={approve:'Согласовано / утверждено',return:'Возвращено',publish:'Введено в действие',cancel:'Возвращено организатором',withdraw:'Выведено'};
- const labels={branch:'Филиал',department:'Подразделение',workplace:'Рабочее место',operation:'Операция',sopNumber:'Номер',safety:'Безопасность',tools:'Инструменты',material:'Материалы'};
+ const labels={description:'Описание',print_format:'Формат',changed_on:'Дата изменения',review_due:'Срок пересмотра',workplace_name:'Рабочее место (паспорт)',equipment_name:'Оборудование (паспорт)',branch:'Филиал',department:'Подразделение',workplace:'Рабочее место',operation:'Операция',sopNumber:'Номер',safety:'Безопасность',tools:'Инструменты',material:'Материалы'};
  const comment=(required=false)=>{const l=el('label',required?'Причина (обязательно)':'Комментарий','field'),t=el('textarea');t.name='note';t.required=required;t.maxLength=2000;t.rows=3;l.append(t);return l};
  async function list(kind='all',offset=0){
   const d=await api('sop-approval/list?kind='+kind+'&offset='+offset),host=el('div');
@@ -32,7 +32,24 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
     source.append(table(['Шаг','Действие','Ключевые моменты','Причина','Секунды','Фото'],p.steps.map(s=>[s.position,s.action,s.key_points.join(' · '),s.reason,s.seconds,photo(s)])));
     const twi=el('details');twi.append(el('summary','План TWI · '+p.twi.status),table(['Этап','Содержание'],p.twi.fields.map(x=>[x.label,x.value])));
     const frv=el('details');frv.append(el('summary','ФРВ по СОП (расчёт, не фактические замеры)'),table(['Шаг','Действие','Сек.','ВДЦ','М1','М2'],p.frv.rows.map(x=>[x.position,x.action,x.seconds,x.vdc,x.m1,x.m2])));
-    source.append(twi,frv);out.append(source);
+    source.append(twi,frv);
+    const c=p.comparison;
+    if(c){
+     const x=panel('Сравнение с предыдущей действующей редакцией',el('p','v'+c.old_version+' → v'+c.new_version+' · '+(c.same_work_content?'Рабочее содержание совпадает':'Рабочее содержание изменено'),'lc83-state'),el('p','Сравнение по позиции шага. Контрольные суммы исходников: '+c.old_sha+' → '+c.new_sha,'lc83-hash'));
+     if(c.meta.length)x.append(table(['Реквизит','Было','Стало'],c.meta.map(m=>[labels[m.field]||m.field,m.before,m.after])));
+     const sideCell=(v,pos,side)=>{
+      if(!v)return '—';
+      const cell=el('div');cell.append(el('p',v.action),el('p','КМ: '+v.key_points.join(' · ')),el('p','Причина: '+v.reason),el('p','Время: '+v.seconds+' с'));
+      if(v.photo)cell.append(button('Показать '+(side==='previous'?'прежнее':'новое')+' фото шага '+pos,()=>{if(cell.querySelector('img'))return;const im=el('img',undefined,'lc81-image');im.alt=(side==='previous'?'Прежнее':'Новое')+' фото шага '+pos;im.src='/api/lc81/'+url('photo',id,d.preview_round_id)+'&position='+pos+'&side='+side;im.addEventListener('error',()=>{im.remove();note('Фото не получено; проверьте доступ и повторите',true)},{once:true});cell.append(im)}));
+      return cell;
+     };
+     if(c.steps.length)x.append(table(['Позиция / изменения','Было','Стало'],c.steps.map(v=>[v.position+' · '+v.fields.join(', '),sideCell(v.before,v.position,'previous'),sideCell(v.after,v.position,'current')])));
+     else x.append(el('p','В отображаемых шагах нет различий.'));
+     x.append(el('p','TWI: '+(c.twi_changed?'изменён':'без изменений')+' · ФРВ по СОП: '+(c.frv_changed?'изменён':'без изменений')));
+     if(!c.same_work_content)x.append(el('p','Даже при отсутствии видимых различий изменённые или неизвестные рабочие поля не считаются редакционно эквивалентными.','muted'));
+     source.append(x);
+    }else source.append(el('p',p.baseline_known?'Предыдущей действующей редакции на момент отправки нет.':'Для старого раунда предыдущая редакция не зафиксирована.','muted'));
+    out.append(source);
    });
    n.append(load,out);
    if(d.can_submit&&d.preview_round_id)n.append(button('Открыть текущий черновик для нового раунда',()=>detail(host,id,null,back)));

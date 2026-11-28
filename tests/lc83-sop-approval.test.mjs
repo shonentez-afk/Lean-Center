@@ -33,6 +33,9 @@ test('LC83 mandatory independent votes, frozen round history, publication and re
  await x.change('safety',id,'safety');
  await assert.rejects(x.change('engineering',id,'engineering','return',''),/причину/);
  const firstMaterial=await store.approvalMaterial(users.safety.id,1,id,first.id);
+ assert(firstMaterial.comparison);assert.equal(firstMaterial.comparison.old_revision_id,old);assert.equal(firstMaterial.comparison.same_work_content,false);assert(firstMaterial.comparison.steps.some(x=>x.fields.includes('Действие')));
+ assert((await store.approvalMaterial(users.safety.id,1,id,first.id,1,'previous')).bytes.length>0);
+ await assert.rejects(store.approvalMaterial(users.observer.id,1,id,first.id,1,'previous'),/недоступны/);
  assert.equal(firstMaterial.steps[0].action,'Первая учебная редакция');
  const photo=await store.approvalMaterial(users.safety.id,1,id,first.id,1);assert(photo.bytes.length>0);
  await x.change('engineering',id,'engineering','return','Исправить техническое описание');
@@ -44,6 +47,7 @@ test('LC83 mandatory independent votes, frozen round history, publication and re
  assert.equal(detail('author',id).round.decisions.length,0);
  const snapshot=await store.approvalMaterial(users.author.id,1,id,first.id);
  assert.equal(snapshot.steps[0].action,firstMaterial.steps[0].action);
+ assert.equal(snapshot.comparison.old_sha,firstMaterial.comparison.old_sha);
  assert.notEqual(detail('author',id).round.source_sha256,detail('author',id,first.id).round.source_sha256);
  const stale=x.decision('safety',id,'safety');
  await x.change('engineering',id,'engineering');

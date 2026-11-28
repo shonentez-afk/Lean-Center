@@ -32,7 +32,7 @@ import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {internalTrainerAppointment} from '../../src/modules/training/domain.js';
-import {approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,checkApprovalIntegrity} from './sop-approval.mjs';
+import {approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,compareApprovalSnapshots,checkApprovalIntegrity} from './sop-approval.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
 import {journalWorkspace,retrainingWorkspace,revisionReviewContext,inspectRevisionChange,publicRevisionReview,saveRevisionReview} from './training-registers.mjs';
@@ -940,6 +940,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   async submitSopApproval(actor,revision,f){
    const ctx=read(db=>prepareApprovalSubmit(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f));
    await inspectApprovalSource(ctx.b,readFile);
+   if(ctx.route.previous)await inspectApprovalSource(ctx.route.previous,readFile);
    return mutate(db=>submitApproval(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx));
   },
   async changeSopApproval(actor,revision,f){
@@ -947,10 +948,18 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    await inspectApprovalSource(ctx.b,readFile);
    return mutate(db=>changeApproval(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx));
   },
-  async approvalMaterial(actor,revision,id,roundId=null,position=null){
+  async approvalMaterial(actor,revision,id,roundId=null,position=null,side='current'){
+   must(['current','previous'].includes(side)&&!(position===null&&side==='previous'),400,'Некорректная сторона сравнения');
    const context=db=>approvalPreviewContext(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),id,roundId);
-   const ctx=read(context),p=await inspectApprovalSource(ctx.binding,readFile);
-   const result=position===null?approvalPreview(ctx.binding,p):await approvalPhoto(ctx.binding,p,position);
+   const ctx=read(context);let result;
+   if(position===null){
+    const p=await inspectApprovalSource(ctx.binding,readFile);
+    const old=ctx.previous?await inspectApprovalSource(ctx.previous,readFile):null;
+    result={...approvalPreview(ctx.binding,p),baseline_known:ctx.baseline_known,comparison:old?compareApprovalSnapshots(ctx.previous,old,ctx.binding,p):null};
+   }else{
+    const b=side==='previous'?ctx.previous:ctx.binding;must(b,404,'Предыдущая редакция недоступна');
+    result=await approvalPhoto(b,await inspectApprovalSource(b,readFile),position);
+   }
    return read(db=>{const next=context(db);must(next.sha===ctx.sha&&next.round_id===ctx.round_id,409,'Материал изменился');return result});
   },
   libraryCard(actor,revision,id){

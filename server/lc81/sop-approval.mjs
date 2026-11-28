@@ -7,6 +7,7 @@ import {validateRef,inspectSource,checkContent} from '../../src/modules/library/
 import {hasSopKeyMomentsAndReason} from '../../src/modules/library/sop-step-quality.js';
 import {projectLibraryDetail} from './library-commands.mjs';
 import {extractPhoto} from './sop-photo.mjs';
+import {sameWorkContent} from '../../src/modules/training/revision-impact.js';
 const must=(ok,status,message)=>{if(!ok)throw new PilotError(status,message)};
 const exact=(x,ks)=>x&&typeof x==='object'&&!Array.isArray(x)&&Object.keys(x).length===ks.length&&ks.every(k=>Object.hasOwn(x,k));
 const text=(x,max=2000)=>typeof x==='string'&&x.length<=max;
@@ -28,6 +29,14 @@ const route=r=>JSON.parse(r.route_json),frozen=r=>JSON.parse(r.binding_json);
 function binding(db,r){
  const p=JSON.parse(r.payload_json),origin=one(db,'SELECT study_id,source_sha256 FROM sop_frv_origin WHERE revision_id=?',[r.id]);
  return {revision_id:r.id,document_id:r.document_id,version_no:r.version_no,code:r.code,title:documentTitle(db,r.document_id,r.id),operation_id:r.operation_id,unit_id:r.unit_id,source:validateRef(p.source),projection_sha256:digest(p.projection),print_format:r.print_format,changed_on:r.changed_on,review_due:r.review_due,workplace_id:r.workplace_id,workplace_name:r.workplace_name,equipment_name:r.equipment_name,origin:origin??null};
+}
+// Bind the actually effective standard, not the preceding version number.
+function previousBinding(db,r){
+ const old=one(db,"SELECT id FROM document_revision WHERE document_id=? AND id<>? AND state='effective'",[r.document_id,r.id]);
+ return old?binding(db,revision(db,old.id)):null;
+}
+function previousFor(db,r,rr){
+ return rr?Object.hasOwn(route(rr),'previous')?route(rr).previous:null:previousBinding(db,r);
 }
 function blockers(db,r,a){
  const b=binding(db,r),p=JSON.parse(r.payload_json).projection,op=one(db,'SELECT workplace_id FROM operation WHERE id=? AND archived=0',[r.operation_id]),out=[];
@@ -138,7 +147,7 @@ function inputRoute(db,a,r,f){
  }
  const reviewDates=selected.slice(0,3).map(x=>x.due_on);
  must((f.mode==='parallel'||reviewDates.every((x,i)=>i===0||x>=reviewDates[i-1]))&&reviewDates.every(x=>x<=selected[3].due_on)&&selected[3].due_on<=selected[4].due_on,422,'Сроки должны соответствовать последовательности этапов');
- return {version:1,mode:f.mode,participants:selected};
+ return {version:1,mode:f.mode,participants:selected,previous:previousBinding(db,r)};
 }
 export function prepareApprovalSubmit(db,a,f){
  must(exact(f,['revision_id','expected_revision','mode','participants','note'])&&isId(f.revision_id)&&Number.isSafeInteger(f.expected_revision)&&text(f.note),400,'Неверные поля маршрута');
@@ -187,6 +196,7 @@ export function prepareApprovalChange(db,a,f){
   }else{
    must(f.command==='publish'&&stage==='publish'&&rr.state==='approved'&&r.state==='approved',422,'Сначала три согласования и утверждение директора');
    must(rt.participants.every(x=>sameGrant(x,eligible(a,r,x.stage,x.account_id))),409,'Состав или полномочия изменились; верните СОП и запустите новый раунд');
+   must(Object.hasOwn(rt,'previous')&&canonical(rt.previous)===canonical(previousBinding(db,r)),409,'Предыдущая действующая редакция не подтверждена; требуется новый раунд');
    transition='effect';state='effective';
   }
   if(f.command==='approve'||f.command==='publish'){const problems=blockers(db,r,a);must(!problems.length,422,problems.join('; '))}
@@ -213,7 +223,8 @@ export function approvalPreviewContext(db,a,id,roundId){
  const r=revision(db,id),rr=roundId?byRound(db,roundId):null;
  must(r&&(!roundId||rr?.revision_id===id)&&canSee(db,a,r,rr||latest(db,id)),404,'Материалы согласования недоступны');
  must(rr||a.coordinate(id),404,'Выберите назначенный раунд');
- const b=rr?frozen(rr):binding(db,r);return {binding:b,sha:digest(b),round_id:rr?.id??null};
+ const b=rr?frozen(rr):binding(db,r),previous=previousFor(db,r,rr),baseline_known=!rr||Object.hasOwn(route(rr),'previous');
+ return {binding:b,previous,baseline_known,sha:digest({b,previous,baseline_known}),round_id:rr?.id??null};
 }
 export async function inspectApprovalSource(b,readFile){
  const text=await checkContent(b.source,await readFile(b.source)),p=await inspectSource(text,'sop');
@@ -223,6 +234,40 @@ export async function inspectApprovalSource(b,readFile){
 export function approvalPreview(b,p){
  const doc=projectLibraryDetail('sop.read_public',p.raw),twi=projectLibraryDetail('sop.read_twi',p.raw),frv=projectLibraryDetail('sop.read_linked_frv',p.raw);
  return {binding:b,meta:doc.meta,description:doc.description,steps:p.projection.steps.map((x,i)=>({position:i+1,action:x.action,key_points:x.key_points,reason:x.reason,seconds:x.seconds,photo:x.photo})),twi,frv};
+}
+// Compare validated snapshots by step position. Do not equate step identity
+// merely because two positions or imported source IDs happen to match.
+export function compareApprovalSnapshots(oldBinding,oldDoc,newBinding,newDoc){
+ const publicFields=x=>projectLibraryDetail('sop.read_public',x.raw);
+ const before=publicFields(oldDoc),after=publicFields(newDoc),meta=[];
+ for(const key of new Set([...Object.keys(before.meta),...Object.keys(after.meta)])){
+  const a=before.meta[key]??'',b=after.meta[key]??'';
+  if(canonical(a)!==canonical(b))meta.push({field:key,before:a,after:b});
+ }
+ if(before.description!==after.description)meta.push({field:'description',before:before.description,after:after.description});
+ for(const key of ['print_format','changed_on','review_due','workplace_name','equipment_name']){
+  const a=oldBinding[key]??'',b=newBinding[key]??'';
+  if(canonical(a)!==canonical(b))meta.push({field:key,before:a,after:b});
+ }
+ const simple=(p,idx)=>{
+  const x=p.projection.steps[idx];if(!x)return null;
+  const raw=p.raw.constructor.steps[idx],asset=x.photo?p.raw.photoAssets[x.source_id]:null;
+  return {action:x.action,key_points:x.key_points,reason:x.reason,seconds:x.seconds,photo:x.photo,photo_sha:asset?digest(asset):null,annotation_sha:digest(raw.photoAnnotations??[]),extra_sha:digest(raw)};
+ };
+ const show=x=>x?{action:x.action,key_points:x.key_points,reason:x.reason,seconds:x.seconds,photo:x.photo}:null;
+ const steps=[];
+ for(let i=0;i<Math.max(oldDoc.projection.steps.length,newDoc.projection.steps.length);i++){
+  const a=simple(oldDoc,i),b=simple(newDoc,i),fields=[];
+  if(!a||!b)fields.push(!a?'Добавлен шаг':'Удалён шаг');
+  else{
+   for(const [key,label] of [['action','Действие'],['key_points','Ключевые моменты'],['reason','Причина'],['seconds','Время'],['photo','Наличие фото'],['photo_sha','Фото'],['annotation_sha','Разметка фото']])if(canonical(a[key])!==canonical(b[key]))fields.push(label);
+   if(a.extra_sha!==b.extra_sha&&!fields.length)fields.push('Прочие поля шага');
+  }
+  if(fields.length)steps.push({position:i+1,fields,before:show(a),after:show(b)});
+ }
+ const twiChanged=canonical(oldDoc.raw.constructor.twi??null)!==canonical(newDoc.raw.constructor.twi??null);
+ const frvChanged=canonical(projectLibraryDetail('sop.read_linked_frv',oldDoc.raw))!==canonical(projectLibraryDetail('sop.read_linked_frv',newDoc.raw));
+ return {old_revision_id:oldBinding.revision_id,old_version:oldBinding.version_no,old_sha:oldBinding.source.sha256,new_version:newBinding.version_no,new_sha:newBinding.source.sha256,meta,steps,twi_changed:twiChanged,frv_changed:frvChanged,same_work_content:sameWorkContent(oldDoc.raw,newDoc.raw),comparison:'by_position'};
 }
 export async function approvalPhoto(b,p,position){
  must(Number.isSafeInteger(position)&&position>=1&&position<=1000,404,'Фото недоступно');
@@ -242,5 +287,6 @@ export function checkApprovalIntegrity(db){
   if(['approved','effective','withdrawn'].includes(rr.state))must(approved.has('director'),503,'Нет утверждения директора');
   if(['effective','withdrawn'].includes(rr.state))must(vs.some(x=>x.command==='publish'),503,'Нет решения ввода в действие');
   if(rr.state==='returned')must(vs.some(x=>['return','cancel'].includes(x.command)),503,'Нет причины закрытия раунда');
+  if(rt.previous)must(rt.previous.document_id===b.document_id&&rt.previous.revision_id!==b.revision_id&&rt.previous.version_no<b.version_no,503,'Неверная предыдущая редакция раунда');
  }
 }

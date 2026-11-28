@@ -51,6 +51,9 @@ try{
  for(const name of ['safety','engineering','twi','director']){
   const q=await profile(name,name==='safety');await q.go('sop.approvals');await q.button('Открыть согласование').click();
   await q.button('Просмотреть зафиксированный СОП').click();await q.content.getByText('Браузерная редакция LC83',{exact:true}).first().waitFor();
+  await q.content.getByRole('heading',{name:'Сравнение с предыдущей действующей редакцией',exact:true}).waitFor();
+  await q.button('Показать прежнее фото шага 1').click();
+  await q.p.waitForFunction(()=>[...document.querySelectorAll('img[alt="Прежнее фото шага 1"]')].some(i=>i.complete&&i.naturalWidth>0));
   await q.button('Показать фото').first().click();await q.content.locator('img.lc81-image').first().waitFor();
   await q.p.waitForFunction(()=>[...document.querySelectorAll('img.lc81-image')].some(i=>i.complete&&i.naturalWidth>0));
   await q.button(name==='director'?'Утвердить СОП':'Согласовать СОП').click();await q.ready();

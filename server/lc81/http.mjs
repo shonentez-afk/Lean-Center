@@ -296,7 +296,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
     const pos=p.endsWith('/photo')?url.searchParams.get('position'):null;
     must(pos===null&&!p.endsWith('/photo')||/^\d{1,4}$/.test(pos||''),404,'Фото недоступно');
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
-    try{const result=await store.approvalMaterial(a.id,a.credential_revision,url.searchParams.get('id'),url.searchParams.get('round_id')||null,pos===null?null:Number(pos));if(pos===null)reply(res,200,result);else reply(res,200,result.bytes,result.type);return}finally{libraryBusy--}
+    try{const result=await store.approvalMaterial(a.id,a.credential_revision,url.searchParams.get('id'),url.searchParams.get('round_id')||null,pos===null?null:Number(pos),url.searchParams.get('side')||'current');if(pos===null)reply(res,200,result);else reply(res,200,result.bytes,result.type);return}finally{libraryBusy--}
    }
    if(req.method==='GET'&&p==='/api/lc81/library/card'){reply(res,200,store.libraryCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/rollout'){reply(res,200,store.rolloutDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
