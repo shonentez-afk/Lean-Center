@@ -64,9 +64,9 @@ export function captureDomainNotices(db,after,clock){
  }
  return count;
 }
-export function domainNoticeRows(db,a){
+export function domainNoticeRows(db,a,id=null){
  if(!exists(db)||!a.personId)return [];
- return rows(db,"SELECT *,rowid ordinal,'domain' source FROM lc824_domain_notice WHERE person_id=? ORDER BY occurred_at DESC,id DESC",[a.personId]);
+ return rows(db,"SELECT *,rowid ordinal,'domain' source FROM lc824_domain_notice WHERE person_id=?"+(id?' AND id=?':'')+' ORDER BY occurred_at DESC,id DESC',[a.personId,...(id?[id]:[])]);
 }
 export function domainNoticeAnchor(db,a,id){
  return exists(db)&&a.personId?one(db,'SELECT rowid ordinal FROM lc824_domain_notice WHERE id=? AND person_id=?',[id,a.personId]):null;

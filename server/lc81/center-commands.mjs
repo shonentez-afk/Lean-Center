@@ -142,14 +142,19 @@ export function calendarWorkspace(db,a,{mode,from,to,person_id=null}){
  // Explicit personnel context is checked by the store before entering this
  // projection. It still uses each record's calendar permission, not self.
  if(!personal)must((mode==='calendar'||person_id)&&has(a,'calendar.read'),403,'Календарь или план недоступен');
- const includeOverdue=mode==='plan',items=[],add=(x,r,people)=>{
+ const includeOverdue=mode==='plan',wanted=person_id||self||null,items=[];
+ const relevant=(date,pending,people)=>!!date&&date<=to&&(date>=from||includeOverdue&&pending&&date<a.day)&&(!wanted||people.includes(wanted));
+ // SQL only narrows candidates. All existing record/scope checks remain.
+ const dateWhere=column=>[column+'<=?',...(includeOverdue?[]:[column+'>=?'])];
+ const dateArgs=()=>[to,...(includeOverdue?[]:[from])];
+ const add=(x,r,people)=>{
   if(!x.date||x.date>to||x.date<from&&!(includeOverdue&&x.pending&&x.date<a.day))return;
   if(person_id&&!people.includes(person_id))return;
   if(personal){if(!people.includes(self))return}
   else if(!r||!allowed(a,'calendar.read',x.anchor,r))return;
   const {anchor,...item}=x;items.push({...item,overdue:!!x.pending&&x.date<a.day});
  };
- for(const s of rows(db,'SELECT * FROM schedule_event ORDER BY due_on,id')){
+ for(const s of rows(db,'SELECT * FROM schedule_event WHERE '+[...dateWhere('due_on'),...(wanted?['owner_id=?']:[])].join(' AND ')+' ORDER BY due_on,id',[...dateArgs(),...(wanted?[wanted]:[])])){
   const v=a.read('calendar.read',s.id);if(!v||personal&&s.owner_id!==self||person_id&&s.owner_id!==person_id)continue;
   const r=scheduleResource(db,s,a.day);
   if(!r){
@@ -163,29 +168,29 @@ export function calendarWorkspace(db,a,{mode,from,to,person_id=null}){
  const addRecord=(type,id,date,title,owner,people,state,pending,key=null)=>{
   // Reject out-of-range and other-person rows before costly composite
   // authorization. The add() check remains unchanged as a second guard.
-  if(!date||date>to||date<from&&!(includeOverdue&&pending&&date<a.day)||person_id&&!people.includes(person_id)||personal&&!people.includes(self))return;
+  if(!relevant(date,pending,people))return;
   const link=recordAccess(db,a,type,id);if(!link)return;
-  add({anchor:id,key:key||type+':'+id,date,type:({training:'Инструктаж TWI',enrollment:'Персональная программа',task:'Мероприятие',development:'Цель развития',preparation:'Подготовка'})[type],title,owner:name(a,owner),state,pending,route:routeOf(link)},link.resource,people);
+  add({anchor:id,key:key||type+':'+id,date,type:({training:'Инструктаж TWI',enrollment:'Персональная программа',task:'Мероприятие',development:'Цель развития',preparation:'Подготовка'})[type],title:typeof title==='function'?title():title,owner:name(a,owner),state,pending,route:routeOf(link)},link.resource,people);
  };
- for(const t of rows(db,"SELECT * FROM training_assignment WHERE source_sha256 IS NOT NULL AND state<>'cancelled'")){
+ for(const t of rows(db,"SELECT * FROM training_assignment WHERE source_sha256 IS NOT NULL AND state<>'cancelled' AND "+[...dateWhere('due_on'),...(wanted?['(trainee_id=? OR mentor_id=? OR supervisor_id=?)']:[])].join(' AND '),[...dateArgs(),...(wanted?[wanted,wanted,wanted]:[])])){
   const p=['planned','in_progress'].includes(t.state);
-  addRecord('training',t.id,t.due_on,a.read('operation.read',t.operation_id)?.data.name||'Назначение обучения',t.mentor_id,[t.trainee_id,t.mentor_id,t.supervisor_id],t.state,p);
+  addRecord('training',t.id,t.due_on,()=>a.read('operation.read',t.operation_id)?.data.name||'Назначение обучения',t.mentor_id,[t.trainee_id,t.mentor_id,t.supervisor_id],t.state,p);
  }
- for(const n of rows(db,"SELECT n.*,p.title FROM training_enrollment n JOIN training_program p ON p.id=n.program_id WHERE n.state<>'cancelled'"))addRecord('enrollment',n.id,n.due_on,n.title,n.mentor_id,[n.trainee_id,n.mentor_id,n.manager_id],n.state,n.state==='active');
- for(const t of actionRows(db)){
+ for(const n of rows(db,"SELECT n.*,p.title FROM training_enrollment n JOIN training_program p ON p.id=n.program_id WHERE n.state<>'cancelled' AND "+[...dateWhere('n.due_on'),...(wanted?['(n.trainee_id=? OR n.mentor_id=? OR n.manager_id=?)']:[])].join(' AND '),[...dateArgs(),...(wanted?[wanted,wanted,wanted]:[])]))addRecord('enrollment',n.id,n.due_on,n.title,n.mentor_id,[n.trainee_id,n.mentor_id,n.manager_id],n.state,n.state==='active');
+ for(const t of actionRows(db,null,{ownerId:wanted,dueThrough:to,dueFrom:includeOverdue?null:from})){
   if(personal&&t.owner_id!==self||person_id&&t.owner_id!==person_id)continue;
   const s=actionStatus(db,t);if(s==='cancelled')continue;
   addRecord('task',t.id,t.due_on,t.title,t.owner_id,[t.owner_id],s,['open','in_progress','implemented','ineffective'].includes(s));
  }
- for(const g of rows(db,"SELECT g.*,p.person_id FROM development_goal g JOIN development_plan p ON p.id=g.plan_id WHERE p.state<>'cancelled' AND g.state<>'cancelled'"))addRecord('development',g.plan_id,g.due_on,g.title,g.person_id,[g.person_id],g.state,g.state==='open','goal:'+g.id);
- for(const x of standardCalendar(db,a.day,{kind:'preparation'})){
-  const b=find(db,'twi_preparation',x.options.id),trainee=name(a,b?.trainee_id);
+ for(const g of rows(db,"SELECT g.*,p.person_id FROM development_goal g JOIN development_plan p ON p.id=g.plan_id WHERE p.state<>'cancelled' AND g.state<>'cancelled' AND "+[...dateWhere('g.due_on'),...(wanted?['p.person_id=?']:[])].join(' AND '),[...dateArgs(),...(wanted?[wanted]:[])]))addRecord('development',g.plan_id,g.due_on,g.title,g.person_id,[g.person_id],g.state,g.state==='open','goal:'+g.id);
+ for(const x of standardCalendar(db,a.day,{kind:'preparation',personId:wanted||''})){
   const done=['Завершена','Завершено'].includes(x.state);
-  addRecord('preparation',x.options.id,x.date,x.type+(trainee?' · '+x.title:''),x.ownerId,x.people,x.state,!done,x.key);
+  addRecord('preparation',x.options.id,x.date,()=>{const b=find(db,'twi_preparation',x.options.id),trainee=name(a,b?.trainee_id);return x.type+(trainee?' · '+x.title:'')},x.ownerId,x.people,x.state,!done,x.key);
  }
  // Annual milestones are derived from the original corporate rules.
  const annualByPerson=new Map(annualAuditCoverage(db,a.day.slice(0,4),a.day).map(x=>[x.personId,x]));
- for(const x of standardCalendar(db,a.day,{kind:'normative'})){
+ for(const x of standardCalendar(db,a.day,{kind:'normative',personId:wanted||''})){
+  if(!relevant(x.date,true,x.people))continue;
   if(x.page==='audit'){
    const p=annualByPerson.get(x.options.personId);
    if(!p||!who(a,p.personId)||!p.certificates.every(c=>a.read('credential.read',c.id))||![...p.audits,...p.unlinked,...p.duplicates].every(q=>recordAccess(db,a,'audit',q.id)))continue;
@@ -199,7 +204,7 @@ export function calendarWorkspace(db,a,{mode,from,to,person_id=null}){
  }
  // Derived deadlines keep the original reference, never duplicate schedules.
  // SOP reviews are appended once by the shared review-owner projection in store.
- for(const r of rows(db,"SELECT * FROM economic_effect WHERE state='active'")){
+ for(const r of rows(db,"SELECT * FROM economic_effect WHERE state='active' AND "+[...dateWhere('review_due'),...(wanted?['owner_id=?']:[])].join(' AND '),[...dateArgs(),...(wanted?[wanted]:[])])){
   if(!financialRecordAllowed(db,a,r.id))continue;
   const state=effectStatus(db,r);
   add({anchor:r.id,key:'roi:'+r.id,date:r.review_due,type:'Контроль экономического эффекта',title:r.title,owner:name(a,r.owner_id),state,pending:effectPending(db,r),route:{type:'roi',id:r.id}},unitResource(r.unit_id),[r.owner_id]);

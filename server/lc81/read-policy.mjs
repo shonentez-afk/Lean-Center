@@ -1,3 +1,4 @@
+import {memoRead} from './read-memo.mjs';
 import {projectSopReviewRow} from '../../src/modules/library/sop-review.js';
 // LC8.1 QA: server-only policy/projection foundation. Used by the isolated HTTP service.
 // All account, grant, policy and date inputs MUST come from trusted server state.
@@ -11,8 +12,9 @@ export {READ_ACTIONS};
 const validDay=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
 const activePeriod=(x,day)=>!!x&&validDay(x.valid_from)&&x.valid_from<=day&&(x.valid_to===null||validDay(x.valid_to)&&day<=x.valid_to);
 const unique=(items,predicate)=>{if(!Array.isArray(items))return null;const found=items.filter(predicate);return found.length===1?found[0]:null};
-const activePerson=(db,id)=>isId(id)&&one(db,'SELECT id,display_name FROM person WHERE id=? AND archived=0',[id]);
-function lineage(db,id){
+const activePerson=(db,id)=>isId(id)&&memoRead(db,'policy.person',[id],()=>one(db,'SELECT id,display_name FROM person WHERE id=? AND archived=0',[id]));
+function lineage(db,id){return memoRead(db,'policy.lineage',[id],()=>loadLineage(db,id))}
+function loadLineage(db,id){
  const found=new Set();
  while(id!==null){
   if(!isId(id)||found.has(id))return null;
@@ -24,8 +26,10 @@ function lineage(db,id){
 }
 const inside=(db,root,id)=>lineage(db,id)?.has(root)===true;
 function unitsFor(db,person,day){
- const a=rows(db,'SELECT unit_id FROM person_assignment WHERE person_id=? AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)',[person,day,day]);
- return a.length===1&&lineage(db,a[0].unit_id)?[a[0].unit_id]:[];
+ return [...memoRead(db,'policy.units',[person,day],()=>{
+  const a=rows(db,'SELECT unit_id FROM person_assignment WHERE person_id=? AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)',[person,day,day]);
+  return a.length===1&&lineage(db,a[0].unit_id)?[a[0].unit_id]:[];
+ })];
 }
 // Fixed SQL, fixed output allowlists. No source JSON, full snapshots, logs,
 // credentials, personal assessments, or attachment bytes in these projections.
@@ -454,11 +458,12 @@ function decide(db,security,accountId,action,resourceId,day,resourceAction=actio
  if(!resource||action==='task.implement_own'&&resource.self!==account.person_id)return null;
  for(const grant of security.grants){
   if(grant?.account_id!==accountId||grant.state!=='active'||grant.revoked_at!==null||!activePeriod(grant,day)||!isId(grant.id)||!isId(grant.role_id)||!isId(grant.assignment_id))continue;
-  const role=one(db,'SELECT id FROM business_role WHERE id=? AND archived=0',[grant.role_id]);
-  const assignment=one(db,'SELECT person_id,role_id,valid_from,valid_to FROM role_assignment WHERE id=?',[grant.assignment_id]);
-  if(!role||assignment?.person_id!==account.person_id||assignment.role_id!==role.id||!activePeriod(assignment,day))continue;
-  const policy=unique(security.policies,x=>x?.role_id===role.id);
+  // Reject grants that cannot authorize this action before reading role rows.
+  const policy=unique(security.policies,x=>x?.role_id===grant.role_id);
   if(!policy||!Number.isSafeInteger(policy.revision)||policy.revision<1||grant.policy_revision!==policy.revision||!Array.isArray(policy.permissions)||!policy.permissions.includes(action))continue;
+  const role=memoRead(db,'policy.role',[grant.role_id],()=>one(db,'SELECT id FROM business_role WHERE id=? AND archived=0',[grant.role_id]));
+  const assignment=memoRead(db,'policy.assignment',[grant.assignment_id],()=>one(db,'SELECT person_id,role_id,valid_from,valid_to FROM role_assignment WHERE id=?',[grant.assignment_id]));
+  if(!role||assignment?.person_id!==account.person_id||assignment.role_id!==role.id||!activePeriod(assignment,day))continue;
   if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...SOP_APPROVAL_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result','preparation.shift','supplement.create','supplement.revise','supplement.decide','self.create','task.start','calendar.complete'].includes(x)),'matrix.detail','center.read','analytics.read','metrics.read','roi.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
  }
  return null;

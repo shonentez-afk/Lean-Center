@@ -1,3 +1,5 @@
+import {memoRead,withCommittedReadMemo} from '../server/lc81/read-memo.mjs';
+import {actionRows} from '../src/modules/training/audit-domain.js';
 import {projectSopReviewRows,reviewDue} from '../src/modules/library/sop-review.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -796,6 +798,8 @@ test('LC824 twelve-month native task history, mixed authenticated HTTP load and 
  const writes_ms=Math.round(performance.now()-start);
  assert.equal(store.notificationFeed(users.author.id,1,{limit:50}).total,24);
  const notice=store.notificationFeed(users.author.id,1,{limit:50}).items[0],target=created[0].id;
+ const expectedTasks=store.listResources(users.author.id,'task.read').filter(r=>r.state!=='cancelled'&&r.due_on<=plan.to&&(r.due_on>=plan.from||['open','in_progress','implemented','ineffective'].includes(r.state)&&r.due_on<to)).map(r=>r.id).sort();
+ assert.deepEqual(store.calendarWorkspace(users.author.id,1,plan).items.filter(r=>r.route?.type==='task').map(r=>r.route.id).sort(),expectedTasks);
  const origin='https://qa.invalid',server=createSecureQAServer({store,origin});
  try{
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -815,16 +819,16 @@ test('LC824 twelve-month native task history, mixed authenticated HTTP load and 
   const routes=['notifications?limit=30','calendar/view?'+new URLSearchParams(plan),'tasks/detail?id='+target,'session'];
   const results=[];
   for(const concurrent of [1,10,20,40]){
-   const timing=[],statuses={},perRoute=Object.fromEntries(routes.map(r=>[r,0])),started=performance.now();
+   const timing=[],statuses={},perRoute=Object.fromEntries(routes.map(r=>[r,0])),routeTimes=Object.fromEntries(routes.map(r=>[r,[]])),started=performance.now();
    await Promise.all(Array.from({length:concurrent},async(_,c)=>{
     for(let i=0;i<4;i++){
-     const route=routes[(c+i)%routes.length],r=await get(route);timing.push(r.ms);statuses[r.status]=(statuses[r.status]||0)+1;
+     const route=routes[(c+i)%routes.length],r=await get(route);timing.push(r.ms);routeTimes[route].push(r.ms);statuses[r.status]=(statuses[r.status]||0)+1;
      assert([200,429].includes(r.status));if(r.status===429)assert(Number(r.retry)>0);else{perRoute[route]++;if(route.startsWith('notifications'))assert.equal(r.data.total,24)}
     }
    }));
    assert.equal(timing.length,concurrent*4);assert(Object.values(perRoute).every(n=>n>0));
    timing.sort((a,b)=>a-b);const q=n=>Math.round(timing[Math.ceil(timing.length*n)-1]*100)/100;
-   results.push({concurrent,requests:timing.length,statuses,p50_ms:q(.5),p95_ms:q(.95),p99_ms:q(.99),elapsed_ms:Math.round(performance.now()-started)});
+   results.push({concurrent,requests:timing.length,statuses,p50_ms:q(.5),p95_ms:q(.95),p99_ms:q(.99),elapsed_ms:Math.round(performance.now()-started),routes:Object.fromEntries(Object.entries(routeTimes).map(([route,ms])=>{ms.sort((a,b)=>a-b);return [route.split('?')[0],{requests:ms.length,p95_ms:Math.round(ms[Math.ceil(ms.length*.95)-1]*100)/100}]}))});
   }
   console.log('LC824_YEAR_HISTORY_HTTP_LOAD_OK',JSON.stringify({months:history.months,legacy_tasks:history.tasks,legacy_task_events:history.events,owner_tasks:history.perAuthor,new_tasks:24,writes_ms,results}));
  }finally{if(server.listening)await new Promise(resolve=>{server.close(resolve);server.closeAllConnections?.()})}
@@ -937,4 +941,33 @@ test('LC825 calendar-year review uses site civil director decision; legacy evide
   assert(out.every(r=>r.passport_review_due==='2025-01-01'));
   console.log('LC825_APPROVAL_CIVIL_YEAR_LEAP_LEGACY_OK');
  }finally{db.close()}
+});
+
+test('LC826 committed read memo never crosses requests, exceptions or databases',()=>{
+ const db={},other={};let value=1,loads=0;
+ const get=d=>memoRead(d,'qa',['same'],()=>{loads++;return value});
+ withCommittedReadMemo(db,()=>{
+  assert.equal(get(db),1);assert.equal(get(db),1);
+  withCommittedReadMemo(db,()=>assert.equal(get(db),1));
+  assert.equal(loads,1);
+  assert.equal(get(other),1);assert.equal(get(other),1);assert.equal(loads,3);
+  assert.equal(memoRead(db,'qa.other',['same'],()=>2),2);
+ });
+ value=3;assert.equal(get(db),3);assert.equal(loads,4);
+ assert.throws(()=>withCommittedReadMemo(db,()=>{assert.equal(get(db),3);throw Error('QA rollback of context')}),/QA rollback/);
+ value=4;assert.equal(get(db),4);
+ withCommittedReadMemo(db,()=>assert.equal(get(db),4));
+ console.log('LC826_READ_MEMO_ISOLATION_OK');
+});
+test('LC826 action candidate SQL preserves the original rows, owner and inclusive date bounds',async()=>{
+ const {fixture}=await import('./lc4-fixture.mjs'),f=await fixture();
+ try{
+  const owner=f.trainee,other=f.other;
+  for(const [who,on] of [[owner,'2026-01-20'],[other,'2026-01-21'],[owner,'2026-01-22'],[owner,'2026-02-01']])await f.save('action_item',{response_id:null,title:'QA candidate',owner_id:who,subject_id:null,due_on:on,kind:'corrective',priority:'normal'});
+  const all=actionRows(f.w.working),expected=all.filter(r=>r.owner_id===owner&&r.due_on>='2026-01-20'&&r.due_on<='2026-01-22');
+  assert.equal(expected.length,2);
+  assert.deepEqual(actionRows(f.w.working,null,{ownerId:owner,dueFrom:'2026-01-20',dueThrough:'2026-01-22'}),expected);
+  assert.deepEqual(actionRows(f.w.working,expected[0].id),[expected[0]]);
+  console.log('LC826_TASK_CANDIDATE_PARITY_OK');
+ }finally{f.w.close()}
 });

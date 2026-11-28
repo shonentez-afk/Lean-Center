@@ -13,16 +13,16 @@ const journal='lc83_sop_notice',readTable='lc82_notice_read';
 const schema="CREATE TABLE IF NOT EXISTS lc82_notice_read(notice_id TEXT PRIMARY KEY REFERENCES lc83_sop_notice(id),account_id TEXT NOT NULL REFERENCES lc81_account(id),read_at TEXT NOT NULL);";
 export const notificationsEnabled=()=>process.env.LC82_INBOX_ENABLED!=='0';
 function requireInbox(a){must(notificationsEnabled()&&a.personId,404,'Личные уведомления недоступны')}
-function sourceRows(db,a){
- const read=exists(db,readTable),original=exists(db,journal)?rows(db,"SELECT n.*,n.rowid ordinal,'original' source,"+(read?'r.read_at':'NULL read_at')+' FROM lc83_sop_notice n '+(read?'LEFT JOIN lc82_notice_read r ON r.notice_id=n.id AND r.account_id=n.recipient_account_id ':'')+'WHERE n.recipient_account_id=? ORDER BY n.occurred_at DESC,n.id DESC',[a.accountId]):[];
- return [...original,...backgroundNoticeRows(db,a),...domainNoticeRows(db,a)];
+function sourceRows(db,a,id=null){
+ const read=exists(db,readTable),original=exists(db,journal)?rows(db,"SELECT n.*,n.rowid ordinal,'original' source,"+(read?'r.read_at':'NULL read_at')+' FROM lc83_sop_notice n '+(read?'LEFT JOIN lc82_notice_read r ON r.notice_id=n.id AND r.account_id=n.recipient_account_id ':'')+'WHERE n.recipient_account_id=?'+(id?' AND n.id=?':'')+' ORDER BY n.occurred_at DESC,n.id DESC',[a.accountId,...(id?[id]:[])]):[];
+ return [...original,...backgroundNoticeRows(db,a,id),...domainNoticeRows(db,a,id)];
 }
 function project(db,a,n){
  const view=n.source==='domain'?domainNoticeView(db,a,n):n.source==='background'?backgroundNoticeView(db,a,n):n.kind.startsWith('familiarization_')?familiarizationNoticeView(db,a,n):approvalNoticeView(db,a,n);
  return view?{id:n.id,kind:n.kind,occurred_at:n.occurred_at,read_at:n.read_at,...view}:null;
 }
-function visible(db,a){
- return sourceRows(db,a).flatMap(n=>{const v=project(db,a,n);return v?[{n,v}]:[]});
+function visible(db,a,{id=null,accept=()=>true}={}){
+ return sourceRows(db,a,id).flatMap(n=>{if(!accept(n))return [];const v=project(db,a,n);return v?[{n,v}]:[]});
 }
 // Outbound transport sees only currently visible notices, never the raw
 // journal or a separately guessed recipient. Two insertion watermarks avoid
@@ -32,7 +32,7 @@ export function pushNoticeWatermarks(db){
 }
 export function pushNoticeCandidates(db,a,device){
  if(!notificationsEnabled()||!a?.personId)return [];
- return visible(db,a).filter(x=>!x.v.read_at&&x.n.ordinal>(x.n.source==='background'?device.background_after:x.n.source==='domain'?(device.domain_after??0):device.original_after)).map(x=>x.v);
+ return visible(db,a,{accept:n=>!n.read_at&&n.ordinal>(n.source==='background'?device.background_after:n.source==='domain'?(device.domain_after??0):device.original_after)}).map(x=>x.v);
 }
 const newest=(a,b)=>b.v.occurred_at.localeCompare(a.v.occurred_at)||b.v.id.localeCompare(a.v.id);
 const actions=(a,b)=>Number(b.v.overdue)-Number(a.v.overdue)||String(a.v.due_on??'9999-12-31').localeCompare(String(b.v.due_on??'9999-12-31'))||newest(a,b);
@@ -56,7 +56,7 @@ export function notificationFeed(db,a,{filter='all',cursor=null,limit=30}={}){
 }
 export function readNotification(db,a,f){
  requireInbox(a);must(exact(f,['id'])&&isId(f.id),400,'Неверное уведомление');
- const x=visible(db,a).find(x=>x.v.id===f.id);must(x,404,'Действие больше недоступно');
+ const x=visible(db,a,{id:f.id}).find(x=>x.v.id===f.id);must(x,404,'Действие больше недоступно');
  if(!x.v.read_at)markRead(db,a,x);
  return {id:x.v.id,read_at:x.v.read_at||a.at,route:x.v.route};
 }

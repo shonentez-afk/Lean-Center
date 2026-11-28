@@ -1,3 +1,4 @@
+import {memoRead} from './read-memo.mjs';
 // LC8.2.2: local, durable, bounded reconciliation and reminder work.
 // No outbound network, no second workflow, no client-triggered worker.
 // Every completed reminder is still projected from LIVE domain evidence.
@@ -47,11 +48,13 @@ const bools=(v,ks)=>exact(v,ks)&&ks.every(k=>typeof v[k]==='boolean');
 const validWindow=w=>w===null||exact(w,['days','start','end'])&&Array.isArray(w.days)&&w.days.length>=1&&w.days.length<=7&&new Set(w.days).size===w.days.length&&w.days.every(d=>Number.isSafeInteger(d)&&d>=1&&d<=7)&&time(w.start)&&time(w.end)&&w.start!==w.end;
 const validPrefs=p=>exact(p,['reminders','push_types','delivery_window'])&&(bools(p.reminders,categories)||bools(p.reminders,legacyCategories))&&(bools(p.push_types,pushCategories)||bools(p.push_types,legacyPushCategories))&&validWindow(p.delivery_window);
 const requireUser=a=>must(a.personId&&process.env.LC82_INBOX_ENABLED!=='0',404,'Настройки уведомлений недоступны');
-function policy(db){
+function policy(db){return memoRead(db,'notification.policy',[],()=>loadPolicy(db))}
+function loadPolicy(db){
  const p=exists(db,policyTable)&&one(db,'SELECT * FROM lc822_notification_policy WHERE id=1');
  return p?{rev:p.rev,...defaultPolicy(db),...JSON.parse(p.settings_json)}:{rev:0,...defaultPolicy(db)};
 }
-function preferences(db,id){
+function preferences(db,id){return memoRead(db,'notification.preferences',[id],()=>loadPreferences(db,id))}
+function loadPreferences(db,id){
  const p=exists(db,prefTable)&&one(db,'SELECT * FROM lc822_notification_preference WHERE account_id=?',[id]);
  const base=defaultPreferences(),saved=p&&JSON.parse(p.settings_json);
  return saved?{rev:p.rev,reminders:{...base.reminders,...saved.reminders},push_types:{...base.push_types,...saved.push_types},delivery_window:saved.delivery_window}:{rev:0,...base};
@@ -111,9 +114,9 @@ function liveView(db,a,j,p,clock){
  if(Object.hasOwn(EXTRA_SOURCES,j.kind))return extraReminderView(db,a,j);
  return null;
 }
-export function backgroundNoticeRows(db,a){
+export function backgroundNoticeRows(db,a,id=null){
  if(!exists(db,table))return [];
- return rows(db,"SELECT *,notice_ordinal ordinal,finished_at occurred_at,'background' source FROM lc822_notification_job WHERE account_id=? AND state='completed' AND kind<>'familiarization_catchup' ORDER BY finished_at DESC,id DESC",[a.accountId]);
+ return rows(db,"SELECT *,notice_ordinal ordinal,finished_at occurred_at,'background' source FROM lc822_notification_job WHERE account_id=? AND state='completed' AND kind<>'familiarization_catchup'"+(id?' AND id=?':'')+' ORDER BY finished_at DESC,id DESC',[a.accountId,...(id?[id]:[])]);
 }
 export function backgroundNoticeView(db,a,j){
  // Disabling or superseding a reminder removes it from the actionable inbox,

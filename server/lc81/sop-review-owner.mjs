@@ -1,3 +1,4 @@
+import {memoRead} from './read-memo.mjs';
 import {projectSopReviewRows,projectSopReviewRow} from '../../src/modules/library/sop-review.js';
 // LC8.2 D2: one responsibility record per SOP document, shared by the
 // existing calendar, card, inbox and transport. No new task registry.
@@ -12,13 +13,14 @@ const schema=[
  "CREATE TABLE IF NOT EXISTS lc825_sop_review_owner(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES document(id),rev INTEGER NOT NULL CHECK(rev>0),revision_id TEXT NOT NULL REFERENCES document_revision(id),person_id TEXT NOT NULL REFERENCES person(id),employment_id TEXT NOT NULL REFERENCES person_assignment(id),actor_account_id TEXT NOT NULL REFERENCES lc81_account(id),changed_at TEXT NOT NULL,note TEXT NOT NULL,UNIQUE(document_id,rev));",
  "CREATE INDEX IF NOT EXISTS lc825_review_owner_document ON lc825_sop_review_owner(document_id,rev DESC);"
 ].join('\n');
-export const currentSopReviewRows=db=>projectSopReviewRows(db,rows(db,"SELECT r.id,r.document_id,r.version_no,r.state,r.effective_at,r.author_id,r.review_due,r.changed_on,d.code,d.operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.kind='sop' AND d.archived=0 AND o.archived=0")).sort((a,b)=>(a.review_due??'9999-12-31').localeCompare(b.review_due??'9999-12-31')||a.id.localeCompare(b.id));
+export const currentSopReviewRows=db=>memoRead(db,'review.rows',[],()=>projectSopReviewRows(db,rows(db,"SELECT r.id,r.document_id,r.version_no,r.state,r.effective_at,r.author_id,r.review_due,r.changed_on,d.code,d.operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.kind='sop' AND d.archived=0 AND o.archived=0")).sort((a,b)=>(a.review_due??'9999-12-31').localeCompare(b.review_due??'9999-12-31')||a.id.localeCompare(b.id)));
 export const currentSopReviewRow=(db,id)=>isId(id)?projectSopReviewRow(db,one(db,"SELECT r.id,r.document_id,r.version_no,r.state,r.effective_at,r.author_id,r.review_due,r.changed_on,d.code,d.operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.id=? AND r.state='effective' AND d.kind='sop' AND d.archived=0 AND o.archived=0",[id])):null;
 const latest=(db,id)=>exists(db,table)?one(db,'SELECT * FROM lc825_sop_review_owner WHERE document_id=? ORDER BY rev DESC LIMIT 1',[id]):null;
 function inSite(db,id,site){
  const seen=new Set();while(id&&!seen.has(id)){if(id===site)return true;seen.add(id);const r=one(db,'SELECT parent_id FROM org_unit WHERE id=? AND archived=0',[id]);id=r?.parent_id??null}return false;
 }
-export function localReviewEmployment(db,id,day){
+export function localReviewEmployment(db,id,day){return memoRead(db,'review.employment',[id,day],()=>loadReviewEmployment(db,id,day))}
+function loadReviewEmployment(db,id,day){
  if(!isId(id)||!one(db,'SELECT id FROM person WHERE id=? AND archived=0',[id]))return null;
  const site=one(db,"SELECT value FROM lc81_meta WHERE key='site_id'")?.value;
  const es=rows(db,'SELECT id,unit_id FROM person_assignment WHERE person_id=? AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)',[id,day,day]);
@@ -64,7 +66,7 @@ export function assignSopReviewOwner(db,a,library,f){
  a.audit('sop.review_owner.assign',id);return {rev:old.rev+1,person_id:c.id};
 }
 export function ownSopReviewAvailable(db,approval){
- return !!approval.personId&&currentSopReviewRows(db).some(r=>approval.effective(r.id)&&sopReviewOwner(db,r,approval.day).person_id===approval.personId);
+ return !!approval.personId&&currentSopReviewRows(db).some(r=>sopReviewOwner(db,r,approval.day).person_id===approval.personId&&approval.effective(r.id));
 }
 export function sopReviewCalendar(db,a,approval,q,personal){
  return currentSopReviewRows(db).flatMap(r=>{

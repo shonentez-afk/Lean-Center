@@ -1,3 +1,4 @@
+import {memoRead,withCommittedReadMemo} from './read-memo.mjs';
 // Isolated QA server. One protected, atomically replaced SQLite checkpoint
 // containing the accepted v17 domain schema and private service tables.
 import fs from 'node:fs/promises';
@@ -65,19 +66,19 @@ const audit=(db,actor,action,target)=>db.run('INSERT INTO lc81_audit VALUES(?,?,
 function domainCreate(db,type,payload,id=uuid()){
  applyEvent(db,{id:uuid(),entity_type:type,entity_id:id,operation:'create',expected_revision:0,payload,occurred_at:at()});return id;
 }
-const roleRow=(db,id)=>one(db,'SELECT id,code,name FROM business_role WHERE id=? AND archived=0',[id]);
-const activePerson=(db,id)=>one(db,'SELECT id,display_name FROM person WHERE id=? AND archived=0',[id]);
-const rootUnit=(db,id)=>{
+const roleRow=(db,id)=>memoRead(db,'store.role',[id],()=>one(db,'SELECT id,code,name FROM business_role WHERE id=? AND archived=0',[id]));
+const activePerson=(db,id)=>memoRead(db,'store.person',[id],()=>one(db,'SELECT id,display_name FROM person WHERE id=? AND archived=0',[id]));
+const rootUnit=(db,id)=>memoRead(db,'store.root',[id],()=>{
  const seen=new Set();
  while(isId(id)&&!seen.has(id)){seen.add(id);const r=one(db,'SELECT id,parent_id FROM org_unit WHERE id=? AND archived=0',[id]);if(!r)return null;if(r.parent_id===null)return r.id;id=r.parent_id}return null;
-};
+});
 // Existing QA stores retain their original IDs; migration records explicit mappings.
-const config=db=>({
+const config=db=>memoRead(db,'store.config',[],()=>({
  site:one(db,"SELECT value FROM lc81_meta WHERE key='site_id'")?.value||SITE,
  admin:one(db,"SELECT value FROM lc81_meta WHERE key='admin_role_id'")?.value||ADMIN_ROLE,
  manager:one(db,"SELECT value FROM lc81_meta WHERE key='manager_role_id'")?.value||MANAGER_ROLE
-});
-const employment=(db,id,d)=>rows(db,'SELECT id,unit_id,valid_from,valid_to FROM person_assignment WHERE person_id=?',[id]).filter(r=>period(r,d)&&rootUnit(db,r.unit_id)===config(db).site);
+}));
+const employment=(db,id,d)=>memoRead(db,'store.employment',[id,d],()=>rows(db,'SELECT id,unit_id,valid_from,valid_to FROM person_assignment WHERE person_id=?',[id]).filter(r=>period(r,d)&&rootUnit(db,r.unit_id)===config(db).site));
 function account(db,id){
  const a=one(db,'SELECT * FROM lc81_account WHERE id=?',[id]);
  if(!a||a.state!=='active')return null;
@@ -128,7 +129,11 @@ function loadSecurity(db,accountId){
  return {accounts:[a],policies,grants};
 }
 function readFor(db,a,action,id,d){
- return a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,d):readAuthorized(db,security(db,a.id),a.id,action,id,d);
+ const load=()=>a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,d):readAuthorized(db,security(db,a.id),a.id,action,id,d);
+ // These small, fixed projections are repeatedly used for labels and links.
+ // Clone to prevent one consumer modifying a cached authorization projection.
+ if(['person.read_basic','person.read_directory','operation.read','task.read','calendar.read','training.read'].includes(action))return structuredClone(memoRead(db,'store.read',[a.id,a.credential_revision,d,action,id],load));
+ return load();
 }
 function directoryAllowed(db,a,action,anchorAction,id,d){
  return DIRECTORY_COMMANDS.includes(action)&&(a.bootstrap===1?!!readManagerProjection(db,config(db).site,anchorAction,id,d):canChangeDirectory(db,security(db,a.id),a.id,action,anchorAction,id,d));
@@ -165,14 +170,14 @@ function approvalAccess(db,a,d){
   effective:id=>local(a)&&!!v.read('sop.read_effective',id),reviewTitle:id=>local(a)?v.read('sop.read_effective',id)?.data.title??null:null,
   employmentFor:id=>{const e=employment(db,id,d);return activePerson(db,id)&&e.length===1?e[0].id:null},
   accountFor:id=>{const q=one(db,'SELECT id FROM lc81_account WHERE person_id=?',[id]),v=q&&account(db,q.id);return local(v)?v.id:null},
-  coordinate:id=>siteRead(id)&&(shared.ownsSop(id)||v.fullAllows('sop.edit_draft','sop.read_history',id)),eligible,impactActor:id=>{const other=account(db,id);return local(other)?trainingAccess(db,other,d):null},audit:(action,target)=>audit(db,a.id,action,target)};
+  coordinate:id=>siteRead(id)&&(shared.ownsSop(id)||v.fullAllows('sop.edit_draft','sop.read_history',id)),eligible,impactActor:id=>memoRead(db,'store.impactActor',[id,d],()=>{const other=account(db,id);return local(other)?trainingAccess(db,other,d):null}),audit:(action,target)=>audit(db,a.id,action,target)};
 }
 // Narrow approvers may open ONLY their own derived SOP plan. This does not
 // grant calendar.read, training.read, or access to anyone else's plan.
 function sopPersonalPlanAvailable(db,approval,access){
  if(!approval.personId)return false;
- if(ownSopReviewAvailable(db,approval))return true;
  if(access.permissions.some(k=>['sop.approval.safety','sop.approval.engineering','sop.approval.twi','sop.approval.director','sop.approval.publish'].includes(k))||hasOwnFamiliarization(db,approval))return true;
+ if(ownSopReviewAvailable(db,approval))return true;
  return !!one(db,"SELECT name FROM sqlite_master WHERE type='table' AND name='lc83_sop_round'")&&rows(db,'SELECT DISTINCT revision_id FROM lc83_sop_round WHERE submitted_account_id=?',[approval.accountId]).some(x=>approval.siteRead(x.revision_id));
 }
 const planDate=x=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x))&&new Date(x).toISOString().slice(0,10)===x;
@@ -491,7 +496,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
  const read=fn=>{
   ready();const db=current;if(readSecurityMemo.has(db))return fn(db);
   readSecurityMemo.set(db,new Map());
-  try{return fn(db)}finally{readSecurityMemo.delete(db)}
+  try{return withCommittedReadMemo(db,()=>fn(db))}finally{readSecurityMemo.delete(db)}
  };
  // Staff lists contain authorized projections only. The cache belongs to
  // this committed checkpoint, has bounded size and is invalidated on every
