@@ -54,13 +54,30 @@ try{
   await a.content.locator('select[name=account_'+stage+']').selectOption(x.users[name].id);
   await a.content.locator('input[name=due_'+stage+']').fill(x.day);
  }
+ await a.content.locator('form').filter({has:a.p.locator('select[name=mode]')}).locator('textarea[name=note]').fill('Изменено действие, уточнено содержание для проверки');
  await a.button('Отправить на согласование').click();
  await a.content.getByText('На согласовании',{exact:true}).first().waitFor();await a.ready();
  assert.equal(x.detail('author',id).round.state,'review');await a.ctx.close();
  const outsider=await profile('observer');await outsider.go('sop.approvals');
  assert.equal(await outsider.button('Открыть согласование').count(),0);await outsider.ctx.close();
  for(const name of ['safety','engineering','twi','director']){
-  const q=await profile(name,name==='safety');await q.go('sop.approvals');await q.button('Открыть согласование').click();
+  const q=await profile(name,name==='safety');
+  if(name==='safety'){
+   await q.go('plan.read');await q.button('Открыть согласование').click();
+   await q.content.getByRole('heading',{name:'Что изменилось и зачем',exact:true}).waitFor();
+   await q.p.locator('#lc82-bell').click();
+   const inbox=q.p.locator('dialog.lc82-notification-dialog');
+   await inbox.getByRole('heading',{name:'СОП назначен на согласование',exact:true}).waitFor();
+   await inbox.getByRole('button',{name:'Отметить прочитанным',exact:true}).click();
+   await inbox.getByText('Непрочитанных: 0',{exact:false}).waitFor();
+   await inbox.getByRole('button',{name:'Требуют действия',exact:true}).click();
+   await inbox.getByRole('heading',{name:'СОП назначен на согласование',exact:true}).waitFor();
+   assert.equal(await inbox.getByRole('button',{name:'Отметить прочитанным',exact:true}).count(),0);
+   await inbox.getByRole('button',{name:'Открыть согласование',exact:true}).click();
+   await q.content.getByText('Изменено действие, уточнено содержание для проверки',{exact:true}).waitFor();
+   assert.equal(x.detail('safety',id).round.decisions.length,0);
+   console.log('LC835_LC821_BROWSER_PLAN_AND_INBOX_SAME_ROUND_OK');
+  }else{await q.go('sop.approvals');await q.button('Открыть согласование').click();}
   await q.button('Просмотреть зафиксированный СОП').click();await q.content.getByText('Браузерная редакция LC83',{exact:true}).first().waitFor();
   await q.content.getByRole('heading',{name:'Сравнение с предыдущей действующей редакцией',exact:true}).waitFor();
   await q.button('Показать прежнее фото шага 1').click();

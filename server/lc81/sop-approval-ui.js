@@ -3,7 +3,7 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
  const url=(action,id,round=null)=>'sop-approval/'+action+'?id='+encodeURIComponent(id)+(round?'&round_id='+encodeURIComponent(round):'');
  const commandLabel={approve:'Согласовано / утверждено',return:'Возвращено',publish:'Введено в действие',cancel:'Возвращено организатором',withdraw:'Выведено'};
  const labels={description:'Описание',print_format:'Формат',changed_on:'Дата изменения',review_due:'Срок пересмотра',workplace_name:'Рабочее место (паспорт)',equipment_name:'Оборудование (паспорт)',branch:'Филиал',department:'Подразделение',workplace:'Рабочее место',operation:'Операция',sopNumber:'Номер',safety:'Безопасность',tools:'Инструменты',material:'Материалы'};
- const comment=(required=false)=>{const l=el('label',required?'Причина (обязательно)':'Комментарий','field'),t=el('textarea');t.name='note';t.required=required;t.maxLength=2000;t.rows=3;l.append(t);return l};
+ const comment=(required=false,title=null)=>{const l=el('label',title||(required?'Причина (обязательно)':'Комментарий'),'field'),t=el('textarea');t.name='note';t.required=required;t.maxLength=2000;t.rows=3;l.append(t);return l};
  async function familiarizationPanel(filter={}){
   const {kind='mine',revision_id=null,person_id=null,offset=0,back=null}=filter;
   const query=new URLSearchParams({kind,offset:String(offset),...(revision_id?{revision_id}:{}),...(person_id?{person_id}:{})});
@@ -87,6 +87,13 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
   if(guard&&!discard())return;
   const d=await api(url('detail',id,roundId)),r=d.round;
   const n=panel('Согласование СОП · '+d.code+' · v'+d.version_no,el('h3',d.title),el('p',d.status,'lc83-state'));
+  const overview=panel('Что изменилось и зачем',el('p',d.baseline_known?(d.previous_version===null?'Первый ввод: предыдущей действующей редакции нет':'Предыдущая действующая редакция на момент отправки: v'+d.previous_version+' → v'+d.version_no):'Предыдущий снимок не зафиксирован; сравнение не подтверждено.','muted'),el('p',r?.note||'Резюме автора ещё не зарегистрировано.'));
+  overview.classList.add('lc835-release-summary');
+  if(r)overview.append(el('p','Раунд '+r.no+' · '+r.submitted_name+' · '+r.submitted_at.slice(0,10),'muted'));
+  if(d.impact?.record)overview.append(el('p','Оценка влияния: '+({initial:'первичный ввод',editorial:'редакционная эквивалентность',retrain:'переобучение'}[d.impact.record.decision]||d.impact.record.decision)+' · сотрудников в зафиксированном составе: '+d.impact.record.people_count));
+  if(d.publication?.record)overview.append(el('p','Плановая дата ввода: '+d.publication.record.due_on+' · '+({pending:'ожидается',executed:'исполнен',cancelled:'отменён',blocked:'заблокирован'}[d.publication.record.state]||d.publication.record.state)));
+  overview.append(el('p','Фактический ввод: '+(d.actual_effective_at?d.actual_effective_at.replace('T',' ').slice(0,19)+' UTC':'не зарегистрирован')));
+  n.append(overview);
   n.append(button('← Назад к списку',async()=>{if(!discard())return;if(back){const result=await back();if(result instanceof Node)host.replaceChildren(result)}else await render()}));
   const reload=()=>detail(host,id,null,back,false);
   if(d.can_preview){
@@ -102,7 +109,7 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
     source.append(twi,frv);
     const c=p.comparison;
     if(c){
-     const x=panel('Сравнение с предыдущей действующей редакцией',el('p','v'+c.old_version+' → v'+c.new_version+' · '+(c.same_work_content?'Рабочее содержание совпадает':'Рабочее содержание изменено'),'lc83-state'),el('p','Сравнение по позиции шага. Контрольные суммы исходников: '+c.old_sha+' → '+c.new_sha,'lc83-hash'));
+     const x=panel('Сравнение с предыдущей действующей редакцией',el('p','v'+c.old_version+' → v'+c.new_version+' · '+(c.same_work_content?'Рабочее содержание совпадает':'Рабочее содержание изменено'),'lc83-state'),el('p','Сопоставление по уникальному содержанию/действию и позиции. Изменение номера не доказывает изменение содержания; неоднозначные пары требуют проверки.','muted'),el('p','Контрольные суммы исходников: '+c.old_sha+' → '+c.new_sha,'lc83-hash'));
      if(c.meta.length)x.append(table(['Реквизит','Было','Стало'],c.meta.map(m=>[labels[m.field]||m.field,m.before,m.after])));
      const sideCell=(v,pos,side)=>{
       if(!v)return '—';
@@ -110,7 +117,13 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
       if(v.photo)cell.append(button('Показать '+(side==='previous'?'прежнее':'новое')+' фото шага '+pos,()=>{if(cell.querySelector('img'))return;const im=el('img',undefined,'lc81-image');im.alt=(side==='previous'?'Прежнее':'Новое')+' фото шага '+pos;im.src='/api/lc81/'+url('photo',id,d.preview_round_id)+'&position='+pos+'&side='+side;im.addEventListener('error',()=>{im.remove();note('Фото не получено; проверьте доступ и повторите',true)},{once:true});cell.append(im)}));
       return cell;
      };
-     if(c.steps.length)x.append(table(['Позиция / изменения','Было','Стало'],c.steps.map(v=>[v.position+' · '+v.fields.join(', '),sideCell(v.before,v.position,'previous'),sideCell(v.after,v.position,'current')])));
+     if(c.steps.length){
+      const summary=el('div',undefined,'row'),changes=table(['Позиция / изменения','Было','Стало'],c.steps.map(v=>[(v.before_position??'—')+' → '+(v.after_position??'—')+' · '+v.fields.join(', ')+({position:' · проверить сопоставление по позиции',action:' · сопоставлено по уникальному действию',ambiguous:' · требуется ручная проверка'}[v.match]||''),sideCell(v.before,v.before_position,'previous'),sideCell(v.after,v.after_position,'current')]));
+      const trs=[...changes.querySelectorAll('tbody tr')];
+      c.steps.forEach((v,i)=>summary.append(button('Шаг '+(v.before_position??'—')+' → '+(v.after_position??'—')+' · '+v.fields.join(', '),()=>{const tr=trs[i];tr.tabIndex=-1;tr.scrollIntoView({block:'center'});tr.focus({preventScroll:true})},'lc835-step-link')));
+      x.append(el('h3','Изменённые фрагменты'),summary,changes);
+      if(c.manual_review)x.append(el('p','Есть сопоставления по действию/позиции или несопоставленные шаги. Проверьте оба исходника; визуальное сравнение не меняет серверное правило эквивалентности.','muted'));
+     }
      else x.append(el('p','В отображаемых шагах нет различий.'));
      x.append(el('p','TWI: '+(c.twi_changed?'изменён':'без изменений')+' · ФРВ по СОП: '+(c.frv_changed?'изменён':'без изменений')));
      if(!c.same_work_content)x.append(el('p','Даже при отсутствии видимых различий изменённые или неизвестные рабочие поля не считаются редакционно эквивалентными.','muted'));
@@ -122,7 +135,7 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
    if(d.can_submit&&d.preview_round_id)n.append(button('Открыть текущий черновик для нового раунда',()=>detail(host,id,null,back)));
   }
   if(r){
-   n.append(panel('Зафиксированный маршрут · раунд '+r.no,el('p',(r.mode==='parallel'?'Три параллельных согласования':'Последовательно: ОТ → главный инженер → ВТ')+' · отправил '+r.submitted_name+' · '+r.submitted_at.slice(0,10)),el('p',r.note||'Без комментария'),el('p','Контрольная сумма редакции: '+r.binding_sha256,'lc83-hash'),table(['Этап','Участник','Срок','Состояние','Комментарий / дата'],r.participants.map(x=>[x.label,x.name+' · '+x.role,x.due_on,x.state+(x.active?'':' · полномочие изменилось'),[x.note,x.decided_at?.slice(0,16)].filter(Boolean).join(' · ')]))));
+   n.append(panel('Зафиксированный маршрут · раунд '+r.no,el('p',(r.mode==='parallel'?'Три параллельных согласования':'Последовательно: ОТ → главный инженер → ВТ')+' · отправил '+r.submitted_name+' · '+r.submitted_at.slice(0,10)),el('p','Контрольная сумма редакции: '+r.binding_sha256,'lc83-hash'),table(['Этап','Участник','Срок','Состояние','Комментарий / дата'],r.participants.map(x=>[x.label,x.name+' · '+x.role,x.due_on,x.state+(x.active?'':' · полномочие изменилось'),[x.note,x.decided_at?.slice(0,16)].filter(Boolean).join(' · ')]))));
    if(r.decisions.length)n.append(panel('История решений раунда',table(['Этап','Решение','Сотрудник','Дата и время','Комментарий'],r.decisions.map(x=>[x.stage,commandLabel[x.command]||x.command,x.actor,x.at.replace('T',' ').slice(0,19),x.note]))));
   }
   if(d.can_submit){
@@ -133,7 +146,7 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
     const who=select('account_'+stage.stage,stage.label,[['','— Выберите участника —'],...choices.map(x=>[x.account_id,x.name+' · '+x.role])]);
     const due=input('due_'+stage.stage,'Срок','date');due.querySelector('input').min=d.day;due.querySelector('input').value=d.day;group.append(who,due);fields.push(group);
    }
-   fields.push(comment());
+   fields.push(comment(true,'Краткое резюме: что изменилось и зачем (обязательно)'));
    const f=form(fields,'Отправить на согласование',async f=>{
     const participants=d.stages.map(s=>({stage:s.stage,account_id:value(f,'account_'+s.stage),due_on:value(f,'due_'+s.stage)}));
     await api('sop-approval/submit',{revision_id:id,expected_revision:d.document_rev,mode:value(f,'mode'),participants,note:value(f,'note')});
@@ -147,8 +160,9 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
   if(d.impact&&r){
    const i=d.impact,cap={initial:'Первичный ввод',editorial:'Редакционная эквивалентность',retrain:'Переобучение'};
    const box=panel('Оценка влияния перед вводом',el('p','Состав определяется по зарегистрированным назначениям, оценкам, допускам и действующим требованиям профессий. Это не автоматически утверждённый список всех исполнителей.','muted'));
-   if(i.record)box.append(el('p',cap[i.record.decision]+' · '+i.record.reviewer+' · '+i.record.recorded_at.slice(0,10)+' · строк состава: '+i.record.affected+' · '+i.record.reason));
+   if(i.record)box.append(el('p',cap[i.record.decision]+' · '+i.record.reviewer+' · '+i.record.recorded_at.slice(0,10)+' · сотрудников: '+i.record.people_count+' · строк навыков/оснований: '+i.record.affected+' · '+i.record.reason));
    else box.append(el('p','Оценка пока не зарегистрирована. Ввод блокируется.','muted'));
+   if(i.record)box.append(el('p',i.record.decision==='editorial'?'Ознакомление с действующей редакцией; переобучение не назначается по этому решению.':'Ознакомление отдельно от адресного TWI, практической оценки, квалификации и допуска.','muted'));
    if(i.can_review){
     if(i.scope.length)box.append(table(['Сотрудник','Навык / операция','Основания'],i.scope.map(x=>[x.person,x.skill,[...new Set(x.basis.map(b=>({training:'Обучение',assessment:'Оценка',admission:'Допуск',requirement:'Требование профессии'})[b.kind]||b.kind))].join(', ')])));
     else box.append(el('p','По имеющимся регистрам затронутый состав не найден. Проверьте полноту данных.'));

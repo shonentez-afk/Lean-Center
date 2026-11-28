@@ -105,6 +105,66 @@ export function approvalList(db,a,{kind='all',offset=0}={}){
  }
  return {items:visible.slice(offset,offset+50),total:visible.length,offset,limit:50};
 }
+// Read-only projection of the SAME workflow: no duplicate tasks or state.
+// Personal plan is independent of notification existence/read state.
+export function approvalPlanItems(db,a,{mode,from,to,person_id=null}){
+ if(mode!=='plan'||!a.personId||person_id&&person_id!==a.personId||!exists(db))return [];
+ const items=[];
+ for(const rr of rows(db,"SELECT * FROM lc83_sop_round WHERE state IN('review','approved','returned') ORDER BY submitted_at,id")){
+  const r=revision(db,rr.revision_id);
+  if(!r||r.document_archived||r.operation_archived||latest(db,r.id)?.id!==rr.id||!canSee(db,a,r,rr))continue;
+  const b=frozen(rr),job=pendingPublication(db,rr),rt=route(rr);
+  const title=b.code+' · v'+b.version_no+' · '+b.title+' · раунд '+rr.round_no;
+  const add=(stage,due,state,pending=true)=>{
+   if(due&&(due>to||due<from&&!(pending&&due<a.day)))return;
+   items.push({key:'sop-approval:'+rr.id+':'+stage,date:due,type:stage==='rework'?'Доработка СОП':LABELS[stage],title,owner:a.name,state,pending,overdue:!!(pending&&due&&due<a.day),route:{type:'sop_approval',id:r.id,round_id:rr.id,stage}});
+  };
+  if(rr.state==='returned'){
+   if(rr.submitted_account_id===a.accountId&&r.state==='draft'&&coordinate(a,r,rr))add('rework',null,'Возвращён на доработку');
+   continue;
+  }
+  for(const stage of availableFor(db,a,r,rr)){
+   const slot=rt.participants.find(x=>x.stage===stage);
+   if(stage==='publish'&&job){add(stage,job.due_on,'Запланирован серверный ввод',false);continue}
+   add(stage,slot.due_on,stage==='publish'&&!impactPlan(db,rr)?'Ожидает оценки влияния':'Ожидает решения');
+  }
+ }
+ return items;
+}
+// Historical events are addressed, not a second permissions system. Resolve
+// the exact stage which produced each notice (director may also be publisher).
+export function approvalNoticeView(db,a,n){
+ const rr=byRound(db,n.round_id),r=rr&&revision(db,rr.revision_id);
+ if(!r||!a.personId||n.recipient_account_id!==a.accountId||r.document_archived||r.operation_archived||!canSee(db,a,r,rr))return null;
+ const rt=route(rr),b=frozen(rr),last=latest(db,r.id)?.id===rr.id,live=assigned(a,r,rr),author=rr.submitted_account_id===a.accountId&&(coordinate(a,r,rr)||a.history(r.id));
+ const mine=availableFor(db,a,r,rr),job=pendingPublication(db,rr),vs=decisions(db,rr);
+ const title=b.code+' · v'+b.version_no+' · '+b.title+' · раунд '+rr.round_no;
+ let label,reason,stage=null,pending=false,due=null;
+ if(n.kind==='action_required'){
+  const cause=vs.find(v=>v.id===n.event_key),activated=n.event_key===rr.submit_event_id?(rt.mode==='parallel'?REVIEWS:REVIEWS.slice(0,1)):cause?.command==='approve'?(cause.stage==='director'?['publish']:rt.mode==='parallel'?['director']:[STAGES[STAGES.indexOf(cause.stage)+1]]):[];
+  const slot=rt.participants.find(x=>activated.includes(x.stage)&&x.account_id===a.accountId);
+  if(!slot||!sameGrant(slot,eligible(a,frozen(rr),slot.stage,a.accountId)))return null;
+  stage=slot.stage;due=stage==='publish'&&job?job.due_on:slot.due_on;
+  label=stage==='director'?'СОП назначен на утверждение':stage==='publish'?'Требуется ввод СОП':'СОП назначен на согласование';
+  reason='Ваш этап: '+LABELS[stage];
+  pending=last&&mine.includes(stage)&&!(stage==='publish'&&job);
+ }else if(n.kind==='returned'){
+  if(!author&&!live&&!a.history(r.id))return null;
+  label='СОП возвращён на доработку';reason=author?'Вы отправили этот раунд':'Вы участвовали в маршруте';
+  pending=author&&last&&rr.state==='returned'&&r.state==='draft'&&coordinate(a,r,rr);
+  if(pending)stage='rework';
+ }else if(['effective','withdrawn'].includes(n.kind)){
+  if(!author&&!live&&!a.history(r.id))return null;
+  label=n.kind==='effective'?'СОП введён в действие':'СОП выведен из действия';reason=author?'Вы отправили этот раунд':'Вы участвовали в маршруте';
+ }else if(['publication_scheduled','publication_cancelled','publication_blocked'].includes(n.kind)){
+  const j=publicationById(db,n.event_key);
+  if(!j||j.round_id!==rr.id||!author&&!live&&!a.history(r.id))return null;
+  label={publication_scheduled:'Назначена дата ввода СОП',publication_cancelled:'Плановый ввод отменён',publication_blocked:'Плановый ввод заблокирован'}[n.kind];
+  reason='Изменилось состояние планового ввода';due=j.due_on;
+  if(n.kind!=='publication_scheduled'&&last&&rr.state==='approved'&&!job&&mine.includes('publish')){pending=true;stage='publish'}
+ }else return null;
+ return {label,title,reason,due_on:due,pending,overdue:!!(pending&&due&&due<a.day),state:pending?'Требуется действие':status(db,r,rr),route:{type:'sop_approval',id:r.id,round_id:rr.id,...(stage?{stage}:{})}};
+}
 export function approvalBadge(db,a,id){
  const r=revision(db,id),rr=r&&latest(db,id);
  return r&&canSee(db,a,r,rr)?{status:status(db,r,rr),round_id:rr?.id??null}:null;
@@ -132,7 +192,7 @@ export function approvalDetail(db,a,id,roundId=null){
  const impact=rr?impactView(db,a,r,rr,isLatest):null,publication=rr?publicationView(db,a,r,rr,isLatest,canManage):null;
  const canCancel=!!rr&&isLatest&&['review','approved'].includes(rr.state)&&canManage;
  const canWithdraw=!!rr&&isLatest&&rr.state==='effective'&&r.state==='effective'&&rt.participants.some(x=>['director','publish'].includes(x.stage)&&x.account_id===a.accountId)&&!!eligible(a,r,'withdraw',a.accountId);
- return {revision_id:r.id,document_id:r.document_id,document_rev:r.document_rev,version_no:r.version_no,code:r.code,title:roundId&&rr?b.title:documentTitle(db,r.document_id,r.id),document_state:r.state,day:a.day,status:status(db,r,rr),impact,publication,round:rr?{id:rr.id,rev:rr.rev,no:rr.round_no,state:rr.state,mode:rt.mode,submitted_at:rr.submitted_at,submitted_name:rr.submitted_name,note:rr.submit_note,binding_sha256:rr.binding_sha256,source_sha256:b.source.sha256,participants,decisions:vs.map(v=>({stage:LABELS[v.stage]||v.stage,command:v.command,actor:v.actor_name,note:v.note,at:v.occurred_at}))}:null,can_submit:canSubmit,can_restart_legacy:isLatest&&!last&&['review','approved'].includes(r.state)&&canManage,can_cancel:canCancel,can_withdraw:canWithdraw,can_decide:isLatest?availableFor(db,a,r,rr):[],options,stages:STAGES.map(stage=>({stage,label:LABELS[stage]})),blockers:canSubmit?blockers(db,r,a):[],preview_round_id:roundId||(!canSubmit&&rr?rr.id:null),can_preview:!!(roundId||!canSubmit&&rr||a.coordinate(id)),history:exists(db)?rows(db,'SELECT * FROM lc83_sop_round WHERE revision_id=? ORDER BY round_no DESC',[id]).filter(x=>canSee(db,a,r,x)).map(x=>summary(db,a,r,x)):[]};
+ return {revision_id:r.id,document_id:r.document_id,document_rev:r.document_rev,version_no:r.version_no,baseline_known:!rr||Object.hasOwn(route(rr),'previous'),previous_version:(rr?previousFor(db,r,rr):previousBinding(db,r))?.version_no??null,actual_effective_at:rr?(vs.find(v=>v.command==='publish')?.occurred_at??null):(r.state==='effective'?r.effective_at??null:null),code:r.code,title:roundId&&rr?b.title:documentTitle(db,r.document_id,r.id),document_state:r.state,day:a.day,status:status(db,r,rr),impact,publication,round:rr?{id:rr.id,rev:rr.rev,no:rr.round_no,state:rr.state,mode:rt.mode,submitted_at:rr.submitted_at,submitted_name:rr.submitted_name,note:rr.submit_note,binding_sha256:rr.binding_sha256,source_sha256:b.source.sha256,participants,decisions:vs.map(v=>({stage:LABELS[v.stage]||v.stage,command:v.command,actor:v.actor_name,note:v.note,at:v.occurred_at}))}:null,can_submit:canSubmit,can_restart_legacy:isLatest&&!last&&['review','approved'].includes(r.state)&&canManage,can_cancel:canCancel,can_withdraw:canWithdraw,can_decide:isLatest?availableFor(db,a,r,rr):[],options,stages:STAGES.map(stage=>({stage,label:LABELS[stage]})),blockers:canSubmit?blockers(db,r,a):[],preview_round_id:roundId||(!canSubmit&&rr?rr.id:null),can_preview:!!(roundId||!canSubmit&&rr||a.coordinate(id)),history:exists(db)?rows(db,'SELECT * FROM lc83_sop_round WHERE revision_id=? ORDER BY round_no DESC',[id]).filter(x=>canSee(db,a,r,x)).map(x=>summary(db,a,r,x)):[]};
 }
 function event(db,a,r,command,note){
  const id=uuid();
@@ -158,7 +218,7 @@ function inputRoute(db,a,r,f){
  return {version:1,mode:f.mode,participants:selected,previous:previousBinding(db,r)};
 }
 export function prepareApprovalSubmit(db,a,f){
- must(exact(f,['revision_id','expected_revision','mode','participants','note'])&&isId(f.revision_id)&&Number.isSafeInteger(f.expected_revision)&&text(f.note),400,'Неверные поля маршрута');
+ must(exact(f,['revision_id','expected_revision','mode','participants','note'])&&isId(f.revision_id)&&Number.isSafeInteger(f.expected_revision)&&text(f.note)&&f.note.trim(),400,'Укажите краткое резюме изменений и заполните маршрут');
  const r=revision(db,f.revision_id),rr=r&&latest(db,r.id);
  must(r&&a.personId&&a.siteRead(r.id)&&coordinate(a,r,rr),404,'Черновик недоступен');
  must(r.state==='draft'&&!r.document_archived&&!r.operation_archived&&r.document_rev===f.expected_revision&&(!rr||rr.state==='returned'),409,'Редакция или маршрут изменились');
@@ -276,19 +336,39 @@ export function compareApprovalSnapshots(oldBinding,oldDoc,newBinding,newDoc){
   return {action:x.action,key_points:x.key_points,reason:x.reason,seconds:x.seconds,photo:x.photo,photo_sha:asset?digest(asset):null,annotation_sha:digest(raw.photoAnnotations??[]),extra_sha:digest(raw)};
  };
  const show=x=>x?{action:x.action,key_points:x.key_points,reason:x.reason,seconds:x.seconds,photo:x.photo}:null;
+ const left=oldDoc.projection.steps.map((_,i)=>simple(oldDoc,i)),right=newDoc.projection.steps.map((_,i)=>simple(newDoc,i));
+ const matched=[],usedLeft=new Set(),usedRight=new Set();
+ const pair=(i,j,match)=>{matched.push({i,j,match});usedLeft.add(i);usedRight.add(j)};
+ const unique=(key,match)=>{
+  const group=(xs,used)=>{const m=new Map();xs.forEach((v,i)=>{if(used.has(i))return;const k=key(v);if(k!==null)m.set(k,[...(m.get(k)||[]),i])});return m};
+  const a=group(left,usedLeft),b=group(right,usedRight);
+  for(const [k,is] of a){const js=b.get(k);if(is.length===1&&js?.length===1)pair(is[0],js[0],match)}
+ };
+ // Do not infer identity from source IDs, which imports may reuse. A match
+ // based on action or position is explicitly labelled for manual review.
+ unique(v=>canonical([v.action,v.key_points,v.reason,v.seconds,v.photo,v.photo_sha,v.annotation_sha]),'content');
+ unique(v=>String(v.action??'').trim()?canonical(v.action):null,'action');
+ const aRest=left.map((_,i)=>i).filter(i=>!usedLeft.has(i)),bRest=right.map((_,i)=>i).filter(i=>!usedRight.has(i));
+ if(left.length===right.length&&aRest.length===bRest.length){
+  for(const i of aRest)if(bRest.includes(i))pair(i,i,'position');
+ }
+ const ambiguous=left.some((_,i)=>!usedLeft.has(i))&&right.some((_,i)=>!usedRight.has(i));
+ for(let i=0;i<left.length;i++)if(!usedLeft.has(i))matched.push({i,j:null,match:ambiguous?'ambiguous':'unmatched'});
+ for(let j=0;j<right.length;j++)if(!usedRight.has(j))matched.push({i:null,j,match:ambiguous?'ambiguous':'unmatched'});
  const steps=[];
- for(let i=0;i<Math.max(oldDoc.projection.steps.length,newDoc.projection.steps.length);i++){
-  const a=simple(oldDoc,i),b=simple(newDoc,i),fields=[];
-  if(!a||!b)fields.push(!a?'Добавлен шаг':'Удалён шаг');
+ for(const {i,j,match} of matched.sort((a,b)=>(a.j??a.i)-(b.j??b.i)||(a.i??-1)-(b.i??-1))){
+  const a=i===null?null:left[i],b=j===null?null:right[j],fields=[];
+  if(!a||!b)fields.push(match==='ambiguous'?'Не сопоставлен · нужна ручная проверка':!a?'Добавлен шаг':'Удалён шаг');
   else{
    for(const [key,label] of [['action','Действие'],['key_points','Ключевые моменты'],['reason','Причина'],['seconds','Время'],['photo','Наличие фото'],['photo_sha','Фото'],['annotation_sha','Разметка фото']])if(canonical(a[key])!==canonical(b[key]))fields.push(label);
    if(a.extra_sha!==b.extra_sha&&!fields.length)fields.push('Прочие поля шага');
+   if(i!==j)fields.push('Изменение позиции');
   }
-  if(fields.length)steps.push({position:i+1,fields,before:show(a),after:show(b)});
+  if(fields.length)steps.push({position:(j??i)+1,before_position:i===null?null:i+1,after_position:j===null?null:j+1,match,fields,before:show(a),after:show(b)});
  }
  const twiChanged=canonical(oldDoc.raw.constructor.twi??null)!==canonical(newDoc.raw.constructor.twi??null);
  const frvChanged=canonical(projectLibraryDetail('sop.read_linked_frv',oldDoc.raw))!==canonical(projectLibraryDetail('sop.read_linked_frv',newDoc.raw));
- return {old_revision_id:oldBinding.revision_id,old_version:oldBinding.version_no,old_sha:oldBinding.source.sha256,new_version:newBinding.version_no,new_sha:newBinding.source.sha256,meta,steps,twi_changed:twiChanged,frv_changed:frvChanged,same_work_content:sameWorkContent(oldDoc.raw,newDoc.raw),comparison:'by_position'};
+ return {old_revision_id:oldBinding.revision_id,old_version:oldBinding.version_no,old_sha:oldBinding.source.sha256,new_version:newBinding.version_no,new_sha:newBinding.source.sha256,meta,steps,twi_changed:twiChanged,frv_changed:frvChanged,same_work_content:sameWorkContent(oldDoc.raw,newDoc.raw),comparison:'aligned_conservative',manual_review:steps.some(x=>['position','action','ambiguous'].includes(x.match))};
 }
 export async function approvalPhoto(b,p,position){
  must(Number.isSafeInteger(position)&&position>=1&&position<=1000,404,'Фото недоступно');
@@ -311,7 +391,7 @@ function impactContext(db,a,r,rr){
  return {r,rr,old,b:frozen(rr),reviewer,context,prior:impactPlan(db,rr),scope:context.scope,scope_sha:scopeDigest(context.scope)};
 }
 function impactView(db,a,r,rr,isLatest){
- const prior=impactPlan(db,rr),base={can_review:false,has_baseline:Object.hasOwn(route(rr),'previous'),previous_version:route(rr).previous?.version_no??null,record:prior?{rev:prior.rev,decision:prior.decision,reason:prior.reason,reviewer:prior.reviewer_name,recorded_at:prior.recorded_at,affected:JSON.parse(prior.scope_json).length,activated_at:prior.activated_at}:null};
+ const prior=impactPlan(db,rr),base={can_review:false,has_baseline:Object.hasOwn(route(rr),'previous'),previous_version:route(rr).previous?.version_no??null,record:prior?{rev:prior.rev,decision:prior.decision,reason:prior.reason,reviewer:prior.reviewer_name,recorded_at:prior.recorded_at,affected:JSON.parse(prior.scope_json).length,people_count:new Set(JSON.parse(prior.scope_json).map(x=>x.person_id)).size,activated_at:prior.activated_at}:null};
  if(!isLatest||rr.state!=='approved'||pendingPublication(db,rr))return base;
  try{const c=impactContext(db,a,r,rr);return {...base,can_review:true,scope:c.scope}}catch(e){if(e instanceof PilotError)return base;throw e}
 }

@@ -17,7 +17,7 @@ import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,SITE_REFE
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop,productionPlans,createProductionPlan,approveProductionPlan,recordInstructionProtocol,recordAssessmentResult} from './training-commands.mjs';
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix,matrixOverviewOptions,matrixOverview,matrixAssessmentHistory,profileOptions,professionProfile,saveProfessionProfile} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
-import {familiarizationList,prepareFamiliarizationAck,confirmFamiliarization,setFamiliarizationDeadline,checkFamiliarizationIntegrity,familiarizationMetrics,familiarizationMetricId,familiarizationScopeOptions,changeFamiliarizationScope,linkFamiliarizationTraining,familiarizationCalendar} from './sop-familiarization.mjs';
+import {familiarizationList,prepareFamiliarizationAck,confirmFamiliarization,setFamiliarizationDeadline,checkFamiliarizationIntegrity,familiarizationMetrics,familiarizationMetricId,familiarizationScopeOptions,changeFamiliarizationScope,linkFamiliarizationTraining,familiarizationCalendar,hasOwnFamiliarization} from './sop-familiarization.mjs';
 import {calendarWorkspace,calendarOptions,calendarDetail,createSchedule,changeSchedule,scheduleView,centerOptions,centerWorkspace,metricEvidence} from './center-commands.mjs';
 import {roiOptions,roiView,roiDetail,createRoi,changeRoi,roiMeasureContext,measureRoi,roiTwiOptions,previewRoiTwi} from './roi-commands.mjs';
 import {competencyOptions,competencyChange,competencyView,assessmentDetail} from './competency-commands.mjs';
@@ -33,7 +33,8 @@ import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {internalTrainerAppointment} from '../../src/modules/training/domain.js';
-import {approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,compareApprovalSnapshots,approvalImpactContext,saveApprovalImpact,preparePublicationSchedule,schedulePublication,cancelPublication,duePublications,prepareScheduledPublication,executeScheduledPublication,blockDuePublication,checkApprovalIntegrity} from './sop-approval.mjs';
+import {notificationsEnabled,notificationFeed,readNotification,readAllNotifications,checkNotificationIntegrity} from './notifications.mjs';
+import {approvalPlanItems,approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,compareApprovalSnapshots,approvalImpactContext,saveApprovalImpact,preparePublicationSchedule,schedulePublication,cancelPublication,duePublications,prepareScheduledPublication,executeScheduledPublication,blockDuePublication,checkApprovalIntegrity} from './sop-approval.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
 import {journalWorkspace,retrainingWorkspace,revisionReviewContext,inspectRevisionChange,publicRevisionReview,saveRevisionReview} from './training-registers.mjs';
@@ -96,8 +97,9 @@ function sessionView(db,a,withWorkspace=true){
  if(view.permissions.includes('sop.approval.twi'))types.push('mentor_credential','mentor_appointment');
  const epoch=types.length?one(db,'SELECT count(*) n FROM change_event WHERE entity_type IN ('+types.map(()=>'?').join(',')+')',types).n:0;
  const stamp=createHash('sha256').update(JSON.stringify([a.id,a.credential_revision,d,view.permissions,effective,epoch])).digest('hex');
- const work=workspaceActions(db,trainingAccess(db,a,d),a.bootstrap===1);
- return {...view,workspace_actions:[...new Set([...work,...(a.person_id?[...SHARED_LIBRARY_WORKSPACES,'sop.approvals']:[])])].sort(),access_stamp:stamp};
+ const access=trainingAccess(db,a,d),work=workspaceActions(db,access,a.bootstrap===1),approval=approvalAccess(db,a,d);
+ if(!work.includes('plan.read')&&sopPersonalPlanAvailable(db,approval,access))work.push('plan.read');
+ return {...view,notifications_enabled:notificationsEnabled()&&!!approval.personId,workspace_actions:[...new Set([...work,...(a.person_id?[...SHARED_LIBRARY_WORKSPACES,'sop.approvals']:[])])].sort(),access_stamp:stamp};
 }
 function auditView(db){return rows(db,"SELECT a.id,a.actor_account_id,a.action,a.target_id,a.occurred_at,m.value reason FROM lc81_audit a LEFT JOIN lc81_meta m ON m.key='reason:'||a.target_id ORDER BY a.occurred_at DESC,a.id LIMIT 100")}
 // A synchronous read may perform hundreds of decisions for one account.
@@ -160,6 +162,14 @@ function approvalAccess(db,a,d){
   accountFor:id=>{const q=one(db,'SELECT id FROM lc81_account WHERE person_id=?',[id]),v=q&&account(db,q.id);return local(v)?v.id:null},
   coordinate:id=>siteRead(id)&&(shared.ownsSop(id)||v.fullAllows('sop.edit_draft','sop.read_history',id)),eligible,impactActor:id=>{const other=account(db,id);return local(other)?trainingAccess(db,other,d):null},audit:(action,target)=>audit(db,a.id,action,target)};
 }
+// Narrow approvers may open ONLY their own derived SOP plan. This does not
+// grant calendar.read, training.read, or access to anyone else's plan.
+function sopPersonalPlanAvailable(db,approval,access){
+ if(!approval.personId)return false;
+ if(access.permissions.some(k=>['sop.approval.safety','sop.approval.engineering','sop.approval.twi','sop.approval.director','sop.approval.publish'].includes(k))||hasOwnFamiliarization(db,approval))return true;
+ return !!one(db,"SELECT name FROM sqlite_master WHERE type='table' AND name='lc83_sop_round'")&&rows(db,'SELECT DISTINCT revision_id FROM lc83_sop_round WHERE submitted_account_id=?',[approval.accountId]).some(x=>approval.siteRead(x.revision_id));
+}
+const planDate=x=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x))&&new Date(x).toISOString().slice(0,10)===x;
 // A revision and its historical FRV source are independently protected.
 // The shared final-study floor does not disclose previously replaced sources.
 function readableFrvOrigin(db,v,id){
@@ -309,6 +319,7 @@ function checkPrivate(db){
  must(!!one(db,'SELECT role_id FROM lc81_policy WHERE role_id=?',[cfg.manager]),503,'Нет политики управляющего');
  checkApprovalIntegrity(db);
  checkFamiliarizationIntegrity(db);
+ checkNotificationIntegrity(db);
 }
 const digest=b=>createHash('sha256').update(b).digest('hex');
 function pack(db){
@@ -779,12 +790,17 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   mentorOptions(actor,revision,kind){return read(db=>mentorOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind))},
   changeMentor(actor,revision,input){return mutate(db=>changeMentor(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   calendarWorkspace(actor,revision,query){return read(db=>{
-   const a=checkedAccount(db,actor,revision),d=day(db),access=trainingAccess(db,a,d),id=query.person_id||null;
-   if(id)must(isId(id)&&cardAllowed(db,a,id,d)&&((query.mode==='plan'&&a.person_id===id&&workspaceActions(db,access,a.bootstrap===1).includes('plan.read'))||access.permissions.includes('calendar.read')),404,'План сотрудника недоступен');
-   const result=calendarWorkspace(db,access,{...query,person_id:id});
-   const personal=query.mode==='plan'&&(!id||id===a.person_id)&&workspaceActions(db,access,a.bootstrap===1).includes('plan.read');
-   const extra=familiarizationCalendar(db,approvalAccess(db,a,d),access,{...query,person_id:id},personal);
-   return {...result,items:[...result.items,...extra].sort((a,b)=>Number(b.overdue)-Number(a.overdue)||String(a.date??'9999-12-31').localeCompare(String(b.date??'9999-12-31'))||a.key.localeCompare(b.key))};
+   const a=checkedAccount(db,actor,revision),d=day(db),access=trainingAccess(db,a,d),approval=approvalAccess(db,a,d),id=query.person_id||null;
+   const own=query.mode==='plan'&&(!id||id===a.person_id),native=workspaceActions(db,access,a.bootstrap===1).includes('plan.read');
+   const personal=own&&(native||sopPersonalPlanAvailable(db,approval,access));
+   if(id)must(isId(id)&&cardAllowed(db,a,id,d)&&(personal||access.permissions.includes('calendar.read')),404,'План сотрудника недоступен');
+   let result;
+   if(personal&&!native){
+    must(planDate(query.from)&&planDate(query.to)&&query.from<=query.to&&Date.parse(query.to)-Date.parse(query.from)<=366*86400000,400,'Выберите период не более года');
+    result={day:access.day,from:query.from,to:query.to,mode:'plan',items:[],can_plan:false};
+   }else result=calendarWorkspace(db,access,{...query,person_id:id});
+   const extra=familiarizationCalendar(db,approval,access,{...query,person_id:id},personal),decisions=personal?approvalPlanItems(db,approval,{...query,person_id:id}):[];
+   return {...result,items:[...result.items,...extra,...decisions].sort((a,b)=>Number(b.overdue)-Number(a.overdue)||String(a.date??'9999-12-31').localeCompare(String(b.date??'9999-12-31'))||a.key.localeCompare(b.key))};
   })},
   calendarOptions(actor,revision,type,sourceId=null){return read(db=>calendarOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),type,sourceId))},
   calendarDetail(actor,revision,id){return read(db=>calendarDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
@@ -964,6 +980,9 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const a=checkedAccount(db,actor,revision);
    return finalizeLibrary(db,input,{...libraryAccess(db,a,day(db)),personId:a.person_id,at:at(),audit:(action,target)=>audit(db,actor,action,target)});
   })},
+  notificationFeed(actor,revision,filter){return read(db=>notificationFeed(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),filter))},
+  readNotification(actor,revision,f){return mutate(db=>readNotification(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  readAllNotifications(actor,revision,f){return mutate(db=>readAllNotifications(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   approvalList(actor,revision,filter){return read(db=>approvalList(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),filter))},
   approvalDetail(actor,revision,id,roundId=null){return read(db=>approvalDetail(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),id,roundId))},
   familiarizationList(actor,revision,filter){return read(db=>familiarizationList(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),filter))},

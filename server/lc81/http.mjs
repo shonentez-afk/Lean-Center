@@ -286,6 +286,9 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='POST'&&p==='/api/lc81/matrix/retire'){reply(res,200,await store.retireMatrix(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/person/card'){reply(res,200,store.personCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
+   if(req.method==='GET'&&p==='/api/lc81/notifications'){reply(res,200,store.notificationFeed(a.id,a.credential_revision,{filter:url.searchParams.get('filter')||'all',cursor:url.searchParams.get('cursor')||null,limit:Number(url.searchParams.get('limit')||30)}));return}
+   if(req.method==='POST'&&p==='/api/lc81/notifications/read'){reply(res,200,await store.readNotification(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/notifications/read-all'){reply(res,200,await store.readAllNotifications(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/sop-familiarization/list'){
     reply(res,200,store.familiarizationList(a.id,a.credential_revision,{kind:url.searchParams.get('kind')||'mine',revision_id:url.searchParams.get('revision_id')||null,person_id:url.searchParams.get('person_id')||null,offset:Number(url.searchParams.get('offset')||0)}));return;
    }

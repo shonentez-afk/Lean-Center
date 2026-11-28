@@ -114,6 +114,29 @@ function itemFor(db,a,t,x,training){
  return {id:x.id,rev:x.rev,revision_id:x.revision_id,round_id:x.round_id,source_sha256:x.source_sha,person_id:x.person_id,person:x.person_name,unit_id:scope.unit_id,code:b.code,title:b.title,version_no:b.version_no,decision:x.decision,state,state_label:stateLabels[state],current:active,assigned_on:scope.assigned_at.slice(0,10),confirmed_at:x.confirmed_at,due_on:deadline?.due_on??null,overdue,scope_history:managed?scope.changes.map(c=>({date:c.recorded_on,reason:c.reason,skill:c.skill_id?t.read('skill.read',c.skill_id)?.data.name??null:null})):[],
  can_ack:own&&state==='pending'&&a.effective(x.revision_id),can_due:canWrite(db,t,x)&&state==='pending',can_open:!!(a.effective(x.revision_id)||a.history(x.revision_id)),training:training&&managed?trainingRows(db,t,x,allowedTraining):null};
 }
+// Read the original recipient event; don't make a second business record.
+export function familiarizationNoticeView(db,a,n){
+ if(!a.personId||n.recipient_account_id!==a.accountId||!exists(db))return null;
+ let x=null;
+ if(['familiarization_required','familiarization_confirmed'].includes(n.kind))x=find(db,n.event_key);
+ if(!x&&n.kind==='familiarization_deadline'){const d=one(db,'SELECT receipt_id FROM lc83_sop_familiarization_deadline WHERE id=?',[n.event_key]);if(d)x=find(db,d.receipt_id)}
+ if(!x&&['familiarization_required','familiarization_scope_changed'].includes(n.kind)&&exists(db,'lc834_sop_scope_change')){
+  const c=one(db,'SELECT receipt_id FROM lc834_sop_scope_change WHERE id=?',[n.event_key]);if(c)x=find(db,c.receipt_id);
+ }
+ if(!x||x.round_id!==n.round_id||x.document_archived||x.operation_archived)return null;
+ const t=manager(db,a),own=x.person_id===a.personId,managed=canManage(db,t,x);
+ if(n.kind==='familiarization_confirmed'?!managed:!own)return null;
+ const v=itemFor(db,a,t,x,false);
+ // Don't disclose a restricted or transferred recipient's former instruction.
+ if(!v.can_open||own&&v.state==='scope_changed')return null;
+ const label={familiarization_required:'Требуется ознакомление с СОП',familiarization_deadline:'Установлен срок ознакомления',familiarization_scope_changed:'Уточнено назначение ознакомления',familiarization_confirmed:'Сотрудник ознакомился с СОП'}[n.kind];
+ if(!label)return null;
+ const pending=own&&v.can_ack&&n.kind!=='familiarization_confirmed';
+ return {label,title:v.code+' · v'+v.version_no+' · '+v.title,reason:own?'Вам назначено персональное ознакомление':'Вы отвечаете за оценку влияния',due_on:v.due_on,pending,overdue:pending&&v.overdue,state:v.state_label,route:{type:'familiarization',id:v.revision_id,person_id:v.person_id}};
+}
+export function hasOwnFamiliarization(db,a){
+ return !!a.personId&&exists(db)&&rows(db,selectSQL+" WHERE f.person_id=? AND r.state='effective' AND v.state='effective' AND d.archived=0 AND o.archived=0 AND f.confirmed_at IS NULL",[a.personId]).some(x=>stateFor(db,a,x)==='pending'&&a.effective(x.revision_id));
+}
 export function familiarizationList(db,a,{kind='mine',revision_id=null,person_id=null,offset=0}={},includeTraining=true){
  must(a.personId&&['mine','managed','visible'].includes(kind)&&(revision_id===null||isId(revision_id))&&(person_id===null||isId(person_id))&&Number.isSafeInteger(offset)&&offset>=0&&offset<=1000000,400,'Неверный фильтр ознакомления');
  const t=manager(db,a),result={items:[],total:0,offset,limit:50,day:a.day,can_manage:!!t,registered:false,can_scope:false};

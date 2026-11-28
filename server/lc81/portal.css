@@ -69,3 +69,18 @@
 /* LC8.3 route setup stays readable on narrow screens. */
 .lc83-route-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(130px,1fr);gap:10px;align-items:end}.lc83-hash{overflow-wrap:anywhere;font-family:monospace;font-size:12px}.lc83-state{font-weight:600;color:var(--tn-red)}
 @media(max-width:600px){.lc83-route-row{grid-template-columns:minmax(0,1fr);gap:4px}}
+
+/* LC8.2 personal inbox; no cached private content or background push yet. */
+.lc82-bell{white-space:nowrap;position:relative}
+dialog.lc82-notification-dialog{position:fixed;inset:0 0 0 auto;margin:0;width:min(460px,100%);height:100dvh;max-height:100dvh;max-width:100%;padding:16px;box-sizing:border-box;border:0;border-left:1px solid #d5d9de;overflow:auto;overscroll-behavior:contain;background:var(--surface,#fff);color:var(--text,#222);z-index:2000}
+dialog.lc82-notification-dialog::backdrop{background:rgba(0,0,0,.32)}
+.lc82-notice-head{display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:0;background:inherit;z-index:1}
+.lc82-notice-list{display:grid;gap:10px;margin-top:12px}
+.lc82-notice-card{min-width:0;border:1px solid #d5d9de;border-radius:8px;padding:12px;overflow-wrap:anywhere}
+.lc82-notice-card h3{margin:0 0 8px;font-size:16px}
+.lc82-notice-card p{margin:4px 0}
+.lc82-notice-card.lc82-unread{border-left:4px solid var(--tn-red,#c62632)}
+.lc82-notification-dialog .row{flex-wrap:wrap;gap:6px}
+.lc835-release-summary{border-left:4px solid var(--tn-red,#c62632);overflow-wrap:anywhere}
+.lc835-step-link{white-space:normal;text-align:left}
+@media(max-width:600px){dialog.lc82-notification-dialog{width:100%;border:0;padding:12px}.lc82-notification-dialog button{min-height:40px}}

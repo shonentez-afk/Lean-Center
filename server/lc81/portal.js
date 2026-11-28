@@ -20,6 +20,7 @@ let libraryUI=null,trainingUI=null,centerUI=null,assistantUI=null,mobileUI=null,
 let user=null,page='person.read_basic',busy=false,sequence=0,saving=false,checking=false,saveFailed=false,networkFailed=false;
 let authGeneration=0,statusVersion=0,accessCheck=null,accessRefreshPending=false,provisionManager=false;
 let navigationStarted=false,historyReplay=false,navAccount=null,navOpen=new Map();
+let noticeCounterFetch=null,noticeCounterAt=0;
 const adminPages=Object.freeze({admin:'Начало работы','admin.enterprise':'Предприятие','admin.users':'Пользователи','admin.roles':'Роли и права','admin.access':'Назначения и доступ','admin.storage':'Хранение и журнал'});
 const isAdminPage=key=>Object.hasOwn(adminPages,key);
 const titleFor=key=>adminPages[key]||actions[key]||'Личное рабочее пространство';
@@ -71,9 +72,9 @@ async function run(fn){
   }
  }finally{busy=false;refreshIndicator();if(accessRefreshPending&&user)void checkAccess(true)}
 }
-function closeProtectedViews(){for(const d of document.querySelectorAll('dialog.lc81-password-dialog,dialog.lc72-context-dialog')){if(d.open)d.close();else d.remove()}libraryUI?.clear();$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren()}
+function closeProtectedViews(){if($('lc82-bell')){$('lc82-bell').textContent='🔔 Уведомления';$('lc82-bell').setAttribute('aria-label','Уведомления');noticeCounterAt=0}for(const d of document.querySelectorAll('dialog.lc81-password-dialog,dialog.lc72-context-dialog,dialog.lc82-notification-dialog')){if(d.open)d.close();else d.remove()}libraryUI?.clear();$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren()}
 function showLogin(){authGeneration++;sequence++;user=null;navigationStarted=false;historyReplay=false;navAccount=null;navOpen.clear();centerUI?.resetReports();history.replaceState(null,'');accessRefreshPending=false;maskAccess(false);closeProtectedViews();saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
-function showUser(a){user=a;maskAccess(false);$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Изменить пароль',ownPasswordDialog),button('Выйти',async()=>{if(!discard()||!$('issued').hidden&&!confirm('Выданный пароль ещё открыт. Завершить сеанс?'))return;await api('logout',{});showLogin();note('Выход выполнен')}));refreshIndicator()}
+function showUser(a){user=a;maskAccess(false);$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Изменить пароль',ownPasswordDialog),button('Выйти',async()=>{if(!discard()||!$('issued').hidden&&!confirm('Выданный пароль ещё открыт. Завершить сеанс?'))return;await api('logout',{});showLogin();note('Выход выполнен')}));if(a.notifications_enabled){const bell=button('🔔 Уведомления',openNotifications,'lc82-bell');bell.id='lc82-bell';bell.setAttribute('aria-label','Уведомления');$('identity').prepend(bell);noticeCounterAt=0;void refreshNoticeCounter(true)}refreshIndicator()}
 function panel(title,...children){const n=el('section',undefined,'panel');n.append(el('h2',title),...children);return n}
 function table(headers,values){const wrap=el('div',undefined,'tablewrap lc81-rows');const t=el('table'),h=el('thead'),tr=el('tr');for(const v of headers)tr.append(el('th',v));h.append(tr);t.append(h);const b=el('tbody');for(const row of values){const r=el('tr');for(const v of row){const d=el('td');d.append(v instanceof Node?v:el('span',v??'—'));r.append(d)}b.append(r)}t.append(b);wrap.append(t);return wrap}
 function input(name,label,type='text',required=true){const n=el('input');n.name=name;n.type=type;n.required=required;if(type==='password')n.autocomplete='new-password';const l=el('label',label,'field');l.append(n);return l}
@@ -82,6 +83,73 @@ function check(name,label,checked=false){const l=el('label'),n=el('input');n.typ
 const value=(f,k)=>f.elements.namedItem(k).value;
 function form(fields,submit,fn){const f=el('form',undefined,'lc81-form');f.append(...fields,el('button',submit,'primary'));f.addEventListener('submit',e=>{e.preventDefault();run(async()=>{if([...$('content').querySelectorAll('[data-lc-work-form]')].some(x=>x!==f&&x.lcIsDirty?.())&&!confirm('В другой форме есть изменения. Продолжить без их сохранения?'))return;await fn(f)})});return protectWorkForm(f)}
 const options=items=>items.map(x=>[x.id,x.name||x.display_name||x.login||x.id]);
+// Header count is an independent, read-only request; its failure must not
+// change the save indicator or interfere with a domain mutation.
+function setNoticeCount(n){
+ const b=$('lc82-bell');if(!b)return;
+ const count=Number.isSafeInteger(n)&&n>=0?n:null;
+ b.textContent='🔔 Уведомления'+(count?' · '+(count>99?'99+':count):count===null?' · ?':'');
+ b.setAttribute('aria-label',count===null?'Уведомления, счётчик недоступен':'Уведомления, '+count+' непрочитанных');
+}
+async function refreshNoticeCounter(force=false){
+ if(!user?.notifications_enabled||!$('lc82-bell')||document.visibilityState==='hidden'||noticeCounterFetch||!force&&Date.now()-noticeCounterAt<10000)return;
+ const generation=authGeneration,account=user.id;
+ noticeCounterAt=Date.now();
+ const task=(async()=>{try{
+  const r=await fetch('/api/lc81/notifications?limit=1',{cache:'no-store',credentials:'same-origin',signal:AbortSignal.timeout(8000)});
+  const d=await r.json();if(generation===authGeneration&&user?.id===account)setNoticeCount(r.ok?d.unread:null);
+ }catch{if(generation===authGeneration&&user?.id===account)setNoticeCount(null)}})();
+ noticeCounterFetch=task;
+ try{await task}finally{if(noticeCounterFetch===task)noticeCounterFetch=null}
+}
+async function openNotifications(){
+ if(!user?.notifications_enabled)return;
+ const trigger=$('lc82-bell'),d=el('dialog',undefined,'lc82-notification-dialog'),head=el('div',undefined,'lc82-notice-head'),body=el('div',undefined,'lc82-notice-list'),tools=el('div',undefined,'row');
+ d.setAttribute('aria-label','Личные уведомления');
+ const close=button('Закрыть',()=>d.close()),summary=el('p','Загрузка…','muted');
+ head.append(el('h2','Уведомления'),close);
+ const tabs=el('div',undefined,'row');let filter='all',snapshot=null,next=null;
+ const allRead=button('Отметить все прочитанными',async()=>{await api('notifications/read-all',{snapshot});await load()});
+ const reload=button('Обновить',()=>load());
+ const tabButtons=[['actions','Требуют действия'],['unread','Непрочитанные'],['all','Все']].map(([key,title])=>{
+  const b=button(title,async()=>{filter=key;await load()});tabs.append(b);return [key,b];
+ });
+ tools.append(reload,allRead);d.append(head,summary,tabs,tools,body);document.body.append(d);
+ d.addEventListener('close',()=>{d.remove();if(trigger?.isConnected)trigger.focus({preventScroll:true})},{once:true});
+ d.showModal();
+ async function load(cursor=null){
+  if(!d.isConnected)return;
+  body.replaceChildren(el('p','Загрузка…','muted'));allRead.disabled=true;
+  for(const [key,b] of tabButtons){b.setAttribute('aria-pressed',String(key===filter));b.classList.toggle('primary',key===filter)}
+  try{
+   const q=new URLSearchParams({filter,limit:'30',...(cursor?{cursor}:{})}),v=await api('notifications?'+q);
+   if(!d.isConnected)return;
+   snapshot=v.snapshot;next=v.next_cursor;setNoticeCount(v.unread);
+   summary.textContent='Непрочитанных: '+v.unread+' · требуют действия: '+v.action_count+' · записей в выборке: '+v.total;
+   allRead.disabled=!snapshot||v.unread===0;body.replaceChildren();
+   if(!v.items.length)body.append(el('p','Нет доступных уведомлений в этой выборке.','empty'));
+   for(const n of v.items){
+    const c=el('article',undefined,'lc82-notice-card'),h=el('h3',n.label),row=el('div',undefined,'row');
+    c.dataset.noticeId=n.id;c.classList.toggle('lc82-unread',!n.read_at);
+    c.append(h,el('p',n.title),el('p',n.reason,'muted'),el('p',(n.overdue?'Просрочено · ':'')+n.state+(n.due_on?' · срок '+n.due_on:''),'lc83-state'),el('p',n.occurred_at.replace('T',' ').slice(0,19)+' UTC · '+(n.read_at?'Прочитано':'Не прочитано'),'muted'));
+    row.append(button(n.route.type==='sop_approval'?'Открыть согласование':'Открыть ознакомление',async()=>{
+     const r=await api('notifications/read',{id:n.id});d.close();void refreshNoticeCounter(true);
+     // The returned server route is reauthorized again by its own endpoint.
+     await openLinked($('content'),r.route);
+    },'primary'));
+    if(!n.read_at)row.append(button('Отметить прочитанным',async()=>{await api('notifications/read',{id:n.id});await load()}));
+    c.append(row);body.append(c);
+   }
+   if(cursor)body.append(button('К началу',()=>load()));
+   if(next)body.append(button('Следующая страница',()=>load(next)));
+  }catch(e){
+   if(e.status===401){showLogin();return}
+   if(e.name==='AbortError'||!d.isConnected)return;
+   body.replaceChildren(el('p',e.status===409?'Лента изменилась. Обновите список.':'Не удалось получить уведомления. Проверьте связь.','status error'),button('Повторить',()=>load()));setNoticeCount(null);
+  }
+ }
+ await load();
+}
 function ownPasswordDialog(){
  if(!discard())return;
  if(!$('issued').hidden)throw Error('Сначала сохраните и закройте выданный пароль');
@@ -465,6 +533,7 @@ async function openLinked(host,r){
  if(['sop_evaluation','weighted_sop'].includes(r.type))return trainingUI.sopEvaluationCard(host,r.type,r.id);
  if(['schedule','roi'].includes(r.type))return centerUI.open(host,r.type,r.id);
  if(r.type==='sop')return libraryUI.card(host,r.id);
+ if(r.type==='sop_approval')return approvalUI.detail(host,r.id,r.round_id,null,false);
  if(r.type==='familiarization')return openFamiliarization(host,{kind:'visible',revision_id:r.id,...(r.person_id?{person_id:r.person_id}:{})});
  if(r.type==='frv'){
   const action='frv.read',result=await api('resources?action='+encodeURIComponent(action));
@@ -667,7 +736,7 @@ async function checkAccess(mask=false){
    $('access-check-notice').textContent='Не удалось подтвердить права доступа. Данные скрыты до восстановления связи.';
   }
  })();
- try{await accessCheck}finally{accessCheck=null;if(accessRefreshPending&&user&&!busy)queueMicrotask(()=>{if(!accessCheck&&!busy&&accessRefreshPending)void checkAccess(true)});if(!accessRefreshPending&&user&&!document.documentElement.classList.contains('lc81-access-check'))$('access-check-notice').textContent='Проверка действующих прав доступа…'}
+ try{await accessCheck}finally{accessCheck=null;if(accessRefreshPending&&user&&!busy)queueMicrotask(()=>{if(!accessCheck&&!busy&&accessRefreshPending)void checkAccess(true)});if(!accessRefreshPending&&user&&!document.documentElement.classList.contains('lc81-access-check')){$('access-check-notice').textContent='Проверка действующих прав доступа…';void refreshNoticeCounter()}}
 }
 
 $('menu').addEventListener('click',()=>setMobileMenu(!$('nav').classList.contains('lc53-menu-open'),$('nav').classList.contains('lc53-menu-open')));
