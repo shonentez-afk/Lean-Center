@@ -53,6 +53,54 @@ jobs:
           test "$(id -un)" = lean-deploy
           root="$HOME/lean-center-cloudcore-qa"
           live="$root/private-devtunnel"
+          # Read-only diagnostics: never truncate, remove, or forcibly unlock
+          # a live deployment lock. Open an existing inode read-only and use
+          # a short nonblocking probe. Only own-process classifications/PIDs.
+          probe_lock() {
+            local kind="$1" lock="$2" rc=0 proc fd target pid comm label supervisor=''
+            if [[ ! -e "$lock" && ! -L "$lock" ]]; then
+              printf 'CLOUDCORE_LOCK_%s_ABSENT\n' "$kind"
+              return
+            fi
+            if [[ ! -f "$lock" || -L "$lock" || ! -O "$lock" ]]; then
+              printf 'CLOUDCORE_LOCK_%s_UNKNOWN\n' "$kind"
+              return
+            fi
+            if ! { exec 8<"$lock"; }; then
+              printf 'CLOUDCORE_LOCK_%s_UNKNOWN\n' "$kind"
+              return
+            fi
+            flock -n -x -E 75 8 || rc=$?
+            if [[ "$rc" == 0 ]]; then
+              flock -u 8
+              printf 'CLOUDCORE_LOCK_%s_FREE\n' "$kind"
+            elif [[ "$rc" == 75 ]]; then
+              printf 'CLOUDCORE_LOCK_%s_BUSY\n' "$kind"
+              if [[ -f "$live/supervisor.pid" ]]; then read -r supervisor < "$live/supervisor.pid" || true; fi
+              for proc in /proc/[0-9]*; do
+                [[ -O "$proc" && -r "$proc/comm" ]] || continue
+                pid="${proc##*/}"
+                for fd in "$proc"/fd/*; do
+                  target="$(readlink -- "$fd" 2>/dev/null)" || continue
+                  [[ "$target" == "$lock" ]] || continue
+                  comm="$(cat "$proc/comm" 2>/dev/null)" || continue
+                  label=OTHER
+                  if [[ "$pid" == "$supervisor" ]]; then label=SUPERVISOR
+                  elif [[ "$comm" == node ]]; then label=NODE
+                  elif [[ "$comm" == bash || "$comm" == sh ]]; then label=SHELL
+                  elif [[ "$comm" == flock ]]; then label=FLOCK
+                  fi
+                  printf 'CLOUDCORE_LOCK_%s_HOLDER %s %s\n' "$kind" "$label" "$pid"
+                  break
+                done
+              done
+            else
+              printf 'CLOUDCORE_LOCK_%s_UNKNOWN\n' "$kind"
+            fi
+            exec 8<&-
+          }
+          probe_lock INSTALL "$root/.install.lock"
+          probe_lock CONTROL "$live/control.lock"
           read -r sha sequence < "$live/active-release"
           [[ "$sha" =~ ^[a-f0-9]{40}$ && "$sequence" =~ ^[0-9]+$ ]]
           [[ "$(cat "$live/status")" == READY ]]
@@ -92,11 +140,11 @@ jobs:
           printf 'CLOUDCORE_ACTIVE_SOURCE %s\n' "$sha"
           REMOTE
           then
-            grep -E '^CLOUDCORE_(LOCAL_HEALTH_OK|HTTPS_GUEST_BOUNDARY_OK|DATA_PRESENT|BACKUP_PRESENT|ACTIVE_SOURCE [0-9a-f]{40})$' "$tmp/status" || true
+            grep -E '^CLOUDCORE_(LOCAL_HEALTH_OK|HTTPS_GUEST_BOUNDARY_OK|DATA_PRESENT|BACKUP_PRESENT|ACTIVE_SOURCE [0-9a-f]{40}|LOCK_(INSTALL|CONTROL)_(ABSENT|FREE|BUSY|UNKNOWN)|LOCK_(INSTALL|CONTROL)_HOLDER (SUPERVISOR|NODE|SHELL|FLOCK|OTHER) [0-9]+)$' "$tmp/status" || true
             echo "::error::Live status check incomplete; no server changes were made"
             exit 1
           fi
           for marker in LOCAL_HEALTH_OK HTTPS_GUEST_BOUNDARY_OK DATA_PRESENT BACKUP_PRESENT; do
             grep -Fxq "CLOUDCORE_$marker" "$tmp/status"
           done
-          grep -Ex '^CLOUDCORE_(LOCAL_HEALTH_OK|HTTPS_GUEST_BOUNDARY_OK|DATA_PRESENT|BACKUP_PRESENT|ACTIVE_SOURCE [0-9a-f]{40})$' "$tmp/status"
+          grep -Ex '^CLOUDCORE_(LOCAL_HEALTH_OK|HTTPS_GUEST_BOUNDARY_OK|DATA_PRESENT|BACKUP_PRESENT|ACTIVE_SOURCE [0-9a-f]{40}|LOCK_(INSTALL|CONTROL)_(ABSENT|FREE|BUSY|UNKNOWN)|LOCK_(INSTALL|CONTROL)_HOLDER (SUPERVISOR|NODE|SHELL|FLOCK|OTHER) [0-9]+)$' "$tmp/status"
