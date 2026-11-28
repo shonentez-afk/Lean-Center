@@ -60,6 +60,16 @@ try{
  await m.p.locator('#nav [data-action="person.read_directory"]').click();
  await m.p.getByRole('cell',{name:'BROWSER-A',exact:true}).waitFor();
  await m.p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();
+ const staffSearch=m.p.getByRole('searchbox',{name:'Поиск по справочнику'});
+ await staffSearch.fill('browser-b');await button(m.p,'Найти').click();
+ await m.p.getByRole('cell',{name:'BROWSER-A',exact:true}).waitFor({state:'detached'});
+ await m.p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();
+ await button(m.p,'Сбросить фильтр').click();await m.p.getByRole('cell',{name:'BROWSER-A',exact:true}).waitFor();
+ await m.p.getByRole('combobox',{name:'Подразделение сотрудников'}).selectOption(b);
+ await m.p.getByRole('cell',{name:'BROWSER-A',exact:true}).waitFor({state:'detached'});
+ await m.p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();
+ await button(m.p,'Сбросить фильтр').click();await m.p.getByRole('cell',{name:'BROWSER-A',exact:true}).waitFor();
+ await indicator(m.p,'saved').waitFor();
  await m.p.getByRole('row').filter({has:m.p.getByRole('cell',{name:'BROWSER-B',exact:true})}).getByRole('button',{name:'Карточка',exact:true}).click();
  await m.p.getByRole('heading',{name:'Карточка сотрудника · Учебный сотрудник Б',exact:true}).waitFor();
  await button(m.p,'Назначения и роли').click();
@@ -78,7 +88,14 @@ try{
  await m.p.locator('.lc81-editor select[name=unit_id]').selectOption(a);
  await indicator(m.p,'dirty').waitFor();
  assert(await m.p.evaluate(()=>{const e=new Event('beforeunload',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented}));
+ await m.p.route('**/api/lc81/directory/change',route=>route.fulfill({status:429,contentType:'application/json',headers:{'Retry-After':'1'},body:JSON.stringify({error:'Очередь сохранения занята'})}),{times:1});
+ await button(m.p,'Сохранить').click();
+ await m.p.locator('#status.error').filter({hasText:'Не сохранено: Очередь сохранения занята'}).waitFor();
+ assert.equal(await m.p.locator('.lc81-editor input[name=employee_code]').inputValue(),'BROWSER-C');
+ assert.equal(await m.p.locator('.lc81-editor input[name=display_name]').inputValue(),'Учебный созданный');
+ assert(!store.listResources(manager.id,'person.read_directory').some(x=>x.employee_code==='BROWSER-C'));
  await button(m.p,'Сохранить').click();await m.p.getByRole('cell',{name:'BROWSER-C',exact:true}).waitFor();await indicator(m.p,'saved').waitFor();
+ console.log('R61_QA03_BROWSER_FORM_RETRY_OK');
  assert.equal(await m.p.evaluate(()=>{const e=new Event('beforeunload',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented}),false);
  await m.p.getByRole('row').filter({has:m.p.getByRole('cell',{name:'BROWSER-C',exact:true})}).getByRole('button',{name:'Изменить',exact:true}).click();
  await m.p.locator('.lc81-editor input[name=display_name]').fill('Учебный исправленный');
@@ -163,7 +180,7 @@ try{
   // finishing or the returning tab is verifying access. Only retry
   // idempotent navigation; never retry a write, bypass permissions or force clicks.
   for(let attempt=0;attempt<5;attempt++){
-   await p.locator('html:not(.lc81-access-check) #nav').waitFor();
+   await p.locator('html:not(.lc81-access-check)').waitFor();
    await indicator(p,'saved').waitFor();
    await nav.waitFor({state:'attached'});
    if(await p.locator('#menu').isVisible()&&await p.locator('#menu').getAttribute('aria-expanded')!=='true')await p.locator('#menu').click();
@@ -197,7 +214,19 @@ try{
  await goSection('sop.evaluation.read');await m.p.getByRole('heading',{name:'Оценки СОП',exact:true}).last().waitFor();
  await button(m.p,'Новая оценка СОП').click();await button(m.p,'Установить утверждённый чек-лист из 20 критериев').click();
  await m.p.getByText('Нужны доступная редакция СОП и действующая методика.',{exact:true}).waitFor();
- await goSection('audit.read');
+ let releaseSlow,markSlow;const slowGate=new Promise(resolve=>releaseSlow=resolve),slowStarted=new Promise(resolve=>markSlow=resolve);
+ await m.p.route('**/api/lc81/resources?action=audit.read',async route=>{markSlow();await slowGate;await route.continue()},{times:1});
+ const slowNavigation=goSection('audit.read');
+ try{
+  await Promise.race([slowStarted,slowNavigation.then(()=>{throw Error('Slow read not intercepted')})]);
+  assert(await m.p.locator('#nav [data-action="sop.read_effective"]').isDisabled());
+  assert.equal(await m.p.locator('#nav').getAttribute('aria-busy'),'true');
+  await m.p.locator('#lc81-nav-wait').waitFor();
+ }finally{releaseSlow()}
+ await slowNavigation;
+ assert.equal(await m.p.locator('#nav').getAttribute('aria-busy'),'false');
+ assert(!await m.p.locator('#nav [data-action="sop.read_effective"]').isDisabled());
+ console.log('R61_QA04_NAVIGATION_BUSY_OK');
  await button(m.p,'Мобильный аудит · выгрузка и приём').click();
  await m.p.getByRole('heading',{name:'Мобильный аудит L1 · RC1',exact:true}).waitFor();
  await m.p.getByRole('button',{name:'Предварительная проверка JSON',exact:true}).waitFor();
@@ -318,6 +347,14 @@ try{
   assert(await m.p.locator('#content').evaluate(e=>e.childElementCount>0),'Empty destination: '+dest);
   assert.equal(await m.p.locator('#status.error').count(),0,'Route failed: '+dest);
  }
+ const responsive=['center.read','sop.read_effective','instruction.view','mentoring.view','journal.view','audit.read','calendar.read','assistant.read','matrix.read','analytics.read'];
+ let mobileOpenings=0;
+ for(const width of [360,390,768,1024]){
+  await m.p.setViewportSize({width,height:844});
+  for(const action of responsive){await goSection(action);assert(await m.p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Page overflow '+width+' '+action);mobileOpenings++}
+ }
+ await m.p.setViewportSize({width:1440,height:900});
+ console.log('R61_QA05_RESPONSIVE_OPENINGS '+mobileOpenings);
  const r=await profile('reader',readerPassword,{width:390,height:844});await r.p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();
  assert.equal(await r.p.getByRole('cell',{name:'BROWSER-A',exact:true}).count(),0);assert.equal(await r.p.getByRole('cell',{name:'BROWSER-C',exact:true}).count(),0);
  assert.equal(await button(r.p,'Добавить').count(),0);assert.equal(await button(r.p,'Изменить').count(),0);
@@ -327,6 +364,10 @@ try{
  assert.equal(await r.p.locator('#nav [data-action="sop.read_effective"]').count(),1);
  assert.equal(await r.p.locator('#nav [data-action="frv.read"]').count(),1);
  assert(await r.p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'mobile page overflow');
+ await r.p.keyboard.press('Escape');
+ assert.equal(await r.p.locator('#menu').getAttribute('aria-expanded'),'false');
+ assert(await r.p.locator('#menu').evaluate(e=>document.activeElement===e));
+ await r.p.locator('#menu').press('Enter');assert.equal(await r.p.locator('#menu').getAttribute('aria-expanded'),'true');
  const blocked=await r.p.evaluate(async()=>{const x=await fetch('/api/lc81/admin');return x.status});assert.equal(blocked,403);
  // QA-01: names of rights alone are insufficient to expose a workspace.
  assert.equal(await r.p.locator('#nav [data-action="audit.history.read"]').count(),0);
@@ -339,6 +380,9 @@ try{
  const goReader=async(p,k)=>{if(await p.locator('#menu').isVisible()&&await p.locator('#menu').getAttribute('aria-expanded')!=='true')await button(p,'Меню').click();const nav=p.locator('#nav [data-action="'+k+'"]'),group=nav.locator('xpath=ancestor::details');if(await group.count()&&!await group.evaluate(e=>e.open))await group.locator('summary').click();await nav.click()};
  await goReader(r.p,'org.read');await r.p.locator('#status.error').filter({hasText:'QA: отказ предыдущего раздела'}).waitFor();
  await goReader(r.p,'person.read_directory');await r.p.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();await r.p.locator('#status.error').waitFor({state:'detached'});
+ await r.p.waitForFunction(()=>document.activeElement===document.querySelector('#page-heading h1'));
+ assert.equal(await r.p.locator('#menu').getAttribute('aria-expanded'),'false');
+ console.log('R61_QA05_MENU_ESCAPE_FOCUS_OK');
  // QA-03: no navigation/reload is needed to invalidate already shown data.
  const second=await r.ctx.newPage();second.on('pageerror',e=>errors.push(e.message));await second.goto(url);
  await second.getByRole('cell',{name:'BROWSER-B',exact:true}).waitFor();

@@ -32,6 +32,7 @@ async function synthetic(t,{twiR2=false}={}){
  if(twiR2)await f.save('mentor_credential',{person_id:f.actor,kind:'certificate',role:'internal_trainer',number:'QA-VT-R2',issuer:'Учебный центр',issued_on:'2020-01-01',valid_until:null,evidence:'Синтетический документ ВТ',registered_by:f.mentor});
  const workerRole=one(w.working,"SELECT id FROM business_role WHERE code='TRAINEE'").id,workerAssignment=one(w.working,'SELECT id FROM role_assignment WHERE person_id=? AND role_id=?',[f.trainee,workerRole]).id;
  const matrixScale=w.edit('rating_scale',null,{name:'Производственная компетенция (1–4)',version_no:'1',levels:'1: Обучен\n2: Выполняет работу самостоятельно\n3: Выполняет работу мастерски\n4: Инструктор-наставник'});
+ const badMatrixScale=w.edit('rating_scale',null,{name:'Производственная компетенция (1–4)',version_no:'2',levels:'1: Первый\n2: Второй\n3: Третий\n4: Четвёртый'});
  const category=one(w.working,'SELECT category_id FROM skill WHERE id=?',[f.skill]).category_id;
  const generalSkill=w.edit('skill',null,{category_id:category,operation_id:null,name:'Учебный общий навык'});
  const position=w.edit('position',null,{code:'QA-INSTR-POS',name:'Учебная должность инструктора'});
@@ -54,7 +55,7 @@ async function synthetic(t,{twiR2=false}={}){
  const source=path.join(root,'legacy-copy'),target=path.join(root,'secure-copy');
  await copyPilotCheckpoint({SQL,snapshot,readSource:f.readContent,target:source});
  const sourceHash=sha(await fs.readFile(path.join(source,PILOT_STATE)));
- return {root,source,target,sourceHash,snapshot,site,unitB,personB,adminRole,managerRole,managerAssignment,workerRole,workerAssignment,assignment,ownTask,otherTask,instructorTask,revision,matrixScale,generalSkill,category,bank,bareOperation,bareRevision:bareDoc.id,f};
+ return {root,source,target,sourceHash,snapshot,site,unitB,personB,adminRole,managerRole,managerAssignment,workerRole,workerAssignment,assignment,ownTask,otherTask,instructorTask,revision,matrixScale,badMatrixScale,generalSkill,category,bank,bareOperation,bareRevision:bareDoc.id,f};
 }
 test('migration keeps all existing v17 records and referenced sources, reuses role IDs and copies authenticated state',async t=>{
  const x=await synthetic(t),pass=password();
@@ -393,6 +394,10 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const filtered=store.matrixInfo(manager.id,1,x.f.unit,today,{shift_id:x.f.shift,profession_id:x.f.profession,category_id:x.category,workplace_id:null});
   assert(filtered.columns.some(c=>c.skill_id===x.generalSkill&&c.document_id===null));
   assert(filtered.roster.some(p=>p.person_id===x.f.trainee));
+  assert(filtered.scales.some(s=>s.id===x.matrixScale));assert(!filtered.scales.some(s=>s.id===x.badMatrixScale));
+  assert(!store.profileOptions(manager.id,1).scales.some(s=>s.id===x.badMatrixScale));
+  await assert.rejects(store.saveMatrix(manager.id,1,{...matrixRequest,code:'R61-BAD-SCALE',scale_id:x.badMatrixScale}),/недоступны/);
+  console.log('R61_QA07_SCALE_LIST_AND_SAVE_OK');
   const mixed=await store.saveMatrix(manager.id,1,{...matrixRequest,code:'QA-LC81-MIXED',shift_id:x.f.shift,profession_id:x.f.profession,category_id:x.category,workplace_id:null,person_ids:[x.f.other,x.f.trainee],columns:[{skill_id:x.generalSkill,document_id:null},...matrixRequest.columns]});
   const mixedView=store.matrixDetail(manager.id,1,mixed.id);
   assert.equal(mixedView.shift_id,x.f.shift);assert.equal(mixedView.columns[0].skill_id,x.generalSkill);assert.equal(mixedView.roster[0].person_id,x.f.other);assert.equal(mixedView.cells[1][0].actual,null);assert.equal(mixedView.cells[1][1].actual,2);

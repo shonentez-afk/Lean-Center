@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {setTimeout as delay} from 'node:timers/promises';
+import {atomicReplace} from '../server/lc74-store.mjs';
+import {recoverCopy} from '../server/lc81/maintenance.mjs';
 import {randomBytes,createHash,randomUUID} from 'node:crypto';
 import {openSecureQA,ADMIN_ROLE,MANAGER_ROLE} from '../server/lc81/store.mjs';
 import {readZip} from '../src/modules/training/local-docx.js';
@@ -29,11 +34,11 @@ async function harness(t,serverOptions={}){
  }
  async function stop(){if(server){await new Promise(resolve=>server.close(resolve));server=null}if(store){await store.close();store=null}}
  t.after(async()=>{await stop();await fs.rm(parent,{recursive:true,force:true})});
- async function request(route,{cookie,body,csrf=true,method,auth,otherOrigin}={}){
+ async function request(route,{cookie,body,csrf=true,method,auth,otherOrigin,timeoutMs}={}){
   const headers={};if(cookie)headers.Cookie=cookie;if(auth)headers.Authorization=auth;
   const m=method||(body!==undefined?'POST':'GET');
   if(m==='POST'){headers['Content-Type']='application/json';if(csrf){headers.Origin=otherOrigin||origin;headers['X-LC81-Request']='1'}}
-  const r=await fetch(base+route,{method:m,headers,...(body!==undefined?{body:JSON.stringify(body)}:{})});
+  const r=await fetch(base+route,{method:m,headers,...(timeoutMs?{signal:AbortSignal.timeout(timeoutMs)}:{}),...(body!==undefined?{body:JSON.stringify(body)}:{})});
   return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie'),cache:r.headers.get('cache-control'),retryAfter:r.headers.get('retry-after')};
  }
  async function login(login,password){
@@ -517,4 +522,140 @@ test('PARITY: competence report without requirements returns an empty report, no
  assert.equal(overview.status,200,JSON.stringify(overview.data));
  // The new fixture has one employee and no skill columns: one empty row.
  assert.deepEqual(overview.data.cells,[[]]);
+});
+
+test('R6.1 QA-02: 331 staff, server pages, scoped search, invalidation and bounded HTTP load',async t=>{
+ const h=await harness(t),a=await h.login('admin',h.adminPassword),ac=a.cookie,site=(await h.admin(ac)).site;
+ const ref=async(type,payload)=>(await h.post(ac,'reference',{type,payload})).id;
+ const ua=await ref('org_unit',{code:'R61-A',name:'Учебный участок Альфа',kind:'Участок',parent_id:site});
+ const ub=await ref('org_unit',{code:'R61-B',name:'Учебный участок Бета',kind:'Участок',parent_id:site});
+ const codes=Array.from({length:331},(_,i)=>'R61-'+String(i+1).padStart(3,'0'));
+ const people=[];
+ for(let i=0;i<codes.length;i+=4){
+  const batch=codes.slice(i,i+4);
+  const created=await Promise.all(batch.map((code,j)=>h.store.changeDirectory(a.user.id,1,{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:code,display_name:'Учебный Сотрудник '+code,unit_id:i+j<240?ua:ub}})));
+  people.push(...created.map(x=>x.id));
+ }
+ const role=await ref('business_role',{code:'QA-R61-READER',name:'Чтение R6.1'});
+ const assignment=await ref('role_assignment',{person_id:people[0],role_id:role,valid_from:day,valid_to:null});
+ const pw=secret(),worker=await h.post(ac,'account',{person_id:people[0],login:'r61-reader',password:pw,generate:false});
+ await h.post(ac,'policy',{role_id:role,revision:0,permissions:['org.read','person.read_directory']});
+ const grant=await h.post(ac,'grant',{account_id:worker.id,assignment_id:assignment,scope:{kind:'unit_tree',unit_id:ua},valid_to:null});
+ const wc=(await h.login('r61-reader',pw)).cookie;
+ const root='/api/lc81/resources?action=person.read_directory';
+ const page=async(cookie,params={})=>h.request(root+'&'+new URLSearchParams({page:'1',limit:'50',...params}),{cookie,timeoutMs:20000});
+ const started=performance.now(),first=await page(ac),cold=performance.now()-started;
+ assert.equal(first.status,200);assert.equal(first.data.total,331);assert.equal(first.data.items.length,50);assert.equal(first.data.page_count,7);
+ const ids=[];
+ for(let i=1;i<=7;i++){const r=await page(ac,{page:String(i)});assert.equal(r.status,200);ids.push(...r.data.items.map(x=>x.id))}
+ assert.equal(new Set(ids).size,331);assert.deepEqual(ids.slice().sort(),people.slice().sort());
+ assert.equal((await page(ac,{page:'999'})).data.page,7);
+ assert.equal((await page(ac,{limit:'101'})).status,400);
+ assert.equal((await h.request(root+'&page=1&page=2',{cookie:ac})).status,400);
+ const filtered=await page(ac,{q:'уЧЕБНЫЙ сОТРУДНИК r61-331'});assert.equal(filtered.data.total,1);assert.equal(filtered.data.items[0].id,people[330]);
+ const scoped=await page(wc);assert.equal(scoped.status,200);assert.equal(scoped.data.total,240);assert.equal(scoped.data.accessible,240);
+ assert.equal((await page(wc,{q:'R61-331'})).data.total,0);
+ assert.equal((await page(wc,{unit:ub})).status,404);
+ assert.equal((await page(ac,{unit:ub})).data.total,91);
+ assert.equal((await page(wc,{unit:ua})).data.total,240);
+ const old=(await h.request(root,{cookie:ac})).data.items;
+ assert.deepEqual(old.map(x=>x.id).sort(),ids.slice().sort());
+ assert.equal((await page()).status,401);
+ const updated=await h.store.changeDirectory(a.user.id,1,{type:'person',operation:'update',id:people[330],expected_revision:1,fields:{employee_code:codes[330],display_name:'Изменённая карточка R61'}});
+ assert.equal(updated.rev,2);
+ assert.equal((await page(ac,{q:'Изменённая карточка'})).data.items[0].id,people[330]);
+ assert.equal((await page(ac,{q:'Сотрудник R61-331'})).data.total,0);
+ assert.equal((await page(wc,{q:'Изменённая карточка'})).data.total,0);
+ await h.store.revoke(a.user.id,grant.id);
+ assert.equal((await page(wc)).status,404);
+ assert.equal((await h.request(root,{cookie:wc})).status,404);
+ const measure=async(name,concurrent,rounds,routes)=>{
+  const timings=[],statuses={};let responseBytes=0;
+  const start=performance.now();
+  await Promise.all(Array.from({length:concurrent},async(_,client)=>{
+   for(let i=0;i<rounds;i++){
+    const at=performance.now(),r=await h.request(routes[(client+i)%routes.length],{cookie:ac,timeoutMs:20000});
+    timings.push(performance.now()-at);statuses[r.status]=(statuses[r.status]||0)+1;responseBytes+=Buffer.byteLength(JSON.stringify(r.data));
+    assert([200,429].includes(r.status),'Unexpected HTTP '+r.status);
+    if(r.status===429)assert(Number(r.retryAfter)>0,'Explicit backpressure required');
+   }
+  }));
+  timings.sort((a,b)=>a-b);
+  const quantile=q=>Math.round(timings[Math.max(0,Math.ceil(q*timings.length)-1)]*100)/100;
+  return {name,concurrent,requests:timings.length,statuses,p50_ms:quantile(.5),p95_ms:quantile(.95),p99_ms:quantile(.99),seconds:Math.round((performance.now()-start)/10)/100,responseBytes};
+ };
+ const paged=root+'&page=1&limit=50',results=[];
+ for(const n of [1,4]){results.push(await measure('legacy authorized staff list',n,5,[root]));results.push(await measure('staff page 50',n,5,[paged]))}
+ for(const n of [1,4,10,20,40])results.push(await measure('read mix with paginated staff',n,8,['/api/lc81/session','/api/lc81/admin','/api/lc81/directory/info?type=person',paged]));
+ console.log('R61_STAFF_LOAD '+JSON.stringify({staff:331,cold_first_page_ms:Math.round(cold*100)/100,results}));
+ assert(results.every(x=>(x.statuses[200]||0)>0),'Each workload must have successful requests');
+ console.log('R61_QA02_PAGED_SCOPE_CACHE_OK');
+});
+
+test('R6.1 QA-03: 20 synchronized writes, explicit 429 and manual retry without phantom commits',async t=>{
+ const h=await harness(t),initial=await h.login('admin',h.adminPassword),site=(await h.admin(initial.cookie)).site;
+ await h.stop();
+ let release,entered,first=true;
+ const gate=new Promise(resolve=>release=resolve),writing=new Promise(resolve=>entered=resolve);
+ await h.start({write:async(file,bytes)=>{if(first){first=false;entered();await gate}await atomicReplace(file,bytes)}});
+ const a=await h.login('admin',h.adminPassword),cookie=a.cookie,root='/api/lc81/directory/change';
+ const payload=i=>({type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:'BURST-'+i,display_name:'Учебная запись '+i,unit_id:site}});
+ let rejected=0;
+ const jobs=Array.from({length:20},(_,i)=>h.request(root,{cookie,body:payload(i),timeoutMs:20000}).then(r=>{if(r.status===429)rejected++;return {i,...r}}));
+ try{
+  await Promise.race([writing,Promise.all(jobs).then(()=>{throw Error('No gated write')})]);
+  const deadline=Date.now()+10000;while(rejected<12&&Date.now()<deadline)await delay(20);
+  assert.equal(rejected,12);
+ }finally{release()}
+ const results=await Promise.all(jobs),ok=results.filter(x=>x.status===200),no=results.filter(x=>x.status===429);
+ assert.equal(ok.length,8);assert.equal(no.length,12);assert(no.every(x=>Number(x.retryAfter)>0&&x.data.error.includes('Очередь')));
+ const current=h.store.listResources(a.user.id,'person.read_directory');assert.equal(current.length,8);
+ assert(no.every(x=>!current.some(y=>y.employee_code==='BURST-'+x.i)));
+ for(const {i} of no){const r=await h.request(root,{cookie,body:payload(i)});assert.equal(r.status,200)}
+ const final=h.store.listResources(a.user.id,'person.read_directory');assert.equal(final.length,20);assert.equal(new Set(final.map(x=>x.employee_code)).size,20);
+ console.log('R61_QA03_BACKPRESSURE_MANUAL_RETRY_OK');
+});
+
+test('R6.1 QA-06: crash after acknowledged write, recover only into new verified directory',async t=>{
+ const h=await harness(t),a=await h.login('admin',h.adminPassword),site=(await h.admin(a.cookie)).site;
+ await h.stop();
+ const script=`
+ import {openSecureQA} from './server/lc81/store.mjs';
+ const store=await openSecureQA({dataDir:process.env.QA_DIR});
+ const admin=store.authenticate('admin',process.env.QA_PASSWORD);
+ const result=await store.changeDirectory(admin.id,1,{type:'person',operation:'create',id:null,expected_revision:0,fields:{employee_code:'CRASH-ACK',display_name:'Учебная запись после подтверждения',unit_id:process.env.QA_SITE}});
+ process.stdout.write(JSON.stringify({id:result.id})+'\\n');setInterval(()=>{},1000);
+ `;
+ const child=spawn(process.execPath,['--input-type=module','-e',script],{env:{...process.env,QA_DIR:h.dataDir,QA_PASSWORD:h.adminPassword,QA_SITE:site},stdio:['ignore','pipe','pipe']});
+ const exited=once(child,'exit');let ack;
+ try{
+  ack=await new Promise((resolve,reject)=>{
+   let out='',err='';const timer=setTimeout(()=>reject(Error('Crash fixture did not acknowledge')),15000);
+   child.stderr.on('data',b=>err+=String(b));child.stdout.on('data',b=>{out+=String(b);if(out.includes('\n')){clearTimeout(timer);try{resolve(JSON.parse(out.split('\n')[0]))}catch(e){reject(e)}}});
+   child.once('error',e=>{clearTimeout(timer);reject(e)});child.once('exit',()=>{clearTimeout(timer);reject(Error('Crash fixture exited before acknowledgement: '+err.slice(0,500)))});
+  });
+  assert(ack.id);
+ }finally{if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');await exited}
+ const file=path.join(h.dataDir,'secure.lc81'),bytes=await fs.readFile(file),lock=path.join(h.dataDir,'writer.lock');
+ assert((await fs.lstat(lock)).isFile());
+ await assert.rejects(openSecureQA({dataDir:h.dataDir}),/EEXIST|lock|блокиров/i);
+ const offline=path.join(h.parent,'offline-copy'),recovered=path.join(h.parent,'recovered');
+ await fs.cp(h.dataDir,offline,{recursive:true,errorOnExist:true,force:false});
+ await assert.rejects(recoverCopy(offline,recovered),/Подтвердите/);
+ const result=await recoverCopy(offline,recovered,{confirmedOffline:true});
+ assert.equal(result.sha256,createHash('sha256').update(bytes).digest('hex'));assert(result.source_lock_preserved);
+ assert((await fs.readFile(path.join(recovered,'secure.lc81'))).equals(bytes));assert((await fs.readFile(file)).equals(bytes));
+ assert((await fs.lstat(lock)).isFile());assert((await fs.lstat(path.join(offline,'writer.lock'))).isFile());
+ await assert.rejects(fs.access(path.join(recovered,'writer.lock')));
+ await assert.rejects(recoverCopy(offline,recovered,{confirmedOffline:true}));
+ const restored=await openSecureQA({dataDir:recovered});try{
+  const admin=restored.authenticate('admin',h.adminPassword);assert(admin?.admin);
+  assert.deepEqual(restored.listResources(admin.id,'person.read_directory').map(x=>x.id),[ack.id]);
+ }finally{await restored.close()}
+ const damaged=path.join(h.parent,'damaged'),refused=path.join(h.parent,'refused');
+ await fs.cp(offline,damaged,{recursive:true,errorOnExist:true,force:false});
+ const corrupt=Buffer.from(bytes);corrupt[corrupt.length-1]^=1;await fs.writeFile(path.join(damaged,'secure.lc81'),corrupt);
+ await assert.rejects(recoverCopy(damaged,refused,{confirmedOffline:true}));await assert.rejects(fs.access(refused));
+ assert((await fs.lstat(path.join(damaged,'writer.lock'))).isFile());
+ console.log('R61_QA06_CRASH_RECOVER_NEW_OK');
 });
