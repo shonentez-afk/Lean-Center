@@ -6,9 +6,11 @@ fail() { printf 'CLOUDCORE_QA_ERROR_%s\n' "$1"; exit 1; }
 
 [[ "$(id -un)" == lean-deploy && "$(id -u)" != 0 ]] || fail USER
 [[ "$(uname -m)" == x86_64 ]] || fail ARCH
-[[ $# == 2 && "$1" =~ ^[a-f0-9]{40}$ && "$2" =~ ^[a-f0-9]{64}$ ]] || fail RELEASE
+[[ $# == 3 && "$1" =~ ^[a-f0-9]{40}$ && "$2" =~ ^[a-f0-9]{64}$ && "$3" =~ ^[1-9][0-9]{0,8}$ ]] || fail RELEASE
 root="$HOME/lean-center-cloudcore-qa"
 release="$root/$1"
+controller="$root/private-devtunnel/control-named.sh"
+[[ -f "$controller" && ! -L "$controller" ]] || fail CONTROLLER
 [[ ! -L "$root" && ! -L "$root/.install.lock" ]] || fail PATH
 mkdir -p -m 700 -- "$root" || fail PATH
 [[ "$(stat -c '%a:%u' "$root")" == "700:$(id -u)" ]] || fail PATH
@@ -18,6 +20,7 @@ if [[ -e "$release" || -L "$release" ]]; then
   cat >/dev/null
   [[ ! -L "$release" && -f "$release/.qa-verified" && "$(cat "$release/.qa-verified")" == "$1" ]] || fail RELEASE_EXISTS
   printf 'CLOUDCORE_QA_ALREADY_VERIFIED\n'
+  /bin/bash "$controller" promote "$1" "$3"
   exit 0
 fi
 stage="$(mktemp -d "$root/.stage.XXXXXXXX")" || fail STAGE
@@ -43,3 +46,4 @@ printf '%s\n' "$1" > "$stage/.qa-verified"
 mv -T -- "$stage" "$release" || fail PUBLISH
 trap - EXIT
 printf 'CLOUDCORE_QA_INSTALLED_AND_VERIFIED\n'
+/bin/bash "$controller" promote "$1" "$3"
