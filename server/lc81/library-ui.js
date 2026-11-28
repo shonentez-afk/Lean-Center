@@ -3,7 +3,7 @@
 const context=(kind,command,operation_id,id=null,revision_id=null,origin_id=null,origin_revision=null)=>({kind,command,id,revision_id,operation_id,origin_id,origin_revision});
 const stateLabel={draft:'Черновик',review:'На согласовании',approved:'Согласован (прежний порядок)',effective:'Действует',superseded:'Заменён',withdrawn:'Выведен',final:'Завершено',archived:'Архив'};
 const max=30*1024*1024;
-export function createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh,render,discard,check,assistant,openLinked,twiReport,assignRollout}){
+export function createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh,render,discard,check,assistant,openLinked,twiReport,assignRollout,downloadForm}){
  let active=null;
  function clear(){
   const s=active;active=null;
@@ -199,9 +199,10 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   const link=(type,id,label)=>button(label,()=>openLinked(nested,{type,id}));
   if(p){
    n.append(el('p','Версия отчёта '+p.version+' · '+(p.acceptance?p.acceptance.current?'Принят руководителем':'Принят ранее; основания изменились':p.ready?'Готов к принятию':'Сбор подтверждений')),
-    table(['Основание','Состояние'],[['Задача',link('task',p.task.id,p.task.title+' · '+p.task.owner)],['ФРВ до',link('frv',p.baseline.id,p.baseline.title+' · '+p.baseline.count+' цикл. · '+p.baseline.mean_seconds.toFixed(1)+' с')],['Апробация',p.trial_on+' · '+p.trial_reference],['ФРВ после',p.control?link('frv',p.control.id,p.control.title+' · '+p.control.count+' цикл. · '+p.control.mean_seconds.toFixed(1)+' с'):'Не выбрано'],['Навык',p.skill+' · '+p.scale],['Состав',p.roster_note]]),
+    table(['Основание','Состояние'],[['Задача',link('task',p.task.id,p.task.title+' · '+p.task.owner)],['Статус инструктора',p.instructor_status],['ФРВ до',link('frv',p.baseline.id,p.baseline.title+' · '+p.baseline.count+' цикл. · '+p.baseline.mean_seconds.toFixed(1)+' с')],['Апробация',p.trial_on+' · '+p.trial_reference],['ФРВ после',p.control?link('frv',p.control.id,p.control.title+' · '+p.control.count+' цикл. · '+p.control.mean_seconds.toFixed(1)+' с'):'Не выбрано'],['Навык',p.skill+' · '+p.scale],['Состав',p.roster_note]]),
     el('p','Подтверждены '+p.participants.filter(x=>x.ready).length+' из '+p.participants.length+' исполнителей; поддержка может продолжаться. Сравнение времени не означает автоматически сопоставимость условий или подтверждённый экономический эффект.','muted'),
     table(['Исполнитель','Цель','Факт МК','Результат','Инструктаж','Практика','Оценка'],p.participants.map(x=>[x.name,x.target_level,x.actual??'—',x.status,x.assignment?link('training',x.assignment.id,'Карточка'):p.can_edit&&assignRollout?button('Назначить обучение',()=>assignRollout(nested,{operation_id:d.operation_id,trainee_id:x.person_id,revision_id:id,skill_id:p.skill_id,scale_id:p.scale_id,target_level:x.target_level,reason:'Внедрение новой редакции · '+d.title},()=>rolloutPanel(host,id,back,false))):'—',x.practical?link('assessment',x.practical.id,'Факт'):'—',x.qualification?link('assessment',x.qualification.id,'Уровень'):'—'])));
+   if(p.can_export&&downloadForm)n.append(button('Скачать отчёт XLSX',()=>downloadForm('rollout_report',id,null,p.version)));
    if(p.blockers.length)n.append(el('p','Требует внимания: '+p.blockers.join('; ')));
    if(p.acceptance)n.append(panel('Историческое решение руководителя',el('p',[p.acceptance.on,p.acceptance.actor].filter(Boolean).join(' · ')),el('p','Качество: '+p.acceptance.quality),el('p',p.acceptance.report)));
    if(p.can_accept)n.append(panel('Принять отчёт',form([check('roster_confirmed','Подтверждаю, что состав охватывает всех фактических исполнителей'),input('quality','Фактическое подтверждение качества и соблюдения СОП'),input('report','Вывод руководителя по результатам, времени и дальнейшим действиям')],'Принять отчёт',async f=>{
@@ -211,7 +212,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   if(d.can_edit)n.append(button(p?'Уточнить состав и основания':'Сформировать отчёт о внедрении',()=>{
    if(!discard())return;
    const o=d.options,sel=(k,label,options,initial)=>{const x=select(k,label,options);x.querySelector('select').value=initial??'';return x},field=(k,label,initial,type='text')=>{const x=input(k,label,type);x.querySelector('input').value=initial??'';return x};
-   const task=sel('task_id','Существующая задача инструктору',[['','— Выберите —'],...o.tasks.map(x=>[x.id,x.title+' · '+x.owner])],p?.task.id);
+   const task=sel('task_id','Существующая задача действующему инструктору',[['','— Выберите —'],...o.tasks.map(x=>[x.id,x.title+' · '+x.owner])],p?.task.id);
    const studies=o.studies.map(x=>[x.id,x.title+' · '+x.day]);
    const baseline=sel('baseline_id','Завершённое исходное ФРВ · циклы до',[['','— Выберите —'],...studies],p?.baseline.id),control=sel('control_id','Контрольное ФРВ · циклы после',[['','— Добавить позднее —'],...studies],p?.control?.id);
    control.querySelector('select').required=false;
@@ -229,7 +230,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
     note('Состав отчёта сохранён');await rolloutPanel(host,id,back,false);
    })));
   },'primary'));
-  if(d.versions.length)n.append(panel('История состава',table(['Версия','Создан','Причина','Принят'],d.versions.map(x=>[x.version,x.created_on,x.reason,x.accepted_on??'—']))));
+  if(d.versions.length)n.append(panel('История состава',table(['Версия','Создан','Причина','Принят','Выгрузка'],d.versions.map(x=>[x.version,x.created_on,x.reason,x.accepted_on??'—',x.can_export&&downloadForm?button('XLSX v'+x.version,()=>downloadForm('rollout_report',id,null,x.version)):'—']))));
   n.append(editor,nested);host.replaceChildren(n);host.scrollIntoView({block:'nearest'});
  }
  async function card(host,id,initial='steps',trail=[]){

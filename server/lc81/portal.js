@@ -338,13 +338,14 @@ function resourcePanel(items){
  }
  return content;
 }
-libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard,check,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),openLinked,twiReport:context=>finalUI.twiReport(context),assignRollout:(host,context,onSaved)=>trainingUI.rolloutAssignmentEditor(host,context,onSaved)});
-async function downloadForm(kind,id=null,appendix=null){
- const r=await fetch('/api/lc81/forms/export',{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:JSON.stringify(kind==='batch'?{kind,items:id}:{kind,id,appendix})});
+libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard,check,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),openLinked,twiReport:context=>finalUI.twiReport(context),assignRollout:(host,context,onSaved)=>trainingUI.rolloutAssignmentEditor(host,context,onSaved),downloadForm});
+async function downloadForm(kind,id=null,appendix=null,version=null){
+ const generation=authGeneration;
+ const r=await fetch('/api/lc81/forms/export',{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:JSON.stringify(kind==='batch'?{kind,items:id}:kind==='rollout_report'?{kind,id,version}:{kind,id,appendix})});
  if(!r.ok){const b=await r.json().catch(()=>({}));throw Object.assign(Error(b.error||'Выгрузка не подтверждена'),{status:r.status})}
  const filename=r.headers.get('Content-Disposition')?.match(/filename="(TWI-03-[A-Za-z0-9-]+\.(?:xlsx|docx|zip))"/)?.[1];
  if(!filename)throw Error('Сервер не подтвердил имя документа');
- const blob=await r.blob(),url=URL.createObjectURL(blob),link=el('a');link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+ const blob=await r.blob();if(generation!==authGeneration)throw new DOMException('Контекст доступа изменился','AbortError');const url=URL.createObjectURL(blob),link=el('a');link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
  note('Документ сформирован без подписей');
 }
 function formsPanel(d){

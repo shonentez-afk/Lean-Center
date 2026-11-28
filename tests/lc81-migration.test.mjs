@@ -42,7 +42,7 @@ async function synthetic(t,{twiR2=false}={}){
  const bank=(await f.save('twi_knowledge_bank',{profession_id:f.profession,author_id:f.actor,reviewed_on:'2026-01-20',previous_id:null,note:'Учебный банк',blocks:QUESTION_BANK_V03.blocks})).entity_id;
  const assignment=await f.addAssignment();
  const task=async (owner,due_on='2027-01-31')=>(await f.save('action_item',{response_id:null,title:'Учебное мероприятие',owner_id:owner,subject_id:null,due_on,kind:'corrective',priority:'normal'})).entity_id;
- const ownTask=await task(f.trainee,'2026-01-31'),otherTask=await task(personB);
+ const ownTask=await task(f.trainee,'2026-01-31'),otherTask=await task(personB),instructorTask=twiR2?await task(f.mentor):null;
  const bareOperation=w.edit('operation',null,{unit_id:f.unit,workplace_id:f.workplace,equipment_id:null,code:'QA-NO-SKILL',name:'Учебная операция без навыка',criticality:'normal'});
  const bareSource=await makeSop('Операция без навыка');f.sources.set(bareSource.source.sha256,bareSource);
  const bareDoc=await f.save('document',{command:'create',code:'QA-NO-SKILL-SOP',title:'Учебная операция без навыка',operation_id:bareOperation,source:bareSource.source,projection:bareSource.projection});
@@ -54,7 +54,7 @@ async function synthetic(t,{twiR2=false}={}){
  const source=path.join(root,'legacy-copy'),target=path.join(root,'secure-copy');
  await copyPilotCheckpoint({SQL,snapshot,readSource:f.readContent,target:source});
  const sourceHash=sha(await fs.readFile(path.join(source,PILOT_STATE)));
- return {root,source,target,sourceHash,snapshot,site,unitB,personB,adminRole,managerRole,managerAssignment,workerRole,workerAssignment,assignment,ownTask,otherTask,revision,matrixScale,generalSkill,category,bank,bareOperation,bareRevision:bareDoc.id,f};
+ return {root,source,target,sourceHash,snapshot,site,unitB,personB,adminRole,managerRole,managerAssignment,workerRole,workerAssignment,assignment,ownTask,otherTask,instructorTask,revision,matrixScale,generalSkill,category,bank,bareOperation,bareRevision:bareDoc.id,f};
 }
 test('migration keeps all existing v17 records and referenced sources, reuses role IDs and copies authenticated state',async t=>{
  const x=await synthetic(t),pass=password();
@@ -923,7 +923,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
  assert.equal(sha(await fs.readFile(path.join(x.source,PILOT_STATE))),x.sourceHash);
 });
 
-test('TWI03 R1–R5: shared plan, atomic JI, competence, rapid control, candidate evidence, rollout and journals',async t=>{
+test('TWI03 R1–R6: shared plan, atomic JI, competence, rapid control, candidate evidence, rollout and journals',async t=>{
  const x=await synthetic(t,{twiR2:true}),pass=password();
  await migratePilotCopy({source:x.source,target:x.target,siteId:x.site,adminRoleId:x.adminRole,managerRoleId:x.managerRole,password:pass});
  let store=await openSecureQA({dataDir:x.target});
@@ -994,7 +994,7 @@ test('TWI03 R1–R5: shared plan, atomic JI, competence, rapid control, candidat
    return v.id;
   };
   const initialFrv=await makeStudy('baseline',20,'QA ФРВ до'),controlFrv=await makeStudy('improved',15,'QA ФРВ после'),draftFrv=await makeStudy('baseline',21,'QA ФРВ черновик',x.f.operation,false);
-  const draftRollout={revision_id:rolloutRev,expected_version:0,task_id:x.ownTask,baseline_id:initialFrv,control_id:null,trial_on:day,trial_reference:'QA: документ апробации',skill_id:x.f.skill,scale_id:x.matrixScale,roster:[{person_id:x.f.trainee,target_level:2},{person_id:x.personB,target_level:2}],roster_confirmed:true,roster_note:'QA полный состав двух исполнителей',change_reason:'QA внедрение'};
+  const draftRollout={revision_id:rolloutRev,expected_version:0,task_id:x.instructorTask,baseline_id:initialFrv,control_id:null,trial_on:day,trial_reference:'QA: документ апробации',skill_id:x.f.skill,scale_id:x.matrixScale,roster:[{person_id:x.f.trainee,target_level:2},{person_id:x.personB,target_level:2}],roster_confirmed:true,roster_note:'QA полный состав двух исполнителей',change_reason:'QA внедрение'};
   assert(store.libraryCard(manager.id,1,rolloutRev).can_rollout);
   assert(store.rolloutDetail(manager.id,1,rolloutRev).options.people.some(x=>x.id===draftRollout.roster[1].person_id));
   assert.throws(()=>store.rolloutDetail(worker.id,1,rolloutRev),/недоступен/);
@@ -1002,8 +1002,24 @@ test('TWI03 R1–R5: shared plan, atomic JI, competence, rapid control, candidat
   await assert.rejects(store.saveRollout(manager.id,1,{...draftRollout,roster_confirmed:false}),/полный состав/);
   await assert.rejects(store.saveRollout(manager.id,1,{...draftRollout,baseline_id:draftFrv}),/недоступны/);
   await assert.rejects(store.saveRollout(manager.id,1,{...draftRollout,baseline_id:controlFrv}),/циклов «до»/);
+  assert(store.rolloutDetail(manager.id,1,rolloutRev).options.tasks.some(t=>t.id===x.instructorTask));
+  assert(!store.rolloutDetail(manager.id,1,rolloutRev).options.tasks.some(t=>t.id===x.ownTask));
+  await assert.rejects(store.saveRollout(manager.id,1,{...draftRollout,task_id:x.ownTask}),/статус инструктора/);
   const savedRollout=await store.saveRollout(manager.id,1,draftRollout);
   assert.equal(savedRollout.version,1);
+  const rolloutBook=async version=>{const file=await store.exportForm(manager.id,1,{kind:'rollout_report',id:rolloutRev,version});const b=new (excelJS().Workbook)();await b.xlsx.load(file.bytes);return b};
+  const firstRolloutBook=await rolloutBook(1);
+  assert.equal(firstRolloutBook.getWorksheet('Состав и текущие факты').rowCount,3);
+  assert.equal(firstRolloutBook.getWorksheet('Решение руководителя').getCell('B2').text,'Решение не зарегистрировано');
+  await assert.rejects(store.exportForm(worker.id,1,{kind:'rollout_report',id:rolloutRev,version:1}),/недоступен|недоступны/);
+  await assert.rejects(store.exportForm(manager.id,1,{kind:'rollout_report',id:rolloutRev,version:999}),/недоступна/);
+  const allForms=store.formsCatalog(manager.id,1).forms;
+  assert.deepEqual(allForms.map(x=>x.id),Array.from({length:17},(_,i)=>i+1));
+  for(const form of allForms){
+   const file=await store.exportForm(manager.id,1,{kind:'blank',id:null,appendix:form.id});assert(file.bytes.length>100,'Appendix '+form.id);
+   if(form.id===15){assert.match(file.filename,/\.docx$/);assert.equal(file.bytes.subarray(0,2).toString(),'PK')}
+   else{const book=new (excelJS().Workbook)();await book.xlsx.load(file.bytes);assert(book.worksheets.length,'Appendix '+form.id);}
+  }
   const pendingRollout=store.rolloutDetail(manager.id,1,rolloutRev).report;
   assert.equal(pendingRollout.baseline.mean_seconds,20);assert(!pendingRollout.ready);
   assert.equal(pendingRollout.participants.filter(x=>x.ready).length,0);
@@ -1068,9 +1084,14 @@ test('TWI03 R1–R5: shared plan, atomic JI, competence, rapid control, candidat
   assert(acceptance.accepted);
   const acceptedRollout=store.rolloutDetail(manager.id,1,rolloutRev);
   assert(acceptedRollout.report.acceptance.current);assert.equal(acceptedRollout.versions.length,2);
+  const acceptedBook=await rolloutBook(2);
+  assert.equal(acceptedBook.getWorksheet('Решение руководителя').getCell('B2').text,'Решение актуально');
+  assert.equal(acceptedBook.getWorksheet('Факты на дату решения').rowCount,3);
+  const archivedBook=await rolloutBook(1);
+  assert.equal(archivedBook.getWorksheet('Решение руководителя').getCell('B2').text,'Решение не зарегистрировано');
   await assert.rejects(store.acceptRollout(manager.id,1,{...acceptRequest,expected_version:2}),/не готов/);
   assert.equal(store.trainingDetail(manager.id,1,first.id).admission,'Нет решения');
-  assert.equal(store.taskDetail(manager.id,1,x.ownTask).state,'open');
+  assert.equal(store.taskDetail(manager.id,1,x.instructorTask).state,'open');
   const rv=await store.revisionChange(manager.id,1,x.f.doc.id,x.revision.revision);
   assert.equal(rv.same_work_content,false);
   const review={old_id:x.f.doc.id,new_id:x.revision.revision,expected_revision:0,decision:'editorial',reason:'QA проверка'};
@@ -1116,6 +1137,7 @@ test('TWI03 R1–R5: shared plan, atomic JI, competence, rapid control, candidat
   const jo=(await journalBook(oldJournalPlan)).getWorksheet('Назначения и факты'),jn=(await journalBook(newJournalPlan)).getWorksheet('Назначения и факты');assert.equal(jo.rowCount,2);assert.equal(jn.rowCount,2);assert.equal(jo.getCell('I2').value,10);assert.equal(jn.getCell('I2').value,15);
   const staleRollout=store.rolloutDetail(manager.id,1,rolloutRev).report;
   assert(!staleRollout.acceptance.current&&staleRollout.blockers.length>0);
+  const staleBook=await rolloutBook(2);assert.equal(staleBook.getWorksheet('Решение руководителя').getCell('B2').text,'Историческое решение; не текущая приёмка');assert.equal(staleBook.getWorksheet('Факты на дату решения').rowCount,3);
   const before=store.productionPlans(manager.id,1).plans.find(z=>z.id===p.id);
   await store.close();store=await openSecureQA({dataDir:x.target});
   assert.deepEqual(store.productionPlans(manager.id,1).plans.find(z=>z.id===p.id),before);

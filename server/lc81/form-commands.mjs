@@ -22,6 +22,7 @@ import {matrixDetail} from './matrix-commands.mjs';
 import {assessmentDetail} from './competency-commands.mjs';
 import {PilotError} from '../lc74-store.mjs';
 import {formsWorkspace} from './workspace-scope.mjs';
+import {rolloutExport,rolloutWorkbook} from './operation-rollout.mjs';
 const must=(x,s,m)=>{if(!x)throw new PilotError(s,m)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
 const allowed=(a,k,id,r)=>!!r&&a.scope(k,id,r);
@@ -182,6 +183,12 @@ function productionJournal(db,a,plan){
  return productionWorkbook(excelJS(),data,{title:STANDARD_FORMS.find(x=>x.id===8).title,scope:plan.title+' · '+plan.from+' — '+plan.to,date:a.day});
 }
 export function prepareForm(db,a,f){
+ if(f?.kind==='rollout_report'){
+  must(exact(f,['kind','id','version'])&&isId(f.id)&&Number.isSafeInteger(f.version)&&f.version>0,400,'Выберите версию отчёта о внедрении');
+  const d=rolloutExport(db,a,f.id,f.version),book=rolloutWorkbook(excelJS(),d);
+  a.audit('forms.export.rollout_report',f.id);
+  return {book,extension:'xlsx',filename:'TWI-03-ROLLOUT-'+f.id.slice(0,8)+'-V'+f.version+'.xlsx',mime:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
+ }
  if(f?.kind==='batch'){
   must(exact(f,['kind','items'])&&Array.isArray(f.items)&&f.items.length>=1&&f.items.length<=20&&f.items.every(x=>exact(x,['kind','id'])&&Object.hasOwn(recordTypes,x.kind)&&x.kind!=='preparation_pack'&&isId(x.id)),400,'Выберите от 1 до 20 документов');
   must(new Set(f.items.map(x=>x.kind+':'+x.id)).size===f.items.length,400,'Повторяющиеся документы');

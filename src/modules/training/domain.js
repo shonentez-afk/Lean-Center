@@ -67,6 +67,12 @@ function appointmentValid(db,id,day){
  const x=one(db,'SELECT * FROM mentor_appointment WHERE id=?',[id]);if(!x||!within(day,x.valid_from,x.valid_to)||x.acknowledged_on>day||!beforeRevocation(x.revoked_at,day))return null;
  const c=certificateValid(db,x.credential_id,day);return c&&c.person_id===x.person_id&&c.role===x.role?x:null
 }
+// Status of instructor for an implementation task, independent from permission
+// to teach a specific operation (authorizationValid remains unchanged).
+export function instructorAppointment(db,personId,day){
+ if(!activeEmployment(db,personId,day)||!roleMatches(db,personId,day,['instructor']))return null;
+ return rows(db,"SELECT * FROM mentor_appointment WHERE person_id=? AND role='instructor' ORDER BY valid_from DESC,id",[personId]).find(x=>appointmentValid(db,x.id,day))??null;
+}
 export function authorizationValid(db,id,day){
  const a=one(db,'SELECT * FROM mentor_authorization WHERE id=?',[id]);if(!a||!a.credential_id||!a.appointment_id||!within(day,a.valid_from,a.valid_to)||!beforeRevocation(a.revoked_at,day))return false;
  const o=appointmentValid(db,a.appointment_id,day),c=certificateValid(db,a.credential_id,day);

@@ -1,0 +1,93 @@
+name: TWI 03 R6 - isolated final regression and package
+on:
+  push:
+    branches: [feature/lc81-twi03-r6-final-qa]
+    paths:
+      - '.github/workflows/twi03-r6-qa.yml'
+      - '.github/workflows/cloudcore-install-qa.yml'
+      - 'deploy/cloudcore/**'
+      - 'src/**'
+      - 'server/**'
+      - 'db/**'
+      - 'tools/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'amvera.yml'
+      - 'docs/DEPLOY_NETWORK_RU.md'
+      - 'baselines/sop-stage43/**'
+      - 'tests/**'
+permissions:
+  contents: read
+concurrency:
+  group: twi03-r6-regression
+  cancel-in-progress: false
+jobs:
+  regression:
+    if: github.repository == 'shonentez-afk/Lean-Center' && github.event_name == 'push' && github.ref == 'refs/heads/feature/lc81-twi03-r6-final-qa'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Build pinned LC8.1 and check the standard startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          bash -n deploy/cloudcore/install.sh
+          bash tests/cloudcore-install-lock.test.sh
+          bash -n deploy/cloudcore/start.sh
+          bash -n deploy/cloudcore/check-update.sh
+          bash -n deploy/cloudcore/host-control.sh
+          bash -n deploy/cloudcore/host-snapshot.sh
+          node deploy/cloudcore/pin-source.mjs
+          node --check deploy/cloudcore/smoke.mjs
+          node tools/build_folder.mjs --cloud
+          node --test tests/lc81-amvera-smoke.test.mjs
+          git diff --exit-code -- package-lock.json
+      - name: Complete protected and domain regressions before VPS access
+        shell: bash
+        run: |
+          set -euo pipefail
+          find server/lc81 -type f \( -name '*.js' -o -name '*.mjs' \) -print0 | xargs -0 -r -n 1 node --check
+          node --test tests/lc81-read-policy.test.mjs tests/lc81-secure-qa.test.mjs tests/lc81-migration.test.mjs
+          node tools/lc81-inventory.mjs
+          npm test
+          node --test tests/lc74-server.test.mjs tests/lc74-save-state.test.mjs
+          npx playwright install --with-deps chromium
+          node tests/lc81-browser.mjs
+          node tests/lc81-parity-r2-browser.mjs
+          node tests/lc53-mobile-browser.mjs
+          node tests/lc74-cloud-browser.mjs
+
+      - name: Package the Ubuntu x64 runtime and application
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The protected editor imports esbuild at runtime.
+          test "$(node -p 'process.arch')" = x64
+          mkdir -p .runtime
+          install -m 0755 "$(command -v node)" .runtime/node
+          tar -czf "$RUNNER_TEMP/cloudcore-qa.tgz" .runtime \
+            deploy/cloudcore package.json package-lock.json node_modules \
+            server src db tools baselines/sop-stage43 dist/LeanCenterCloud
+      - name: Rehearse the packaged runtime in a fresh directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          sandbox="$(mktemp -d)"
+          trap 'rm -rf -- "$sandbox"' EXIT
+          tar -xzf "$RUNNER_TEMP/cloudcore-qa.tgz" -C "$sandbox"
+          cd "$sandbox"
+          timeout --kill-after=10s 90s .runtime/node deploy/cloudcore/smoke.mjs
+      - name: Save tested release candidate (no SSH or deployment)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: LeanCenter-TWI03-R6-CloudCore-candidate
+          path: ${{ runner.temp }}/cloudcore-qa.tgz
+          if-no-files-found: error
+          retention-days: 7

@@ -2,7 +2,7 @@
 // task, instruction, competence assessment or permission-to-work registry.
 import {one,rows,isId,uuid,canonical} from '../../src/core/db.js';
 import {currentStandard,progressFor,latestAssessment} from '../../src/modules/training/training-facts.js';
-import {activeEmployment,latestQualification} from '../../src/modules/training/domain.js';
+import {activeEmployment,latestQualification,instructorAppointment} from '../../src/modules/training/domain.js';
 import {personWorkResource,trainingResource} from './read-policy.mjs';
 import {recordAccess} from './center-commands.mjs';
 import {checkedLibrarySource} from './library-commands.mjs';
@@ -46,6 +46,22 @@ function taskView(db,a,id){
  if(!t||!recordAccess(db,a,'task',id)||!who(a,t.owner_id))return null;
  return {id:t.id,title:t.title,owner_id:t.owner_id,owner:personName(db,t.owner_id),state:t.state,rev:t.rev};
 }
+function instructorBasis(db,owner,trialOn,on){
+ const trial=instructorAppointment(db,owner,trialOn),current=instructorAppointment(db,owner,on);
+ return trial&&current?{person_id:owner,name:personName(db,owner),trial_appointment:trial.id,trial_credential:trial.credential_id,checked_on:on,appointment:current.id,credential:current.credential_id}:null;
+}
+function instructorStatus(db,p,t,on){
+ if(!p.instructor_basis)return 'Статус инструктора не зарегистрирован в этой версии';
+ if(p.instructor_basis.person_id!==t.owner_id)return 'Исполнитель задачи изменился; уточните состав';
+ return instructorBasis(db,t.owner_id,p.trial_on,on)?'Инструктор подтверждён':'У исполнителя нет действующего статуса инструктора на требуемые даты';
+}
+function exportRecord(db,a,type,id){
+ const x=recordAccess(db,a,type,id);
+ must(x&&x.resource&&scope(a,'forms.export',id,x.resource),404,'Полные основания выгрузки недоступны');
+}
+function exportPerson(db,a,id,on){
+ must(who(a,id)&&scope(a,'forms.export',id,personWorkResource(db,[id],a.day,[on])),404,'Полные основания выгрузки недоступны');
+}
 function study(db,a,c,id,{allowArchived=false}={}){
  const x=isId(id)&&one(db,'SELECT * FROM frv_study WHERE id=? AND operation_id=?',[id,c.r.operation_id]);
  if(!x||!(x.state==='final'||allowArchived&&x.state==='archived')||!a.read('frv.read',id)||!scope(a,'frv.read_summary',id,c.resource))return null;
@@ -65,9 +81,10 @@ function storedContext(db,a,c,p){
  !['training.read','training.detail','assessment.read','assessment.detail'].every(k=>scope(a,k,c.r.id,resource)))return null;
  return {t,baseline,control,ss,resource};
 }
-function factsFor(db,a,c,p,row){
+function factsFor(db,a,c,p,row,exporting=false){
  const t=one(db,"SELECT * FROM training_assignment WHERE trainee_id=? AND sop_revision_id=? AND skill_id=? AND scale_id=? AND state<>'cancelled' AND source_sha256=? ORDER BY assigned_on DESC, (SELECT max(occurred_at) FROM change_event e WHERE e.entity_type='training_assignment' AND e.entity_id=training_assignment.id AND e.operation='create') DESC,id DESC LIMIT 1",[row.person_id,c.r.id,p.skill_id,p.scale_id,c.r.source.sha256]);
  const visible=t&&recordAccess(db,a,'training',t.id);
+ if(exporting&&t)exportRecord(db,a,'training',t.id);
  const base={person_id:row.person_id,name:row.name,target_level:row.target_level,assignment:null,practical:null,qualification:null,actual:null,day:null,ready:false,support_pending:false,status:'Нет доступного назначения по этой редакции'};
  if(!visible)return base;
  const pr=progressFor(db,t),introDates=pr.facts.filter(x=>x.result==='completed'&&pr.stages.some(s=>s.code===x.stage_code&&!['support','followup'].includes(s.phase))).map(x=>x.held_at.slice(0,10));
@@ -75,9 +92,11 @@ function factsFor(db,a,c,p,row){
  if(!t.approval_json||!pr.intro||!introDates.length||introDates.some(x=>x<p.trial_on||x>a.day))return result;
  result.status='Нет подтверждённой практической оценки';
  const practical=latestAssessment(db,t.id,'practical'),q=latestQualification(db,row.person_id,p.skill_id,a.day);
+ if(exporting&&practical)exportRecord(db,a,'assessment',practical.id);
  if(!practical||!recordAccess(db,a,'assessment',practical.id))return result;
  result.practical={id:practical.id,conclusion:practical.conclusion,day:practical.assessed_at.slice(0,10)};
  result.status='Не достигнут актуальный целевой уровень';
+ if(exporting&&q)exportRecord(db,a,'assessment',q.session_id);
  if(!q||!recordAccess(db,a,'assessment',q.session_id))return result;
  result.qualification={id:q.session_id,day:q.assessed_at.slice(0,10)};result.actual=q.observation_state==='rated'?q.level:null;
  const assessment=one(db,'SELECT * FROM assessment_session WHERE id=?',[q.session_id]);
@@ -85,10 +104,22 @@ function factsFor(db,a,c,p,row){
  if(q.assignment_id!==t.id||q.standard_revision_id!==c.r.id||q.scale_id!==p.scale_id||assessment?.practical_id!==practical.id||practical.conclusion==='not_meet'||q.observation_state!=='rated'||q.level<row.target_level||q.valid_until&&q.valid_until<a.day||day<p.trial_on||day>a.day)return result;
  return {...result,day,ready:true,status:pr.complete?'Инструктаж и уровень подтверждены':'Вводный инструктаж и уровень подтверждены; поддержка продолжается'};
 }
-function reportProjection(db,a,c,record){
+function reportProjection(db,a,c,record,exporting=false){
  const p=JSON.parse(record.payload_json),ctx=storedContext(db,a,c,p);
  must(ctx,404,'Полный состав отчёта или его основания недоступны');
- const participants=p.roster.map(x=>factsFor(db,a,c,p,x)),blockers=[];
+ const accepted=record.accepted_json?JSON.parse(record.accepted_json):null;
+ if(exporting){
+  must(a.personId&&scope(a,'forms.export',c.r.id,ctx.resource),404,'Полные основания выгрузки недоступны');
+  if(p.instructor_basis)exportPerson(db,a,p.instructor_basis.person_id,p.trial_on);
+  exportRecord(db,a,'task',ctx.t.id);
+  if(accepted){
+   exportPerson(db,a,accepted.actor_id,accepted.on);
+   for(const e of accepted.evidence){exportPerson(db,a,e.person_id,accepted.on);for(const [type,id] of [['training',e.assignment],['assessment',e.practical],['assessment',e.qualification]])exportRecord(db,a,type,id)}
+  }
+ }
+ const participants=p.roster.map(x=>factsFor(db,a,c,p,x,exporting)),blockers=[];
+ const instructor_status=instructorStatus(db,p,ctx.t,a.day);
+ if(instructor_status!=='Инструктор подтверждён')blockers.push(instructor_status);
  if(!effective(c,a))blockers.push('Редакция больше не действует');
  if(ctx.t.state==='cancelled')blockers.push('Задача отменена');
  if(ctx.baseline.state!=='final'||ctx.baseline.descriptor.source.sha256!==p.baseline.source_sha256)blockers.push('Исходное ФРВ больше не подтверждено');
@@ -96,11 +127,10 @@ function reportProjection(db,a,c,record){
  else if(ctx.control.state!=='final'||ctx.control.descriptor.source.sha256!==p.control?.source_sha256)blockers.push('Контрольное ФРВ больше не подтверждено');
  if(participants.some(x=>!x.ready))blockers.push('Не у всех подтверждённых исполнителей завершено обучение и достигнут целевой уровень');
  if(ctx.control&&participants.some(x=>x.day&&ctx.control.day<x.day))blockers.push('Контрольные замеры предшествуют подтверждению обучения исполнителей');
- const accepted=record.accepted_json?JSON.parse(record.accepted_json):null;
  const currentEvidence=participants.map(x=>({person_id:x.person_id,assignment:x.assignment?.id??null,practical:x.practical?.id??null,qualification:x.qualification?.id??null,level:x.actual}));
  const unchanged=!!accepted&&canonical(currentEvidence)===canonical(accepted.evidence)&&!blockers.length;
  const acceptance=accepted?{on:accepted.on,actor:who(a,accepted.actor_id)?accepted.actor_name:null,quality:accepted.quality,report:accepted.report,current:unchanged}:null;
- return {id:record.id,version:record.version,task:ctx.t,baseline:{...studyPublic(ctx.baseline),...p.baseline},control:ctx.control?{...studyPublic(ctx.control),...p.control}:null,trial_on:p.trial_on,trial_reference:p.trial_reference,roster_note:p.roster_note,change_reason:p.change_reason,skill_id:p.skill_id,scale_id:p.scale_id,skill:ctx.ss.skill.name,scale:ctx.ss.scale.name,participants,blockers,acceptance,ready:!blockers.length,can_accept:!accepted&&!blockers.length&&a.personId!==ctx.t.owner_id&&canWrite(a,c,ctx.resource),can_edit:canWrite(a,c,ctx.resource)};
+ return {id:record.id,version:record.version,task:ctx.t,instructor_status,can_export:!!a.personId&&scope(a,'forms.export',c.r.id,ctx.resource),baseline:{...studyPublic(ctx.baseline),...p.baseline},control:ctx.control?{...studyPublic(ctx.control),...p.control}:null,trial_on:p.trial_on,trial_reference:p.trial_reference,roster_note:p.roster_note,change_reason:p.change_reason,skill_id:p.skill_id,scale_id:p.scale_id,skill:ctx.ss.skill.name,scale:ctx.ss.scale.name,participants,blockers,acceptance,ready:!blockers.length,can_accept:!accepted&&!blockers.length&&a.personId!==ctx.t.owner_id&&canWrite(a,c,ctx.resource),can_edit:canWrite(a,c,ctx.resource)};
 }
 export function rolloutDetail(db,a,id){
  const c=anchor(db,a,id);must(c,404,'Отчёт о внедрении недоступен');
@@ -108,7 +138,7 @@ export function rolloutDetail(db,a,id){
  const can_edit=canWrite(a,c)&&(!report||report.can_edit);
  const options={tasks:[],studies:[],skills:[],scales:[],people:[]};
  if(can_edit){
-  options.tasks=rows(db,"SELECT id FROM action_item WHERE state<>'cancelled' ORDER BY due_on,id").map(x=>taskView(db,a,x.id)).filter(Boolean);
+  options.tasks=rows(db,"SELECT id FROM action_item WHERE state<>'cancelled' ORDER BY due_on,id").map(x=>taskView(db,a,x.id)).filter(x=>x&&instructorAppointment(db,x.owner_id,a.day));
   options.studies=rows(db,"SELECT id FROM frv_study WHERE operation_id=? AND state='final' ORDER BY observed_at,id",[c.r.operation_id]).flatMap(x=>{const s=study(db,a,c,x.id);return s?[studyPublic(s)]:[]});
   options.skills=rows(db,'SELECT id,name FROM skill WHERE operation_id=? AND archived=0 ORDER BY name',[c.r.operation_id]).filter(x=>a.read('skill.read',x.id));
   options.scales=rows(db,'SELECT id,name FROM rating_scale WHERE archived=0 ORDER BY name').filter(x=>scope(a,'scale.read',x.id,c.resource)&&rows(db,'SELECT value FROM rating_level WHERE scale_id=? ORDER BY value',[x.id]).map(l=>l.value).join(',')==='1,2,3,4');
@@ -117,9 +147,9 @@ export function rolloutDetail(db,a,id){
  }
  const versions=exists(db)?rows(db,'SELECT * FROM lc81_operation_rollout WHERE revision_id=? ORDER BY version DESC',[id]).flatMap(x=>{
   const p=JSON.parse(x.payload_json);
-  if(!storedContext(db,a,c,p))return [];
+  const ctx=storedContext(db,a,c,p);if(!ctx)return [];
   const ac=x.accepted_json?JSON.parse(x.accepted_json):null;
-  return [{version:x.version,created_on:x.created_at.slice(0,10),reason:p.change_reason,accepted_on:ac?.on??null}];
+  return [{version:x.version,created_on:x.created_at.slice(0,10),reason:p.change_reason,accepted_on:ac?.on??null,can_export:!!a.personId&&scope(a,'forms.export',id,ctx.resource)}];
  }):[];
  return {revision_id:id,operation_id:c.r.operation_id,title:c.r.code+' · v'+c.r.version_no+' · '+c.r.title,day:a.day,report,can_edit,options,versions};
 }
@@ -134,7 +164,10 @@ export function prepareRollout(db,a,f){
  must(ctx&&canWrite(a,c,ctx.resource)&&f.roster.every(x=>activeEmployment(db,x.person_id,a.day)),403,'Сотрудник, задача, шкала или ФРВ недоступны в вашей области');
  must(ctx.t.state!=='cancelled'&&ctx.baseline.state==='final'&&(!ctx.control||ctx.control.state==='final'),422,'Нужны действующая задача и завершённые фактические исследования');
  must(ctx.baseline.day<=f.trial_on&&(!ctx.control||ctx.control.day>=f.trial_on&&ctx.control.day<=a.day),422,'Проверьте даты исходного ФРВ, апробации и контрольных замеров');
+ const basis=instructorBasis(db,ctx.t.owner_id,f.trial_on,a.day);
+ must(basis,422,'Исполнитель задачи должен иметь действующий статус инструктора: роль, сертификат и приказ на дату апробации и текущую дату');
  const {revision_id,expected_version,roster_confirmed,...payload}=f;
+ payload.instructor_basis=basis;
  payload.roster=payload.roster.map(x=>({...x,name:personName(db,x.person_id)}));
  return {revision_id,expected_version,payload,sop_sha:c.r.source.sha256,baseline:ctx.baseline,control:ctx.control,task:ctx.t};
 }
@@ -165,7 +198,45 @@ export function acceptRollout(db,a,f,checked,summaries){
  const ctx=prepareRolloutAcceptance(db,a,f);
  must(canonical(ctx)===canonical(checked)&&canonical(summaries.baseline)===canonical(ctx.payload.baseline)&&canonical(summaries.control)===canonical(ctx.payload.control),409,'Основания отчёта изменились при проверке');
  const evidence=ctx.view.participants.map(x=>({person_id:x.person_id,assignment:x.assignment.id,practical:x.practical.id,qualification:x.qualification.id,level:x.actual}));
- const data={actor_id:a.personId,actor_name:personName(db,a.personId),on:a.day,at:a.at,quality:f.quality,report:f.report,evidence};
+ const instructor_basis=instructorBasis(db,ctx.view.task.owner_id,ctx.payload.trial_on,a.day);
+ must(instructor_basis,422,'Статус инструктора больше не подтверждён');
+ const data={actor_id:a.personId,actor_name:personName(db,a.personId),on:a.day,at:a.at,quality:f.quality,report:f.report,evidence,instructor_basis};
  db.run('UPDATE lc81_operation_rollout SET accepted_json=? WHERE id=? AND accepted_json IS NULL',[canonical(data),ctx.id]);a.audit('training.rollout_accept',ctx.id);
  return {id:ctx.id,version:ctx.version,accepted:true};
+}
+
+/** Version-specific export. Current facts are clearly separated from the saved
+ * acceptance snapshot; no old decision is presented as a fresh confirmation. */
+export function rolloutExport(db,a,id,version){
+ const c=anchor(db,a,id);
+ must(c&&Number.isSafeInteger(version)&&version>0,404,'Отчёт о внедрении недоступен');
+ const record=exists(db)&&one(db,'SELECT * FROM lc81_operation_rollout WHERE revision_id=? AND version=?',[id,version]);
+ must(record,404,'Версия отчёта недоступна');
+ const view=reportProjection(db,a,c,record,true),p=JSON.parse(record.payload_json),accepted=record.accepted_json?JSON.parse(record.accepted_json):null;
+ const isLatest=latest(db,id).id===record.id;
+ return {revision_id:id,title:c.r.code+' · v'+c.r.version_no+' · '+c.r.title,source_sha256:c.r.source.sha256,day:a.day,created_at:record.created_at,is_latest:isLatest,view,
+  saved_instructor:p.instructor_basis?.name??null,
+  accepted:accepted?{on:accepted.on,actor:accepted.actor_name,quality:accepted.quality,report:accepted.report,current:isLatest&&view.acceptance.current,evidence:accepted.evidence.map(e=>({...e,name:p.roster.find(r=>r.person_id===e.person_id)?.name??''}))}:null};
+}
+export function rolloutWorkbook(X,d){
+ const w=new X.Workbook(),v=d.view;
+ function sheet(name,headers,widths,values){
+  const s=w.addWorksheet(name,{pageSetup:{orientation:'landscape',paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:0}});
+  s.columns=widths.map(width=>({width}));s.addRow(headers);s.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};s.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFB71920'}};
+  for(const r of values)s.addRow(r.map(x=>x??null));
+  s.eachRow(row=>{let height=1;row.eachCell({includeEmpty:true},(cell,col)=>{cell.alignment={vertical:'top',wrapText:true};height=Math.max(height,Math.ceil(String(cell.value??'').length/Math.max(10,widths[col-1]??20)))});row.height=Math.max(24,Math.min(180,16*height))});
+  s.views=[{state:'frozen',ySplit:1}];return s;
+ }
+ sheet('Отчёт внедрения',['Поле','Значение'],[36,100],[
+  ['Документ','Отчёт о внедрении · TWI 03, п. 4.1.3 · выписка без подписей'],['СОП',d.title],['ID редакции',d.revision_id],['SHA256 СОП',d.source_sha256],['Версия отчёта',v.version],['Создано',d.created_at],['Дата текущей сверки',d.day],['Версия состава',d.is_latest?'Последняя':'Историческая'],
+  ['Задача',v.task.title],['ID задачи',v.task.id],['Исполнитель на дату сохранения',d.saved_instructor],['Текущий исполнитель',v.task.owner],['Статус задачи',v.task.state],['Статус инструктора',v.instructor_status],
+  ['Апробация',v.trial_on],['Реквизиты апробации',v.trial_reference],['Основание полного состава',v.roster_note],['Причина версии',v.change_reason],['Навык',v.skill],['Шкала',v.scale],
+  ['ФРВ до',v.baseline.title],['Полных циклов до',v.baseline.count],['Среднее до, с',v.baseline.mean_seconds],['ФРВ после',v.control?.title],['Полных циклов после',v.control?.count],['Среднее после, с',v.control?.mean_seconds],
+  ['Текущая готовность',v.ready?'Подтверждена':'Не подтверждена'],['Отклонения',v.blockers.join('; ')],['Примечание','Сопоставимость условий и качество подтверждает руководитель. Разность времени не является автоматически экономическим эффектом. Отчёт не утверждает СОП и не выдаёт допуск.']]);
+ sheet('Состав и текущие факты',['Сотрудник','Цель','Текущий уровень','Готовность на дату выгрузки','Поддержка','Дата оценки','ID назначения','ID практики','ID оценки'],[32,12,16,58,18,16,40,40,40],v.participants.map(x=>[x.name,x.target_level,x.actual,x.status,x.support_pending?'Продолжается':'—',x.day,x.assignment?.id,x.practical?.id,x.qualification?.id]));
+ sheet('Замеры ФРВ',['Этап','ID ФРВ','SHA256 источника','Цикл','Секунды'],[18,40,68,14,16],[...v.baseline.cycles.map(x=>['До',v.baseline.id,v.baseline.source_sha256,x.index,x.seconds]),...(v.control?.cycles??[]).map(x=>['После',v.control.id,v.control.source_sha256,x.index,x.seconds])]);
+ sheet('Решение руководителя',['Поле','Значение'],[36,100],[
+  ['Состояние',d.accepted?(d.accepted.current?'Решение актуально':'Историческое решение; не текущая приёмка'):'Решение не зарегистрировано'],['Дата',d.accepted?.on],['Руководитель',d.accepted?.actor],['Качество',d.accepted?.quality],['Вывод',d.accepted?.report],['Подпись','']]);
+ sheet('Факты на дату решения',['Сотрудник','Уровень при принятии','ID назначения','ID практики','ID оценки'],[32,24,40,40,40],(d.accepted?.evidence??[]).map(x=>[x.name,x.level,x.assignment,x.practical,x.qualification]));
+ return w;
 }
