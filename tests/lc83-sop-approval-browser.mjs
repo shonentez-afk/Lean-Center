@@ -72,9 +72,14 @@ try{
    assert.equal(x.detail('author',id).round.state,'approved');assert(x.effective().includes(x.old));
    assert.equal(await q.button('Ввести в действие').count(),0);
    const m=await profile('manager');await m.go('sop.approvals');await m.button('Открыть согласование').click();
-   await m.content.locator('select[name=impact_decision]').selectOption('retrain');
-   await m.content.locator('form').filter({has:m.button('Зарегистрировать оценку влияния')}).locator('textarea[name=note]').fill('Учебное обоснование');
-   await m.button('Зарегистрировать оценку влияния').click();await m.ready();await m.ctx.close();
+   // A has locator is relative to each candidate form. Do not include
+   // #content in the inner selector; it is an ancestor, not a descendant.
+   const impactForm=m.content.locator('form').filter({has:m.p.locator('select[name=impact_decision]')});
+   await impactForm.locator('select[name=impact_decision]').selectOption('retrain');
+   await impactForm.locator('textarea[name=note]').fill('Учебное обоснование');
+   await impactForm.getByRole('button',{name:'Зарегистрировать оценку влияния',exact:true}).click();
+   await m.content.getByText('Переобучение ·', {exact:false}).first().waitFor();await m.ready();
+   assert.equal(x.detail('author',id).impact.record?.decision,'retrain');await m.ctx.close();
    await q.p.bringToFront();await q.go('sop.approvals');await q.button('Открыть согласование').click();
    await q.button('Ввести в действие').click();await q.ready();
   }
