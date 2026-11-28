@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -34,10 +35,22 @@ async function harness(t,serverOptions={}){
  }
  async function stop(){if(server){await new Promise(resolve=>server.close(resolve));server=null}if(store){await store.close();store=null}}
  t.after(async()=>{await stop();await fs.rm(parent,{recursive:true,force:true})});
- async function request(route,{cookie,body,csrf=true,method,auth,otherOrigin,timeoutMs}={}){
+ async function request(route,{cookie,body,csrf=true,method,auth,otherOrigin,timeoutMs,agent}={}){
   const headers={};if(cookie)headers.Cookie=cookie;if(auth)headers.Authorization=auth;
   const m=method||(body!==undefined?'POST':'GET');
   if(m==='POST'){headers['Content-Type']='application/json';if(csrf){headers.Origin=otherOrigin||origin;headers['X-LC81-Request']='1'}}
+  if(agent){
+   // Exactly one persistent socket per synthetic client. Do not retry
+   // transport failures or hide them as successful HTTP requests.
+   return new Promise((resolve,reject)=>{
+    const req=http.request(base+route,{method:m,headers,agent,signal:AbortSignal.timeout(timeoutMs||20000)},res=>{
+     const chunks=[];res.on('data',b=>chunks.push(b));res.on('error',reject);
+     res.on('end',()=>{try{resolve({status:res.statusCode,data:JSON.parse(Buffer.concat(chunks).toString('utf8')),cookie:res.headers['set-cookie']?.[0]??null,cache:res.headers['cache-control']??null,retryAfter:res.headers['retry-after']??null})}catch(e){reject(e)}});
+    });
+    req.on('error',e=>reject(new Error('HTTP transport failure '+route+': '+e.code+' '+e.message,{cause:e})));
+    req.end(body===undefined?undefined:JSON.stringify(body));
+   });
+  }
   const r=await fetch(base+route,{method:m,headers,...(timeoutMs?{signal:AbortSignal.timeout(timeoutMs)}:{}),...(body!==undefined?{body:JSON.stringify(body)}:{})});
   return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie'),cache:r.headers.get('cache-control'),retryAfter:r.headers.get('retry-after')};
  }
@@ -572,14 +585,16 @@ test('R6.1 QA-02: 331 staff, server pages, scoped search, invalidation and bound
  const measure=async(name,concurrent,rounds,routes)=>{
   const timings=[],statuses={};let responseBytes=0;
   const start=performance.now();
-  await Promise.all(Array.from({length:concurrent},async(_,client)=>{
+  const agents=Array.from({length:concurrent},()=>new http.Agent({keepAlive:true,maxSockets:1,maxTotalSockets:1,maxFreeSockets:1}));
+  try{await Promise.all(agents.map(async(agent,client)=>{
    for(let i=0;i<rounds;i++){
-    const at=performance.now(),r=await h.request(routes[(client+i)%routes.length],{cookie:ac,timeoutMs:20000});
+    const at=performance.now(),r=await h.request(routes[(client+i)%routes.length],{cookie:ac,timeoutMs:20000,agent});
     timings.push(performance.now()-at);statuses[r.status]=(statuses[r.status]||0)+1;responseBytes+=Buffer.byteLength(JSON.stringify(r.data));
     assert([200,429].includes(r.status),'Unexpected HTTP '+r.status);
     if(r.status===429)assert(Number(r.retryAfter)>0,'Explicit backpressure required');
    }
-  }));
+  }))}finally{for(const agent of agents)agent.destroy()}
+  assert.equal(timings.length,concurrent*rounds,'All requests must receive a response');
   timings.sort((a,b)=>a-b);
   const quantile=q=>Math.round(timings[Math.max(0,Math.ceil(q*timings.length)-1)]*100)/100;
   return {name,concurrent,requests:timings.length,statuses,p50_ms:quantile(.5),p95_ms:quantile(.95),p99_ms:quantile(.99),seconds:Math.round((performance.now()-start)/10)/100,responseBytes};

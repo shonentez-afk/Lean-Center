@@ -62,7 +62,7 @@ test('LC83 mandatory independent votes, frozen round history, publication and re
  await assert.rejects(x.change('director',id,'publish','publish'),/оценка влияния/);
  assert(detail('manager',id).impact.can_review);
  assert(!detail('director',id).impact.can_review);
- assert(detail('manager',id).impact.scope.some(x=>x.basis.some(b=>b.kind==='training'&&b.id===x.assignment)));
+ assert(detail('manager',id).impact.scope.some(person=>person.basis.some(b=>b.kind==='training'&&b.id===x.assignment)),'Affected roster must include the actual training assignment');
  await assert.rejects(x.impact(id,'editorial'),/Рабочее содержание отличается/);
  const impact=await x.impact(id);assert.equal(impact.decision,'retrain');assert(impact.affected>0);
  assert(x.effective().includes(old));assert(!x.effective().includes(id));
