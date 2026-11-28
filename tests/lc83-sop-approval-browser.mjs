@@ -9,6 +9,17 @@ import {setupApproval} from './lc83-approval-fixture.mjs';
 import {createSecureQAServer} from '../server/lc81/http.mjs';
 const x=await setupApproval();let browser,server,proxy;
 const close=s=>s?.listening?new Promise(resolve=>s.close(resolve)):Promise.resolve();
+// Poll an actual locator in the test runner. waitForFunction's internal eval
+// is blocked by the application's CSP; do not use bypassCSP or unsafe-eval.
+async function loadedImage(locator){
+ await locator.waitFor({state:'visible'});
+ const deadline=Date.now()+15000;
+ while(Date.now()<deadline){
+  if(await locator.evaluate(img=>img.complete&&img.naturalWidth>0))return;
+  await new Promise(resolve=>setTimeout(resolve,80));
+ }
+ throw Error('Authorized image did not load');
+}
 try{
  const d=await x.passport(await x.draft('Браузерная редакция LC83')),id=d.revision_id;
  const key=path.join(x.root,'key.pem'),cert=path.join(x.root,'cert.pem');
@@ -53,9 +64,9 @@ try{
   await q.button('Просмотреть зафиксированный СОП').click();await q.content.getByText('Браузерная редакция LC83',{exact:true}).first().waitFor();
   await q.content.getByRole('heading',{name:'Сравнение с предыдущей действующей редакцией',exact:true}).waitFor();
   await q.button('Показать прежнее фото шага 1').click();
-  await q.p.waitForFunction(()=>[...document.querySelectorAll('img[alt="Прежнее фото шага 1"]')].some(i=>i.complete&&i.naturalWidth>0));
-  await q.button('Показать фото').first().click();await q.content.locator('img.lc81-image').first().waitFor();
-  await q.p.waitForFunction(()=>[...document.querySelectorAll('img.lc81-image')].some(i=>i.complete&&i.naturalWidth>0));
+  await loadedImage(q.content.locator('img[alt="Прежнее фото шага 1"]'));
+  await q.button('Показать фото').first().click();
+  await loadedImage(q.content.locator('img[alt="Фото шага 1"]').first());
   await q.button(name==='director'?'Утвердить СОП':'Согласовать СОП').click();await q.ready();
   if(name==='director'){
    assert.equal(x.detail('author',id).round.state,'approved');assert(x.effective().includes(x.old));
