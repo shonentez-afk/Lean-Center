@@ -117,10 +117,10 @@ async function openNotifications(){
  });
  const prefs=button('Настройки уведомлений',async()=>{
   const v=await api('notifications/preferences');if(!d.isConnected)return;
-  const labels={approval:'Согласование СОП',familiarization:'Ознакомление',training:'Обучение TWI',audit:'Аудиты и оценки',task:'Мероприятия',information:'Информационные события'};
-  const rkeys=['approval','familiarization','training'],pkeys=[...rkeys,'audit','task','information'];
+  const labels={approval:'Согласование СОП',familiarization:'Ознакомление',training:'Обучение TWI',sop_review:'Актуализация СОП',audit:'Аудиты и оценки',task:'Мероприятия',credential:'Сертификаты и полномочия наставников',admission:'Допуски к работе',information:'Информационные события'};
+  const rkeys=Object.keys(v.reminders),pkeys=Object.keys(v.push_types);
   const reminders=el('fieldset');reminders.append(el('legend','Дополнительные напоминания внутри портала'),...rkeys.map(k=>check('reminder_'+k,labels[k]+(v.policy[k]===null?' · выключено предприятием':' · за '+v.policy[k]+' дн.'),v.reminders[k])));
-  const push=el('fieldset');push.append(el('legend','Типы Web Push'),el('p','Настройки действуют только после явного подключения личного устройства. Согласования, обучение, аудит, практическая оценка и мероприятия используют общую ленту.'),...pkeys.map(k=>check('push_'+k,labels[k],v.push_types[k])));
+  const push=el('fieldset');push.append(el('legend','Типы Web Push'),el('p','Настройки действуют только после явного подключения личного устройства. Все категории используют общую ленту, а срок берётся из исходной записи.'),...pkeys.map(k=>check('push_'+k,labels[k],v.push_types[k])));
   const window=el('fieldset'),start=input('window_start','Начало','time',false),end=input('window_end','Окончание','time',false);
   start.querySelector('input').required=false;end.querySelector('input').required=false;
   start.querySelector('input').value=v.delivery_window?.start??'';end.querySelector('input').value=v.delivery_window?.end??'';
@@ -159,7 +159,7 @@ async function openNotifications(){
     const c=el('article',undefined,'lc82-notice-card'),h=el('h3',n.label),row=el('div',undefined,'row');
     c.dataset.noticeId=n.id;c.classList.toggle('lc82-unread',!n.read_at);
     c.append(h,el('p',n.title),el('p',n.reason,'muted'),el('p',(n.overdue?'Просрочено · ':'')+n.state+(n.due_on?' · срок '+n.due_on:''),'lc83-state'),el('p',n.occurred_at.replace('T',' ').slice(0,19)+' UTC · '+(n.read_at?'Прочитано':'Не прочитано'),'muted'));
-    row.append(button(({sop_approval:'Открыть согласование',familiarization:'Открыть ознакомление',training:'Открыть обучение',schedule:'Открыть плановое событие',audit:'Открыть аудит',assessment:'Открыть оценку',task:'Открыть мероприятие'})[n.route.type]||'Открыть поручение',async()=>{
+    row.append(button(({sop_approval:'Открыть согласование',familiarization:'Открыть ознакомление',training:'Открыть обучение',sop:'Открыть СОП',credential:'Открыть сертификат',appointment:'Открыть приказ',authorization:'Открыть полномочия',schedule:'Открыть плановое событие',audit:'Открыть аудит',assessment:'Открыть оценку',task:'Открыть мероприятие'})[n.route.type]||'Открыть поручение',async()=>{
      const r=await api('notifications/read',{id:n.id});d.close();void refreshNoticeCounter(true);
      // The returned server route is reauthorized again by its own endpoint.
      await openLinked($('content'),r.route);
@@ -199,8 +199,8 @@ function displayIssued(r){
 }
 const grantLabels={effective:'Действует',revoked:'Отозван',future:'Ещё не действует',expired:'Истёк срок',blocked:'Аккаунт заблокирован',role_ended:'Роль не действует',policy_changed:'Политика изменена · требуется подтверждение',employment_changed:'Кадровое назначение изменилось',scope_changed:'Область недоступна'};
 function notificationAdminPanel(v){
- const labels={approval:'Согласование СОП',familiarization:'Ознакомление с СОП',training:'Обучение TWI'},fields=Object.keys(labels).map(k=>{
-  const l=select(k,labels[k],[['off','Отключено'],...Array.from({length:31},(_,i)=>[String(i),i===0?'В день срока':('За '+i+' дн.')])]);l.querySelector('select').value=v.policy[k]===null?'off':String(v.policy[k]);return l;
+ const labels={approval:'Согласование СОП',familiarization:'Ознакомление с СОП',training:'Обучение TWI',sop_review:'Актуализация СОП',audit:'Аудиты и оценки',task:'Мероприятия',credential:'Сертификаты и полномочия наставников',admission:'Допуски к работе'},fields=Object.keys(labels).map(k=>{
+  const l=select(k,labels[k],[['off','Отключено'],...Array.from({length:['approval','familiarization','training'].includes(k)?31:91},(_,i)=>[String(i),i===0?'В день срока':('За '+i+' дн.')])]);l.querySelector('select').value=v.policy[k]===null?'off':String(v.policy[k]);return l;
  });
  const settings=form(fields,'Сохранить политику напоминаний',async f=>{
   const p={expected_revision:v.policy.rev,...Object.fromEntries(Object.keys(labels).map(k=>[k,value(f,k)==='off'?null:Number(value(f,k))]))};
@@ -214,7 +214,7 @@ function notificationAdminPanel(v){
   if(!confirm(pv.enabled?'Отключить внешнюю доставку? Внутренняя лента продолжит работать.':'Разрешить доставку на явно подключённых личных устройствах?'))return;
   await api('admin/push-policy',{expected_revision:pv.rev,enabled:!pv.enabled});await render();
  }));
- return panel('Фоновые уведомления',el('p',v.enabled&&!v.worker_disabled?'Внутренний обработчик разрешён':'Обработчик выключен настройкой размещения'),el('p','Часовой пояс: '+v.zone+(v.clock_configured?' · закреплён':' · не настроен')+' · лимит пакета: '+v.batch_limit),table(['Состояние задания','Количество'],Object.keys(state).map(k=>[state[k],v.counts[k]])),el('p','Готовы к обработке: '+v.ready+' · незавершённых ознакомлений без активного аккаунта: '+v.missing_accounts),el('p','Последнее завершение: '+(v.last_finished||'ещё нет')+' · внутренний обработчик.'),el('p','Последний проход текущего процесса: '+(v.last_scan?({running:'выполняется',ok:'завершён',deferred:'отложен из-за занятости хранилища',error:'ошибка'}[v.last_scan.state]||'—')+' · '+(v.last_scan.finished_at||v.last_scan.started_at):'ещё нет (сбрасывается при перезапуске)'),'muted'),button('Обновить состояние',()=>render()),el('h3','Политика напоминаний предприятия'),el('p','Сроки СОП, ознакомления и обучения берутся из действующих записей. Пока категория отключена, дополнительных напоминаний нет. Существующие обязательные уведомления продолжают работать.'),settings,pushBox);
+ return panel('Фоновые уведомления',el('p',v.enabled&&!v.worker_disabled?'Внутренний обработчик разрешён':'Обработчик выключен настройкой размещения'),el('p','Часовой пояс: '+v.zone+(v.clock_configured?' · закреплён':' · не настроен')+' · лимит пакета: '+v.batch_limit),table(['Состояние задания','Количество'],Object.keys(state).map(k=>[state[k],v.counts[k]])),el('p','Готовы к обработке: '+v.ready+' · незавершённых ознакомлений без активного аккаунта: '+v.missing_accounts),el('p','СОП с контрольным сроком: '+v.sop_review.total+' · просрочено: '+v.sop_review.overdue+' · без ответственного: '+v.sop_review.unassigned+' · ответственный без доступного аккаунта: '+v.sop_review.without_account),el('p','Последнее завершение: '+(v.last_finished||'ещё нет')+' · внутренний обработчик.'),el('p','Последний проход текущего процесса: '+(v.last_scan?({running:'выполняется',ok:'завершён',deferred:'отложен из-за занятости хранилища',error:'ошибка'}[v.last_scan.state]||'—')+' · '+(v.last_scan.finished_at||v.last_scan.started_at):'ещё нет (сбрасывается при перезапуске)'),'muted'),button('Обновить состояние',()=>render()),el('h3','Политика напоминаний предприятия'),el('p','Сроки согласований, актуализации СОП, обучения, проверок, мероприятий и допусков берутся из исходных записей. Новые категории по умолчанию выключены. Неподтверждённые сроки не рассчитываются. Пока категория отключена, дополнительных напоминаний нет. Существующие обязательные уведомления продолжают работать.'),settings,pushBox);
 }
 function adminPanel(d){
  const people=new Map(d.people.map(x=>[x.id,x.display_name])),roles=new Map(d.roles.map(x=>[x.id,x.name])),units=new Map(d.units.map(x=>[x.id,x.name])),accounts=new Map(d.accounts.map(x=>[x.id,x.login]));

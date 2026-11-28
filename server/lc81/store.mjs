@@ -35,6 +35,7 @@ import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {internalTrainerAppointment} from '../../src/modules/training/domain.js';
 import {notificationsEnabled,notificationFeed,readNotification,readAllNotifications,checkNotificationIntegrity} from './notifications.mjs';
 import {domainEventWatermark,captureDomainNotices,checkDomainNoticeIntegrity} from './domain-notices.mjs';
+import {ownSopReviewAvailable,sopReviewCalendar,sopReviewOwnerInfo,assignSopReviewOwner,sopReviewStatus,checkSopReviewOwnerIntegrity} from './sop-review-owner.mjs';
 import {pushDevices,registerPushDevice,revokePushDevice,queuePushTest,setPushPolicy,pushAdminStatus,pushNeedsRecovery,recoverPush,stalePushDevices,retireStalePushDevices,discoverPush,enqueuePush,pushReady,claimPush,recheckPush,releaseChangedPush,finishPush,checkPushIntegrity} from './web-push.mjs';
 import {sendWebPush} from './web-push-transport.mjs';
 import {backgroundEnabled,notificationPreferences,saveNotificationPreferences,saveReminderPolicy,discoverBackground,enqueueBackground,readyBackground,drainBackground,backgroundStatus,checkBackgroundIntegrity} from './notification-background.mjs';
@@ -161,7 +162,7 @@ function approvalAccess(db,a,d){
  };
  return {accountId:a.id,personId:local(a)?a.person_id:null,name:a.person_id?activePerson(db,a.person_id)?.display_name:'',credentialRevision:a.credential_revision,day:clock.day,at:clock.at,zone:clock.zone,clockConfigured:clock.configured,
   siteRead,history:id=>siteRead(id)&&!!readFor(db,a,'sop.read_history',id,d),
-  effective:id=>local(a)&&!!v.read('sop.read_effective',id),
+  effective:id=>local(a)&&!!v.read('sop.read_effective',id),reviewTitle:id=>local(a)?v.read('sop.read_effective',id)?.data.title??null:null,
   employmentFor:id=>{const e=employment(db,id,d);return activePerson(db,id)&&e.length===1?e[0].id:null},
   accountFor:id=>{const q=one(db,'SELECT id FROM lc81_account WHERE person_id=?',[id]),v=q&&account(db,q.id);return local(v)?v.id:null},
   coordinate:id=>siteRead(id)&&(shared.ownsSop(id)||v.fullAllows('sop.edit_draft','sop.read_history',id)),eligible,impactActor:id=>{const other=account(db,id);return local(other)?trainingAccess(db,other,d):null},audit:(action,target)=>audit(db,a.id,action,target)};
@@ -170,6 +171,7 @@ function approvalAccess(db,a,d){
 // grant calendar.read, training.read, or access to anyone else's plan.
 function sopPersonalPlanAvailable(db,approval,access){
  if(!approval.personId)return false;
+ if(ownSopReviewAvailable(db,approval))return true;
  if(access.permissions.some(k=>['sop.approval.safety','sop.approval.engineering','sop.approval.twi','sop.approval.director','sop.approval.publish'].includes(k))||hasOwnFamiliarization(db,approval))return true;
  return !!one(db,"SELECT name FROM sqlite_master WHERE type='table' AND name='lc83_sop_round'")&&rows(db,'SELECT DISTINCT revision_id FROM lc83_sop_round WHERE submitted_account_id=?',[approval.accountId]).some(x=>approval.siteRead(x.revision_id));
 }
@@ -327,6 +329,7 @@ function checkPrivate(db){
  checkBackgroundIntegrity(db);
  checkPushIntegrity(db);
  checkDomainNoticeIntegrity(db);
+ checkSopReviewOwnerIntegrity(db);
 }
 const digest=b=>createHash('sha256').update(b).digest('hex');
 function pack(db){
@@ -809,7 +812,8 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     result={day:access.day,from:query.from,to:query.to,mode:'plan',items:[],can_plan:false};
    }else result=calendarWorkspace(db,access,{...query,person_id:id});
    const extra=familiarizationCalendar(db,approval,access,{...query,person_id:id},personal),decisions=personal?approvalPlanItems(db,approval,{...query,person_id:id}):[];
-   return {...result,items:[...result.items,...extra,...decisions].sort((a,b)=>Number(b.overdue)-Number(a.overdue)||String(a.date??'9999-12-31').localeCompare(String(b.date??'9999-12-31'))||a.key.localeCompare(b.key))};
+   const reviews=sopReviewCalendar(db,access,approval,{...query,person_id:id},personal);
+   return {...result,items:[...result.items,...extra,...decisions,...reviews].sort((a,b)=>Number(b.overdue)-Number(a.overdue)||String(a.date??'9999-12-31').localeCompare(String(b.date??'9999-12-31'))||a.key.localeCompare(b.key))};
   })},
   calendarOptions(actor,revision,type,sourceId=null){return read(db=>calendarOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),type,sourceId))},
   calendarDetail(actor,revision,id){return read(db=>calendarDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
@@ -993,7 +997,8 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   saveNotificationPreferences(actor,revision,f){return mutate(db=>{const a=approvalAccess(db,checkedAccount(db,actor,revision),day(db));return {...saveNotificationPreferences(db,a,f),push_available:!!pushConfig&&pushDevices(db,a,pushConfig).enabled}})},
   notificationBackgroundStatus(actor,revision){return read(db=>{
    requireAdmin(db,actor,revision);const clock=siteClock(db);
-   return {...backgroundStatus(db,clock,id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)}),last_scan:notificationScan,push:pushAdminStatus(db,pushConfig)};
+   const accessFor=id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)};
+   return {...backgroundStatus(db,clock,accessFor),sop_review:sopReviewStatus(db,clock.day,accessFor),last_scan:notificationScan,push:pushAdminStatus(db,pushConfig)};
   })},
   setNotificationPolicy(actor,revision,f){return mutate(db=>{
    requireAdmin(db,actor,revision);return saveReminderPolicy(db,actor,siteClock(db),f,(action,target)=>audit(db,actor,action,target));
@@ -1163,9 +1168,10 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     const rev=history?projectView(db,a,'sop.read_history',history.data,d):(pub||entry.data);
     const origin=readableFrvOrigin(db,v,id),approval=approvalAccess(db,a,d);
     const familiarization=approval.personId?familiarizationList(db,approval,{kind:'visible',revision_id:id},false):null;
-    return {day:d,revision:rev,versions,measured,can_familiarization:!!familiarization?.registered,origin:origin?publicFrvOrigin(origin):null,evaluations:sopEvaluationsForRevision(db,access,id),can_evaluation:access.permissions.includes('sop.evaluation.read')&&!!history,can_effectiveness:canEffect,can_rollout:canReadRollout(db,access,id),can_public:!!effective&&v.allows('sop.read_public','sop.read_effective',id),can_steps:!!v.read('sop.read_steps',id),can_twi:!!pub?.can_twi,can_linked_frv:!!pub?.can_linked_frv};
+    return {day:d,revision:rev,versions,measured,review_owner:sopReviewOwnerInfo(db,access,v,approval,id),can_familiarization:!!familiarization?.registered,origin:origin?publicFrvOrigin(origin):null,evaluations:sopEvaluationsForRevision(db,access,id),can_evaluation:access.permissions.includes('sop.evaluation.read')&&!!history,can_effectiveness:canEffect,can_rollout:canReadRollout(db,access,id),can_public:!!effective&&v.allows('sop.read_public','sop.read_effective',id),can_steps:!!v.read('sop.read_steps',id),can_twi:!!pub?.can_twi,can_linked_frv:!!pub?.can_linked_frv};
    });
   },
+  assignSopReviewOwner(actor,revision,f){return mutate(db=>{const a=checkedAccount(db,actor,revision),d=day(db);return assignSopReviewOwner(db,trainingAccess(db,a,d),libraryAccess(db,a,d),f)})},
   rolloutDetail(actor,revision,id){return read(db=>rolloutDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
   async saveRollout(actor,revision,f){
    const ctx=read(db=>prepareRollout(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f));

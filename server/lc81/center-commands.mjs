@@ -17,6 +17,7 @@ import {programResource,personWorkResource,scheduleResource,trainingAssignmentRe
 import {PilotError} from '../lc74-store.mjs';
 import {civilPayload} from './site-clock.mjs';
 import {personalPlanWorkspace,reportScope} from './workspace-scope.mjs';
+import {currentSopReviewRow,sopReviewOwner} from './sop-review-owner.mjs';
 const must=(x,s,m)=>{if(!x)throw new PilotError(s,m)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
 const validDate=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
@@ -160,6 +161,9 @@ export function calendarWorkspace(db,a,{mode,from,to,person_id=null}){
   add({anchor:s.id,key:'schedule:'+s.id,date:s.due_on,type:scheduleLabels[scheduleKind(s)],title:view.title,owner:view.owner??null,state:view.state,pending:schedulePending(db,s),route:view.can_detail?{type:'schedule',id:s.id}:null},r,[s.owner_id]);
  }
  const addRecord=(type,id,date,title,owner,people,state,pending,key=null)=>{
+  // Reject out-of-range and other-person rows before costly composite
+  // authorization. The add() check remains unchanged as a second guard.
+  if(!date||date>to||date<from&&!(includeOverdue&&pending&&date<a.day)||person_id&&!people.includes(person_id)||personal&&!people.includes(self))return;
   const link=recordAccess(db,a,type,id);if(!link)return;
   add({anchor:id,key:key||type+':'+id,date,type:({training:'Инструктаж TWI',enrollment:'Персональная программа',task:'Мероприятие',development:'Цель развития',preparation:'Подготовка'})[type],title,owner:name(a,owner),state,pending,route:routeOf(link)},link.resource,people);
  };
@@ -169,6 +173,7 @@ export function calendarWorkspace(db,a,{mode,from,to,person_id=null}){
  }
  for(const n of rows(db,"SELECT n.*,p.title FROM training_enrollment n JOIN training_program p ON p.id=n.program_id WHERE n.state<>'cancelled'"))addRecord('enrollment',n.id,n.due_on,n.title,n.mentor_id,[n.trainee_id,n.mentor_id,n.manager_id],n.state,n.state==='active');
  for(const t of actionRows(db)){
+  if(personal&&t.owner_id!==self||person_id&&t.owner_id!==person_id)continue;
   const s=actionStatus(db,t);if(s==='cancelled')continue;
   addRecord('task',t.id,t.due_on,t.title,t.owner_id,[t.owner_id],s,['open','in_progress','implemented','ineffective'].includes(s));
  }
@@ -193,10 +198,7 @@ export function calendarWorkspace(db,a,{mode,from,to,person_id=null}){
   }
  }
  // Derived deadlines keep the original reference, never duplicate schedules.
- for(const r of rows(db,"SELECT r.id,r.review_due,r.author_id,d.title,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.archived=0 AND o.archived=0 AND r.review_due IS NOT NULL")){
-  const v=a.read('sop.read_history',r.id);if(!v)continue;
-  add({anchor:r.id,key:'sop:'+r.id,date:r.review_due,type:'Пересмотр СОП',title:v.data.title||r.title,owner:name(a,r.author_id),state:'Действует',pending:true,route:{type:'sop',id:r.id}},unitResource(r.unit_id),[r.author_id]);
- }
+ // SOP reviews are appended once by the shared review-owner projection in store.
  for(const r of rows(db,"SELECT * FROM economic_effect WHERE state='active'")){
   if(!financialRecordAllowed(db,a,r.id))continue;
   const state=effectStatus(db,r);
@@ -274,8 +276,8 @@ function evidenceOK(db,a,e){
  return true;
 }
 function safeEvidence(db,a,e){
- const link=evidenceLink(db,a,e);
- return {key:e.key,label:e.page==='preparation'&&!name(a,e.personId)?'Комплект подготовки':e.label,date:e.date,state:e.state,included:e.included!==false,person:name(a,e.personId),method:e.method||null,reason:e.reason||null,required_level:e.requiredLevel??null,observed_level:e.observedLevel??null,route:routeOf(link)};
+ const link=evidenceLink(db,a,e),revision=e.page==='sop'&&currentSopReviewRow(db,e.options?.revisionId),owner=revision?sopReviewOwner(db,revision,a.day):null;
+ return {key:e.key,label:e.page==='preparation'&&!name(a,e.personId)?'Комплект подготовки':e.label,date:e.date,state:e.state,included:e.included!==false,person:name(a,owner?owner.person_id:e.personId),method:e.method||null,reason:e.reason||null,required_level:e.requiredLevel??null,observed_level:e.observedLevel??null,route:routeOf(link)};
 }
 function buildProjection(db,a,k,scope){
  const options=centerOptions(db,a,k);
@@ -306,7 +308,7 @@ function buildProjection(db,a,k,scope){
  const metrics=p.metrics.map(m=>{
   const ok=permitted(m);
   const {evidence,options,scope:unused,...data}=m;
-  return {...data,dimensions:ok?m.dimensions:[],value:ok?m.value:null,denominator:ok?m.denominator:null,availability:ok?m.availability:'restricted',evidence:ok?evidence:[]};
+  return {...data,...(m.id==='sop_review'?{definition:'Действующие редакции со сроком пересмотра до текущей даты; в карточке — ответственный за актуализацию.'}:{}),dimensions:ok?m.dimensions:[],value:ok?m.value:null,denominator:ok?m.denominator:null,availability:ok?m.availability:'restricted',evidence:ok?evidence:[]};
  });
  return {options,p,metrics,can,full,scope};
 }

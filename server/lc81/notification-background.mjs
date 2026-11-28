@@ -6,6 +6,7 @@ import {PilotError} from '../lc74-store.mjs';
 import {approvalReminderTargets,approvalReminderView} from './sop-approval.mjs';
 import {familiarizationBackgroundTargets,familiarizationBackgroundView,familiarizationMissingAccounts} from './sop-familiarization.mjs';
 import {recordAccess} from './center-commands.mjs';
+import {EXTRA_CATEGORIES,EXTRA_SOURCES,EXTRA_KIND_CATEGORY,extraReminderTargets,extraReminderView,extraReminderEvidence} from './extra-reminders.mjs';
 
 const must=(v,s,m)=>{if(!v)throw new PilotError(s,m)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
@@ -14,33 +15,46 @@ const instant=v=>typeof v==='string'&&Number.isFinite(Date.parse(v))&&new Date(v
 const time=v=>typeof v==='string'&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v);
 const exists=(db,t)=>!!one(db,"SELECT name FROM sqlite_master WHERE type='table' AND name=?",[t]);
 const table='lc822_notification_job',prefTable='lc822_notification_preference',policyTable='lc822_notification_policy';
-const kinds=['approval_due','familiarization_due','training_due','familiarization_catchup'];
-const categories=['approval','familiarization','training'];
-const pushCategories=[...categories,'audit','task','information'];
-const category=j=>j.kind==='approval_due'?'approval':j.kind==='training_due'?'training':'familiarization';
+const legacyKinds=['approval_due','familiarization_due','training_due','familiarization_catchup'];
+const kinds=[...legacyKinds,...Object.keys(EXTRA_SOURCES)];
+const legacyCategories=['approval','familiarization','training'],legacyPushCategories=[...legacyCategories,'audit','task','information'];
+const categories=[...legacyCategories,...EXTRA_CATEGORIES];
+const pushCategories=[...categories,'information'];
+const category=j=>EXTRA_KIND_CATEGORY[j.kind]??(j.kind==='approval_due'?'approval':j.kind==='training_due'?'training':'familiarization');
 const schema=[
  "CREATE TABLE IF NOT EXISTS lc822_notification_policy(id INTEGER PRIMARY KEY CHECK(id=1),rev INTEGER NOT NULL CHECK(rev>0),settings_json TEXT NOT NULL CHECK(json_valid(settings_json)),updated_by TEXT NOT NULL REFERENCES lc81_account(id),updated_at TEXT NOT NULL);",
  "CREATE TABLE IF NOT EXISTS lc822_notification_preference(account_id TEXT PRIMARY KEY REFERENCES lc81_account(id),rev INTEGER NOT NULL CHECK(rev>0),settings_json TEXT NOT NULL CHECK(json_valid(settings_json)),updated_at TEXT NOT NULL);",
- "CREATE TABLE IF NOT EXISTS lc822_notification_job(id TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN('approval_due','familiarization_due','training_due','familiarization_catchup')),target_id TEXT NOT NULL,stage TEXT NOT NULL,basis TEXT NOT NULL,person_id TEXT NOT NULL REFERENCES person(id),account_id TEXT NOT NULL REFERENCES lc81_account(id),state TEXT NOT NULL CHECK(state IN('pending','retry','completed','cancelled','failed')),attempts INTEGER NOT NULL CHECK(attempts BETWEEN 0 AND 4),created_at TEXT NOT NULL,next_attempt_at TEXT NOT NULL,finished_at TEXT,last_code TEXT,read_at TEXT,notice_ordinal INTEGER UNIQUE,CHECK((state='completed' AND kind<>'familiarization_catchup')=(notice_ordinal IS NOT NULL)),UNIQUE(kind,target_id,stage,basis,account_id),CHECK((state IN('completed','cancelled','failed'))=(finished_at IS NOT NULL)),CHECK(read_at IS NULL OR (state='completed' AND kind<>'familiarization_catchup')));",
+ "CREATE TABLE IF NOT EXISTS lc822_notification_job(id TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN('approval_due','familiarization_due','training_due','familiarization_catchup','sop_review_due','schedule_due','task_due','credential_due','appointment_due','authorization_due','admission_due')),target_id TEXT NOT NULL,stage TEXT NOT NULL,basis TEXT NOT NULL,person_id TEXT NOT NULL REFERENCES person(id),account_id TEXT NOT NULL REFERENCES lc81_account(id),state TEXT NOT NULL CHECK(state IN('pending','retry','completed','cancelled','failed')),attempts INTEGER NOT NULL CHECK(attempts BETWEEN 0 AND 4),created_at TEXT NOT NULL,next_attempt_at TEXT NOT NULL,finished_at TEXT,last_code TEXT,read_at TEXT,notice_ordinal INTEGER UNIQUE,CHECK((state='completed' AND kind<>'familiarization_catchup')=(notice_ordinal IS NOT NULL)),UNIQUE(kind,target_id,stage,basis,account_id),CHECK((state IN('completed','cancelled','failed'))=(finished_at IS NOT NULL)),CHECK(read_at IS NULL OR (state='completed' AND kind<>'familiarization_catchup')));",
  "CREATE INDEX IF NOT EXISTS lc822_job_ready ON lc822_notification_job(state,next_attempt_at,id);",
  "CREATE INDEX IF NOT EXISTS lc822_job_account ON lc822_notification_job(account_id,state,finished_at);"
 ].join('\n');
+function ensureSchema(db){
+ const old=exists(db,table)&&one(db,"SELECT sql FROM sqlite_master WHERE type='table' AND name=?",[table]);
+ if(old&&!old.sql.includes("'sop_review_due'")){
+  db.run('ALTER TABLE lc822_notification_job RENAME TO lc822_notification_job_legacy');
+  db.run(schema);
+  db.run('INSERT INTO lc822_notification_job SELECT * FROM lc822_notification_job_legacy');
+  db.run('DROP TABLE lc822_notification_job_legacy');
+ }
+ db.run(schema);
+}
 
 export const backgroundEnabled=()=>process.env.LC82_INBOX_ENABLED!=='0'&&process.env.LC82_BACKGROUND_ENABLED!=='0';
-const defaultPolicy=()=>({approval:null,familiarization:null,training:null});
+const defaultPolicy=()=>Object.fromEntries(categories.map(k=>[k,null]));
 const defaultPreferences=()=>({reminders:Object.fromEntries(categories.map(k=>[k,true])),push_types:Object.fromEntries(pushCategories.map(k=>[k,false])),delivery_window:null});
-const validPolicy=p=>exact(p,categories)&&categories.every(k=>p[k]===null||Number.isSafeInteger(p[k])&&p[k]>=0&&p[k]<=30);
+const validPolicy=p=>(exact(p,categories)||exact(p,legacyCategories))&&Object.keys(p).every(k=>p[k]===null||Number.isSafeInteger(p[k])&&p[k]>=0&&p[k]<=(legacyCategories.includes(k)?30:90));
 const bools=(v,ks)=>exact(v,ks)&&ks.every(k=>typeof v[k]==='boolean');
 const validWindow=w=>w===null||exact(w,['days','start','end'])&&Array.isArray(w.days)&&w.days.length>=1&&w.days.length<=7&&new Set(w.days).size===w.days.length&&w.days.every(d=>Number.isSafeInteger(d)&&d>=1&&d<=7)&&time(w.start)&&time(w.end)&&w.start!==w.end;
-const validPrefs=p=>exact(p,['reminders','push_types','delivery_window'])&&bools(p.reminders,categories)&&bools(p.push_types,pushCategories)&&validWindow(p.delivery_window);
+const validPrefs=p=>exact(p,['reminders','push_types','delivery_window'])&&(bools(p.reminders,categories)||bools(p.reminders,legacyCategories))&&(bools(p.push_types,pushCategories)||bools(p.push_types,legacyPushCategories))&&validWindow(p.delivery_window);
 const requireUser=a=>must(a.personId&&process.env.LC82_INBOX_ENABLED!=='0',404,'Настройки уведомлений недоступны');
 function policy(db){
  const p=exists(db,policyTable)&&one(db,'SELECT * FROM lc822_notification_policy WHERE id=1');
- return p?{rev:p.rev,...JSON.parse(p.settings_json)}:{rev:0,...defaultPolicy()};
+ return p?{rev:p.rev,...defaultPolicy(),...JSON.parse(p.settings_json)}:{rev:0,...defaultPolicy()};
 }
 function preferences(db,id){
  const p=exists(db,prefTable)&&one(db,'SELECT * FROM lc822_notification_preference WHERE account_id=?',[id]);
- return p?{rev:p.rev,...JSON.parse(p.settings_json)}:{rev:0,...defaultPreferences()};
+ const base=defaultPreferences(),saved=p&&JSON.parse(p.settings_json);
+ return saved?{rev:p.rev,reminders:{...base.reminders,...saved.reminders},push_types:{...base.push_types,...saved.push_types},delivery_window:saved.delivery_window}:{rev:0,...base};
 }
 export function notificationPreferences(db,a){
  requireUser(a);return {...preferences(db,a.accountId),zone:a.zone,internal_inbox:true,push_available:false,email_available:false,policy:policy(db)};
@@ -48,23 +62,25 @@ export function notificationPreferences(db,a){
 export function saveNotificationPreferences(db,a,f){
  requireUser(a);
  must(exact(f,['expected_revision','reminders','push_types','delivery_window'])&&Number.isSafeInteger(f.expected_revision)&&f.expected_revision>=0,400,'Неверные поля настроек');
- const {expected_revision,...p}=f;
- must(validPrefs(p),400,'Проверьте типы уведомлений и окно доставки');
+ const {expected_revision,...input}=f;
+ must(validPrefs(input),400,'Проверьте типы уведомлений и окно доставки');
  const old=preferences(db,a.accountId);
  must(old.rev===expected_revision,409,'Настройки изменились; обновите форму');
- db.run(schema);
+ const p={reminders:{...old.reminders,...input.reminders},push_types:{...old.push_types,...input.push_types},delivery_window:input.delivery_window};
+ ensureSchema(db);
  db.run("INSERT INTO lc822_notification_preference VALUES(?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET rev=excluded.rev,settings_json=excluded.settings_json,updated_at=excluded.updated_at",[a.accountId,old.rev+1,JSON.stringify(p),a.at]);
  a.audit('notification.preferences',a.accountId);
  return notificationPreferences(db,a);
 }
 export function saveReminderPolicy(db,actor,clock,f,audit){
- must(exact(f,['expected_revision','approval','familiarization','training'])&&Number.isSafeInteger(f.expected_revision)&&f.expected_revision>=0,400,'Неверные поля политики напоминаний');
- const {expected_revision,...p}=f;
- must(validPolicy(p),400,'Укажите от 0 до 30 дней либо отключите напоминания');
- must(clock.configured||categories.every(k=>p[k]===null),409,'Сначала закрепите часовой пояс предприятия');
+ must(f&&Number.isSafeInteger(f.expected_revision)&&f.expected_revision>=0,400,'Неверные поля политики напоминаний');
+ const {expected_revision,...input}=f;
+ must(validPolicy(input),400,'Укажите от 0 до 30 дней для согласований/обучения или до 90 дней для новых категорий либо отключите напоминания');
  const old=policy(db);
  must(old.rev===expected_revision,409,'Политика изменилась; обновите форму');
- db.run(schema);
+ const p={...defaultPolicy(),...Object.fromEntries(categories.map(k=>[k,old[k]])),...input};
+ must(clock.configured||categories.every(k=>p[k]===null),409,'Сначала закрепите часовой пояс предприятия');
+ ensureSchema(db);
  db.run("INSERT INTO lc822_notification_policy VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET rev=excluded.rev,settings_json=excluded.settings_json,updated_by=excluded.updated_by,updated_at=excluded.updated_at",[old.rev+1,JSON.stringify(p),actor,clock.at]);
  audit('notification.policy',actor);
  return policy(db);
@@ -92,6 +108,7 @@ function liveView(db,a,j,p,clock){
  if(j.kind==='approval_due')return approvalReminderView(db,a,j);
  if(j.kind==='familiarization_due')return familiarizationBackgroundView(db,a,j);
  if(j.kind==='training_due')return trainingView(db,a,j);
+ if(Object.hasOwn(EXTRA_SOURCES,j.kind))return extraReminderView(db,a,j);
  return null;
 }
 export function backgroundNoticeRows(db,a){
@@ -118,7 +135,7 @@ export function discoverBackground(db,clock,accessFor,limit=BACKGROUND_BATCH){
  if(!backgroundEnabled())return [];
  const p=policy(db),a=accessMemo(accessFor);
  const approvalUntil=horizon(clock,p,'approval');
- const candidates=[...familiarizationBackgroundTargets(db,horizon(clock,p,'familiarization')),...(approvalUntil?approvalReminderTargets(db,approvalUntil):[]),...trainingTargets(db,horizon(clock,p,'training'))];
+ const candidates=[...familiarizationBackgroundTargets(db,horizon(clock,p,'familiarization')),...(approvalUntil?approvalReminderTargets(db,approvalUntil):[]),...trainingTargets(db,horizon(clock,p,'training')),...extraReminderTargets(db,clock,Object.fromEntries(EXTRA_CATEGORIES.map(k=>[k,horizon(clock,p,k)])))];
  candidates.sort((a,b)=>Number(b.kind==='familiarization_catchup')-Number(a.kind==='familiarization_catchup')||a.basis.localeCompare(b.basis)||key(a).localeCompare(key(b)));
  const known=exists(db,table)?new Set(rows(db,"SELECT kind,target_id,stage,basis,account_id FROM lc822_notification_job WHERE state<>'cancelled'").map(key)):new Set();
  const jobs=[];
@@ -131,10 +148,10 @@ export function discoverBackground(db,clock,accessFor,limit=BACKGROUND_BATCH){
 }
 export function enqueueBackground(db,clock,accessFor,candidates){
  if(!backgroundEnabled()||!candidates.length)return 0;
- const p=policy(db),a=accessMemo(accessFor);let count=0,initialized=exists(db,table);
+ const p=policy(db),a=accessMemo(accessFor);let count=0,initialized=false;
  for(const j of candidates.slice(0,BACKGROUND_BATCH)){
   if(!liveView(db,a(j.account_id),j,p,clock))continue;
-  if(!initialized){db.run(schema);initialized=true}
+  if(!initialized){ensureSchema(db);initialized=true}
   const prior=one(db,'SELECT id,state FROM lc822_notification_job WHERE kind=? AND target_id=? AND stage=? AND basis=? AND account_id=?',[j.kind,j.target_id,j.stage,j.basis,j.account_id]);
   if(prior){
    // A never-delivered cancelled job may become valid again (e.g. the
@@ -193,11 +210,12 @@ export function checkBackgroundIntegrity(db){
  for(const q of rows(db,'SELECT * FROM lc822_notification_preference'))must(validPrefs(JSON.parse(q.settings_json))&&instant(q.updated_at),503,'Повреждены настройки уведомлений');
  for(const j of rows(db,'SELECT j.*,a.person_id account_person FROM lc822_notification_job j JOIN lc81_account a ON a.id=j.account_id')){
   must(isId(j.id)&&isId(j.target_id)&&j.account_person===j.person_id&&kinds.includes(j.kind)&&instant(j.created_at)&&instant(j.next_attempt_at)&&j.next_attempt_at>=j.created_at&&(!j.finished_at||instant(j.finished_at)&&j.finished_at>=j.created_at)&&(!j.read_at||instant(j.read_at)&&j.read_at>=j.finished_at),503,'Повреждено фоновое задание');
-  must(j.kind==='approval_due'?['safety','engineering','twi','director','publish'].includes(j.stage)&&date(j.basis):j.stage===''&&(j.kind==='familiarization_catchup'?j.basis==='required':date(j.basis)),503,'Повреждено основание фонового задания');
-  const source=j.kind==='approval_due'?'lc83_sop_round':j.kind==='training_due'?'training_assignment':'lc83_sop_familiarization';
+  must(Object.hasOwn(EXTRA_SOURCES,j.kind)?isId(j.stage)&&date(j.basis):j.kind==='approval_due'?['safety','engineering','twi','director','publish'].includes(j.stage)&&date(j.basis):j.stage===''&&(j.kind==='familiarization_catchup'?j.basis==='required':date(j.basis)),503,'Повреждено основание фонового задания');
+  const source=EXTRA_SOURCES[j.kind]??(j.kind==='approval_due'?'lc83_sop_round':j.kind==='training_due'?'training_assignment':'lc83_sop_familiarization');
   const evidence=exists(db,source)&&one(db,'SELECT * FROM '+source+' WHERE id=?',[j.target_id]);
   must(evidence,503,'Нет источника фонового задания');
-  if(j.kind==='approval_due')must(JSON.parse(evidence.route_json).participants.some(x=>x.stage===j.stage&&x.person_id===j.person_id&&x.account_id===j.account_id&&x.due_on===j.basis),503,'Неверный адресат поручения СОП');
+  if(Object.hasOwn(EXTRA_SOURCES,j.kind))must(extraReminderEvidence(db,j,evidence),503,'Неверный адресат или источник напоминания');
+  else if(j.kind==='approval_due')must(JSON.parse(evidence.route_json).participants.some(x=>x.stage===j.stage&&x.person_id===j.person_id&&x.account_id===j.account_id&&x.due_on===j.basis),503,'Неверный адресат поручения СОП');
   else must((j.kind==='training_due'?evidence.trainee_id:evidence.person_id)===j.person_id,503,'Неверный адресат фонового задания');
   must(j.notice_ordinal===null||Number.isSafeInteger(j.notice_ordinal)&&j.notice_ordinal>0,503,'Неверный порядок уведомлений');
  }

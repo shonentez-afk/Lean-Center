@@ -83,6 +83,8 @@ test('LC83 mandatory independent votes, frozen round history, publication and re
  await x.change('director',id,'publish','publish');
  assert.equal(detail('author',id).round.state,'effective');
  assert(x.effective().includes(id));assert(!x.effective().includes(old));
+ assert.equal(x.store.libraryCard(x.users.author.id,1,id).review_owner.origin,'organizer');
+ assert.equal(x.store.libraryCard(x.users.author.id,1,id).review_owner.person_id,x.users.author.person_id);
  assert.equal(detail('author',id).round.decisions.length,5);
  assert.equal(detail('author',id).history.length,2);
  const queue=store.retrainingWorkspace(users.manager.id,1,{type:'all',state:'all',person_id:null,q:'',offset:0});
@@ -396,7 +398,7 @@ test('LC822 persistent reminder jobs: policy, live authorization, deadline repla
  const x=await setupApproval();t.after(x.cleanup);
  const {store,users,admin}=x;
  const status=()=>store.notificationBackgroundStatus(admin.id,1),feed=name=>store.notificationFeed(users[name].id,1,{}),of=(name,kind)=>feed(name).items.filter(v=>v.kind===kind);
- assert.deepEqual(status().policy,{rev:0,approval:null,familiarization:null,training:null});
+ assert.deepEqual(status().policy,{rev:0,approval:null,familiarization:null,training:null,sop_review:null,audit:null,task:null,credential:null,admission:null});
  assert.throws(()=>store.notificationBackgroundStatus(users.observer.id,1),/администратора/);
  await assert.rejects(store.setNotificationPolicy(users.observer.id,1,{expected_revision:0,approval:0,familiarization:0,training:0}),/администратора/);
  await assert.rejects(store.setNotificationPolicy(admin.id,1,{expected_revision:0,approval:31,familiarization:0,training:0}),/30 дней/);
@@ -567,6 +569,22 @@ test('LC822 queue-scale fixture: 500 recipients, 1000 events, bounded retry, exa
   assert.equal(one(db,'SELECT state FROM lc822_notification_job WHERE id=?',[bad]).state,'failed');
   assert.deepEqual(discoverBackground(db,clock,accessFor),[]);assert.deepEqual(readyBackground(db,clock),[]);
   checkBackgroundIntegrity(db);
+  // Recreate the exact earlier kind CHECK with the actual prior rows, then
+  // exercise the in-transaction upgrade preserving read and failed history.
+  const before=rows(db,'SELECT * FROM lc822_notification_job ORDER BY id'),newSql=one(db,"SELECT sql FROM sqlite_master WHERE name='lc822_notification_job'").sql;
+  tx(db,()=>{
+   db.run('ALTER TABLE lc822_notification_job RENAME TO qa_lc825_current');
+   db.run(newSql.replace(",'sop_review_due','schedule_due','task_due','credential_due','appointment_due','authorization_due','admission_due'",""));
+   db.run('INSERT INTO lc822_notification_job SELECT * FROM qa_lc825_current');
+   db.run('DROP TABLE qa_lc825_current');
+   db.run("UPDATE lc822_notification_policy SET settings_json=? WHERE id=1",[JSON.stringify({approval:null,familiarization:0,training:null})]);
+  });
+  assert(!one(db,"SELECT sql FROM sqlite_master WHERE name='lc822_notification_job'").sql.includes("'sop_review_due'"));
+  checkBackgroundIntegrity(db);
+  tx(db,()=>saveReminderPolicy(db,admin,clock,{expected_revision:1,approval:null,familiarization:0,training:null,sop_review:90,audit:null,task:null,credential:null,admission:null},()=>{}));
+  assert.deepEqual(rows(db,'SELECT * FROM lc822_notification_job ORDER BY id'),before);
+  checkBackgroundIntegrity(db);
+  console.log('LC825_LEGACY_QUEUE_SCHEMA_AND_ORDINALS_OK');
   console.log('LC822_QUEUE_500_RECIPIENTS_1000_EVENTS_OK',JSON.stringify({queued,completed,retried,rounds,elapsed_ms:Date.now()-start,scope:'synthetic queue fixture; not VPS or full checkpoint load'}));
  }finally{db.close()}
 });
@@ -816,4 +834,87 @@ test('LC824 twelve-month native task history, mixed authenticated HTTP load and 
   assert.equal(restored.listResources(actor.id,'task.read').filter(r=>r.title.startsWith('Год QA ')).length,history.perAuthor);
  }finally{await restored.close()}
  console.log('LC824_YEAR_HISTORY_RESTORE_OK');
+});
+
+test('LC825 actualization ownership, reminder until effective revision, task deadline, push and restore',async t=>{
+ const ec=createECDH('prime256v1');ec.generateKeys();const key=Buffer.concat([Buffer.alloc(32-ec.getPrivateKey().length),ec.getPrivateKey()]).toString('base64url');
+ const cfg={...vapidFromPrivate(key,'mailto:qa@example.invalid'),binding:'f'.repeat(64),origin:'https://qa.invalid'},sent=[];
+ const x=await setupApproval({pushConfig:cfg,pushSender:async(config,device,notice_id)=>{sent.push(notice_id);return {status:201}}});t.after(x.cleanup);
+ const {store,users,admin,old,day}=x,until=new Date(Date.parse(day)+90*86400000).toISOString().slice(0,10);
+ const feed=(u,kind,id)=>store.notificationFeed(u.id,1,{filter:'actions',limit:50}).items.find(n=>n.kind===kind&&n.route.id===id);
+ const plan=u=>store.calendarWorkspace(u.id,1,{mode:'plan',from:day,to:until}).items;
+ const owner=(u,id=old)=>store.libraryCard(u.id,1,id).review_owner;
+ const assign=(u,person,rev,id=old)=>store.assignSopReviewOwner(u.id,1,{revision_id:id,expected_revision:rev,person_id:person,note:'Учебное назначение ответственного'});
+ const settings={approval:null,familiarization:null,training:null,sop_review:90,audit:null,task:0,credential:null,admission:null};
+ assert.equal(owner(users.manager).assigned,false,'unattributed legacy SOP cannot silently gain a recipient');
+ assert.equal(store.notificationBackgroundStatus(admin.id,1).sop_review.unassigned,1);
+ assert.equal(owner(users.manager).can_assign,true);
+ await assert.rejects(assign(users.observer,users.observer.person_id,0),/недоступно/);
+ await assign(users.manager,users.author.person_id,0);
+ assert.equal(owner(users.author).person_id,users.author.person_id);
+ assert.equal(owner(users.manager).rev,1);
+ await assert.rejects(assign(users.manager,users.observer.person_id,0),/изменён/);
+ assert.equal(store.notificationBackgroundStatus(admin.id,1).sop_review.unassigned,0);
+ await store.setPushPolicy(admin.id,1,{expected_revision:0,enabled:true});
+ const ap=store.notificationPreferences(users.author.id,1);
+ await store.saveNotificationPreferences(users.author.id,1,{expected_revision:ap.rev,reminders:ap.reminders,push_types:{...ap.push_types,sop_review:true},delivery_window:null});
+ const browser=createECDH('prime256v1');browser.generateKeys();
+ await store.registerPushDevice(users.author.id,1,{label:'Учебный телефон',confirmed:true,subscription:{endpoint:'https://fcm.googleapis.com/fcm/send/qa-review',expirationTime:null,keys:{p256dh:browser.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}}});
+ await store.setNotificationPolicy(admin.id,1,{expected_revision:0,...settings});
+ // For this fixture the legacy passport is 2026-01-20, review 2027-01-20.
+ // The real current CI date is used; it may already be overdue in later runs.
+ assert(owner(users.author).due_on<=until);
+ const first=await store.runNotificationBackground();assert.equal(first.completed,1);
+ const n=feed(users.author,'sop_review_due',old);assert(n?.pending);assert.equal(n.due_on,owner(users.author).due_on);assert.equal(n.category,'sop_review');
+ assert(plan(users.author).some(p=>p.route?.id===old&&p.type==='Актуализация СОП'));
+ assert.equal(feed(users.observer,'sop_review_due',old),undefined);
+ assert.equal((await store.runPushDelivery()).finished,1);assert.deepEqual(sent,[n.id]);assert.equal(feed(users.author,'sop_review_due',old).read_at,null);
+ await store.readNotification(users.author.id,1,{id:n.id});assert(feed(users.author,'sop_review_due',old).pending);
+ assert.equal((await store.runNotificationBackground()).completed,0);
+ // Reassignment retains the old job in history but removes its live route.
+ await assign(users.manager,users.observer.person_id,1);
+ assert.equal(feed(users.author,'sop_review_due',old),undefined);
+ assert.equal((await store.runNotificationBackground()).completed,1);
+ const n2=feed(users.observer,'sop_review_due',old);assert(n2?.pending);assert.notEqual(n.id,n2.id);
+ assert(plan(users.observer).some(p=>p.route?.id===old));
+ const prefs=store.notificationPreferences(users.observer.id,1);
+ const saved=await store.saveNotificationPreferences(users.observer.id,1,{expected_revision:prefs.rev,reminders:{...prefs.reminders,sop_review:false},push_types:prefs.push_types,delivery_window:null});
+ assert.equal(feed(users.observer,'sop_review_due',old),undefined);
+ assert(plan(users.observer).some(p=>p.route?.id===old),'personal plan independent of optional reminders');
+ await store.saveNotificationPreferences(users.observer.id,1,{expected_revision:saved.rev,reminders:{...saved.reminders,sop_review:true},push_types:saved.push_types,delivery_window:null});
+ assert.equal(feed(users.observer,'sop_review_due',old).id,n2.id);
+ const id=(await x.passport(await x.draft('Учебная актуализация СОП'))).revision_id;
+ assert(feed(users.observer,'sop_review_due',old)?.pending,'a draft cannot close effective revision deadline');
+ await x.submit(id);for(const stage of ['safety','engineering','twi','director'])await x.change(stage,id,stage);
+ await x.impact(id);assert(feed(users.observer,'sop_review_due',old)?.pending);
+ await x.change('director',id,'publish','publish');
+ assert.equal(feed(users.observer,'sop_review_due',old),undefined);
+ assert(!plan(users.observer).some(p=>p.route?.id===old));
+ assert.equal(owner(users.observer,id).person_id,users.observer.person_id,'explicit document responsibility survives new revision');
+ assert.equal(owner(users.observer,id).rev,2);assert(owner(users.observer,id).due_on>until);
+ assert.equal((await store.runNotificationBackground()).completed,0);
+ // Task deadline uses existing native state; optional reminder is separate
+ // from the mandatory D1 event, and both disappear from actionable work.
+ const role=store.adminData(admin.id).assignments.find(a=>a.person_id===users.author.person_id);
+ await store.setPolicy(admin.id,{role_id:role.role_id,revision:0,permissions:['task.read','task.detail','task.implement_own','task.start','plan.read']});
+ await store.grant(admin.id,{account_id:users.author.id,assignment_id:role.id,scope:{kind:'self'},valid_to:null});
+ const task=await store.createTask(users.manager.id,1,{source:null,title:'Контрольный срок мероприятия',owner_id:users.author.person_id,due_on:day,kind:'corrective',priority:'normal'});
+ assert.equal((await store.runNotificationBackground()).completed,1);
+ const due=feed(users.author,'task_due',task.id);assert(due?.pending);
+ await store.readNotification(users.author.id,1,{id:due.id});assert(feed(users.author,'task_due',task.id).pending);
+ await store.implementOwnTask(users.author.id,1,{id:task.id,expected_revision:task.rev,result:'Учебное выполнение'});
+ assert.equal(feed(users.author,'task_due',task.id),undefined);
+ // Legacy clients can still change their original 3 policies without
+ // overwriting the new categories. The queue retains old IDs and receipts.
+ const policy=await store.setNotificationPolicy(admin.id,1,{expected_revision:1,approval:2,familiarization:null,training:null});
+ assert.equal(policy.sop_review,90);assert.equal(policy.task,0);
+ await store.close();const backup=path.join(x.root,'lc825-review-owner-copy');await copySecureCheckpoint(x.target,backup);
+ const restored=await openSecureQA({dataDir:backup});try{
+  const actor=restored.authenticate('observer',x.password),m=restored.authenticate('manager',x.password);
+  assert.equal(restored.libraryCard(actor.id,1,id).review_owner.person_id,actor.person_id??users.observer.person_id);
+  assert.equal(restored.libraryCard(m.id,1,id).review_owner.rev,2);
+  assert.equal(restored.notificationBackgroundStatus(admin.id,1).policy.sop_review,90);
+  assert(!restored.notificationFeed(actor.id,1,{filter:'actions'}).items.some(n=>n.kind==='sop_review_due'&&n.route.id===old));
+ }finally{await restored.close()}
+ console.log('LC825_SOP_OWNER_REASSIGN_READ_DRAFT_PUBLISH_TASK_RESTORE_OK');
 });

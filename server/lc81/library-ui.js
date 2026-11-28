@@ -269,7 +269,15 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
    }else if(key==='passport'){
     const doc=await meta(),fields=[['Код',r.code],['Название',r.title],['Редакция','v'+r.version_no],['Состояние',r.approval?.status||stateLabel[r.state]||r.state],...Object.entries({created_at:'Создана',effective_at:'Ввод в действие',review_due:'Срок пересмотра',changed_on:'Изменена',print_format:'Формат А3'}).filter(([k])=>Object.hasOwn(r,k)).map(([k,label])=>[label,k==='print_format'?({portrait:'Вертикальный',landscape:'Горизонтальный'}[r[k]]||'—'):r[k]])];
     if(doc)fields.push(...Object.entries(doc.meta).filter(([,v])=>v).map(([k,v])=>[fieldNames[k]||k,v]));
+    const review=d.review_owner;
+    if(review)fields.push(['Ответственный за актуализацию',review.assigned?(review.name||'Назначен'):'Требуется назначить'],['Основание',({assigned:'Назначение ответственным',organizer:'Организатор утверждённого маршрута (по умолчанию)',recorded_author:'Автор в исходной записи',employment_changed:'Кадровое назначение изменилось',unassigned:'Нет подтверждённого ответственного'})[review.origin]],['Контроль срока',review.overdue?'Пересмотр просрочен':'Срок не истёк']);
     content.append(table(['Реквизит','Значение'],fields),el('p','Согласование и ввод в действие выполняются по отдельному маршруту LC8.3. Прежний исторический статус не является новым утверждением.','muted'),editActions(r,'sop'));
+    if(review){
+     content.append(el('p','Актуализация: срок пересмотра рассчитывается от фактической даты изменения. Прочтение уведомления или создание черновика не закрывает действующий срок.','muted'));
+     if(review.can_assign){const owner=select('review_person','Ответственный за актуализацию',[['','Выберите сотрудника'],...review.choices.map(p=>[p.id,p.name])]);owner.querySelector('select').value=review.person_id||'';
+      content.append(panel('Назначение ответственного за актуализацию',form([owner,input('review_note','Основание назначения')],'Сохранить ответственного',async f=>{await api('library/review-owner',{revision_id:id,expected_revision:review.rev,person_id:value(f,'review_person'),note:value(f,'review_note')});f.lcResetForm?.();note('Ответственный сохранён');await card(host,id,'passport',trail)})));
+     }
+    }
    }else if(key==='versions'){
     content.append(table(['Редакция','Название','Состояние','Введена','Действия'],d.versions.map(v=>['v'+v.version_no,v.title,stateLabel[v.state]||v.state,v.effective_at,v.revision_id===id?'Открыта':button('Открыть редакцию',()=>openVersion(v))])));
     content.append(el('p','Показаны только редакции, доступные текущей учётной записи.','muted'));

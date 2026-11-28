@@ -278,6 +278,6 @@ export function checkPushIntegrity(db){
    const domain=domainNoticeOwner(db,j.notice_id);
    must((n||b)?.account_id===d.account_id||domain?.person_id===d.person_id,503,'Неверный получатель доставки');
   }
-  must(isId(j.id)&&instant(j.created_at)&&instant(j.expires_at)&&j.expires_at>j.created_at&&instant(j.next_attempt_at)&&(!j.finished_at||instant(j.finished_at))&&(!j.claim_id||isId(j.claim_id))&&(j.kind==='test'?j.category==='test'&&j.dedup==='test:'+j.id:isId(j.notice_id)&&j.dedup===j.notice_id&&['approval','training','familiarization','audit','task','information'].includes(j.category)),503,'Повреждено задание Web Push');
+  must(isId(j.id)&&instant(j.created_at)&&instant(j.expires_at)&&j.expires_at>j.created_at&&instant(j.next_attempt_at)&&(!j.finished_at||instant(j.finished_at))&&(!j.claim_id||isId(j.claim_id))&&(j.kind==='test'?j.category==='test'&&j.dedup==='test:'+j.id:isId(j.notice_id)&&j.dedup===j.notice_id&&['approval','training','familiarization','sop_review','audit','task','credential','admission','information'].includes(j.category)),503,'Повреждено задание Web Push');
  }
 }

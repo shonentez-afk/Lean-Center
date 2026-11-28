@@ -181,8 +181,10 @@ try{
  const admin=await profile('admin');await admin.go('admin.notifications');
  await admin.content.getByRole('heading',{name:'Фоновые уведомления',exact:true}).waitFor();
  await admin.content.locator('select[name=familiarization]').selectOption('0');
+ await admin.content.locator('select[name=sop_review]').selectOption('90');
  await admin.button('Сохранить политику напоминаний').click();await admin.ready();
  assert.equal(x.store.notificationBackgroundStatus(x.admin.id,1).policy.familiarization,0);
+ assert.equal(x.store.notificationBackgroundStatus(x.admin.id,1).policy.sop_review,90);
  await admin.ctx.close();
  console.log('LC822_BROWSER_PREFERENCES_ADMIN_POLICY_OK');
  const role=x.store.adminData(x.admin.id).assignments.find(a=>a.person_id===x.users.author.person_id);assert(role);
@@ -199,6 +201,17 @@ try{
  assert.equal(x.store.taskDetail(x.users.author.id,1,task.id).state,'open');
  await worker.ctx.close();
  console.log('LC824_BROWSER_TASK_NOTICE_EXACT_CARD_OK');
+ const reviewManager=await profile('manager');await reviewManager.go('sop.read_effective');
+ await reviewManager.button('Открыть СОП').first().click();
+ await reviewManager.content.getByRole('heading',{name:'Назначение ответственного за актуализацию',exact:true}).waitFor();
+ const reviewForm=reviewManager.content.locator('form').filter({has:reviewManager.p.locator('select[name=review_person]')});
+ await reviewForm.locator('select[name=review_person]').selectOption(x.users.observer.person_id);
+ await reviewForm.locator('input[name=review_note]').fill('Браузерное назначение ответственного');
+ await reviewForm.getByRole('button',{name:'Сохранить ответственного',exact:true}).click();
+ await reviewManager.ready();
+ assert.equal(x.store.libraryCard(x.users.manager.id,1,id).review_owner.person_id,x.users.observer.person_id);
+ await reviewManager.ctx.close();
+ console.log('LC825_BROWSER_REVIEW_OWNER_AND_POLICY_OK');
  assert.deepEqual(errors,[]);
  console.log('LC83_BROWSER_FULL_ROUTE_OK');
 }finally{if(browser)await browser.close();await close(proxy);await close(server);await x.cleanup()}

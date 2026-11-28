@@ -59,7 +59,7 @@ async function synthetic(t,{twiR2=false}={}){
 }
 test('migration keeps all existing v17 records and referenced sources, reuses role IDs and copies authenticated state',async t=>{
  const x=await synthetic(t),pass=password();
- const mapping={source:x.source,target:x.target,siteId:x.site,adminRoleId:x.adminRole,managerRoleId:x.managerRole,password:pass};
+ const mapping={source:x.source,target:x.target,siteId:x.site,adminRoleId:x.adminRole,managerRoleId:x.managerRole,password:pass,siteTimeZone:'UTC'};
  await assert.rejects(migratePilotCopy({...mapping,target:x.source}));
  await assert.rejects(migratePilotCopy({...mapping,target:path.join(x.source,'nested')}));
  await assert.rejects(migratePilotCopy({...mapping,target:path.join(x.root,'bad-role'),adminRoleId:null}));
@@ -274,9 +274,21 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const aData=store.adminData(admin.id),instructorRole=aData.roles.find(r=>r.code==='INSTRUCTOR').id;
   const instructorAssignment=aData.assignments.find(r=>r.person_id===x.f.mentor&&r.role_id===instructorRole).id;
   const instructor=await store.createAccount(admin.id,{person_id:x.f.mentor,login:'secure-instructor',password:password(),generate:false});
-  await store.setPolicy(admin.id,{role_id:instructorRole,revision:0,permissions:['training.read','training.detail','training.stage','training.read_sop','training.enrollment.read','training.enrollment.detail','training.enrollment.result','preparation.read','preparation.detail','preparation.shift','self.read','self.detail','self.create','audit.read','audit.detail','person.read_basic','calendar.read','calendar.detail','calendar.complete','plan.read']});
+  await store.setPolicy(admin.id,{role_id:instructorRole,revision:0,permissions:['training.read','training.detail','training.stage','training.read_sop','training.enrollment.read','training.enrollment.detail','training.enrollment.result','preparation.read','preparation.detail','preparation.shift','self.read','self.detail','self.create','audit.read','audit.detail','person.read_basic','calendar.read','calendar.detail','calendar.complete','plan.read','credential.read','appointment.read','authorization.read']});
   await store.grant(admin.id,{account_id:instructor.id,assignment_id:instructorAssignment,scope:{kind:'assigned'},valid_to:null});
   await store.grant(admin.id,{account_id:instructor.id,assignment_id:instructorAssignment,scope:{kind:'self'},valid_to:null});
+  const reminder=(actor,kind,id)=>store.notificationFeed(actor.id,1,{filter:'actions',limit:50}).items.find(n=>n.kind===kind&&n.route.id===id);
+  await store.setNotificationPolicy(admin.id,1,{expected_revision:0,approval:null,familiarization:null,training:null,sop_review:null,audit:90,task:null,credential:90,admission:90});
+  const expiring=await store.changeMentor(manager.id,1,mentorCmd('credential',{...certificateFields,number:'LC825-EXPIRING',issued_on:today,valid_until:due}));
+  const expiringOrder=await store.changeMentor(manager.id,1,mentorCmd('appointment',{credential_id:expiring.id,order_number:'LC825-EXPIRING-ORDER',order_on:today,approved_by:x.f.actor,valid_from:today,valid_to:due,acknowledged_on:today,evidence:'Учебный приказ со сроком'}));
+  const expiringAuth=await store.changeMentor(manager.id,1,mentorCmd('authorization',{appointment_id:expiringOrder.id,operation_id:operation.id,valid_from:today,valid_to:due}));
+  await store.runNotificationBackground();
+  for(const [kind,id] of [['credential_due',expiring.id],['appointment_due',expiringOrder.id],['authorization_due',expiringAuth.id]]){assert(reminder(instructor,kind,id)?.pending);assert.equal(reminder(worker,kind,id),undefined)}
+  await store.changeMentor(manager.id,1,mentorCmd('authorization',{reason:'Учебный отзыв'},expiringAuth.id,expiringAuth.rev));
+  assert.equal(reminder(instructor,'authorization_due',expiringAuth.id),undefined);
+  await store.changeMentor(manager.id,1,mentorCmd('appointment',{reason:'Учебный отзыв'},expiringOrder.id,expiringOrder.rev));
+  await store.changeMentor(manager.id,1,mentorCmd('credential',{reason:'Учебный отзыв'},expiring.id,expiring.rev));
+  assert.equal(reminder(instructor,'credential_due',expiring.id),undefined);assert.equal(reminder(instructor,'appointment_due',expiringOrder.id),undefined);
   const headRole=(await store.createReference(admin.id,'business_role',{code:'QA-HEAD-LC81',name:'Руководитель обучения QA'})).id;
   const headAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.f.other,role_id:headRole,valid_from:'2020-01-01',valid_to:null})).id;
   const head=await store.createAccount(admin.id,{person_id:x.f.other,login:'secure-head',password:password(),generate:false});
@@ -352,7 +364,8 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(domainFeed(worker,'practical_result',practical.id)[0].category,'audit');
   assert.equal(domainFeed(instructor,'practical_result',practical.id).length,0);
   await cmd(manager.id,'qualify',{assessed_on:today,practical_id:practical.id,observation_state:'rated',level:2,valid_until:null,evidence:'Учебное решение',feedback:'Уровень подтверждён'});
-  await cmd(manager.id,'admit',{decided_on:today,valid_until:null,decision:'granted',evidence:'Учебное основание допуска',feedback:'Допуск зарегистрирован'});
+  await cmd(manager.id,'admit',{decided_on:today,valid_until:due,decision:'granted',evidence:'Учебное основание допуска',feedback:'Допуск зарегистрирован'});
+  await store.runNotificationBackground();assert(reminder(worker,'admission_due',newTraining.id)?.pending);assert.equal(reminder(instructor,'admission_due',newTraining.id),undefined);
   assert(store.enrollmentDetail(manager.id,1,personal.id).tasks.every(t=>t.done));
   await enrollmentCmd(manager.id,'finish',{conclusion:'basic',feedback:'Все задания подтверждены'});
   assert.equal(store.enrollmentDetail(manager.id,1,personal.id).state,'completed');
@@ -452,6 +465,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const scheduled=await store.createSchedule(manager.id,1,{type:'audit',source_id:newTraining.id,source_rev:observation.rev,owner_id:x.f.actor,due_on:today});
   assert.equal(store.calendarDetail(manager.id,1,scheduled.id).candidates.length,0);
   assert.equal(domainFeed(manager,'schedule_assigned',scheduled.id)[0].pending,true);
+  await store.runNotificationBackground();assert(reminder(manager,'schedule_due',scheduled.id)?.pending);
   assert.equal(domainFeed(worker,'schedule_assigned',scheduled.id).length,0);
   assert.throws(()=>store.calendarDetail(worker.id,1,scheduled.id),/недоступен/);
   await assert.rejects(store.changeSchedule(manager.id,1,{id:scheduled.id,expected_revision:scheduled.rev,command:'complete',fields:{fact_id:newTraining.id}}),/доступный факт/);
@@ -462,6 +476,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   await store.changeSchedule(manager.id,1,{id:scheduled.id,expected_revision:scheduled.rev,command:'complete',fields:{fact_id:recordedAudit.id}});
   assert.equal(store.calendarDetail(manager.id,1,scheduled.id).state,'done');
   assert.equal(domainFeed(manager,'schedule_assigned',scheduled.id)[0].pending,false);
+  assert.equal(reminder(manager,'schedule_due',scheduled.id),undefined);
   assert.equal(store.calendarDetail(manager.id,1,scheduled.id).fact.id,recordedAudit.id);
   const cancelSchedule=await store.createSchedule(manager.id,1,{type:'practical',source_id:newTraining.id,source_rev:observation.rev,owner_id:x.f.actor,due_on:due});
   await store.changeSchedule(manager.id,1,{id:cancelSchedule.id,expected_revision:cancelSchedule.rev,command:'cancel',fields:{}});
@@ -502,6 +517,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(domainFeed(worker,'task_assigned',action.id).length,1);assert.equal(domainFeed(worker,'task_assigned',action.id)[0].pending,false);
   assert.equal(domainFeed(worker,'task_result',action.id).length,1);
   console.log('LC824_DOMAIN_TRAINING_AUDIT_ASSESSMENT_TASK_OK');
+  console.log('LC825_CERTIFICATE_APPOINTMENT_AUTHORIZATION_ADMISSION_SCHEDULE_OK');
   // Question-bank revisions are immutable; previous-id CAS is mandatory.
   const oldBank=store.bankDetail(manager.id,1,x.bank);
   const editedBlocks=oldBank.blocks.map(b=>({...b,questions:b.questions.map((q,i)=>i<Math.ceil(b.questions.length*0.1)?{...q,text:q.text+' (учебное уточнение)'}:q)}));
