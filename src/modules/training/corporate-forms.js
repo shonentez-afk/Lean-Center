@@ -71,15 +71,16 @@ function merge(s,r,c1,c2,value,bold=false){if(c2>c1)s.mergeCells(r,c1,r,c2);cons
 function header(s,r,last){for(let c=1;c<=last;c++){const x=s.getCell(r,c);x.font={name:'Arial',size:10,bold:true};x.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE7E9EC'}};x.border=border;x.alignment={vertical:'middle',horizontal:'center',wrapText:true}}s.getRow(r).height=32}
 function cells(s,r,values){values.forEach((v,i)=>{const x=s.getCell(r,i+1);x.value=v??null;x.font={name:'Arial',size:10};x.border=border;x.alignment={vertical:'middle',wrapText:true,horizontal:i===0?'center':'left'}});s.getRow(r).height=Math.max(23,Math.min(90,15*Math.ceil(Math.max(1,...values.map(x=>typeof x==='string'?x.length/35:1)))))}
 export function productionPlanWorkbook(ExcelJS,plan){
- const w=new ExcelJS.Workbook(),s=sheet(w,'Согласованный план',[7,23,29,43,20,29,15,15,36]);
+ const w=new ExcelJS.Workbook(),s=sheet(w,plan.blank?'План обучения':'Согласованный план',[7,23,29,43,20,29,15,15,36]);
  merge(s,1,1,9,'Приложение 6 · План производственного обучения',true);
  merge(s,2,1,9,plan.title||'');merge(s,3,1,9,'Период: '+(plan.from||'')+' — '+(plan.to||''));
  merge(s,4,1,9,'Согласовано: '+(plan.approved_on||'')+' · непосредственный руководитель: '+(plan.responsible?.name||'')+' · '+(plan.responsible?.date||'')+' · подпись: __________');
  merge(s,5,1,9,'Руководитель подразделения: '+(plan.head?.name||'')+' · '+(plan.head?.date||'')+' · подпись: __________');
  cells(s,6,['№','Подразделение','Обучаемый','СОП / редакция','Целевой уровень','Инструктор','Начало','Срок','Основание']);header(s,6,9);
  plan.rows.forEach((x,i)=>cells(s,i+7,[i+1,x.unit,x.trainee,x.sop,x.target_level==null?'':x.target_level+(x.target_label?' · '+x.target_label:''),x.instructor,x.assigned_on,x.due_on,x.scenario]));
- merge(s,plan.rows.length+8,1,9,'Выписка согласованного состава. Подписи не подставляются; фактическое время и этапы — в приложении 8.');
+ merge(s,plan.rows.length+8,1,9,plan.blank?'Пустой бланк. Заполните состав и согласуйте план.':'Выписка согласованного состава. Подписи не подставляются; фактическое время и этапы — в приложении 8.');
  s.views=[{state:'frozen',ySplit:6}];s.pageSetup.printTitlesRow='6:6';s.pageSetup.printArea='A1:I'+(plan.rows.length+8);
+ if(plan.blank)return w;
  const trace=sheet(w,'Основания строк',[8,45,19]);cells(trace,1,['№','ID назначения','Версия при согласовании']);header(trace,1,3);
  plan.rows.forEach((x,i)=>cells(trace,i+2,[i+1,x.assignment_id,x.assignment_rev]));return w;
 }

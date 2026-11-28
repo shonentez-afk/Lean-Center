@@ -92,6 +92,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   }
   if(open&&cap.reschedule)n.append(groups('Изменить срок',[dt('due_on','Новый срок',d.due_on),input('reason','Причина')],'Сохранить срок',command('reschedule',f=>({due_on:value(f,'due_on'),reason:value(f,'reason')}))));
   if(open&&cap.cancel)n.append(groups('Отменить назначение',[input('reason','Причина')],'Отменить',command('cancel',f=>({reason:value(f,'reason')}))));
+  const secondary=el('details');secondary.append(el('summary','Дополнительные действия · отдельные факты и оценки'));
   if(valid&&d.approved){
    if(cap.stage){
     const stages=d.stages.filter(s=>s.done||s.code===d.next),stage=select('stage_code','Фактический этап',stages.map(s=>[s.code,s.label]));if(d.next)stage.querySelector('select').value=d.next;
@@ -106,7 +107,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
      if(focus==='instruction')protocol.open=true;n.append(protocol);
     }
     const held=input('held_at','Фактические дата и время','datetime-local');
-    n.append(groups('Регистрация инструктажа',[stage,held,number('duration','Минуты',1,1440),select('result','Результат',[['completed','Выполнен'],['incomplete','Не завершён']]),input('notes','Что выполнено'),optional('witness_id','Демонстратор (если требуется)',opts(d.witnesses)),check('mentor_ack','Инструктор подтвердил факт'),check('trainee_ack','Обучаемый подтвердил факт')],'Записать факт инструктажа',command('stage',f=>({stage_code:value(f,'stage_code'),held_at:value(f,'held_at'),duration_minutes:Number(value(f,'duration')),result:value(f,'result'),notes:value(f,'notes'),witness_id:value(f,'witness_id')||null,mentor_ack:checked(f,'mentor_ack'),trainee_ack:checked(f,'trainee_ack')}))));
+    (pending.length?secondary:n).append(groups('Регистрация инструктажа',[stage,held,number('duration','Минуты',1,1440),select('result','Результат',[['completed','Выполнен'],['incomplete','Не завершён']]),input('notes','Что выполнено'),optional('witness_id','Демонстратор (если требуется)',opts(d.witnesses)),check('mentor_ack','Инструктор подтвердил факт'),check('trainee_ack','Обучаемый подтвердил факт')],'Записать факт инструктажа',command('stage',f=>({stage_code:value(f,'stage_code'),held_at:value(f,'held_at'),duration_minutes:Number(value(f,'duration')),result:value(f,'result'),notes:value(f,'notes'),witness_id:value(f,'witness_id')||null,mentor_ack:checked(f,'mentor_ack'),trainee_ack:checked(f,'trainee_ack')}))));
    }
    if(cap.verify_source)for(const v of d.verification.filter(v=>v.option&&(!v.current||!v.source))){
     const label=v.kind==='safety'?'ОТ':'Теория';
@@ -123,14 +124,15 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    }
    if(cap.practical&&d.methods.length){
     const method=d.methods[0],fields=method.criteria.flatMap((q,i)=>[select('answer_'+i,q.section+' · '+q.question,[['','— Выберите —'],['1','Да'],['0','Нет']]),input('note_'+i,'Примечание','text',false)]);
-    n.append(groups('Практическая оценка',[dt('assessed_on','Дата',d.day),...fields,...rapidFields(),select('conclusion','Заключение',Object.entries(d.conclusions)),input('feedback','Обратная связь')],'Сохранить оценку',command('practical',f=>({assessed_on:value(f,'assessed_on'),method_id:method.id,responses:method.criteria.map((q,i)=>({criterion_id:q.id,value:Number(value(f,'answer_'+i)),note:value(f,'note_'+i)})),conclusion:value(f,'conclusion'),feedback:value(f,'feedback'),...rapidValue(f)}))));
+    (cap.qualify?secondary:n).append(groups('Практическая оценка',[dt('assessed_on','Дата',d.day),...fields,...rapidFields(),select('conclusion','Заключение',Object.entries(d.conclusions)),input('feedback','Обратная связь')],'Сохранить оценку',command('practical',f=>({assessed_on:value(f,'assessed_on'),method_id:method.id,responses:method.criteria.map((q,i)=>({criterion_id:q.id,value:Number(value(f,'answer_'+i)),note:value(f,'note_'+i)})),conclusion:value(f,'conclusion'),feedback:value(f,'feedback'),...rapidValue(f)}))));
    }
    if(cap.qualify&&d.practical){
     const until=input('valid_until','Действует до','date',false);
-    n.append(groups('Квалификация',[dt('assessed_on','Дата',d.day),select('observation_state','Результат наблюдения',[['rated','Оценено'],['not_observed','Не наблюдалось'],['not_applicable','Неприменимо']]),select('level','Уровень',d.levels.map(x=>[x.value,x.label])),until,input('evidence','Подтверждение'),input('feedback','Обратная связь')],'Подтвердить квалификацию',command('qualify',f=>({assessed_on:value(f,'assessed_on'),practical_id:d.practical.id,observation_state:value(f,'observation_state'),level:value(f,'observation_state')==='rated'?Number(value(f,'level')):null,valid_until:value(f,'observation_state')==='rated'?value(f,'valid_until')||null:null,evidence:value(f,'evidence'),feedback:value(f,'feedback')}))));
+    (cap.practical&&d.methods.length?secondary:n).append(groups('Квалификация',[dt('assessed_on','Дата',d.day),select('observation_state','Результат наблюдения',[['rated','Оценено'],['not_observed','Не наблюдалось'],['not_applicable','Неприменимо']]),select('level','Уровень',d.levels.map(x=>[x.value,x.label])),until,input('evidence','Подтверждение'),input('feedback','Обратная связь')],'Подтвердить квалификацию',command('qualify',f=>({assessed_on:value(f,'assessed_on'),practical_id:d.practical.id,observation_state:value(f,'observation_state'),level:value(f,'observation_state')==='rated'?Number(value(f,'level')):null,valid_until:value(f,'observation_state')==='rated'?value(f,'valid_until')||null:null,evidence:value(f,'evidence'),feedback:value(f,'feedback')}))));
    }
    if(cap.admit)n.append(groups('Решение о допуске (если требуется по операции)',[dt('decided_on','Дата решения',d.day),select('decision','Решение',[['granted','Допустить'],['denied','Отказать']]),input('valid_until','Действует до','date',false),input('evidence','Основание'),input('feedback','Обратная связь')],'Зарегистрировать решение',command('admit',f=>({decided_on:value(f,'decided_on'),valid_until:value(f,'decision')==='granted'?value(f,'valid_until')||null:null,decision:value(f,'decision'),evidence:value(f,'evidence'),feedback:value(f,'feedback')}))));
   }
+  if(secondary.children.length>1)n.append(secondary);
   if(d.practical?.can_task){
    const related=el('div');
    if(d.practical.conclusion==='not_meet')n.append(button('Мероприятие по результату практики',()=>taskEditor(related,{kind:'practical',id:d.practical.id,criterion_id:null})));
@@ -163,7 +165,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
     box.append(el('p',label+': '+(v.done?'Подтверждено '+v.day:'Ожидается')));
     if(v.can)box.append(groups('Согласовать план: '+label,[input('note','Примечание','text',false)],'Согласовать весь план',async f=>{await api('training/plan-approve',{id:p.id,kind,note:value(f,'note')});note('Согласование плана зарегистрировано');await render()}));
    }
-   if(p.can_export)box.append(button('Скачать согласованный состав · приложение 6 XLSX',()=>downloadForm('production_plan',p.id)));
+   if(p.can_export)box.append(button('Скачать согласованный состав · приложение 6 XLSX',()=>downloadForm('production_plan',p.id)),button('Журнал по составу плана · приложение 8 XLSX',()=>downloadForm('production_journal',p.id)));
    n.append(box);
   }
   if(!d.plans.length)n.append(empty());setContent(host,n);

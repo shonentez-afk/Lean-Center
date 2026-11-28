@@ -47,7 +47,7 @@ export function formsCatalog(db,a){
 function blank(db,form){
  if(form.id===15)return {bytes:Buffer.from(builtinOrderDocx({organization:'________________',city:'________________',order_on:'',order_number:'____ /ОДП',approved_name:'________________',supplement_from:'',instructor_amount:5000,trainer_amount:7000},[])),extension:'docx'};
  const X=excelJS(),id=form.id;
- const book=[9,13,14].includes(id)?assessmentMatrixWorkbook(X,id):id===16?supplementMatrixWorkbook(X,db):id===17?preparationStructureWorkbook(X):[6,8].includes(id)?productionWorkbook(X,Array.from({length:12},()=>({values:Array(9).fill(''),facts:[],assignment:{assigned_on:'',due_on:'',state:''}})),{title:form.title}):finalBlankWorkbook(X,id)||standardWorkbook(X,form);
+ const book=[9,13,14].includes(id)?assessmentMatrixWorkbook(X,id):id===16?supplementMatrixWorkbook(X,db):id===17?preparationStructureWorkbook(X):id===6?productionPlanWorkbook(X,{blank:true,rows:Array.from({length:12},()=>({}))}):id===8?productionWorkbook(X,Array.from({length:12},()=>({values:Array(9).fill(''),facts:[],assignment:{assigned_on:'',due_on:'',state:''}})),{title:form.title}):finalBlankWorkbook(X,id)||standardWorkbook(X,form);
  return {book,extension:'xlsx'};
 }
 const programFormKinds=new Set(['entry','adaptation','safety_program','internship_program','preparation_pack']);
@@ -155,6 +155,32 @@ function populated(db,a,kind,id){
  }
  must(book,422,'Форма не сформирована');return {book,extension:'xlsx',tag};
 }
+// Appendix 8 is the factual projection of an approved plan version, not
+// a second set of manually entered dates. Facts belong to the approval
+// interval identified by the assignment revision in their immutable event.
+function productionJournal(db,a,plan){
+ const data=[];let total=0;
+ for(const row of plan.rows){
+  const r=find(db,'training_assignment',row.assignment_id);
+  const changes=rows(db,"SELECT expected_revision,payload_json FROM change_event WHERE entity_type='training_assignment' AND entity_id=? AND operation='update' ORDER BY expected_revision",[r.id]).map(e=>({...e,command:JSON.parse(e.payload_json).command}));
+  must(changes.some(e=>e.expected_revision===row.assignment_rev&&e.command==='approve'),409,'Нет подтверждения версии плана');
+  const end=changes.find(e=>e.expected_revision>row.assignment_rev&&['reschedule','cancel','approve'].includes(e.command));
+  const all=rows(db,"SELECT s.*,e.payload_json AS event_payload FROM training_session s LEFT JOIN change_event e ON e.entity_type='training_session' AND e.entity_id=s.id AND e.operation='create' WHERE s.assignment_id=? AND s.stage_code IS NOT NULL ORDER BY s.held_at,s.id",[r.id]);
+  must(all.length<=2000,413,'Слишком много фактов для одной выгрузки');
+  const facts=[];
+  for(const x of all){
+   const event=x.event_payload?JSON.parse(x.event_payload):null;
+   must(event&&event.assignment_id===r.id&&Number.isSafeInteger(event.assignment_rev),409,'Не подтверждена принадлежность факта к версии плана');
+   if(event.assignment_rev<=row.assignment_rev||end&&event.assignment_rev>=end.expected_revision)continue;
+   const v=trainingAssignmentResource(db,r.id,a.day,[x.mentor_id,x.witness_id].filter(Boolean),x.held_at.slice(0,10));
+   must(v&&a.scope('training.detail',r.id,{...v,self:null,assigned:[]})&&a.scope('forms.export',r.id,{...v,self:null,assigned:[]}),403,'Исторический факт недоступен');
+   const {event_payload,...fact}=x;facts.push(fact);
+  }
+  total+=facts.length;must(total<=2000,413,'Слишком много фактов для одной выгрузки');
+  data.push(...productionRows([{...r,assigned_on:row.assigned_on,due_on:row.due_on,state:end?'Исторический состав':r.state}],facts,{unit:()=>row.unit,person:p=>p===r.mentor_id?row.instructor:row.trainee,revision:()=>row.sop}));
+ }
+ return productionWorkbook(excelJS(),data,{title:STANDARD_FORMS.find(x=>x.id===8).title,scope:plan.title+' · '+plan.from+' — '+plan.to,date:a.day});
+}
 export function prepareForm(db,a,f){
  if(f?.kind==='batch'){
   must(exact(f,['kind','items'])&&Array.isArray(f.items)&&f.items.length>=1&&f.items.length<=20&&f.items.every(x=>exact(x,['kind','id'])&&Object.hasOwn(recordTypes,x.kind)&&x.kind!=='preparation_pack'&&isId(x.id)),400,'Выберите от 1 до 20 документов');
@@ -169,9 +195,9 @@ export function prepareForm(db,a,f){
  if(f.kind==='blank'){
   formsCatalog(db,a);const form=STANDARD_FORMS.find(x=>x.id===f.appendix);
   must(form&&f.id===null,400,'Выберите приложение 1–17');result=blank(db,form);target=programResource(db).units[0];tag=String(form.id);
- }else if(f.kind==='production_plan'){
+ }else if(['production_plan','production_journal'].includes(f.kind)){
   must(f.appendix===null&&isId(f.id),400,'Выберите согласованный план');
-  const plan=productionPlanExport(db,a,f.id);result={book:productionPlanWorkbook(excelJS(),plan),extension:'xlsx',tag:'6'};target=f.id;tag='6-PLAN-'+target.slice(0,8);
+  const plan=productionPlanExport(db,a,f.id),isPlan=f.kind==='production_plan';result={book:isPlan?productionPlanWorkbook(excelJS(),plan):productionJournal(db,a,plan),extension:'xlsx',tag:isPlan?'6':'8'};target=f.id;tag=result.tag+'-PLAN-'+target.slice(0,8);
  }else{
   must(f.appendix===null&&isId(f.id)&&Object.hasOwn(recordTypes,f.kind),400,'Выберите запись');
   result=populated(db,a,f.kind,f.id);target=f.id;tag=result.tag+'-'+target.slice(0,8);

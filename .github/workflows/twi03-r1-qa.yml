@@ -38,6 +38,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           bash -n deploy/cloudcore/install.sh
+          bash tests/cloudcore-install-lock.test.sh
           bash -n deploy/cloudcore/start.sh
           bash -n deploy/cloudcore/check-update.sh
           bash -n deploy/cloudcore/host-control.sh

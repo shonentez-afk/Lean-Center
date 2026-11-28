@@ -16,11 +16,13 @@ mkdir -p -m 700 -- "$root" || fail PATH
 [[ "$(stat -c '%a:%u' "$root")" == "700:$(id -u)" ]] || fail PATH
 exec 9>"$root/.install.lock"
 flock -w 15 9 || fail LOCK
+# Only the installer owns FD 9. Never inherit it into the smoke test or
+# controller: a detached supervisor/tunnel could otherwise retain the flock.
 if [[ -e "$release" || -L "$release" ]]; then
   cat >/dev/null
   [[ ! -L "$release" && -f "$release/.qa-verified" && "$(cat "$release/.qa-verified")" == "$1" ]] || fail RELEASE_EXISTS
   printf 'CLOUDCORE_QA_ALREADY_VERIFIED\n'
-  /bin/bash "$controller" promote "$1" "$3"
+  /bin/bash "$controller" promote "$1" "$3" 9>&-
   exit 0
 fi
 stage="$(mktemp -d "$root/.stage.XXXXXXXX")" || fail STAGE
@@ -33,7 +35,7 @@ rm -- "$stage/bundle.tgz"
   cd "$stage"
   "$PWD/.runtime/node" --version > /dev/null 2>&1 || exit 2
   timeout --kill-after=10s 90s "$PWD/.runtime/node" deploy/cloudcore/smoke.mjs > "$stage/.smoke-log" 2>&1
-) && status=0 || status=$?
+) 9>&- && status=0 || status=$?
 if [[ "$status" == 2 ]]; then fail NODE_RUNTIME; fi
 if [[ "$status" != 0 ]]; then
   if [[ -f "$stage/.smoke-log" ]]; then
@@ -46,4 +48,4 @@ printf '%s\n' "$1" > "$stage/.qa-verified"
 mv -T -- "$stage" "$release" || fail PUBLISH
 trap - EXIT
 printf 'CLOUDCORE_QA_INSTALLED_AND_VERIFIED\n'
-/bin/bash "$controller" promote "$1" "$3"
+/bin/bash "$controller" promote "$1" "$3" 9>&-

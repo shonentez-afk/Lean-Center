@@ -923,7 +923,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
  assert.equal(sha(await fs.readFile(path.join(x.source,PILOT_STATE))),x.sourceHash);
 });
 
-test('TWI03 R1–R4: shared plan, atomic JI, competence, rapid control, candidate evidence and rollout',async t=>{
+test('TWI03 R1–R5: shared plan, atomic JI, competence, rapid control, candidate evidence, rollout and journals',async t=>{
  const x=await synthetic(t,{twiR2:true}),pass=password();
  await migratePilotCopy({source:x.source,target:x.target,siteId:x.site,adminRoleId:x.adminRole,managerRoleId:x.managerRole,password:pass});
  let store=await openSecureQA({dataDir:x.target});
@@ -980,6 +980,10 @@ test('TWI03 R1–R4: shared plan, atomic JI, competence, rapid control, candidat
   assert.deepEqual(new Set([trace.getCell('B2').text,trace.getCell('B3').text]),new Set([first.id,second.id]));
   await assert.rejects(store.exportForm(worker.id,1,{kind:'production_plan',appendix:null,id:p.id}),/недоступны/);
   await assert.rejects(store.exportForm(manager.id,1,{kind:'production_plan',appendix:null,id:stalePlan.id}),/недоступны/);
+  const journalBook=async id=>{const file=await store.exportForm(manager.id,1,{kind:'production_journal',appendix:null,id});const b=new (excelJS().Workbook)();await b.xlsx.load(file.bytes);return b};
+  const emptyJournal=await journalBook(p.id);assert.equal(emptyJournal.getWorksheet('План и реализация').getCell('F7').value,null);assert.equal(emptyJournal.getWorksheet('План и реализация').getCell('F8').value,null);
+  await assert.rejects(store.exportForm(worker.id,1,{kind:'production_journal',appendix:null,id:p.id}),/недоступны/);
+  await assert.rejects(store.exportForm(manager.id,1,{kind:'production_journal',appendix:null,id:stalePlan.id}),/недоступны/);
   // A report joins the existing records; it never manufactures training,
   // competence, permission to work or task completion.
   const rolloutRev=x.revision.revision;
@@ -1047,6 +1051,10 @@ test('TWI03 R1–R4: shared plan, atomic JI, competence, rapid control, candidat
   await store.recordAssessmentResult(manager.id,1,{...re,practical:{...re.practical,rapid_control:control}});
   assert.deepEqual(store.trainingDetail(manager.id,1,second.id).rapid_control,control);
   assert.equal(store.trainingDetail(manager.id,1,second.id).admission,'Нет решения');
+  const actualJournal=await journalBook(p.id),js=actualJournal.getWorksheet('План и реализация'),jd=actualJournal.getWorksheet('Назначения и факты');
+  assert.equal(js.getCell('F7').text,day);assert.equal(js.getCell('F8').text,day);
+  assert(Math.abs(Number(js.getCell('H7').value)+Number(js.getCell('H8').value)-(d.stages.length+sd.stages.length)*10/1440)<1e-8);
+  assert(!js.getCell('I7').value&&!js.getCell('J7').value);assert.equal(jd.rowCount,1+d.stages.length+sd.stages.length);
   const beforeAccept=store.rolloutDetail(manager.id,1,rolloutRev).report;
   assert.equal(beforeAccept.participants.filter(x=>x.ready).length,2);
   assert(!beforeAccept.ready&&beforeAccept.blockers.some(x=>x.includes('ФРВ')));
@@ -1096,6 +1104,15 @@ test('TWI03 R1–R4: shared plan, atomic JI, competence, rapid control, candidat
   await assert.rejects(store.changeTraining(manager.id,1,{id:ed.id,expected_revision:ed.rev,command:'approve_head',fields:{note:'QA'}}),/разными/);
   await store.changeTraining(head.id,1,{id:ed.id,expected_revision:ed.rev,command:'approve_head',fields:{note:'QA оперативное согласование'}});
   assert(store.trainingDetail(manager.id,1,ed.id).approved);
+  // A rescheduled row may enter a new approved plan. The two journals
+  // must partition real facts by approval revision, not by the date alone.
+  const updateDue=async()=>{const q=store.trainingDetail(manager.id,1,ed.id);return store.changeTraining(manager.id,1,{id:ed.id,expected_revision:q.rev,command:'reschedule',fields:{due_on:due,reason:'QA новый состав'}})};
+  const approveNewPlan=async title=>{const q=store.trainingDetail(manager.id,1,ed.id),np=await store.createProductionPlan(manager.id,1,{title,from:day,to:due,rows:[{id:ed.id,rev:q.rev}]});await store.approveProductionPlan(manager.id,1,{id:np.id,kind:'responsible',note:'QA'});await store.approveProductionPlan(head.id,1,{id:np.id,kind:'head',note:'QA'});return np.id};
+  await updateDue();const oldJournalPlan=await approveNewPlan('Первая версия журнала');let qj=store.trainingDetail(manager.id,1,ed.id);
+  await store.recordInstructionProtocol(instructor.id,1,{id:ed.id,expected_revision:qj.rev,facts:[fact(qj.next)]});
+  await updateDue();const newJournalPlan=await approveNewPlan('Новая версия журнала');qj=store.trainingDetail(manager.id,1,ed.id);
+  await store.recordInstructionProtocol(instructor.id,1,{id:ed.id,expected_revision:qj.rev,facts:[{...fact(qj.next),duration_minutes:15}]});
+  const jo=(await journalBook(oldJournalPlan)).getWorksheet('Назначения и факты'),jn=(await journalBook(newJournalPlan)).getWorksheet('Назначения и факты');assert.equal(jo.rowCount,2);assert.equal(jn.rowCount,2);assert.equal(jo.getCell('I2').value,10);assert.equal(jn.getCell('I2').value,15);
   const staleRollout=store.rolloutDetail(manager.id,1,rolloutRev).report;
   assert(!staleRollout.acceptance.current&&staleRollout.blockers.length>0);
   const before=store.productionPlans(manager.id,1).plans.find(z=>z.id===p.id);
