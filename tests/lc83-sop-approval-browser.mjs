@@ -57,7 +57,16 @@ try{
   await q.button('Показать фото').first().click();await q.content.locator('img.lc81-image').first().waitFor();
   await q.p.waitForFunction(()=>[...document.querySelectorAll('img.lc81-image')].some(i=>i.complete&&i.naturalWidth>0));
   await q.button(name==='director'?'Утвердить СОП':'Согласовать СОП').click();await q.ready();
-  if(name==='director'){assert.equal(x.detail('author',id).round.state,'approved');assert(x.effective().includes(x.old));await q.button('Ввести в действие').click();await q.ready()}
+  if(name==='director'){
+   assert.equal(x.detail('author',id).round.state,'approved');assert(x.effective().includes(x.old));
+   assert.equal(await q.button('Ввести в действие').count(),0);
+   const m=await profile('manager');await m.go('sop.approvals');await m.button('Открыть согласование').click();
+   await m.content.locator('select[name=impact_decision]').selectOption('retrain');
+   await m.content.locator('form').filter({has:m.button('Зарегистрировать оценку влияния')}).locator('textarea[name=note]').fill('Учебное обоснование');
+   await m.button('Зарегистрировать оценку влияния').click();await m.ready();await m.ctx.close();
+   await q.p.bringToFront();await q.go('sop.approvals');await q.button('Открыть согласование').click();
+   await q.button('Ввести в действие').click();await q.ready();
+  }
   await q.ctx.close();
  }
  assert.equal(x.detail('author',id).round.state,'effective');assert(x.effective().includes(id));assert(!x.effective().includes(x.old));assert.deepEqual(errors,[]);

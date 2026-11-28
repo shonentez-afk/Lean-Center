@@ -59,6 +59,13 @@ test('LC83 mandatory independent votes, frozen round history, publication and re
  await x.change('director',id,'director');
  assert.equal(detail('author',id).round.state,'approved');
  assert(x.effective().includes(old));assert(!x.effective().includes(id));
+ await assert.rejects(x.change('director',id,'publish','publish'),/оценка влияния/);
+ assert(detail('manager',id).impact.can_review);
+ assert(!detail('director',id).impact.can_review);
+ assert(detail('manager',id).impact.scope.some(x=>x.basis.some(b=>b.kind==='training'&&b.id===x.assignment)));
+ await assert.rejects(x.impact(id,'editorial'),/Рабочее содержание отличается/);
+ const impact=await x.impact(id);assert.equal(impact.decision,'retrain');assert(impact.affected>0);
+ assert(x.effective().includes(old));assert(!x.effective().includes(id));
  await x.change('director',id,'publish','publish');
  assert.equal(detail('author',id).round.state,'effective');
  assert(x.effective().includes(id));assert(!x.effective().includes(old));
@@ -71,7 +78,7 @@ test('LC83 mandatory independent votes, frozen round history, publication and re
  const backup=path.join(x.root,'lc83-copy');await copySecureCheckpoint(x.target,backup);
  const restored=await openSecureQA({dataDir:backup});try{
   const actor=restored.authenticate('author',x.password);assert(actor);
-  const data=restored.approvalDetail(actor.id,1,id);assert.equal(data.round.state,'effective');assert.equal(data.history.length,2);
+  const data=restored.approvalDetail(actor.id,1,id);assert.equal(data.round.state,'effective');assert.equal(data.history.length,2);assert(data.impact.record.activated_at);
   assert.equal((await restored.approvalMaterial(actor.id,1,id,first.id)).steps[0].action,'Первая учебная редакция');
  }finally{await restored.close()}
  console.log('LC83_ROUTE_RETURN_HISTORY_PUBLISH_RESTORE_OK');
@@ -80,6 +87,7 @@ test('LC83 revoked reviewer cannot vote or see assigned snapshot; publication re
  const x=await setupApproval();t.after(x.cleanup);
  let d=await x.passport(await x.draft()),id=d.revision_id;
  const round=await x.submit(id);await x.change('safety',id,'safety');await x.change('engineering',id,'engineering');await x.change('twi',id,'twi');await x.change('director',id,'director');
+ await x.impact(id);
  await x.store.revoke(x.admin.id,x.people.safety.grant.id);
  assert.throws(()=>x.detail('safety',id),/недоступно/);
  await assert.rejects(x.store.approvalMaterial(x.users.safety.id,1,id,round.id),/недоступны/);

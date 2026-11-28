@@ -60,8 +60,11 @@ export async function setupApproval(){
    const d=detail(name,id);return {revision_id:id,round_id:d.round.id,expected_revision:d.document_rev,expected_round_revision:d.round.rev,command,stage,note};
   };
   const change=(name,id,stage,command='approve',note='')=>store.changeSopApproval(users[name].id,1,decision(name,id,stage,command,note));
+  const impact=(id,decision='retrain',reason='Учебная оценка последствий')=>{
+   const d=detail('manager',id);return store.saveSopApprovalImpact(users.manager.id,1,{revision_id:id,round_id:d.round.id,expected_revision:d.document_rev,expected_round_revision:d.round.rev,expected_impact_revision:d.impact.record?.rev??0,decision,reason});
+  };
   const effective=(name='observer')=>store.listResources(users[name].id,'sop.read_effective').map(x=>x.revision_id);
   const cleanup=async()=>{await store.close();f.w.close();await fs.rm(root,{recursive:true,force:true})};
-  return {root,target,store,admin,users,people,password,day,old,document,operation,assignment,detail,draft,passport,edit,route,submit,decision,change,effective,cleanup};
+  return {root,target,store,admin,users,people,password,day,old,document,operation,assignment,detail,draft,passport,edit,route,submit,decision,change,impact,effective,cleanup};
  }catch(e){if(store)await store.close();if(f)f.w.close();await fs.rm(root,{recursive:true,force:true});throw e}
 }

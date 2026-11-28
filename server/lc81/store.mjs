@@ -32,7 +32,7 @@ import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {internalTrainerAppointment} from '../../src/modules/training/domain.js';
-import {approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,compareApprovalSnapshots,checkApprovalIntegrity} from './sop-approval.mjs';
+import {approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,compareApprovalSnapshots,approvalImpactContext,saveApprovalImpact,checkApprovalIntegrity} from './sop-approval.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
 import {journalWorkspace,retrainingWorkspace,revisionReviewContext,inspectRevisionChange,publicRevisionReview,saveRevisionReview} from './training-registers.mjs';
@@ -154,7 +154,7 @@ function approvalAccess(db,a,d){
  };
  return {accountId:a.id,personId:local(a)?a.person_id:null,name:a.person_id?activePerson(db,a.person_id)?.display_name:'',day:clock.day,at:clock.at,
   siteRead,history:id=>siteRead(id)&&!!readFor(db,a,'sop.read_history',id,d),
-  coordinate:id=>siteRead(id)&&(shared.ownsSop(id)||v.fullAllows('sop.edit_draft','sop.read_history',id)),eligible,audit:(action,target)=>audit(db,a.id,action,target)};
+  coordinate:id=>siteRead(id)&&(shared.ownsSop(id)||v.fullAllows('sop.edit_draft','sop.read_history',id)),eligible,impactActor:id=>{const other=account(db,id);return local(other)?trainingAccess(db,other,d):null},audit:(action,target)=>audit(db,a.id,action,target)};
 }
 // A revision and its historical FRV source are independently protected.
 // The shared final-study floor does not disclose previously replaced sources.
@@ -946,7 +946,15 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   async changeSopApproval(actor,revision,f){
    const ctx=read(db=>prepareApprovalChange(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f));
    await inspectApprovalSource(ctx.b,readFile);
+   if(ctx.transition==='effect'){const c=read(db=>approvalPreviewContext(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f.revision_id,f.round_id));if(c.previous)await inspectApprovalSource(c.previous,readFile)}
    return mutate(db=>changeApproval(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx));
+  },
+  async saveSopApprovalImpact(actor,revision,f){
+   const context=db=>approvalImpactContext(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f);
+   const ctx=read(context),next=await inspectApprovalSource(ctx.b,readFile);
+   const old=ctx.old?await inspectApprovalSource(ctx.old,readFile):null;
+   const same=old?compareApprovalSnapshots(ctx.old,old,ctx.b,next).same_work_content:false;
+   return mutate(db=>saveApprovalImpact(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx,same));
   },
   async approvalMaterial(actor,revision,id,roundId=null,position=null,side='current'){
    must(['current','previous'].includes(side)&&!(position===null&&side==='previous'),400,'Некорректная сторона сравнения');

@@ -45,20 +45,20 @@ export function journalWorkspace(db,a,f){
 export const RETRAINING_RIGHTS=['training.read','training.detail','sop.read_history','sop.read_effective','operation.read','org.read','person.read_basic','assessment.read','assessment.detail','audit.read','audit.detail','skill.read','requirement.read','matrix.read','matrix.detail','self.read','self.detail','task.read','task.detail','development.read','development.detail','training.enrollment.read','training.enrollment.detail'];
 export const canReadRetraining=(db,a)=>RETRAINING_RIGHTS.every(k=>site(db,a,k));
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
-const schema=`CREATE TABLE IF NOT EXISTS lc81_revision_impact(
+export const REVISION_IMPACT_SCHEMA=`CREATE TABLE IF NOT EXISTS lc81_revision_impact(
  id TEXT PRIMARY KEY,old_id TEXT NOT NULL REFERENCES document_revision(id),new_id TEXT NOT NULL REFERENCES document_revision(id),
  old_sha TEXT NOT NULL,new_sha TEXT NOT NULL,decision TEXT NOT NULL CHECK(decision IN('editorial','retrain')),reason TEXT NOT NULL,
  actor_id TEXT NOT NULL REFERENCES person(id),reviewed_on TEXT NOT NULL,recorded_at TEXT NOT NULL,rev INTEGER NOT NULL,
  UNIQUE(old_id,new_id,rev));`;
-export function revisionReviewContext(db,a,oldId,newId){
+export function revisionReviewContext(db,a,oldId,newId,{prepublication=false}={}){
  must(canReadRetraining(db,a)&&isId(oldId)&&isId(newId)&&oldId!==newId,404,'Редакции недоступны');
  const prev=currentStandard(db,oldId),next=currentStandard(db,newId);
  const op=next&&one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[next.operation_id]);
- must(prev&&next&&op&&prev.document_id===next.document_id&&prev.operation_id===next.operation_id&&prev.state==='superseded'&&next.state==='effective'&&!next.archived&&a.read('sop.read_history',oldId)&&a.read('sop.read_effective',newId),409,'Состав редакций изменился или недоступен');
+ must(prev&&next&&op&&prev.document_id===next.document_id&&prev.operation_id===next.operation_id&&(prepublication?prev.state==='effective'&&next.state==='approved':prev.state==='superseded'&&next.state==='effective')&&!next.archived&&a.read('sop.read_history',oldId)&&a.read(prepublication?'sop.read_history':'sop.read_effective',newId),409,'Состав редакций изменился или недоступен');
  const resource={data:{},self:null,units:[op.unit_id],assigned:[]};
  const can_review=!!a.personId&&a.scope('training.approve_responsible',next.operation_id,resource)&&site(db,a,'training.approve_responsible');
- const prior=revisionImpact(db,oldId,newId,a.day);
- return {old_id:oldId,new_id:newId,old_source:prev.source,new_source:next.source,old_label:prev.code+' · v'+prev.version_no+' · '+prev.title,new_label:next.code+' · v'+next.version_no+' · '+next.title,can_review,prior:prior?{rev:prior.rev,decision:prior.decision,reason:prior.reason,day:prior.reviewed_on}:null};
+ const prior=prepublication&&one(db,"SELECT name FROM sqlite_master WHERE type='table' AND name='lc81_revision_impact'")?one(db,'SELECT * FROM lc81_revision_impact WHERE old_id=? AND new_id=? ORDER BY rev DESC LIMIT 1',[oldId,newId]):revisionImpact(db,oldId,newId,a.day);
+ return {old_id:oldId,new_id:newId,old_source:prev.source,new_source:next.source,old_label:prev.code+' · v'+prev.version_no+' · '+prev.title,new_label:next.code+' · v'+next.version_no+' · '+next.title,can_review,prior:prior?{id:prior.id,rev:prior.rev,decision:prior.decision,reason:prior.reason,day:prior.reviewed_on}:null};
 }
 export async function inspectRevisionChange(context,readSource){
  const [a,b]=await Promise.all([context.old_source,context.new_source].map(async ref=>JSON.parse(await checkContent(ref,await readSource(ref)))));
@@ -68,16 +68,44 @@ export function publicRevisionReview(c,same){
  const {old_source,new_source,...view}=c;
  return {...view,same_work_content:same};
 }
-export function saveRevisionReview(db,a,f,checked,same){
+export function saveRevisionReview(db,a,f,checked,same,{prepublication=false}={}){
  must(exact(f,['old_id','new_id','expected_revision','decision','reason'])&&isId(f.old_id)&&isId(f.new_id)&&Number.isSafeInteger(f.expected_revision)&&['editorial','retrain'].includes(f.decision)&&typeof f.reason==='string'&&f.reason.trim().length>0&&f.reason.length<=1200,400,'Укажите решение и обоснование');
- const c=revisionReviewContext(db,a,f.old_id,f.new_id);
+ const c=revisionReviewContext(db,a,f.old_id,f.new_id,{prepublication});
  must(c.can_review,403,'Нет полномочий принимать решение по изменению СОП');
  must(c.old_source.sha256===checked.old_source.sha256&&c.new_source.sha256===checked.new_source.sha256&&(c.prior?.rev??0)===f.expected_revision,409,'Редакции или решение изменились');
  must(f.decision!=='editorial'||same,422,'Редакционную эквивалентность нельзя подтвердить: рабочее содержание отличается');
- db.run(schema);const id=uuid(),rev=f.expected_revision+1;
+ db.run(REVISION_IMPACT_SCHEMA);const id=uuid(),rev=f.expected_revision+1;
  db.run('INSERT INTO lc81_revision_impact VALUES(?,?,?,?,?,?,?,?,?,?,?)',[id,c.old_id,c.new_id,c.old_source.sha256,c.new_source.sha256,f.decision,f.reason,a.personId,a.day,a.at,rev]);
  a.audit('training.revision_impact',id);
  return {id,rev,decision:f.decision};
+}
+// The prepublication roster is evidence from the existing registers, not
+// a guess about every person who actually performs the operation.
+export function prepublicationContext(db,a,oldId,newId){
+ must(canReadRetraining(db,a)&&isId(newId),404,'Для оценки влияния нужны права на исходные регистры предприятия');
+ const next=currentStandard(db,newId),op=next&&one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[next.operation_id]);
+ must(next&&op&&!next.archived&&next.state==='approved'&&a.read('sop.read_history',newId),409,'Утверждённая редакция недоступна');
+ const resource={data:{},self:null,units:[op.unit_id],assigned:[]};
+ const can_review=!!a.personId&&a.scope('training.approve_responsible',next.operation_id,resource)&&site(db,a,'training.approve_responsible');
+ must(can_review,403,'Нет полномочий принимать решение по изменению СОП');
+ const prior=oldId?revisionReviewContext(db,a,oldId,newId,{prepublication:true}):{old_id:null,new_id:newId,old_source:null,new_source:next.source,can_review,prior:null};
+ const facts=rows(db,`SELECT a.trainee_id person_id,a.skill_id,a.id fact_id,'training' kind FROM training_assignment a WHERE a.operation_id=? AND a.state<>'cancelled' AND a.assigned_on<=?
+ UNION ALL SELECT s.person_id,i.skill_id,s.id,'assessment' FROM assessment_session s JOIN assessment_item i ON i.session_id=s.id WHERE s.operation_id=? AND s.state='confirmed' AND substr(s.assessed_at,1,10)<=?
+ UNION ALL SELECT a.person_id,NULL,a.id,'admission' FROM admission_decision a WHERE a.operation_id=? AND a.decided_on<=?
+ UNION ALL SELECT a.person_id,r.skill_id,r.id,'requirement' FROM person_assignment a JOIN role_requirement r ON r.profession_id=a.profession_id JOIN skill s ON s.id=r.skill_id WHERE s.operation_id=? AND s.archived=0 AND a.valid_from<=? AND coalesce(a.valid_to,'9999-12-31')>=? AND r.valid_from<=? AND coalesce(r.valid_to,'9999-12-31')>=?`,[next.operation_id,a.day,next.operation_id,a.day,next.operation_id,a.day,next.operation_id,a.day,a.day,a.day,a.day]);
+ const grouped=new Map();
+ for(const x of facts){
+  if(!a.read('person.read_basic',x.person_id))continue;
+  const emp=one(db,"SELECT a.id,a.unit_id FROM person_assignment a JOIN person p ON p.id=a.person_id WHERE p.id=? AND p.archived=0 AND a.valid_from<=? AND coalesce(a.valid_to,'9999-12-31')>=? ORDER BY a.valid_from DESC,a.id LIMIT 1",[x.person_id,a.day,a.day]);
+  if(!emp||!a.read('org.read',emp.unit_id))continue;
+  const skill=x.skill_id?a.read('skill.read',x.skill_id)?.data:null;
+  if(x.skill_id&&!skill)continue;
+  const key=x.person_id+':'+(x.skill_id||''),item=grouped.get(key)||{person_id:x.person_id,person:name(a,x.person_id),employment_id:emp.id,unit_id:emp.unit_id,skill_id:x.skill_id,skill:skill?.name??'Операция',basis:[]};
+  const b={kind:x.kind,id:x.fact_id};if(!item.basis.some(y=>y.kind===b.kind&&y.id===b.id))item.basis.push(b);grouped.set(key,item);
+ }
+ const scope=[...grouped.values()].sort((x,y)=>(x.person_id+':'+(x.skill_id||'')).localeCompare(y.person_id+':'+(y.skill_id||'')));
+ for(const x of scope)x.basis.sort((a,b)=>(a.kind+':'+a.id).localeCompare(b.kind+':'+b.id));
+ return {...prior,scope};
 }
 export function retrainingWorkspace(db,a,f){
  // Latest facts and matrix gaps are cross-register calculations. Do not

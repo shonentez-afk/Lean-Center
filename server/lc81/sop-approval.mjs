@@ -8,6 +8,7 @@ import {hasSopKeyMomentsAndReason} from '../../src/modules/library/sop-step-qual
 import {projectLibraryDetail} from './library-commands.mjs';
 import {extractPhoto} from './sop-photo.mjs';
 import {sameWorkContent} from '../../src/modules/training/revision-impact.js';
+import {prepublicationContext,saveRevisionReview,REVISION_IMPACT_SCHEMA} from './training-registers.mjs';
 const must=(ok,status,message)=>{if(!ok)throw new PilotError(status,message)};
 const exact=(x,ks)=>x&&typeof x==='object'&&!Array.isArray(x)&&Object.keys(x).length===ks.length&&ks.every(k=>Object.hasOwn(x,k));
 const text=(x,max=2000)=>typeof x==='string'&&x.length<=max;
@@ -122,9 +123,10 @@ export function approvalDetail(db,a,id,roundId=null){
   const decision=vs.find(v=>v.stage===x.stage),live=sameGrant(x,eligible(a,frozen(rr),x.stage,x.account_id));
   return {stage:x.stage,label:LABELS[x.stage],name:x.name,role:x.role,due_on:x.due_on,state:decision?(decision.command==='approve'?'Согласовано / утверждено':decision.command==='publish'?'Введено':'Возвращено'):['returned','withdrawn','effective'].includes(rr.state)?'Раунд закрыт':next.includes(x.stage)?'Ожидает решения':'Ожидает этапа',active:live,note:decision?.note??'',decided_at:decision?.occurred_at??null};
  })??[];
+ const impact=rr?impactView(db,a,r,rr,isLatest):null;
  const canCancel=!!rr&&isLatest&&['review','approved'].includes(rr.state)&&canManage;
  const canWithdraw=!!rr&&isLatest&&rr.state==='effective'&&r.state==='effective'&&rt.participants.some(x=>['director','publish'].includes(x.stage)&&x.account_id===a.accountId)&&!!eligible(a,r,'withdraw',a.accountId);
- return {revision_id:r.id,document_id:r.document_id,document_rev:r.document_rev,version_no:r.version_no,code:r.code,title:roundId&&rr?b.title:documentTitle(db,r.document_id,r.id),document_state:r.state,day:a.day,status:status(db,r,rr),round:rr?{id:rr.id,rev:rr.rev,no:rr.round_no,state:rr.state,mode:rt.mode,submitted_at:rr.submitted_at,submitted_name:rr.submitted_name,note:rr.submit_note,binding_sha256:rr.binding_sha256,source_sha256:b.source.sha256,participants,decisions:vs.map(v=>({stage:LABELS[v.stage]||v.stage,command:v.command,actor:v.actor_name,note:v.note,at:v.occurred_at}))}:null,can_submit:canSubmit,can_restart_legacy:isLatest&&!last&&['review','approved'].includes(r.state)&&canManage,can_cancel:canCancel,can_withdraw:canWithdraw,can_decide:isLatest?availableFor(db,a,r,rr):[],options,stages:STAGES.map(stage=>({stage,label:LABELS[stage]})),blockers:canSubmit?blockers(db,r,a):[],preview_round_id:roundId||(!canSubmit&&rr?rr.id:null),can_preview:!!(roundId||!canSubmit&&rr||a.coordinate(id)),history:exists(db)?rows(db,'SELECT * FROM lc83_sop_round WHERE revision_id=? ORDER BY round_no DESC',[id]).filter(x=>canSee(db,a,r,x)).map(x=>summary(db,a,r,x)):[]};
+ return {revision_id:r.id,document_id:r.document_id,document_rev:r.document_rev,version_no:r.version_no,code:r.code,title:roundId&&rr?b.title:documentTitle(db,r.document_id,r.id),document_state:r.state,day:a.day,status:status(db,r,rr),impact,round:rr?{id:rr.id,rev:rr.rev,no:rr.round_no,state:rr.state,mode:rt.mode,submitted_at:rr.submitted_at,submitted_name:rr.submitted_name,note:rr.submit_note,binding_sha256:rr.binding_sha256,source_sha256:b.source.sha256,participants,decisions:vs.map(v=>({stage:LABELS[v.stage]||v.stage,command:v.command,actor:v.actor_name,note:v.note,at:v.occurred_at}))}:null,can_submit:canSubmit,can_restart_legacy:isLatest&&!last&&['review','approved'].includes(r.state)&&canManage,can_cancel:canCancel,can_withdraw:canWithdraw,can_decide:isLatest?availableFor(db,a,r,rr):[],options,stages:STAGES.map(stage=>({stage,label:LABELS[stage]})),blockers:canSubmit?blockers(db,r,a):[],preview_round_id:roundId||(!canSubmit&&rr?rr.id:null),can_preview:!!(roundId||!canSubmit&&rr||a.coordinate(id)),history:exists(db)?rows(db,'SELECT * FROM lc83_sop_round WHERE revision_id=? ORDER BY round_no DESC',[id]).filter(x=>canSee(db,a,r,x)).map(x=>summary(db,a,r,x)):[]};
 }
 function event(db,a,r,command,note){
  const id=uuid();
@@ -176,7 +178,7 @@ export function prepareApprovalChange(db,a,f){
   return {r,rr:null,b,sha,basis:{},stage:'legacy',transition:r.state==='approved'?'return_approved':'return',state:null};
  }
  must(rr&&rr.id===f.round_id&&rr.rev===f.expected_round_revision&&sha===rr.binding_sha256,409,'Раунд или содержание изменились');
- const rt=route(rr);let stage=f.stage,basis=null,transition=null,state=rr.state;
+ const rt=route(rr);let stage=f.stage,basis=null,transition=null,state=rr.state,impactId=null;
  if(f.command==='cancel'){
   must(stage===null&&['review','approved'].includes(rr.state)&&coordinate(a,r,rr)&&note,403,'Возврат организатором недоступен или нет причины');
   stage='cancel';basis={coordinator:true};transition=r.state==='approved'?'return_approved':'return';state='returned';
@@ -197,17 +199,19 @@ export function prepareApprovalChange(db,a,f){
    must(f.command==='publish'&&stage==='publish'&&rr.state==='approved'&&r.state==='approved',422,'Сначала три согласования и утверждение директора');
    must(rt.participants.every(x=>sameGrant(x,eligible(a,r,x.stage,x.account_id))),409,'Состав или полномочия изменились; верните СОП и запустите новый раунд');
    must(Object.hasOwn(rt,'previous')&&canonical(rt.previous)===canonical(previousBinding(db,r)),409,'Предыдущая действующая редакция не подтверждена; требуется новый раунд');
+   impactId=assertImpactReady(db,a,r,rr);
    transition='effect';state='effective';
   }
   if(f.command==='approve'||f.command==='publish'){const problems=blockers(db,r,a);must(!problems.length,422,problems.join('; '))}
  }
- return {r,rr,b,sha,basis,stage,transition,state};
+ return {r,rr,b,sha,basis,stage,transition,state,impactId};
 }
 export function changeApproval(db,a,f,checked){
  const c=prepareApprovalChange(db,a,f);
- must(c.sha===checked.sha&&canonical(c.basis)===canonical(checked.basis),409,'Содержание или полномочия изменились');
+ must(c.sha===checked.sha&&canonical(c.basis)===canonical(checked.basis)&&c.impactId===checked.impactId,409,'Содержание, полномочия или оценка влияния изменились');
  const note=f.note.trim(),id=uuid(),previous=currentStage(db,c.rr);
  const eid=c.transition?event(db,a,c.r,c.transition,note):null;
+ if(c.transition==='effect')db.run('UPDATE lc83_sop_impact_plan SET activated_at=? WHERE id=?',[a.at,c.impactId]);
  if(!c.rr)return {revision_id:c.r.id,document_rev:c.r.document_rev+1,state:'draft'};
  db.run('INSERT INTO lc83_sop_decision VALUES(?,?,?,?,?,?,?,?,?,?,?)',[id,c.rr.id,c.stage,f.command,a.accountId,a.personId,a.name,canonical(c.basis),note,a.at,eid]);
  db.run('UPDATE lc83_sop_round SET state=?,rev=rev+1 WHERE id=?',[c.state,c.rr.id]);
@@ -274,9 +278,63 @@ export async function approvalPhoto(b,p,position){
  const step=p.projection.steps[position-1];must(step?.photo,404,'Фото недоступно');
  return extractPhoto({source:b.source,sourceId:step.source_id,projection:p.projection},p.text);
 }
+// The decision stays in lc81_revision_impact; this private round link
+// binds it to a frozen approval and the observed employee roster.
+const impactSchema="CREATE TABLE IF NOT EXISTS lc83_sop_impact_plan(id TEXT PRIMARY KEY,round_id TEXT NOT NULL REFERENCES lc83_sop_round(id),rev INTEGER NOT NULL CHECK(rev>0),impact_id TEXT REFERENCES lc81_revision_impact(id),decision TEXT NOT NULL CHECK(decision IN('initial','editorial','retrain')),reason TEXT NOT NULL,reviewer_account TEXT NOT NULL REFERENCES lc81_account(id),reviewer_person TEXT NOT NULL REFERENCES person(id),reviewer_name TEXT NOT NULL,recorded_at TEXT NOT NULL,binding_sha TEXT NOT NULL,scope_json TEXT NOT NULL CHECK(json_valid(scope_json)),scope_sha TEXT NOT NULL,activated_at TEXT,UNIQUE(round_id,rev));";
+const impactExists=db=>!!one(db,"SELECT name FROM sqlite_master WHERE type='table' AND name='lc83_sop_impact_plan'");
+const impactPlan=(db,rr)=>rr&&impactExists(db)?one(db,'SELECT * FROM lc83_sop_impact_plan WHERE round_id=? ORDER BY rev DESC LIMIT 1',[rr.id]):null;
+const scopeDigest=scope=>digest(scope.map(x=>({person_id:x.person_id,employment_id:x.employment_id,unit_id:x.unit_id,skill_id:x.skill_id,basis:x.basis})));
+function impactContext(db,a,r,rr){
+ must(rr&&rr.state==='approved'&&r.state==='approved'&&latest(db,r.id)?.id===rr.id&&Object.hasOwn(route(rr),'previous'),409,'Нужен утверждённый актуальный раунд с зафиксированной предыдущей редакцией');
+ const old=previousFor(db,r,rr),current=previousBinding(db,r);
+ must(canonical(old)===canonical(current)&&digest(binding(db,r))===rr.binding_sha256,409,'Состав редакций изменился; требуется новый раунд');
+ const reviewer=a.impactActor(a.accountId);must(reviewer?.personId,403,'Нужен ответственный сотрудник');
+ const context=prepublicationContext(db,reviewer,old?.revision_id??null,r.id);
+ must(context.can_review,403,'Нет полномочий оценивать влияние изменения СОП');
+ return {r,rr,old,b:frozen(rr),reviewer,context,prior:impactPlan(db,rr),scope:context.scope,scope_sha:scopeDigest(context.scope)};
+}
+function impactView(db,a,r,rr,isLatest){
+ const prior=impactPlan(db,rr),base={can_review:false,has_baseline:Object.hasOwn(route(rr),'previous'),previous_version:route(rr).previous?.version_no??null,record:prior?{rev:prior.rev,decision:prior.decision,reason:prior.reason,reviewer:prior.reviewer_name,recorded_at:prior.recorded_at,affected:JSON.parse(prior.scope_json).length,activated_at:prior.activated_at}:null};
+ if(!isLatest||rr.state!=='approved')return base;
+ try{const c=impactContext(db,a,r,rr);return {...base,can_review:true,scope:c.scope}}catch(e){if(e instanceof PilotError)return base;throw e}
+}
+export function approvalImpactContext(db,a,f){
+ must(exact(f,['revision_id','round_id','expected_revision','expected_round_revision','expected_impact_revision','decision','reason'])&&isId(f.revision_id)&&isId(f.round_id)&&Number.isSafeInteger(f.expected_revision)&&Number.isSafeInteger(f.expected_round_revision)&&Number.isSafeInteger(f.expected_impact_revision)&&['initial','editorial','retrain'].includes(f.decision)&&text(f.reason,1200)&&f.reason.trim(),400,'Укажите оценку влияния и основание');
+ const r=revision(db,f.revision_id),rr=byRound(db,f.round_id);
+ must(r&&rr?.revision_id===r.id&&canSee(db,a,r,rr),404,'Согласование недоступно');
+ must(r.document_rev===f.expected_revision&&rr.rev===f.expected_round_revision,409,'Редакция или раунд изменились');
+ const c=impactContext(db,a,r,rr);
+ must((c.prior?.rev??0)===f.expected_impact_revision,409,'Оценка влияния изменилась');
+ must(c.old?f.decision!=='initial':f.decision==='initial',422,'Выберите решение в соответствии с наличием предыдущей редакции');
+ return c;
+}
+export function saveApprovalImpact(db,a,f,checked,same){
+ const c=approvalImpactContext(db,a,f);
+ must(c.rr.binding_sha256===checked.rr.binding_sha256&&canonical(c.old)===canonical(checked.old)&&c.scope_sha===checked.scope_sha,409,'Редакция или состав сотрудников изменились');
+ must(f.decision!=='editorial'||same,422,'Рабочее содержание отличается; редакционная эквивалентность недопустима');
+ db.run(REVISION_IMPACT_SCHEMA);let existing=null;
+ if(c.old)existing=saveRevisionReview(db,c.reviewer,{old_id:c.old.revision_id,new_id:c.r.id,expected_revision:c.context.prior?.rev??0,decision:f.decision,reason:f.reason.trim()},c.context,same,{prepublication:true});
+ db.run(impactSchema);const id=uuid(),rev=(c.prior?.rev??0)+1;
+ db.run('INSERT INTO lc83_sop_impact_plan VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[id,c.rr.id,rev,existing?.id??null,f.decision,f.reason.trim(),a.accountId,a.personId,a.name,a.at,c.rr.binding_sha256,canonical(c.scope),c.scope_sha,null]);
+ a.audit('sop.approval.impact',id);
+ return {id,rev,decision:f.decision,affected:c.scope.length};
+}
+function assertImpactReady(db,a,r,rr){
+ const plan=impactPlan(db,rr);
+ must(plan&&!plan.activated_at&&plan.binding_sha===rr.binding_sha256,409,'Перед вводом требуется оценка влияния изменения СОП');
+ const reviewer=a.impactActor(plan.reviewer_account);
+ must(reviewer?.personId===plan.reviewer_person,409,'Ответственный за оценку влияния больше недоступен');
+ const old=previousFor(db,r,rr),current=previousBinding(db,r);
+ must(Object.hasOwn(route(rr),'previous')&&canonical(old)===canonical(current),409,'Предыдущая действующая редакция изменилась');
+ let context;
+ try{context=prepublicationContext(db,reviewer,old?.revision_id??null,r.id)}catch(e){if(e instanceof PilotError)throw new PilotError(409,'Не подтверждены полномочия оценки влияния; требуется новая оценка');throw e}
+ must(context.can_review&&scopeDigest(context.scope)===plan.scope_sha,409,'Полномочия или состав затронутых сотрудников изменились; обновите оценку');
+ must(old?context.prior?.id===plan.impact_id&&context.prior.decision===plan.decision:plan.decision==='initial'&&plan.impact_id===null,409,'Оценка влияния не соответствует текущей записи');
+ return plan.id;
+}
 export function checkApprovalIntegrity(db){
  const tables=['lc83_sop_round','lc83_sop_decision','lc83_sop_notice'].filter(t=>one(db,"SELECT name FROM sqlite_master WHERE type='table' AND name=?",[t]));
- if(!tables.length)return;must(tables.length===3,503,'Неполная схема согласования СОП');
+ if(!tables.length){must(!impactExists(db),503,'Оценка влияния без раунда');return}must(tables.length===3,503,'Неполная схема согласования СОП');
  for(const rr of rows(db,'SELECT * FROM lc83_sop_round')){
   const r=revision(db,rr.revision_id),b=frozen(rr),rt=route(rr),vs=decisions(db,rr);
   must(r&&b.revision_id===r.id&&digest(b)===rr.binding_sha256&&rt.version===1&&['parallel','sequential'].includes(rt.mode)&&canonical(rt.participants.map(x=>x.stage))===canonical(STAGES)&&rr.rev===vs.length+1,503,'Нарушена целостность раунда СОП');
@@ -288,5 +346,12 @@ export function checkApprovalIntegrity(db){
   if(['effective','withdrawn'].includes(rr.state))must(vs.some(x=>x.command==='publish'),503,'Нет решения ввода в действие');
   if(rr.state==='returned')must(vs.some(x=>['return','cancel'].includes(x.command)),503,'Нет причины закрытия раунда');
   if(rt.previous)must(rt.previous.document_id===b.document_id&&rt.previous.revision_id!==b.revision_id&&rt.previous.version_no<b.version_no,503,'Неверная предыдущая редакция раунда');
+  if(Object.hasOwn(rt,'previous')&&['effective','withdrawn'].includes(rr.state))must(impactPlan(db,rr)?.activated_at,503,'Нет активированной оценки влияния');
+ }
+ if(impactExists(db))for(const p of rows(db,'SELECT * FROM lc83_sop_impact_plan')){
+  const rr=byRound(db,p.round_id),old=rr&&route(rr).previous,source=rr&&frozen(rr),scope=JSON.parse(p.scope_json);
+  must(rr&&p.binding_sha===rr.binding_sha256&&Array.isArray(scope)&&scopeDigest(scope)===p.scope_sha,503,'Нарушена целостность оценки влияния');
+  const i=p.impact_id?one(db,'SELECT * FROM lc81_revision_impact WHERE id=?',[p.impact_id]):null;
+  must(old?i&&i.old_id===old.revision_id&&i.new_id===rr.revision_id&&i.old_sha===old.source.sha256&&i.new_sha===source.source.sha256&&i.decision===p.decision&&i.actor_id===p.reviewer_person:p.decision==='initial'&&p.impact_id===null,503,'Оценка не соответствует реестру изменений');
  }
 }

@@ -288,6 +288,10 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
    if(req.method==='GET'&&p==='/api/lc81/sop-approval/list'){reply(res,200,store.approvalList(a.id,a.credential_revision,{kind:url.searchParams.get('kind')||'all',offset:Number(url.searchParams.get('offset')||0)}));return}
    if(req.method==='GET'&&p==='/api/lc81/sop-approval/detail'){reply(res,200,store.approvalDetail(a.id,a.credential_revision,url.searchParams.get('id'),url.searchParams.get('round_id')||null));return}
+   if(req.method==='POST'&&p==='/api/lc81/sop-approval/impact'){
+    must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
+    try{reply(res,200,await store.saveSopApprovalImpact(a.id,a.credential_revision,await body(req)));return}finally{libraryBusy--}
+   }
    if(req.method==='POST'&&['/api/lc81/sop-approval/submit','/api/lc81/sop-approval/change'].includes(p)){
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
     try{const f=await body(req);reply(res,200,p.endsWith('/submit')?await store.submitSopApproval(a.id,a.credential_revision,f):await store.changeSopApproval(a.id,a.credential_revision,f));return}finally{libraryBusy--}

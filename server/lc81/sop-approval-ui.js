@@ -77,6 +77,22 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
    if(missing.length)p.append(el('p','Нет действующих участников: '+missing.map(x=>x.label).join(', ')+'. Администратору необходимо проверить роли, выданные права и область, для ВТ — сертификат и приказ.','status error'));
    f.querySelector('button[type=submit],button.primary').disabled=!!(d.blockers.length||missing.length);p.append(f);n.append(p);
   }
+  if(d.impact&&r){
+   const i=d.impact,cap={initial:'Первичный ввод',editorial:'Редакционная эквивалентность',retrain:'Переобучение'};
+   const box=panel('Оценка влияния перед вводом',el('p','Состав определяется по зарегистрированным назначениям, оценкам, допускам и действующим требованиям профессий. Это не автоматически утверждённый список всех исполнителей.','muted'));
+   if(i.record)box.append(el('p',cap[i.record.decision]+' · '+i.record.reviewer+' · '+i.record.recorded_at.slice(0,10)+' · строк состава: '+i.record.affected+' · '+i.record.reason));
+   else box.append(el('p','Оценка пока не зарегистрирована. Ввод блокируется.','muted'));
+   if(i.can_review){
+    if(i.scope.length)box.append(table(['Сотрудник','Навык / операция','Основания'],i.scope.map(x=>[x.person,x.skill,[...new Set(x.basis.map(b=>({training:'Обучение',assessment:'Оценка',admission:'Допуск',requirement:'Требование профессии'})[b.kind]||b.kind))].join(', ')])));
+    else box.append(el('p','По имеющимся регистрам затронутый состав не найден. Проверьте полноту данных.'));
+    const fields=[select('impact_decision','Решение',i.previous_version!==null?[['retrain','Переобучение'],['editorial','Редакционное изменение (только при полном совпадении рабочих полей)']]:[['initial','Первый ввод']]),comment(true)];
+    box.append(form(fields,'Зарегистрировать оценку влияния',async f=>{
+     await api('sop-approval/impact',{revision_id:id,round_id:r.id,expected_revision:d.document_rev,expected_round_revision:r.rev,expected_impact_revision:i.record?.rev??0,decision:value(f,'impact_decision'),reason:value(f,'note')});
+     f.lcResetForm?.();note('Оценка влияния зарегистрирована');await reload();
+    }));
+   }
+   n.append(box);
+  }
   const decision=(command,stage,caption,required=false)=>{
    const f=form([comment(required)],caption,async f=>{
     await api('sop-approval/change',{revision_id:id,round_id:r?.id??null,expected_revision:d.document_rev,expected_round_revision:r?.rev??0,command,stage,note:value(f,'note')});
@@ -89,7 +105,11 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
    for(const stage of d.can_decide){
     const label=d.stages.find(x=>x.stage===stage)?.label||stage;
     actions.append(el('h3',label));
-    if(stage==='publish')actions.append(el('p','После ввода предыдущая действующая редакция будет заменена; переобучение определяется существующим реестром изменения СОП.','muted'),decision('publish',stage,'Ввести в действие'));
+    if(stage==='publish'){
+     actions.append(el('p','После ввода предыдущая действующая редакция будет заменена. Оценка влияет на существующий реестр переобучения.','muted'));
+     if(d.impact?.record)actions.append(decision('publish',stage,'Ввести в действие'));
+     else actions.append(el('p','Сначала ответственный должен зарегистрировать оценку влияния.','empty'));
+    }
     else{
      actions.append(decision('approve',stage,stage==='director'?'Утвердить СОП':'Согласовать СОП'),decision('return',stage,'Вернуть на доработку',true));
     }
