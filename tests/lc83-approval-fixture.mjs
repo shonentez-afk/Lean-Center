@@ -37,7 +37,7 @@ export async function setupApproval(){
   await migratePilotCopy({source,target,siteId:site,adminRoleId:adminRole,managerRoleId:managerRole,login:'admin',password,siteTimeZone:'UTC'});
   store=await openSecureQA({dataDir:target});
   const admin=store.authenticate('admin',password),users={};
-  const account=async(name,person_id)=>users[name]=await store.createAccount(admin.id,{person_id,login:name,password,generate:false});
+  const account=async(name,person_id)=>users[name]={...await store.createAccount(admin.id,{person_id,login:name,password,generate:false}),person_id};
   const grant=async(name,assignment_id,unit_id)=>store.grant(admin.id,{account_id:users[name].id,assignment_id,scope:{kind:'unit_tree',unit_id},valid_to:null});
   await account('author',f.trainee);await account('observer',f.other);await account('manager',f.actor);await grant('manager',managerAssignment,site);
   for(const [k,def] of Object.entries(defs))await store.setPolicy(admin.id,{role_id:roles[k],revision:0,permissions:k==='leader'?['training.approve_head','training.read','training.detail','sop.read_history','sop.read_effective','person.read_basic','org.read','operation.read','skill.read','calendar.read','center.read','analytics.read','metrics.read']:def[2].map(x=>'sop.approval.'+x)});

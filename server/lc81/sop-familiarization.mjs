@@ -253,6 +253,7 @@ export function familiarizationCalendar(db,a,t,{mode,from,to,person_id=null},per
  for(const x of rows(db,selectSQL+" WHERE r.state='effective' AND v.state='effective' AND d.archived=0 AND o.archived=0 ORDER BY f.id")){
   if(person_id&&x.person_id!==person_id)continue;
   if(personal){if(x.person_id!==a.personId)continue}
+  else if(x.person_id===a.personId&&t.scope('calendar.read',x.person_id,{...managerResource(db,t,x),self:x.person_id})){} 
   else if(!canManage(db,managed,x)||!t.scope('calendar.read',x.operation_id,managerResource(db,t,x)))continue;
   const v=itemFor(db,a,managed,x,false),pending=['pending','scope_changed'].includes(v.state),date=v.due_on||(!pending?v.confirmed_at?.slice(0,10):null);
   if(!date&&(!pending||mode!=='plan')||date&&(date>to||date<from&&!(mode==='plan'&&pending)))continue;

@@ -274,5 +274,15 @@ test('LC834 final: explicit roster supplements, scoped leaders, personal plan an
  await store.changeSopFamiliarizationScope(users.manager.id,1,{...add,person_id:manager.id,expected_revision:after.rev,reason:'Уточнён необходимый навык'});
  assert.equal(list('manager').items.find(v=>v.id===managerAdd.id).training[0].create.skill_id,x.skill);
  assert.equal(x.detail('author',id).impact.record.affected,1);
+ // Transfer the original, still-unconfirmed employee; do not silently
+ // carry the old work assignment or allow the old section leader to see it.
+ const original=list('manager').items.find(v=>v.person_id===users.author.person_id);
+ const emp=store.listResources(users.manager.id,'employment.read').find(v=>v.person_id===users.author.person_id&&v.valid_to===null);
+ await store.transferEmployment(users.manager.id,1,{id:emp.id,expected_revision:emp.rev,unit_id:x.unitB,profession_id:emp.profession_id,position_id:emp.position_id,shift_id:emp.shift_id,valid_from:x.day});
+ const moved=list('author','mine').items[0];assert.equal(moved.state,'scope_changed');assert.equal(moved.can_ack,false);
+ await assert.rejects(store.confirmSopFamiliarization(users.author.id,1,{id:moved.id,expected_revision:moved.rev,source_sha256:moved.source_sha256,confirmed:true}),/изменились/);
+ assert(!list('leader').items.some(v=>v.id===original.id));assert.equal(list('outsideLeader').total,0);
+ await store.changeSopFamiliarizationScope(users.manager.id,1,{revision_id:id,person_id:users.author.person_id,expected_revision:moved.rev,skill_id:null,reason:'Подтверждена связь с операцией после перемещения'});
+ const reconciled=list('author','mine').items[0];assert.equal(reconciled.id,original.id);assert.equal(reconciled.state,'pending');assert(reconciled.can_ack);
  console.log('LC834_FINAL_SCOPE_PLAN_LEADER_ASSISTANT_OK');
 });

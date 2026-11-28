@@ -873,6 +873,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const card=personCard(db,access,id,i=>cardAllowed(db,a,i,d),{libraryRead:v.read,canTwiReport,canPlan}),approval=approvalAccess(db,a,d);
     if(approval.personId){
      const f=familiarizationList(db,approval,{kind:'visible',person_id:id},false);
+     card.familiarization_total=f.total;
      if(f.total)card.sections.push({action:'sop.familiarization',title:'Ознакомление с редакциями СОП',items:f.items.map(x=>({id:x.id,revision_id:x.revision_id,code:x.code,title:x.title,version_no:x.version_no,state:x.state_label,assigned_on:x.assigned_on,due_on:x.due_on,confirmed_on:x.confirmed_at?.slice(0,10)??null,can_open:x.can_open}))});
     }
     return card;

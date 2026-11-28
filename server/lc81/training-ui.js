@@ -344,6 +344,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   let active='overview';
   const reg=el('div');
   if(d.can_journal)quick.append(button('Журнал инструктажей сотрудника',async()=>{if(discard())quickHost.replaceChildren(await registerPanel('journal',id))}));
+  if(d.familiarization_total)quick.append(button('Все ознакомления сотрудника · '+d.familiarization_total,()=>openFamiliarization(quickHost,{kind:'visible',person_id:id})));
   if(d.can_retraining)quick.append(button('Переобучение и развитие',async()=>{if(discard())quickHost.replaceChildren(await registerPanel('retraining',id))}));
   if(d.can_create_training)quick.append(button('Назначить обучение',()=>discard()&&assignmentEditor(quickHost,null,null,id),'primary'));
   if(d.can_plan)quick.append(button('План сотрудника',async()=>{if(discard())quickHost.replaceChildren(await personCalendar('plan',id))}));

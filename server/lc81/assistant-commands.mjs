@@ -75,7 +75,7 @@ export function assistantContext(db,a,f,canCard){
   const d=centerWorkspace(db,a,f.kind,f.scope),extra=a.familiarizationMetrics?.(f.scope)||[],visible=[...d.metrics,...extra].filter(x=>x.availability!=='restricted');
   out.title=f.kind==='center.read'?'Что требует внимания':'Проверка отчёта';
   out.scope=(opts.units.find(u=>u.id===f.scope.unit_id)?.name||'Всё предприятие')+' · '+f.scope.from+' — '+f.scope.to;
-  fact('Доступных показателей',visible.length);fact('Ограничено правами',d.metrics.length-visible.length);
+  fact('Доступных показателей',visible.length);fact('Ограничено правами',d.metrics.length+extra.length-visible.length);
   if(f.kind==='center.read'){
    for(const x of d.attention)if(f.group==='all'||x.group===f.group)check(x.id,x.count,x.records.filter(r=>r.route).map(r=>({label:r.label,route:r.route})));
    if(f.group==='all')for(const m of extra.filter(x=>['lc83_familiarization_overdue','lc83_familiarization_scope_changed'].includes(x.id)))check(m.id,m.value,m.evidence.slice(0,20).map(e=>({label:e.label,route:e.route})));
