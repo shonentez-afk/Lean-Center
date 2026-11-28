@@ -34,7 +34,7 @@ import {directoryPeople} from '../../src/modules/master-data/people-directory.js
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {internalTrainerAppointment} from '../../src/modules/training/domain.js';
 import {notificationsEnabled,notificationFeed,readNotification,readAllNotifications,checkNotificationIntegrity} from './notifications.mjs';
-import {pushDevices,registerPushDevice,revokePushDevice,queuePushTest,setPushPolicy,pushAdminStatus,pushNeedsRecovery,recoverPush,discoverPush,enqueuePush,pushReady,claimPush,recheckPush,releaseChangedPush,finishPush,checkPushIntegrity} from './web-push.mjs';
+import {pushDevices,registerPushDevice,revokePushDevice,queuePushTest,setPushPolicy,pushAdminStatus,pushNeedsRecovery,recoverPush,stalePushDevices,retireStalePushDevices,discoverPush,enqueuePush,pushReady,claimPush,recheckPush,releaseChangedPush,finishPush,checkPushIntegrity} from './web-push.mjs';
 import {sendWebPush} from './web-push-transport.mjs';
 import {backgroundEnabled,notificationPreferences,saveNotificationPreferences,saveReminderPolicy,discoverBackground,enqueueBackground,readyBackground,drainBackground,backgroundStatus,checkBackgroundIntegrity} from './notification-background.mjs';
 import {approvalPlanItems,approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,compareApprovalSnapshots,approvalImpactContext,saveApprovalImpact,preparePublicationSchedule,schedulePublication,cancelPublication,duePublications,prepareScheduledPublication,executeScheduledPublication,blockDuePublication,checkApprovalIntegrity} from './sop-approval.mjs';
@@ -1034,6 +1034,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const ctx=db=>{const clock=siteClock(db);return {clock,accessFor:id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)}}};
    try{
     if(read(db=>pushNeedsRecovery(db)))await mutate(db=>recoverPush(db,siteClock(db)));
+    if(read(db=>stalePushDevices(db,siteClock(db),pushConfig).length))await mutate(db=>retireStalePushDevices(db,siteClock(db),pushConfig));
     const candidates=read(db=>{const c=ctx(db);return discoverPush(db,c.clock,pushConfig,c.accessFor)});
     if(candidates.length)result.enqueued=await mutate(db=>{const c=ctx(db);return enqueuePush(db,c.clock,pushConfig,c.accessFor,candidates)});
     if(enqueueOnly)return result;

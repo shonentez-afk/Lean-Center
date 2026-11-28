@@ -9,7 +9,7 @@ async function removeSubscription(){
  if(!pushSupported())return;
  const reg=await registration(),s=await reg?.pushManager.getSubscription();
  if(s&&!await s.unsubscribe())throw Error('Не удалось отключить подписку в браузере');
- const ns=await reg?.getNotifications?.({tag:'lc82-action'});for(const n of ns||[])n.close();
+ for(const tag of ['lc82-action','lc82-test']){const ns=await reg?.getNotifications?.({tag});for(const n of ns||[])n.close()}
 }
 // Logout revokes server ownership before clearing browser capability. If
 // server revocation fails, local unsubscribe still prevents future delivery.

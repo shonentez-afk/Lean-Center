@@ -5,7 +5,8 @@ import {one,rows,isId,uuid} from '../../src/core/db.js';
 import {PilotError} from '../lc74-store.mjs';
 import {pushNoticeWatermarks,pushNoticeCandidates} from './notifications.mjs';
 import {notificationPreferences} from './notification-background.mjs';
-import {validatePushSubscription,pushEndpoint} from './web-push-transport.mjs';
+import {validatePushSubscription} from './web-push-transport.mjs';
+import {zoneOffset} from './site-clock.mjs';
 const must=(v,s,m)=>{if(!v)throw new PilotError(s,m)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
 const exists=(db,t)=>!!one(db,"SELECT name FROM sqlite_master WHERE type='table' AND name=?",[t]);
@@ -27,7 +28,7 @@ const policy=(db,config)=>{
  const p=exists(db,policyTable)&&one(db,'SELECT * FROM lc823_push_policy WHERE id=1');
  return {rev:p?.rev??0,enabled:!!config&&p?.enabled===1&&p.binding===config.binding,configured:!!config};
 };
-const publicDevice=(d,a,config)=>({id:d.id,label:d.label,state:d.state==='active'&&(!config||d.binding!==config.binding||d.credential_revision!==a.credentialRevision)?'reconnect':d.state,created_at:d.created_at,last_test_at:d.last_test_at,revoked_at:d.revoked_at});
+const publicDevice=(d,a,config)=>({id:d.id,label:d.label,state:d.state==='active'&&d.expiration_time!==null&&d.expiration_time<=Date.parse(a.at)?'expired':d.state==='active'&&(!config||d.binding!==config.binding||d.credential_revision!==a.credentialRevision)?'reconnect':d.state,created_at:d.created_at,last_test_at:d.last_test_at,revoked_at:d.revoked_at});
 function requireUser(a){must(a?.personId&&process.env.LC82_INBOX_ENABLED!=='0',404,'Устройства уведомлений недоступны')}
 function requireEnabled(db,config){must(config&&policy(db,config).enabled,409,'Web Push не включён администратором')}
 function cancelDeviceJobs(db,id,at,code){
@@ -86,6 +87,7 @@ export function setPushPolicy(db,actor,clock,config,f,audit){
   const mark=pushNoticeWatermarks(db);
   db.run("UPDATE lc823_push_job SET state='cancelled',finished_at=?,last_code='transport_policy' WHERE state IN('pending','retry')",[clock.at]);
   db.run("UPDATE lc823_push_device SET original_after=?,background_after=? WHERE state='active' AND binding=?",[mark.original,mark.background,binding]);
+  if(f.enabled)for(const d of rows(db,"SELECT * FROM lc823_push_device WHERE state='active' AND binding<>?",[binding]))retire(db,d,clock.at,'revoked','deployment_changed');
  }
  audit('notification.push.policy',actor);return policy(db,config);
 }
@@ -107,7 +109,15 @@ export function deliverySeconds(window,clock){
  let remaining=0;
  if(start<end&&window.days.includes(day)&&second>=from&&second<to)remaining=to-second;
  if(start>end){if(window.days.includes(day)&&second>=from)remaining=86400+to-second;else if(window.days.includes(prev)&&second<to)remaining=to-second}
- return Math.min(300,Math.max(0,Math.floor(remaining)));
+ let ttl=Math.min(300,Math.max(0,Math.floor(remaining)));
+ // A civil-time offset transition inside the TTL must not jump the
+ // delivery across an allowed window. Stop at the transition.
+ if(clock.zone&&ttl&&zoneOffset(clock.zone,new Date(Date.parse(clock.at)+ttl*1000))!==clock.offset_minutes){
+  let lo=0,hi=ttl;
+  while(hi-lo>1){const mid=Math.floor((lo+hi)/2);if(zoneOffset(clock.zone,new Date(Date.parse(clock.at)+mid*1000))===clock.offset_minutes)lo=mid;else hi=mid}
+  ttl=lo;
+ }
+ return ttl;
 }
 function accessDevice(db,d,clock,config,accessFor){
  if(!d||d.state!=='active'||d.binding!==config?.binding||d.expiration_time!==null&&d.expiration_time<=Date.parse(clock.at))return null;
@@ -130,6 +140,18 @@ export function pushAdminStatus(db,config){
 }
 function ready(db,clock){
  return exists(db,jobTable)?rows(db,"SELECT * FROM lc823_push_job WHERE state IN('pending','retry') AND next_attempt_at<=? AND NOT EXISTS(SELECT 1 FROM lc823_push_job s WHERE s.device_id=lc823_push_job.device_id AND s.state='sending') ORDER BY next_attempt_at,created_at,id LIMIT ?",[clock.at,MAX_JOBS]):[];
+}
+export function stalePushDevices(db,clock,config){
+ if(!config||!exists(db,deviceTable))return [];
+ return rows(db,"SELECT d.id,d.expiration_time FROM lc823_push_device d JOIN lc81_account a ON a.id=d.account_id WHERE d.state='active' AND d.binding=? AND (a.state<>'active' OR d.credential_revision<>a.credential_revision OR (d.expiration_time IS NOT NULL AND d.expiration_time<=?)) ORDER BY d.id LIMIT 128",[config.binding,Date.parse(clock.at)]);
+}
+export function retireStalePushDevices(db,clock,config){
+ let count=0;
+ for(const x of stalePushDevices(db,clock,config)){
+  const d=device(db,x.id),expired=x.expiration_time!==null&&x.expiration_time<=Date.parse(clock.at);
+  retire(db,d,clock.at,expired?'expired':'revoked',expired?'subscription_expired':'account_changed');count++;
+ }
+ return count;
 }
 export function pushNeedsRecovery(db){return exists(db,jobTable)&&!!one(db,"SELECT id FROM lc823_push_job WHERE state='sending' LIMIT 1")}
 export function recoverPush(db,clock){
@@ -190,7 +212,7 @@ export function claimPush(db,clock,config,accessFor){
   const c=jobContext(db,clock,config,accessFor,j);
   if(c.terminal){endJob(db,j,clock.at,c.terminal,c.code);continue}
   if(c.wait){db.run("UPDATE lc823_push_job SET next_attempt_at=? WHERE id=?",[plus(clock.at,60000),j.id]);continue}
-  if(d&&d.id!==c.d.id||chosen.length>=MAX_PER_SEND)continue;
+  if(d&&d.id!==c.d.id||chosen.length>=MAX_PER_SEND||chosen.length&&(j.kind==='test'||chosen[0].kind==='test'))continue;
   if(j.attempts>=4){endJob(db,j,clock.at,'failed','attempt_limit');continue}
   d=c.d;ttl=Math.min(ttl,c.ttl);chosen.push(j);
  }

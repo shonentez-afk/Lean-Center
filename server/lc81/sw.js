@@ -6,7 +6,7 @@ self.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));
 self.addEventListener('push',event=>{
  let p;try{p=event.data?.json()}catch{}
  const id=p?.v===1&&typeof p.notice==='string'&&uuid.test(p.notice)?p.notice:null;
- event.waitUntil(self.registration.showNotification('Lean Center',{body:id?'У вас новое действие в портале':'Проверка уведомлений Lean Center',icon:'/assets/favicon.png',tag:'lc82-action',renotify:false,data:{notice:id}}));
+ event.waitUntil(self.registration.showNotification('Lean Center',{body:id?'У вас новое действие в портале':'Проверка уведомлений Lean Center',icon:'/assets/favicon.png',tag:id?'lc82-action':'lc82-test',renotify:false,data:{notice:id}}));
 });
 self.addEventListener('notificationclick',event=>{
  event.notification.close();

@@ -175,7 +175,7 @@ try{
  assert((await sw.text()).includes('У вас новое действие в портале'));
  await deep.ctx.close();
  const wrong=await profile('engineering',false,'/#lc82-notice='+notice.id);
- await wrong.p.locator('#status').getByText('Уведомление больше недоступно. Проверьте Мой план и колокольчик.',{exact:true}).waitFor();
+ await wrong.p.getByText('Уведомление больше недоступно. Проверьте Мой план и колокольчик.',{exact:true}).waitFor();
  assert.equal(await wrong.button('Подтвердить ознакомление').count(),0);await wrong.ctx.close();
  console.log('LC823_BROWSER_DISABLED_DEVICE_AND_EXACT_DEEP_LINK_OK');
  const admin=await profile('admin');await admin.go('admin.notifications');

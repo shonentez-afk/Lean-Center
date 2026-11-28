@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import fs from 'node:fs/promises';
+import vm from 'node:vm';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startSopPublicationScheduler} from '../server/lc81/sop-publication-scheduler.mjs';
 import {startNotificationBackground,startPushDelivery} from '../server/lc81/notification-scheduler.mjs';
@@ -601,6 +603,8 @@ test('LC823 quiet hours use the enterprise clock and an overnight start day',()=
  assert.equal(deliverySeconds(w,clock('2026-12-01T21:00:00.000Z')),0);
  assert.equal(deliverySeconds(w,{...clock('2026-11-30T13:00:00.000Z'),offset_minutes:420}),300);
  assert.equal(deliverySeconds(null,{...clock('2026-11-30T20:00:00.000Z'),configured:false}),0);
+ const dst={configured:true,at:'2026-03-29T00:59:30.000Z',offset_minutes:60,zone:'Europe/Berlin'};
+ assert.equal(deliverySeconds({days:[7],start:'01:00',end:'04:00'},dst),29);
  console.log('LC823_QUIET_WINDOW_OVERNIGHT_OK');
 });
 test('LC823 device consent, live notice delivery, revoke, provider gone, interruption and isolated restore',async t=>{
@@ -647,6 +651,12 @@ test('LC823 device consent, live notice delivery, revoke, provider gone, interru
  response={status:410};await store.runPushDelivery();
  assert.equal(store.pushDevices(users.safety.id,1).devices.find(v=>v.id===d3.id).state,'expired');
  assert.equal(sent.at(-1).notice_id,null);
+ const d4=await store.registerPushDevice(users.safety.id,1,{label:'Повтор QA',subscription:sub(4),confirmed:true});
+ await store.queuePushTest(users.safety.id,1,{id:d4.id});
+ response={status:429,retry_after:120};await store.runPushDelivery();
+ assert.equal(status().counts.retry,1);
+ assert.equal(store.pushDevices(users.safety.id,1).devices.find(v=>v.id===d4.id).last_test_state,'retry');
+ const retryCalls=sent.length;await store.runPushDelivery();assert.equal(sent.length,retryCalls);
  await store.queuePushTest(users.safety.id,1,{id:d1.id});
  assert.equal((await store.runPushDelivery({claimOnly:true})).claimed,1);
  assert.equal(status().counts.sending,1);const calls=sent.length;
@@ -658,9 +668,30 @@ test('LC823 device consent, live notice delivery, revoke, provider gone, interru
   await restored.runPushDelivery();
   assert.equal(restored.notificationBackgroundStatus(admin.id,1).push.counts.uncertain,1);assert.equal(sent.length,calls);
   await restored.setPushPolicy(admin.id,1,{expected_revision:1,enabled:false});
+  assert.equal(restored.notificationBackgroundStatus(admin.id,1).push.counts.retry,0);
   assert.equal(restored.pushDevices(users.safety.id,1).enabled,false);
   assert.equal(restored.notificationFeed(users.safety.id,1,{filter:'actions'}).total,1);
   assert.equal((await restored.runPushDelivery()).enqueued,0);
  }finally{await restored.close()}
  console.log('LC823_DEVICES_QUEUE_REVOKE_PROVIDER_RESTORE_OK');
+});
+
+test('LC823 service worker keeps payload and click generic; scheduler drains on shutdown',async()=>{
+ const handlers={},shown=[],windows=[],id=uuid();
+ const self={location:{origin:'https://qa.invalid'},addEventListener:(k,fn)=>handlers[k]=fn,registration:{showNotification:async(title,opts)=>shown.push({title,opts})},clients:{openWindow:async url=>windows.push(url)}};
+ vm.runInNewContext(await fs.readFile(new URL('../server/lc81/sw.js',import.meta.url),'utf8'),{self,URL});
+ const fire=async(k,e)=>{let task;handlers[k]({...e,waitUntil:p=>task=p});await task};
+ await fire('push',{data:{json:()=>({v:1,notice:id,title:'PRIVATE NAME',body:'SECRET SOP',url:'https://evil.invalid'})}});
+ assert.equal(shown[0].title,'Lean Center');assert.equal(shown[0].opts.body,'У вас новое действие в портале');assert.equal(shown[0].opts.data.notice,id);
+ assert(!JSON.stringify(shown).includes('PRIVATE NAME'));assert(!JSON.stringify(shown).includes('SECRET SOP'));
+ await fire('push',{data:{json:()=>({v:1,notice:null})}});assert.equal(shown[1].opts.tag,'lc82-test');
+ let closed=false;
+ await fire('notificationclick',{notification:{data:{notice:id,url:'https://evil.invalid'},close:()=>closed=true}});
+ assert(closed);assert.equal(windows[0],'https://qa.invalid/#lc82-notice='+id);
+ await fire('notificationclick',{notification:{data:{notice:'https://evil.invalid'},close(){}}});assert.equal(windows[1],'https://qa.invalid/');
+ assert(!handlers.fetch);
+ let calls=0,start,release;const entered=new Promise(r=>start=r),gate=new Promise(r=>release=r),errors=[];
+ const scheduler=startPushDelivery({async runPushDelivery(){calls++;start();await gate}},{intervalMs:5,onError:()=>errors.push('tick error')});
+ try{await entered;await delay(25);assert.equal(calls,1);let drained=false;const stopped=scheduler.stop().then(()=>{drained=true});await delay(15);assert.equal(drained,false);release();await stopped;await delay(15);assert.equal(calls,1);assert.deepEqual(errors,[])}finally{release();await scheduler.stop()}
+ console.log('LC823_SW_PRIVACY_AND_WORKER_DRAIN_OK');
 });

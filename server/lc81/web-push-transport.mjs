@@ -84,11 +84,11 @@ export async function sendWebPush(config,device,noticeId,{ttl=300}={}){
  // Only an opaque ID, no name, role, SOP title, device label or free text.
  const payload=JSON.stringify({v:1,notice:noticeId||null});
  const body=encryptPush(device,payload);
- const headers={Authorization:vapidAuthorization(config,device.endpoint),'Content-Encoding':'aes128gcm','Content-Type':'application/octet-stream','Content-Length':String(body.length),TTL:String(Math.max(0,Math.min(300,Math.floor(ttl)))),'Urgency':'normal',Topic:'lc82_action'};
+ const headers={Authorization:vapidAuthorization(config,device.endpoint),'Content-Encoding':'aes128gcm','Content-Type':'application/octet-stream','Content-Length':String(body.length),TTL:String(Math.max(0,Math.min(300,Math.floor(ttl)))),'Urgency':'normal',Topic:noticeId?'lc82_action':'lc82_test'};
  // TLS server name and certificate checks remain enabled; never follow 3xx.
  return new Promise((resolve,reject)=>{
   const req=request(endpoint,{method:'POST',headers,lookup:pinnedLookup,agent:false,family:4,signal:AbortSignal.timeout(8000)},res=>{
-   const code=res.statusCode||0,raw=res.headers['retry-after'],retry=typeof raw==='string'&&/^\d{1,6}$/.test(raw)?Number(raw):null;
+   const code=res.statusCode||0,raw=res.headers['retry-after'],retry=typeof raw==='string'?(/^\d{1,6}$/.test(raw)?Number(raw):Number.isFinite(Date.parse(raw))?Math.max(0,Math.ceil((Date.parse(raw)-Date.now())/1000)):null):null;
    res.resume();res.on('error',reject);res.on('end',()=>resolve({status:code,retry_after:retry}));
   });
   req.on('error',reject);req.end(body);
