@@ -1,0 +1,70 @@
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+  color: #f1f5fb;
+  background: #0b1220;
+  --surface: #111c2d;
+  --border: #2b3a50;
+  --muted: #b1bed0;
+  --accent: #82e9ce;
+  --bad: #ffb799;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(72rem, 100%); margin: 0 auto; padding: clamp(1rem, 4vw, 2.6rem); }
+.top { display: flex; align-items: end; justify-content: space-between; gap: 1rem; padding: .45rem 0 1.45rem; border-bottom: 1px solid var(--border); }
+h1, h2, p { margin: 0; }
+h1 { font-size: clamp(2rem, 5.5vw, 3.25rem); letter-spacing: -.045em; line-height: 1.1; }
+h2 { font-size: 1.15rem; line-height: 1.35; }
+.eyebrow { color: var(--accent); font-size: .88rem; margin-bottom: .5rem; }
+.muted { color: var(--muted); font-size: .9rem; line-height: 1.45; }
+.overview { margin: 1.5rem 0 1rem; }
+.metrics { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: .8rem; margin-top: .7rem; }
+.card, .actions, .panel, dialog { background: var(--surface); border: 1px solid var(--border); border-radius: .85rem; }
+.card { padding: 1rem 1.1rem; }
+.caption { color: var(--muted); font-size: .9rem; }
+.value { display: flex; align-items: center; gap: .48rem; margin-top: .45rem; margin-bottom: .35rem; font-size: 1.18rem; font-weight: 700; }
+.dot { display: inline-block; width: .62rem; height: .62rem; border-radius: 50%; background: #a4b4ca; flex: none; }
+.dot.up { background: var(--accent); }
+.dot.down { background: var(--bad); }
+code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.buttons { display: flex; flex-wrap: wrap; gap: .55rem; }
+.button { display: inline-flex; align-items: center; justify-content: center; border-radius: .55rem; min-height: 2.8rem; border: 1px solid transparent; padding: .45rem .8rem; font: inherit; font-weight: 650; font-size: .9rem; text-decoration: none; cursor: pointer; }
+.primary { background: var(--accent); color: #0a241e; }
+.quiet { color: #eef4fb; background: #18263b; border-color: #3a4b65; }
+.primary:hover:not(:disabled) { background: #a6f5e1; }
+.quiet:hover:not(:disabled) { background: #263a55; }
+.button:focus-visible { outline: 3px solid #c1e5ff; outline-offset: 2px; }
+.button:disabled { opacity: .52; cursor: default; }
+.actions { padding: 1rem 1.1rem; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: .6rem 1rem; }
+.actions .muted, dialog .muted { margin-top: .3rem; }
+.notice { color: var(--accent); font-size: .9rem; grid-column: 1 / -1; }
+.notice:empty { display: none; }
+.notice.error { color: var(--bad); }
+.details { display: grid; grid-template-columns: minmax(0,1.12fr) minmax(0,1fr); gap: .8rem; margin-top: 1rem; align-items: start; }
+.panel { padding: 1rem 1.1rem; min-width: 0; }
+.section-note { margin-top: .25rem; }
+.rows { margin: .8rem 0 0; padding: 0; list-style: none; }
+.rows li { border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: start; gap: .6rem; padding: .68rem 0; }
+.rows li:last-child { padding-bottom: 0; }
+.row-main { min-width: 0; }
+.row-title { font-size: .96rem; font-weight: 650; overflow-wrap: anywhere; }
+.rows time, .row-note, .empty { color: var(--muted); font-size: .875rem; line-height: 1.5; }
+.state { color: var(--accent); font-size: .875rem; white-space: nowrap; }
+.state.failed { color: var(--bad); }
+.state.running { color: #d5dcff; }
+dialog { width: min(25rem,calc(100% - 2rem)); color: inherit; padding: 1.25rem; }
+dialog::backdrop { background: #020710c9; }
+dialog .buttons { justify-content: end; margin-top: 1.2rem; }
+@media (max-width: 760px) {
+  .details { grid-template-columns: 1fr; }
+  .actions { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .metrics { grid-template-columns: 1fr; gap: .55rem; }
+  .top { align-items: center; }
+  .eyebrow { font-size: .82rem; }
+  .actions .buttons { display: grid; grid-template-columns: 1fr; }
+  .card { padding: .8rem 1rem; }
+  .rows li { flex-wrap: wrap; }
+}

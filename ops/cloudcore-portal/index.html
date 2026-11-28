@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Lean-Center · Управление стендом</title>
+<link rel="stylesheet" href="/portal.css">
+<script defer src="/portal.js"></script>
+</head>
+<body>
+<main>
+  <header class="top">
+    <div>
+      <p class="eyebrow">CloudCore · Тестовый стенд</p>
+      <h1>Lean-Center</h1>
+    </div>
+    <a id="site-link" class="button quiet" href="https://nl6smkdc-18081.eun1.devtunnels.ms/" target="_blank" rel="noopener noreferrer">Открыть сайт</a>
+  </header>
+
+  <section class="overview" aria-labelledby="overview-heading">
+    <h2 id="overview-heading">Состояние</h2>
+    <div class="metrics">
+      <div class="card">
+        <div class="caption">Тестовый сайт</div>
+        <div class="value"><span class="dot" id="site-dot" aria-hidden="true"></span><span id="site-status">Проверяем…</span></div>
+        <p id="tunnel-status" class="muted">Проверяем состояние туннеля</p>
+      </div>
+      <div class="card">
+        <div class="caption">Активная версия</div>
+        <div class="value"><code id="version">—</code></div>
+        <p id="version-detail" class="muted">Ожидаем данные о выпуске</p>
+      </div>
+      <div class="card">
+        <div class="caption">Последняя копия</div>
+        <div class="value" id="last-copy">—</div>
+        <p id="last-size" class="muted"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="actions" aria-labelledby="actions-heading">
+    <div>
+      <h2 id="actions-heading">Управление стендом</h2>
+      <p class="muted">Копирование и перезапуск кратковременно останавливают тестовый сайт.</p>
+    </div>
+    <div class="buttons">
+      <button id="snapshot" class="button primary" type="button" disabled>Создать копию</button>
+      <button id="restart" class="button quiet" type="button" disabled>Перезапустить стенд</button>
+    </div>
+    <p id="notice" class="notice" role="status" aria-live="polite"></p>
+  </section>
+
+  <div class="details">
+    <section class="panel" aria-labelledby="backups-heading">
+      <h2 id="backups-heading">Резервные копии</h2>
+      <p class="muted section-note">Ежедневно в 03:30 по Красноярску</p>
+      <ul id="backups" class="rows"><li class="empty">Загружаем список…</li></ul>
+    </section>
+    <section class="panel" aria-labelledby="events-heading">
+      <h2 id="events-heading">Журнал</h2>
+      <p class="muted section-note">Копирование по расписанию и действия из портала</p>
+      <ul id="events" class="rows"><li class="empty">Загружаем журнал…</li></ul>
+    </section>
+  </div>
+</main>
+
+<dialog id="confirm">
+  <h2 id="confirm-title"></h2>
+  <p class="muted">Тестовый сайт будет недоступен, пока выполняется операция.</p>
+  <div class="buttons">
+    <button id="cancel" class="button quiet" type="button" autofocus>Отмена</button>
+    <button id="submit" class="button primary" type="button">Подтвердить</button>
+  </div>
+</dialog>
+</body>
+</html>
