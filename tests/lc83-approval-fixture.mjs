@@ -19,10 +19,10 @@ export async function setupApproval(){
   const adminRole=w.edit('business_role',null,{code:'LC83-ADMIN',name:'Администратор'}),managerRole=w.edit('business_role',null,{code:'LC83-MANAGER',name:'Управляющий центром TWI'});
   const assign=(person_id,role_id)=>w.edit('role_assignment',null,{person_id,role_id,valid_from:'2020-01-01',valid_to:null});
   const managerAssignment=assign(f.actor,managerRole);
-  const defs={safety:['SAFETY_HEAD','Руководитель ОТ',['safety']],engineering:['CHIEF_ENGINEER','Главный инженер',['engineering']],twi:['INTERNAL_TRAINER','Внутренний тренер',['twi']],director:['DIRECTOR','Директор предприятия',['director','publish','withdraw']]};
+  const defs={safety:['SAFETY_HEAD','Руководитель ОТ',['safety']],engineering:['CHIEF_ENGINEER','Главный инженер',['engineering']],twi:['INTERNAL_TRAINER','Внутренний тренер',['twi']],director:['DIRECTOR','Директор предприятия',['director','publish','withdraw']],leader:['UNIT_HEAD','Руководитель участка',[]]};
   const roles={},people={};
   for(const [k,[code,name]] of Object.entries(defs))roles[k]=w.edit('business_role',null,{code,name});
-  for(const [name,role,unit] of [['safety','safety',f.unit],['safety2','safety',f.unit],['outside','safety',unitB],['engineering','engineering',f.unit],['twi','twi',f.unit],['uncertified','twi',f.unit],['director','director',site]]){
+  for(const [name,role,unit] of [['safety','safety',f.unit],['safety2','safety',f.unit],['outside','safety',unitB],['engineering','engineering',f.unit],['twi','twi',f.unit],['uncertified','twi',f.unit],['director','director',site],['leader','leader',f.unit],['outsideLeader','leader',unitB]]){
    const person=w.edit('person',null,{employee_code:'LC83-'+name,display_name:'Учебный '+name});
    w.edit('person_assignment',null,{person_id:person,unit_id:unit,profession_id:null,position_id:null,shift_id:null,shift_code:null,valid_from:'2020-01-01',valid_to:null});
    people[name]={person,assignment:assign(person,roles[role]),unit};
@@ -40,7 +40,7 @@ export async function setupApproval(){
   const account=async(name,person_id)=>users[name]=await store.createAccount(admin.id,{person_id,login:name,password,generate:false});
   const grant=async(name,assignment_id,unit_id)=>store.grant(admin.id,{account_id:users[name].id,assignment_id,scope:{kind:'unit_tree',unit_id},valid_to:null});
   await account('author',f.trainee);await account('observer',f.other);await account('manager',f.actor);await grant('manager',managerAssignment,site);
-  for(const [k,def] of Object.entries(defs))await store.setPolicy(admin.id,{role_id:roles[k],revision:0,permissions:def[2].map(x=>'sop.approval.'+x)});
+  for(const [k,def] of Object.entries(defs))await store.setPolicy(admin.id,{role_id:roles[k],revision:0,permissions:k==='leader'?['training.approve_head','training.read','training.detail','sop.read_history','sop.read_effective','person.read_basic','org.read','operation.read','skill.read','calendar.read','center.read','analytics.read','metrics.read']:def[2].map(x=>'sop.approval.'+x)});
   for(const [name,p] of Object.entries(people)){await account(name,p.person);p.grant=await grant(name,p.assignment,p.unit)}
   const day=store.adminData(admin.id).clock.day;
   const old=f.doc.id,document=f.doc.entity_id,operation=f.operation;
@@ -65,6 +65,6 @@ export async function setupApproval(){
   };
   const effective=(name='observer')=>store.listResources(users[name].id,'sop.read_effective').map(x=>x.revision_id);
   const cleanup=async()=>{await store.close();f.w.close();await fs.rm(root,{recursive:true,force:true})};
-  return {root,target,store,admin,users,people,password,day,old,document,operation,assignment,detail,draft,passport,edit,route,submit,decision,change,impact,effective,cleanup};
+  return {root,target,store,admin,users,people,password,day,old,document,operation,assignment,skill:f.skill,scale:f.scale,unit:f.unit,unitB,detail,draft,passport,edit,route,submit,decision,change,impact,effective,cleanup};
  }catch(e){if(store)await store.close();if(f)f.w.close();await fs.rm(root,{recursive:true,force:true});throw e}
 }

@@ -17,7 +17,7 @@ import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,SITE_REFE
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop,productionPlans,createProductionPlan,approveProductionPlan,recordInstructionProtocol,recordAssessmentResult} from './training-commands.mjs';
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix,matrixOverviewOptions,matrixOverview,matrixAssessmentHistory,profileOptions,professionProfile,saveProfessionProfile} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
-import {familiarizationList,prepareFamiliarizationAck,confirmFamiliarization,setFamiliarizationDeadline,checkFamiliarizationIntegrity,familiarizationMetrics,familiarizationMetricId} from './sop-familiarization.mjs';
+import {familiarizationList,prepareFamiliarizationAck,confirmFamiliarization,setFamiliarizationDeadline,checkFamiliarizationIntegrity,familiarizationMetrics,familiarizationMetricId,familiarizationScopeOptions,changeFamiliarizationScope,linkFamiliarizationTraining,familiarizationCalendar} from './sop-familiarization.mjs';
 import {calendarWorkspace,calendarOptions,calendarDetail,createSchedule,changeSchedule,scheduleView,centerOptions,centerWorkspace,metricEvidence} from './center-commands.mjs';
 import {roiOptions,roiView,roiDetail,createRoi,changeRoi,roiMeasureContext,measureRoi,roiTwiOptions,previewRoiTwi} from './roi-commands.mjs';
 import {competencyOptions,competencyChange,competencyView,assessmentDetail} from './competency-commands.mjs';
@@ -197,7 +197,7 @@ function trainingAccess(db,a,d){
 }
 function assistantAccess(db,a,d){
  const shared=sharedLibrary(db,a,config(db).site,d);
- return {...trainingAccess(db,a,d),sharedRead:(action,id)=>shared.read(action,id)};
+ return {...trainingAccess(db,a,d),sharedRead:(action,id)=>shared.read(action,id),familiarizationMetrics:scope=>familiarizationMetrics(db,approvalAccess(db,a,d),scope)};
 }
 function cardAllowed(db,a,id,d){
  return a.bootstrap===1?!!readManagerProjection(db,config(db).site,'person.read_basic',id,d):canReadPersonCard(db,security(db,a.id),a.id,id,d);
@@ -711,7 +711,9 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    return mutate(db=>{
     const access=trainingAccess(db,checkedAccount(db,actor,revision),day(db)),next=resolveTrainingCreate(db,input,access);
     must(next.source.sha256===resolved.source.sha256&&JSON.stringify(next.payload)===JSON.stringify(resolved.payload)&&next.scenario===resolved.scenario&&next.rapidConfirm===resolved.rapidConfirm,409,'Назначение изменилось при проверке');
-    return createTraining(db,next,access);
+    const created=createTraining(db,next,access);
+    if(Object.hasOwn(input,'familiarization_id'))linkFamiliarizationTraining(db,access,input,created.id);
+    return created;
    });
   },
   changeTraining(actor,revision,input){return mutate(db=>changeTraining(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
@@ -779,7 +781,10 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   calendarWorkspace(actor,revision,query){return read(db=>{
    const a=checkedAccount(db,actor,revision),d=day(db),access=trainingAccess(db,a,d),id=query.person_id||null;
    if(id)must(isId(id)&&cardAllowed(db,a,id,d)&&((query.mode==='plan'&&a.person_id===id&&workspaceActions(db,access,a.bootstrap===1).includes('plan.read'))||access.permissions.includes('calendar.read')),404,'План сотрудника недоступен');
-   return calendarWorkspace(db,access,{...query,person_id:id});
+   const result=calendarWorkspace(db,access,{...query,person_id:id});
+   const personal=query.mode==='plan'&&(!id||id===a.person_id)&&workspaceActions(db,access,a.bootstrap===1).includes('plan.read');
+   const extra=familiarizationCalendar(db,approvalAccess(db,a,d),access,{...query,person_id:id},personal);
+   return {...result,items:[...result.items,...extra].sort((a,b)=>Number(b.overdue)-Number(a.overdue)||String(a.date??'9999-12-31').localeCompare(String(b.date??'9999-12-31'))||a.key.localeCompare(b.key))};
   })},
   calendarOptions(actor,revision,type,sourceId=null){return read(db=>calendarOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),type,sourceId))},
   calendarDetail(actor,revision,id){return read(db=>calendarDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
@@ -967,6 +972,8 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    return mutate(db=>confirmFamiliarization(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f,c));
   },
   setSopFamiliarizationDeadline(actor,revision,f){return mutate(db=>setFamiliarizationDeadline(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  familiarizationScopeOptions(actor,revision,id){return read(db=>familiarizationScopeOptions(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  changeSopFamiliarizationScope(actor,revision,f){return mutate(db=>changeFamiliarizationScope(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   async submitSopApproval(actor,revision,f){
    const ctx=read(db=>prepareApprovalSubmit(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f));
    await inspectApprovalSource(ctx.b,readFile);

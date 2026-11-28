@@ -293,6 +293,8 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
     try{reply(res,200,await store.confirmSopFamiliarization(a.id,a.credential_revision,await body(req)));return}finally{libraryBusy--}
    }
+   if(req.method==='GET'&&p==='/api/lc81/sop-familiarization/scope-options'){reply(res,200,store.familiarizationScopeOptions(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&p==='/api/lc81/sop-familiarization/scope'){reply(res,200,await store.changeSopFamiliarizationScope(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/sop-familiarization/deadline'){reply(res,200,await store.setSopFamiliarizationDeadline(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/sop-approval/list'){reply(res,200,store.approvalList(a.id,a.credential_revision,{kind:url.searchParams.get('kind')||'all',offset:Number(url.searchParams.get('offset')||0)}));return}
    if(req.method==='GET'&&p==='/api/lc81/sop-approval/detail'){reply(res,200,store.approvalDetail(a.id,a.credential_revision,url.searchParams.get('id'),url.searchParams.get('round_id')||null));return}

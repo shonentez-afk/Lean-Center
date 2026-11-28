@@ -465,6 +465,7 @@ async function openLinked(host,r){
  if(['sop_evaluation','weighted_sop'].includes(r.type))return trainingUI.sopEvaluationCard(host,r.type,r.id);
  if(['schedule','roi'].includes(r.type))return centerUI.open(host,r.type,r.id);
  if(r.type==='sop')return libraryUI.card(host,r.id);
+ if(r.type==='familiarization')return openFamiliarization(host,{kind:'visible',revision_id:r.id,...(r.person_id?{person_id:r.person_id}:{})});
  if(r.type==='frv'){
   const action='frv.read',result=await api('resources?action='+encodeURIComponent(action));
   const matches=result.items.filter(x=>x.id===r.id);

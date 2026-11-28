@@ -14,13 +14,25 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
   if(d.can_manage)controls.append(button('Контроль ознакомления',switchTo('managed'),kind==='managed'?'primary':''));
   if(kind==='visible')controls.append(el('span','Доступные записи выбранной карточки','muted'));
   if(back)controls.append(button('← Назад к согласованиям',async()=>{if(discard())host.replaceWith(await back())}));
-  const n=panel('Ознакомление с редакциями СОП',el('p','Персональные назначения создаются при фактическом вводе по составу зарегистрированной оценки влияния. Ознакомление не является обучением, практической оценкой или допуском. Срок назначается ответственным; его отсутствие не считается просрочкой.','muted'),controls);
+  const n=panel('Ознакомление с редакциями СОП',el('p','Персональные назначения создаются при фактическом вводе по составу оценки влияния; ответственный может явно уточнить состав с сохранением истории. Ознакомление не является обучением, практической оценкой или допуском. Срок назначается ответственным; его отсутствие не считается просрочкой.','muted'),controls);
   const describe=x=>x.code+' · v'+x.version_no+' · '+x.title;
+  if(d.can_scope&&revision_id&&kind!=='mine')controls.append(button('Уточнить состав исполнителей',async()=>{
+   if(!discard())return;
+   const o=await api('sop-familiarization/scope-options?id='+encodeURIComponent(revision_id));
+   const person=select('scope_person','Сотрудник',[['','— Выберите сотрудника —'],...o.people.map(x=>[x.id,x.name+' · '+(x.unit||'')+(x.registered?' · уже в составе':' · добавить')])]);
+   const skill=select('scope_skill','Дополнительный навык (при необходимости)',[['','— Без дополнительного навыка —'],...o.skills.map(x=>[x.id,x.name])]);skill.querySelector('select').required=false;
+   sub.replaceChildren(panel('Уточнение состава исполнителей',el('p','Добавление нового исполнителя, изменение его рабочего назначения или явное уточнение навыка. Согласованный первоначальный состав сохраняется, подтверждённое ознакомление не переписывается.','muted'),form([person,skill,comment(true)],'Сохранить уточнение состава',async f=>{
+    const id=value(f,'scope_person'),p=o.people.find(x=>x.id===id);if(!p)throw Error('Выберите сотрудника');
+    await api('sop-familiarization/scope',{revision_id,person_id:id,expected_revision:p.rev,skill_id:value(f,'scope_skill')||null,reason:value(f,'note')});
+    note('Уточнение состава зарегистрировано');await reload();
+   })));
+  }));
   function showConfirm(x){
    const check=el('input');check.type='checkbox';check.name='confirmed';check.required=true;
    const l=el('label');l.append(check,el('span','Я ознакомился с указанной редакцией СОП'));
-   const fields=[el('p',describe(x)),el('p','SHA-256: '+x.source_sha256,'lc83-hash'),button('Открыть СОП для ознакомления',()=>openSop(sub,x.revision_id)),l];
-   sub.replaceChildren(panel('Личное подтверждение ознакомления',form(fields,'Подтвердить ознакомление',async f=>{
+   const preview=el('div');
+   const fields=[l];
+   sub.replaceChildren(panel('Личное подтверждение ознакомления',el('p',describe(x)),el('p','SHA-256: '+x.source_sha256,'lc83-hash'),button('Открыть СОП для ознакомления',()=>openSop(preview,x.revision_id)),preview,form(fields,'Подтвердить ознакомление',async f=>{
     await api('sop-familiarization/confirm',{id:x.id,expected_revision:x.rev,source_sha256:x.source_sha256,confirmed:f.elements.namedItem('confirmed').checked});
     note('Личное ознакомление зарегистрировано');await reload();
    })));
@@ -37,6 +49,7 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
    if(x.can_open)row.append(button('Открыть СОП',()=>openSop(sub,x.revision_id)));
    if(x.can_ack)row.append(button('Подтвердить ознакомление',()=>showConfirm(x),'primary'));
    if(x.can_due)row.append(button('Назначить срок ознакомления',()=>showDeadline(x)));
+   if(x.scope_history?.length)row.append(button('История уточнений',()=>sub.replaceChildren(panel('История уточнений состава · '+x.person,table(['Дата','Причина','Дополнительный навык'],x.scope_history.map(c=>[c.date,c.reason,c.skill||'—']))))));
    return row.childElementCount?row:'—';
   }
   function training(x){
@@ -44,7 +57,7 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
    if(!x.training.length)return 'Редакционная эквивалентность';
    const col=el('div');
    for(const t of x.training){
-    const row=el('div',undefined,'row');row.append(el('span',t.skill+' · '+t.label));
+    const row=el('div',undefined,'row');row.append(el('span',t.skill+' · '+t.label+(t.assignment_id?(t.linked?' · адресная связь':' · найдено по фактам'):'')));
     if(t.assignment_id)row.append(button('Открыть обучение',()=>openTraining(sub,t.assignment_id)));
     if(t.create)row.append(button('Назначить обучение',()=>assignFamiliarization(sub,t.create,()=>reload()),'primary'));
     col.append(row);

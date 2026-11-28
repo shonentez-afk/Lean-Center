@@ -72,12 +72,13 @@ export function assistantContext(db,a,f,canCard){
   const opts=assistantOptions(db,a).reports.find(x=>x.kind===f.kind);
   must(opts&&(f.scope.unit_id?opts.units.some(u=>u.id===f.scope.unit_id):opts.all),403,'Область помощника недоступна');
   resource=f.scope.unit_id?unitResource(f.scope.unit_id):programResource(db);anchor=resource.units[0];
-  const d=centerWorkspace(db,a,f.kind,f.scope),visible=d.metrics.filter(x=>x.availability!=='restricted');
+  const d=centerWorkspace(db,a,f.kind,f.scope),extra=a.familiarizationMetrics?.(f.scope)||[],visible=[...d.metrics,...extra].filter(x=>x.availability!=='restricted');
   out.title=f.kind==='center.read'?'Что требует внимания':'Проверка отчёта';
   out.scope=(opts.units.find(u=>u.id===f.scope.unit_id)?.name||'Всё предприятие')+' · '+f.scope.from+' — '+f.scope.to;
   fact('Доступных показателей',visible.length);fact('Ограничено правами',d.metrics.length-visible.length);
   if(f.kind==='center.read'){
    for(const x of d.attention)if(f.group==='all'||x.group===f.group)check(x.id,x.count,x.records.filter(r=>r.route).map(r=>({label:r.label,route:r.route})));
+   if(f.group==='all')for(const m of extra.filter(x=>['lc83_familiarization_overdue','lc83_familiarization_scope_changed'].includes(x.id)))check(m.id,m.value,m.evidence.slice(0,20).map(e=>({label:e.label,route:e.route})));
    out.notices.push('Сигналы текущего состояния. Недоступные источники не считаются нулевыми; количества разных тем не суммируются.');
   }else{
    check('ctx_metric_missing',visible.filter(m=>m.denominator===0).length);check('ctx_metric_review',visible.length);
