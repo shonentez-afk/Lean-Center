@@ -86,9 +86,20 @@ try{
  const heading=name=>content.getByRole('heading',{name,exact:true});
  const ready=async()=>{await p.locator('#save-indicator[data-kind="saved"]').waitFor();assert.equal(await p.locator('#status.error').count(),0)};
  const go=async action=>{
-  const nav=p.locator('#nav [data-action="'+action+'"]'),group=p.locator('#nav details').filter({has:nav});
-  if(await group.count()&&!await group.evaluate(e=>e.open))await group.locator('summary').click();
-  await nav.click();await ready();
+  await p.bringToFront();
+  await ready();
+  const nav=p.locator('#nav [data-action="'+action+'"]'),group=nav.locator('xpath=ancestor::details');
+  await nav.waitFor({state:'attached'});
+  // Navigation can be rebuilt by the live access check. Re-read the current
+  // group after it has settled, and use the actual menu summary (no forced click).
+  for(let attempt=0;attempt<5;attempt++){
+   await p.locator('html:not(.lc81-access-check) #nav').waitFor();
+   if(await p.locator('#menu').isVisible()&&await p.locator('#menu').getAttribute('aria-expanded')!=='true')await p.locator('#menu').click();
+   if(await group.count()&&!await group.evaluate(e=>e.open))await group.locator('summary').click();
+   try{await nav.click({timeout:3000});await p.locator('#nav [data-action="'+action+'"][aria-current="page"]').waitFor({timeout:3000});await ready();return}catch(e){
+    if(attempt===4)throw e;
+   }
+  }
  };
  const rowWith=(scope,value)=>scope.getByRole('row').filter({has:p.getByRole('cell',{name:value,exact:true})});
  await go('center.read');
