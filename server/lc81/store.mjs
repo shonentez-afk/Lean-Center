@@ -32,7 +32,7 @@ import {directoryPeople} from '../../src/modules/master-data/people-directory.js
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
-import {journalWorkspace,retrainingWorkspace} from './training-registers.mjs';
+import {journalWorkspace,retrainingWorkspace,revisionReviewContext,inspectRevisionChange,publicRevisionReview,saveRevisionReview} from './training-registers.mjs';
 import {sopEvaluationWorkspace,sopEvaluationOptions,sopEvaluationDetail,createSopEvaluation,installSopMethod,sopEvaluationsForRevision} from './sop-evaluation-commands.mjs';
 import {importTypes,importAllowed,inspectDirectoryFile,parseDirectoryFile,planDirectoryImport,makeImportToken,checkImportToken} from './import-commands.mjs';
 import {mobileOptions,exportMobile,previewMobile,commitMobile,receiptMobile} from './mobile-audit-commands.mjs';
@@ -938,6 +938,21 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    });
   },
   journalWorkspace(actor,revision,f){return read(db=>journalWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  async revisionChange(actor,revision,oldId,newId){
+   const ctx=read(db=>revisionReviewContext(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),oldId,newId));
+   const same=await inspectRevisionChange(ctx,readFile);
+   return read(db=>{
+    const current=revisionReviewContext(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),oldId,newId);
+    must(current.old_source.sha256===ctx.old_source.sha256&&current.new_source.sha256===ctx.new_source.sha256,409,'Редакции изменились');
+    return publicRevisionReview(current,same);
+   });
+  },
+  async saveRevisionChange(actor,revision,f){
+   const ctx=read(db=>revisionReviewContext(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f?.old_id,f?.new_id));
+   must(ctx.can_review,403,'Нет полномочий принимать решение по изменению СОП');
+   const same=await inspectRevisionChange(ctx,readFile);
+   return mutate(db=>saveRevisionReview(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx,same));
+  },
   retrainingWorkspace(actor,revision,f){return read(db=>retrainingWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   sopEvaluationWorkspace(actor,revision,f){return read(db=>sopEvaluationWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   sopEvaluationOptions(actor,revision){return read(db=>sopEvaluationOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},

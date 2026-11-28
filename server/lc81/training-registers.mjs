@@ -1,8 +1,10 @@
 // Protected LC5.2 journals and retraining queue. Existing domain algorithms,
 // explicit per-record authorization, no new facts or automatic assignments.
-import {one,rows,isId} from '../../src/core/db.js';
+import {one,rows,isId,uuid} from '../../src/core/db.js';
 import {retrainingQueue} from '../../src/modules/training/center-overview.js';
-import {progressFor} from '../../src/modules/training/training-facts.js';
+import {revisionImpact,sameWorkContent} from '../../src/modules/training/revision-impact.js';
+import {checkContent} from '../../src/modules/library/source-validation.js';
+import {currentStandard,progressFor} from '../../src/modules/training/training-facts.js';
 import {validDate} from '../../src/modules/library/sop-review.js';
 import {trainingAssignmentResource,programResource,personWorkResource} from './read-policy.mjs';
 import {recordAccess} from './center-commands.mjs';
@@ -42,11 +44,46 @@ export function journalWorkspace(db,a,f){
 }
 export const RETRAINING_RIGHTS=['training.read','training.detail','sop.read_history','sop.read_effective','operation.read','org.read','person.read_basic','assessment.read','assessment.detail','audit.read','audit.detail','skill.read','requirement.read','matrix.read','matrix.detail','self.read','self.detail','task.read','task.detail','development.read','development.detail','training.enrollment.read','training.enrollment.detail'];
 export const canReadRetraining=(db,a)=>RETRAINING_RIGHTS.every(k=>site(db,a,k));
+const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
+const schema=`CREATE TABLE IF NOT EXISTS lc81_revision_impact(
+ id TEXT PRIMARY KEY,old_id TEXT NOT NULL REFERENCES document_revision(id),new_id TEXT NOT NULL REFERENCES document_revision(id),
+ old_sha TEXT NOT NULL,new_sha TEXT NOT NULL,decision TEXT NOT NULL CHECK(decision IN('editorial','retrain')),reason TEXT NOT NULL,
+ actor_id TEXT NOT NULL REFERENCES person(id),reviewed_on TEXT NOT NULL,recorded_at TEXT NOT NULL,rev INTEGER NOT NULL,
+ UNIQUE(old_id,new_id,rev));`;
+export function revisionReviewContext(db,a,oldId,newId){
+ must(canReadRetraining(db,a)&&isId(oldId)&&isId(newId)&&oldId!==newId,404,'Редакции недоступны');
+ const prev=currentStandard(db,oldId),next=currentStandard(db,newId);
+ const op=next&&one(db,'SELECT unit_id FROM operation WHERE id=? AND archived=0',[next.operation_id]);
+ must(prev&&next&&op&&prev.document_id===next.document_id&&prev.operation_id===next.operation_id&&prev.state==='superseded'&&next.state==='effective'&&!next.archived&&a.read('sop.read_history',oldId)&&a.read('sop.read_effective',newId),409,'Состав редакций изменился или недоступен');
+ const resource={data:{},self:null,units:[op.unit_id],assigned:[]};
+ const can_review=!!a.personId&&a.scope('training.approve_responsible',next.operation_id,resource)&&site(db,a,'training.approve_responsible');
+ const prior=revisionImpact(db,oldId,newId,a.day);
+ return {old_id:oldId,new_id:newId,old_source:prev.source,new_source:next.source,old_label:prev.code+' · v'+prev.version_no+' · '+prev.title,new_label:next.code+' · v'+next.version_no+' · '+next.title,can_review,prior:prior?{rev:prior.rev,decision:prior.decision,reason:prior.reason,day:prior.reviewed_on}:null};
+}
+export async function inspectRevisionChange(context,readSource){
+ const [a,b]=await Promise.all([context.old_source,context.new_source].map(async ref=>JSON.parse(await checkContent(ref,await readSource(ref)))));
+ return sameWorkContent(a,b);
+}
+export function publicRevisionReview(c,same){
+ const {old_source,new_source,...view}=c;
+ return {...view,same_work_content:same};
+}
+export function saveRevisionReview(db,a,f,checked,same){
+ must(exact(f,['old_id','new_id','expected_revision','decision','reason'])&&isId(f.old_id)&&isId(f.new_id)&&Number.isSafeInteger(f.expected_revision)&&['editorial','retrain'].includes(f.decision)&&typeof f.reason==='string'&&f.reason.trim().length>0&&f.reason.length<=1200,400,'Укажите решение и обоснование');
+ const c=revisionReviewContext(db,a,f.old_id,f.new_id);
+ must(c.can_review,403,'Нет полномочий принимать решение по изменению СОП');
+ must(c.old_source.sha256===checked.old_source.sha256&&c.new_source.sha256===checked.new_source.sha256&&(c.prior?.rev??0)===f.expected_revision,409,'Редакции или решение изменились');
+ must(f.decision!=='editorial'||same,422,'Редакционную эквивалентность нельзя подтвердить: рабочее содержание отличается');
+ db.run(schema);const id=uuid(),rev=f.expected_revision+1;
+ db.run('INSERT INTO lc81_revision_impact VALUES(?,?,?,?,?,?,?,?,?,?,?)',[id,c.old_id,c.new_id,c.old_source.sha256,c.new_source.sha256,f.decision,f.reason,a.personId,a.day,a.at,rev]);
+ a.audit('training.revision_impact',id);
+ return {id,rev,decision:f.decision};
+}
 export function retrainingWorkspace(db,a,f){
  // Latest facts and matrix gaps are cross-register calculations. Do not
  // publish a partial denominator or infer absence from an inaccessible record.
  must(canReadRetraining(db,a),403,'Для единой очереди нужны права на все исходные регистры предприятия');
- const match=filter(a,f,false),types=['all','revision','practical','audit','skill','self_eval','action'],states=['all','needs','linked','done','blocked'];
+ const match=filter(a,f,false),types=['all','revision','practical','audit','skill','self_eval','action'],states=['all','needs','linked','done','blocked','reviewed'];
  must(types.includes(f.type)&&states.includes(f.state)&&(f.person_id===null||isId(f.person_id)&&who(a,f.person_id)),400,'Неверные фильтры очереди');
  const items=[];
  for(const x of retrainingQueue(db,a.day)){
@@ -60,6 +97,13 @@ export function retrainingWorkspace(db,a,f){
   const skill=x.skillId?a.read('skill.read',x.skillId)?.data:null;
   if(x.skillId&&!skill)continue;
   const item={type:x.type,person_id:x.personId,person,unit,status:x.status,due:x.due,source,next,description:x.question|| (x.type==='skill'?skill.name+' · цель '+x.required+' / факт '+(x.actual??'Не оценено'):old?.label||''),current:current?.label??null,create:null};
+  if(x.type==='revision'&&old&&current&&a.read('sop.read_effective',current.id)){
+   const previous=currentStandard(db,old.id);
+   if(previous?.state==='superseded'){
+    const c=revisionReviewContext(db,a,old.id,current.id);
+    item.review={old_id:old.id,new_id:current.id,can_review:c.can_review,prior:c.prior};
+   }
+  }
   if(x.status==='needs'&&a.personId){
    if(x.type==='revision'&&current&&a.read('sop.read_effective',current.id)){
     const r=personWorkResource(db,[x.personId],a.day,[],[current.operation_id]);

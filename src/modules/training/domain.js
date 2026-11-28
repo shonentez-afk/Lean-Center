@@ -14,6 +14,7 @@ import {LC5_TYPES,applyLC5Event} from './audit-domain.js';
 import {SELF_LEVELS} from './builtin-forms.js';
 import {STANDARD_TYPES,PROGRAM_DOCS,applyStandardEvent} from './standard-workflows.js';
 import {PREPARATION_FACT_TYPES,applyPreparationEvent,preparationFinishAllowed,preparationProgress} from './preparation-results.js';
+import {equivalentRevisions} from './revision-impact.js';
 import {validateJi2,ji2Stages,jiConfig} from './ji-v03.js';
 export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,...STANDARD_TYPES,...PREPARATION_FACT_TYPES,
  competency_matrix:'Матрица компетенций',audit_session:'Аудит инструктора',mentor_self_evaluation:'Самооценка наставника',mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
@@ -481,11 +482,12 @@ export function matrixData(db,day){
  const records=rows(db,`SELECT * FROM (SELECT a.*,ROW_NUMBER() OVER(PARTITION BY person_id,operation_id ORDER BY decided_on DESC,recorded_at DESC,id DESC) rn FROM admission_decision a WHERE decided_on<=?) WHERE rn=1`,[day]);
  const admissions=new Map(records.map(a=>[a.person_id+':'+a.operation_id,admissionRecordStatus(db,a,day)]));
  const current=new Set(rows(db,"SELECT r.id FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='effective' AND d.archived=0").map(x=>x.id));
+ const equivalent=equivalentRevisions(db,day);
  const cells=new Map();for(const p of people)for(const s of skills){
   const goal=req.get(p.profession_id+':'+s.id)||null,fact=observed.get(p.id+':'+s.id)||null,same=!goal||fact?.scale_id===goal.scale_id;
-  const valid=!!(fact?.observation_state==='rated'&&(!fact.valid_until||fact.valid_until>=day)),revisionCurrent=!s.operation_id||!!(fact?.standard_revision_id&&current.has(fact.standard_revision_id));
+  const valid=!!(fact?.observation_state==='rated'&&(!fact.valid_until||fact.valid_until>=day)),revisionEquivalent=!!(s.operation_id&&fact?.standard_revision_id&&equivalent.has(fact.standard_revision_id)),revisionCurrent=!s.operation_id||!!(fact?.standard_revision_id&&(current.has(fact.standard_revision_id)||revisionEquivalent));
   const adm=s.operation_id?(admissions.get(p.id+':'+s.operation_id)||{record:null,status:'Нет решения',current:false}):null;
-  cells.set(p.id+':'+s.id,{goal,fact,same,valid,revisionCurrent,admission:adm,gap:!!(goal&&(!valid||!same||!revisionCurrent||fact.level<goal.required_level)),qualified:!!(valid&&same&&revisionCurrent&&(!goal||fact.level>=goal.required_level)&&(!adm||adm.current&&adm.record.revision_id===fact.standard_revision_id))})
+  cells.set(p.id+':'+s.id,{goal,fact,same,valid,revisionCurrent,revisionEquivalent,admission:adm,gap:!!(goal&&(!valid||!same||!revisionCurrent||fact.level<goal.required_level)),qualified:!!(valid&&same&&revisionCurrent&&(!goal||fact.level>=goal.required_level)&&(!adm||adm.current&&adm.record.revision_id===fact.standard_revision_id))})
  }return {people,skills,cells}
 }
 export function coverageData(db,day,matrix=matrixData(db,day)){

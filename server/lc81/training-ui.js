@@ -823,8 +823,19 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
  }
 
  const queueTypes={all:'Все основания',revision:'Изменение СОП',practical:'Практическая оценка',audit:'Аудит L1',skill:'Разрыв навыков',self_eval:'Самооценка / развитие',action:'Мероприятие'};
- const queueStates={all:'Все состояния',needs:'Требуется решение',linked:'Есть связанная запись',done:'Новое обучение завершено',blocked:'Нет действующей редакции'};
+ const queueStates={all:'Все состояния',needs:'Требуется решение',linked:'Есть связанная запись',done:'Новое обучение завершено',reviewed:'Редакционное изменение · повторный инструктаж не требуется',blocked:'Нет действующей редакции'};
  const actualStates={completed:'Выполнено',incomplete:'Не выполнено',started:'Начато'};
+ async function revisionReview(host,old_id,new_id,refresh){
+  if(!discard())return;
+  const d=await api('training/revision-change?'+new URLSearchParams({old_id,new_id}));
+  const n=panel('Оценка влияния новой редакции СОП',el('p',d.old_label+' → '+d.new_label),el('p',d.same_work_content?'Рабочее содержание и материалы идентичны; различаются только допустимые реквизиты.':'Есть изменения рабочего содержания или материалов. Эквивалентность не подтверждена.'),el('p','Решение касается основания повторного инструктажа и матрицы компетенций. Оно не утверждает СОП и не выдаёт / не продлевает допуск.','muted'));
+  if(d.prior)n.append(el('p','Ранее: '+(d.prior.decision==='editorial'?'Редакционное изменение':'Требуется обучение')+' · '+d.prior.day+' · '+d.prior.reason));
+  if(d.can_review)n.append(form([select('decision','Решение',[['retrain','Требуется обучение'],...(d.same_work_content?[['editorial','Редакционное изменение — без повторного инструктажа']]:[])]),input('reason','Обоснование решения')],'Сохранить решение',async f=>{
+   await api('training/revision-change',{old_id,new_id,expected_revision:d.prior?.rev??0,decision:value(f,'decision'),reason:value(f,'reason')});
+   note('Оценка влияния сохранена');host.replaceChildren();await refresh();
+  }));
+  setContent(host,n);
+ }
  async function registerPanel(page,personId=null){
   const journal=page==='journal',host=el('div'),out=el('div'),today=new Date().toISOString().slice(0,10);
   const from=dt('journal_from','С даты',today.slice(0,8)+'01'),to=dt('journal_to','По дату',today),q=input('register_search','Поиск по сотруднику, СОП, основанию','text',false);
@@ -843,6 +854,7 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
      return [x.date,x.unit,x.mentor,x.trainee,x.sop,x.stage,x.minutes,actualStates[x.result]||x.result,x.note,actions];
     }
     if(x.source)actions.append(open(x.source,'Основание'));
+    if(x.review)actions.append(button(x.review.prior?'Решение по редакциям':'Оценить изменения',()=>revisionReview(host,x.review.old_id,x.review.new_id,()=>load(offset))));
     if(x.next)actions.append(open(x.next,'Связанная запись'));
     if(x.create?.type==='training')actions.append(button('Назначить переобучение',()=>assignmentEditor(host,null,x.create)));
     if(x.create?.type==='task')actions.append(button('Создать мероприятие',()=>taskEditor(host,x.create.source)));

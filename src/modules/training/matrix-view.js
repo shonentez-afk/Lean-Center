@@ -33,7 +33,7 @@ function factValue(db,m,p,c,scaleId){
  const doc=fact?.standard_revision_id?one(db,'SELECT document_id FROM document_revision WHERE id=?',[fact.standard_revision_id]):null;
  const matches=!c.document_id||doc?.document_id===c.document_id;
  const value=x?.valid&&x.revisionCurrent&&fact.scale_id===scaleId&&matches&&[1,2,3,4].includes(fact.level)?fact.level:null;
- let reason=!fact?'Не оценено':fact.observation_state==='not_applicable'?'Неприменимо':fact.observation_state==='not_observed'?'Не наблюдалось':fact.scale_id!==scaleId?'Другая шкала':!matches?'Другой СОП':!x.valid?'Истёк срок оценки':!x.revisionCurrent?'Прежняя редакция СОП':value===null?'Уровень вне шкалы':'';
+ let reason=!fact?'Не оценено':fact.observation_state==='not_applicable'?'Неприменимо':fact.observation_state==='not_observed'?'Не наблюдалось':fact.scale_id!==scaleId?'Другая шкала':!matches?'Другой СОП':!x.valid?'Истёк срок оценки':!x.revisionCurrent?'Прежняя редакция СОП':value===null?'Уровень вне шкалы':x.revisionEquivalent?'Подтверждена редакционная эквивалентность СОП':'';
  return {value,reason,fact,x}
 }
 export function matrixBaseline(db,roster,columns,scaleId,day){

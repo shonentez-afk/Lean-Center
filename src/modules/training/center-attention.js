@@ -1,4 +1,5 @@
 import {one,rows} from '../../core/db.js';
+import {equivalentRevisions} from './revision-impact.js';
 import {standardControls} from './standard-overview.js';
 import {centerAuditIndicators} from './audit-analytics.js';
 import {assessmentIndicators,assessmentRegistry} from './assessment-review.js';
@@ -40,7 +41,7 @@ export function centerAttention(db,day){
  const overdue=one(db,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='effective' AND d.archived=0 AND r.review_due<?",[day]).n;
  const without=one(db,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='draft' AND d.archived=0 AND (r.print_format IS NULL OR r.workplace_id IS NULL)").n;
  const overdueTraining=one(db,"SELECT count(*) n FROM training_assignment WHERE source_sha256 IS NOT NULL AND state IN('planned','in_progress') AND due_on<?",[day]).n;
- const revisedTraining=one(db,"SELECT count(*) n FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1)").n;
+ const equivalent=equivalentRevisions(db,day),revisedTraining=rows(db,"SELECT a.sop_revision_id,a.state FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1)").filter(x=>x.state!=='completed'||!equivalent.has(x.sop_revision_id)).length;
  const standard=standardControls(db,day),prep=standard.stats,ai=centerAuditIndicators(db,day),ass=assessmentIndicators(db,day),cmp=comparisonIndicators(db,day),plans=rows(db,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(db,x));
  const economic=effectOverview(db,{day,from:day.slice(0,7)+'-01',to:day}),queue=retrainingQueue(db,day);
  const values={
@@ -73,11 +74,12 @@ export function recommendedChecks(snapshot,group='all'){
   const plan=k=>plans.filter(x=>scheduleKind(x)===k).map(x=>r(x.id,'calendar',{id:x.id},x.due_on,'План оценки'));
   const metric=id=>ms.get(id).evidence;
   const queueLink=x=>x.type==='revision'?r(x.id,'twi',{id:x.id},x.due,'Редакция обучения'):x.type==='practical'?r(x.id,'practical',{assessmentId:x.id},x.due,'Практическая оценка'):x.type==='audit'?r(x.responseId||x.id,'audit',{auditId:x.id},x.due,x.question||'Аудит L1'):r(x.personId+':'+(x.skillId||x.id),'person',{personId:x.personId},x.due,x.question||'Потребность в развитии');
+  const equivalent=equivalentRevisions(db,day);
   const exact={
    sop_overdue:metric('sop_review'),
    sop_passport:rows(db,"SELECT r.id,r.document_id,r.review_due FROM document_revision r JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=d.operation_id WHERE r.state='draft' AND d.archived=0 AND (r.print_format IS NULL OR r.workplace_id IS NULL) AND (?='' OR o.unit_id=?)",[unitId,unitId]).map(revision),
    training_overdue:metric('training_overdue'),
-   training_revision:rows(db,"SELECT a.id,a.assigned_on FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=a.operation_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1) AND (?='' OR o.unit_id=?)",[unitId,unitId]).map(assignment),
+   training_revision:rows(db,"SELECT a.id,a.assigned_on,a.sop_revision_id,a.state FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=a.operation_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1) AND (?='' OR o.unit_id=?)",[unitId,unitId]).filter(x=>x.state!=='completed'||!equivalent.has(x.sop_revision_id)).map(assignment),
    annual_l1:global.standard.annual.filter(x=>x.remaining&&unitPerson(x.personId)).map(x=>r(x.personId,'audit',{mode:'annual',year:day.slice(0,4),personId:x.personId},'',x.name)),
    action_overdue:metric('actions_overdue'),action_verify:metric('actions_open').filter(x=>x.state==='implemented'),
    retraining_need:global.queue.filter(x=>(!unitId||x.unitId===unitId)&&x.status==='needs').map(queueLink),

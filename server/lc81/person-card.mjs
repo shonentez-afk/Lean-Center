@@ -1,6 +1,7 @@
 // Every section is independently authorized using existing projections.
 import {rows,one,isId} from '../../src/core/db.js';
 import {trainingAssignmentResource,matrixResource,assessmentResource} from './read-policy.mjs';
+import {competenceRevisionCurrent} from '../../src/modules/training/revision-impact.js';
 import {latestQualification,isCurrentStandard} from '../../src/modules/training/domain.js';
 import {personnelView} from './personnel-commands.mjs';
 import {scheduleView} from './center-commands.mjs';
@@ -52,7 +53,7 @@ function ownCompetences(db,a,id){
   const goal=targets.get(skillId),fact=latestQualification(db,id,skillId,a.day),session=fact&&one(db,'SELECT * FROM assessment_session WHERE id=?',[fact.session_id]),resource=session&&assessmentResource(db,session,a.day);
   const visible=fact&&resource&&a.read('assessment.read',fact.session_id)&&a.allows('assessment.detail',fact.session_id,resource);
   if(!goal&&!visible)continue;
-  const state=!fact?'Нет оценки':!visible?'Оценка недоступна':fact.observation_state==='not_observed'?'Не наблюдалось':fact.observation_state==='not_applicable'?'Неприменимо':fact.valid_until&&fact.valid_until<a.day?'Срок оценки истёк':goal&&goal.scale_id!==fact.scale_id?'Другая шкала':s.operation_id&&!isCurrentStandard(db,fact.standard_revision_id)?'Прежняя редакция СОП':'Подтверждён';
+  const state=!fact?'Нет оценки':!visible?'Оценка недоступна':fact.observation_state==='not_observed'?'Не наблюдалось':fact.observation_state==='not_applicable'?'Неприменимо':fact.valid_until&&fact.valid_until<a.day?'Срок оценки истёк':goal&&goal.scale_id!==fact.scale_id?'Другая шкала':s.operation_id&&!competenceRevisionCurrent(db,fact.standard_revision_id,a.day)?'Прежняя редакция СОП':s.operation_id&&!isCurrentStandard(db,fact.standard_revision_id)?'Подтверждён · эквивалентная редакция':'Подтверждён';
   result.push({skill:s.name,target:goal?.required_level??null,actual:visible&&fact.observation_state==='rated'?fact.level:null,state,assessed_on:visible?fact.assessed_at.slice(0,10):null,assessment_id:visible?fact.session_id:null});
  }
  return result.sort((x,y)=>x.skill.localeCompare(y.skill,'ru'));

@@ -119,7 +119,7 @@ export function matrixOverview(db,a,f,canCard){
    const resource=trainingAssignmentResource(db,admission.assignment_id,a.day);
    return !!resource&&!!a.read('training.read',admission.assignment_id)&&a.scope('training.detail',admission.assignment_id,resource);
   });
-  const status=assessmentState(fact,a.day),reason=stateReason[status]||(!c.same?'Другая шкала':!c.revisionCurrent?'Прежняя редакция СОП':c.gap?'Ниже требования':goal?'Требование покрыто':'Нет требования');
+  const status=assessmentState(fact,a.day),reason=stateReason[status]||(!c.same?'Другая шкала':!c.revisionCurrent?'Прежняя редакция СОП':c.gap?'Ниже требования':c.revisionEquivalent?'Подтверждена редакционная эквивалентность СОП':goal?'Требование покрыто':'Нет требования');
   return {restricted:false,actual:fact?.observation_state==='rated'?fact.level:null,observation:fact?.observation_state??null,assessment_state:status,assessed_on:fact?.assessed_at.slice(0,10)??null,valid_until:fact?.valid_until??null,target:goal?.required_level??null,gap:c.gap,reason,admission:canAdmission?c.admission.status:null,assessment_id:fact?.session_id??null};
  }
  if(f.gaps)people=people.filter(p=>skills.some(s=>cell(p,s).gap===true));
