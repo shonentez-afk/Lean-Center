@@ -1,3 +1,4 @@
+import {projectSopReviewRow} from '../../src/modules/library/sop-review.js';
 // LC8.1 QA: server-only policy/projection foundation. Used by the isolated HTTP service.
 // All account, grant, policy and date inputs MUST come from trusted server state.
 // No client-supplied role, scope, actor, SQL, or resource attributes are accepted.
@@ -335,6 +336,7 @@ function resolve(db,action,id,day){
   const r=one(db,"SELECT r.id AS revision_id,r.version_no,r.state,r.created_at,r.effective_at,r.review_due,r.print_format,r.changed_on,d.id AS document_id,d.code,d.rev AS document_rev,d.archived AS document_archived,o.id AS operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.id=? AND d.kind='sop' AND o.archived=0",[id]);
   if(!r||!lineage(db,r.unit_id)||action==='sop.read_steps'&&(r.state!=='effective'||!one(db,'SELECT id FROM document WHERE id=? AND archived=0',[r.document_id])))return null;
   const {unit_id,...data}=r;
+  if(r.state==='effective')data.review_due=projectSopReviewRow(db,r).review_due;
   data.title=documentTitle(db,r.document_id,r.revision_id);
   if(action==='sop.read_steps'){
    // Verified domain projection, never source JSON or entire attachment.

@@ -54,7 +54,7 @@ export function extraReminderView(db,a,j){
  if(kind==='sop_review_due'){
   const r=currentSopReviewRow(db,j.target_id),owner=sopReviewOwner(db,r,a.day);
   if(!r||!a.effective(r.id)||r.review_due!==j.basis||owner.person_id!==a.personId||owner.employment_id!==j.stage)return null;
-  return make('актуализация СОП',a.reviewTitle?.(r.id)??r.code,'Вы ответственный за актуализацию действующей редакции',{type:'sop',id:r.id},overdue?'Пересмотр просрочен; СОП продолжает действовать':'Требуется пересмотр');
+  return make('актуализация СОП',a.reviewTitle?.(r.id)??r.code,'Вы ответственный за актуализацию действующей редакции'+(r.review_basis==='legacy_passport'?' · срок из старого паспорта, дата согласования не подтверждена':''),{type:'sop',id:r.id},overdue?'Пересмотр просрочен; СОП продолжает действовать':'Требуется пересмотр');
  }
  const source=EXTRA_SOURCES[kind],r=source&&find(db,source,j.target_id);
  if(!r||ownerOf(kind,r)!==a.personId||dateOf(kind,r)!==j.basis)return null;

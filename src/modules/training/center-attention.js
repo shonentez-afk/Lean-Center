@@ -1,3 +1,4 @@
+import {projectSopReviewRows} from '../library/sop-review.js';
 import {one,rows} from '../../core/db.js';
 import {equivalentRevisions} from './revision-impact.js';
 import {standardControls} from './standard-overview.js';
@@ -38,7 +39,7 @@ export const ATTENTION_RULES=Object.freeze({
 });
 export const PRIORITY_LABELS=Object.freeze({urgent:'Сначала проверить',review:'Требуется решение',plan:'Запланировать / настроить'});
 export function centerAttention(db,day){
- const overdue=one(db,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='effective' AND d.archived=0 AND r.review_due<?",[day]).n;
+ const overdue=projectSopReviewRows(db,rows(db,"SELECT r.id,r.state,r.review_due FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.kind='sop' AND d.archived=0 AND o.archived=0")).filter(r=>r.review_due&&r.review_due<day).length;
  const without=one(db,"SELECT count(*) n FROM document_revision r JOIN document d ON d.id=r.document_id WHERE r.state='draft' AND d.archived=0 AND (r.print_format IS NULL OR r.workplace_id IS NULL)").n;
  const overdueTraining=one(db,"SELECT count(*) n FROM training_assignment WHERE source_sha256 IS NOT NULL AND state IN('planned','in_progress') AND due_on<?",[day]).n;
  const equivalent=equivalentRevisions(db,day),revisedTraining=rows(db,"SELECT a.sop_revision_id,a.state FROM training_assignment a JOIN document_revision r ON r.id=a.sop_revision_id JOIN document d ON d.id=r.document_id WHERE a.source_sha256 IS NOT NULL AND a.state<>'cancelled' AND (r.state<>'effective' OR d.archived=1)").filter(x=>x.state!=='completed'||!equivalent.has(x.sop_revision_id)).length;

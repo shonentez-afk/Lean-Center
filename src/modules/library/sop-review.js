@@ -38,3 +38,39 @@ export function applySopEvaluation(db,e,old){
  db.run('INSERT INTO sop_evaluation(id,revision_id,method_id,actor_id,evaluated_on,place,actor_name,source_sha256,recorded_at,rev) VALUES(?,?,?,?,?,?,?,?,?,1)',[e.entity_id,p.revision_id,p.method_id,p.actor_id,p.evaluated_on,p.place.trim(),person.display_name,p.source_sha256,e.occurred_at]);
  for(const q of p.responses)db.run('INSERT INTO sop_evaluation_response(evaluation_id,method_id,criterion_id,value,note) VALUES(?,?,?,?,?)',[e.entity_id,p.method_id,q.criterion_id,q.value,q.note])
 }
+
+// Operational review dates are a read projection, NOT a change to the signed
+// revision passport. LC8.3 uses the final director decision of the published
+// round. Legacy approvals are historic UTC evidence; an old passport is only
+// a clearly marked fallback if no recorded approval date is available.
+const reviewTable=(db,t)=>!!one(db,"SELECT name FROM sqlite_master WHERE type='table' AND name=?",[t]);
+function approvalCivilDay(at,zone='UTC'){
+ if(typeof at!=='string'||!Number.isFinite(Date.parse(at)))return null;
+ const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:zone,calendar:'gregory',numberingSystem:'latn',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(at)).map(p=>[p.type,p.value]));
+ const day=parts.year+'-'+parts.month+'-'+parts.day;
+ return validDate(day)?day:null;
+}
+export function projectSopReviewRows(db,records){
+ const ids=[...new Set(records.filter(r=>r.state==='effective').map(r=>r.revision_id??r.id))];
+ if(!ids.length)return records;
+ const hasRounds=reviewTable(db,'lc83_sop_round')&&reviewTable(db,'lc83_sop_decision'),hasLegacy=reviewTable(db,'document_approval');
+ const zone=reviewTable(db,'lc81_meta')?(one(db,"SELECT value FROM lc81_meta WHERE key='site_time_zone'")?.value||'UTC'):'UTC';
+ const rounds=new Map(),legacy=new Map();
+ for(let i=0;i<ids.length;i+=200){
+  const chunk=ids.slice(i,i+200),q=chunk.map(()=>'?').join(',');
+  if(hasRounds)for(const r of rows(db,"SELECT rr.revision_id,d.occurred_at FROM lc83_sop_round rr LEFT JOIN lc83_sop_decision d ON d.round_id=rr.id AND d.stage='director' AND d.command='approve' WHERE rr.state='effective' AND rr.revision_id IN ("+q+") ORDER BY rr.round_no DESC",chunk))if(!rounds.has(r.revision_id))rounds.set(r.revision_id,r.occurred_at);
+  if(hasLegacy)for(const r of rows(db,"SELECT a.revision_id,a.decision,a.decided_at FROM document_approval a JOIN document_revision v ON v.id=a.revision_id WHERE a.revision_id IN ("+q+") AND a.decided_at<=v.effective_at ORDER BY a.decided_at DESC,a.id DESC",chunk))if(!legacy.has(r.revision_id))legacy.set(r.revision_id,r);
+ }
+ return records.map(r=>{
+  if(r.state!=='effective')return r;
+  const id=r.revision_id??r.id,old=r.review_due??null,record=legacy.get(id);
+  let approval_on=null,review_basis='legacy_passport';
+  if(rounds.has(id)){
+   approval_on=approvalCivilDay(rounds.get(id),zone);review_basis=approval_on?'director_approval':'missing_approval';
+  }else if(record?.decision==='approved'){
+   approval_on=approvalCivilDay(record.decided_at);if(approval_on)review_basis='legacy_approval';
+  }
+  return {...r,passport_review_due:old,approval_on,review_basis,review_due:approval_on?reviewDue(approval_on):review_basis==='missing_approval'?null:validDate(old)?old:null};
+ });
+}
+export const projectSopReviewRow=(db,r)=>r?projectSopReviewRows(db,[r])[0]:null;

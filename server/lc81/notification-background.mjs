@@ -40,7 +40,7 @@ function ensureSchema(db){
 }
 
 export const backgroundEnabled=()=>process.env.LC82_INBOX_ENABLED!=='0'&&process.env.LC82_BACKGROUND_ENABLED!=='0';
-const defaultPolicy=()=>Object.fromEntries(categories.map(k=>[k,null]));
+const defaultPolicy=db=>Object.fromEntries(categories.map(k=>[k,k==='sop_review'&&exists(db,'lc81_meta')&&one(db,"SELECT value FROM lc81_meta WHERE key='site_time_zone'")?.value?30:null]));
 const defaultPreferences=()=>({reminders:Object.fromEntries(categories.map(k=>[k,true])),push_types:Object.fromEntries(pushCategories.map(k=>[k,false])),delivery_window:null});
 const validPolicy=p=>(exact(p,categories)||exact(p,legacyCategories))&&Object.keys(p).every(k=>p[k]===null||Number.isSafeInteger(p[k])&&p[k]>=0&&p[k]<=(legacyCategories.includes(k)?30:90));
 const bools=(v,ks)=>exact(v,ks)&&ks.every(k=>typeof v[k]==='boolean');
@@ -49,7 +49,7 @@ const validPrefs=p=>exact(p,['reminders','push_types','delivery_window'])&&(bool
 const requireUser=a=>must(a.personId&&process.env.LC82_INBOX_ENABLED!=='0',404,'Настройки уведомлений недоступны');
 function policy(db){
  const p=exists(db,policyTable)&&one(db,'SELECT * FROM lc822_notification_policy WHERE id=1');
- return p?{rev:p.rev,...defaultPolicy(),...JSON.parse(p.settings_json)}:{rev:0,...defaultPolicy()};
+ return p?{rev:p.rev,...defaultPolicy(db),...JSON.parse(p.settings_json)}:{rev:0,...defaultPolicy(db)};
 }
 function preferences(db,id){
  const p=exists(db,prefTable)&&one(db,'SELECT * FROM lc822_notification_preference WHERE account_id=?',[id]);
@@ -78,7 +78,7 @@ export function saveReminderPolicy(db,actor,clock,f,audit){
  must(validPolicy(input),400,'Укажите от 0 до 30 дней для согласований/обучения или до 90 дней для новых категорий либо отключите напоминания');
  const old=policy(db);
  must(old.rev===expected_revision,409,'Политика изменилась; обновите форму');
- const p={...defaultPolicy(),...Object.fromEntries(categories.map(k=>[k,old[k]])),...input};
+ const p={...defaultPolicy(db),...Object.fromEntries(categories.map(k=>[k,old[k]])),...input};
  must(clock.configured||categories.every(k=>p[k]===null),409,'Сначала закрепите часовой пояс предприятия');
  ensureSchema(db);
  db.run("INSERT INTO lc822_notification_policy VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET rev=excluded.rev,settings_json=excluded.settings_json,updated_by=excluded.updated_by,updated_at=excluded.updated_at",[old.rev+1,JSON.stringify(p),actor,clock.at]);

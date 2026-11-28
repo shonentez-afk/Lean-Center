@@ -202,8 +202,11 @@ try{
  await worker.ctx.close();
  console.log('LC824_BROWSER_TASK_NOTICE_EXACT_CARD_OK');
  const reviewManager=await profile('manager');await reviewManager.go('sop.read_effective');
- await reviewManager.button('Открыть СОП').first().click();
+ await reviewManager.content.locator('tr').filter({hasText:'Браузерная редакция LC83'}).getByRole('button',{name:'Открыть СОП',exact:true}).click();
+ await reviewManager.button('Паспорт').click();
  await reviewManager.content.getByRole('heading',{name:'Назначение ответственного за актуализацию',exact:true}).waitFor();
+ await reviewManager.content.getByText('Дата окончательного согласования',{exact:true}).waitFor();
+ await reviewManager.content.getByText('Срок актуализации',{exact:true}).waitFor();
  const reviewForm=reviewManager.content.locator('form').filter({has:reviewManager.p.locator('select[name=review_person]')});
  await reviewForm.locator('select[name=review_person]').selectOption(x.users.observer.person_id);
  await reviewForm.locator('input[name=review_note]').fill('Браузерное назначение ответственного');

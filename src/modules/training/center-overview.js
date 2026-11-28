@@ -1,3 +1,4 @@
+import {projectSopReviewRows} from '../library/sop-review.js';
 import {preparationControl,preparationStats} from './standard-overview.js';
 import {twiOverview} from './twi-effectiveness.js';
 import {effectOverview} from '../effect/domain.js';
@@ -45,7 +46,7 @@ export function centerProjection(db,{day,from='',to=day,unitId='',personId=''},{
  const completionDates=actionCompletionDates(db),actions=actionRows(db).filter(x=>!personId||actionPeople(x).includes(personId)).map(x=>({...x,status:actionStatus(db,x),completion:actionCompletionDate(db,x,completionDates)}));
  const pending=actions.filter(x=>open(x.status)&&(!unitId||personUnit(db,x.owner_id,day)===unitId));
  const implemented=actions.filter(x=>x.completion.date&&inPeriod(x.completion.date)&&(!unitId||personUnit(db,x.owner_id,x.completion.date)===unitId)),verified=implemented.filter(x=>x.status==='verified');
- const sop=corporateEvaluations(db).filter(x=>inPeriod(x.date)&&scope(x.unit_id,x.actor_id)),weighted=weightedHistory(db).filter(x=>inPeriod(x.date)&&scope(x.unit_id,x.actor_id)),docs=rows(db,`SELECT r.*,d.operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id LEFT JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.archived=0`).filter(x=>scope(x.unit_id,x.author_id));
+ const sop=corporateEvaluations(db).filter(x=>inPeriod(x.date)&&scope(x.unit_id,x.actor_id)),weighted=weightedHistory(db).filter(x=>inPeriod(x.date)&&scope(x.unit_id,x.actor_id)),docs=projectSopReviewRows(db,rows(db,`SELECT r.*,d.operation_id,o.unit_id FROM document_revision r JOIN document d ON d.id=r.document_id JOIN operation o ON o.id=d.operation_id WHERE r.state='effective' AND d.kind='sop' AND d.archived=0 AND o.archived=0`).filter(x=>scope(x.unit_id,x.author_id)));
  const frv=frvRegistry(db).filter(x=>x.state==='final'&&inPeriod(x.observed_at)&&scope(x.unit_id,x.author_id));
  const schedules=rows(db,"SELECT * FROM schedule_event WHERE state IN('planned','done')").filter(x=>schedulePending(db,x)&&(!unitId||personUnit(db,x.owner_id,scheduleScopeDate(db,x,day))===unitId)&&(!personId||schedulePeople(db,x).includes(personId)));
  const requirements=matrixData(db,day),cells=requirements.people.filter(p=>scope(p.unit_id,p.id)).flatMap(p=>requirements.skills.map(s=>({...requirements.cells.get(p.id+':'+s.id),person:p,skill:s})).filter(c=>c.goal));

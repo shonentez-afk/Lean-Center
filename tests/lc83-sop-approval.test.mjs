@@ -1,3 +1,4 @@
+import {projectSopReviewRows,reviewDue} from '../src/modules/library/sop-review.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -398,7 +399,7 @@ test('LC822 persistent reminder jobs: policy, live authorization, deadline repla
  const x=await setupApproval();t.after(x.cleanup);
  const {store,users,admin}=x;
  const status=()=>store.notificationBackgroundStatus(admin.id,1),feed=name=>store.notificationFeed(users[name].id,1,{}),of=(name,kind)=>feed(name).items.filter(v=>v.kind===kind);
- assert.deepEqual(status().policy,{rev:0,approval:null,familiarization:null,training:null,sop_review:null,audit:null,task:null,credential:null,admission:null});
+ assert.deepEqual(status().policy,{rev:0,approval:null,familiarization:null,training:null,sop_review:30,audit:null,task:null,credential:null,admission:null});
  assert.throws(()=>store.notificationBackgroundStatus(users.observer.id,1),/администратора/);
  await assert.rejects(store.setNotificationPolicy(users.observer.id,1,{expected_revision:0,approval:0,familiarization:0,training:0}),/администратора/);
  await assert.rejects(store.setNotificationPolicy(admin.id,1,{expected_revision:0,approval:31,familiarization:0,training:0}),/30 дней/);
@@ -883,11 +884,18 @@ test('LC825 actualization ownership, reminder until effective revision, task dea
  assert(plan(users.observer).some(p=>p.route?.id===old),'personal plan independent of optional reminders');
  await store.saveNotificationPreferences(users.observer.id,1,{expected_revision:saved.rev,reminders:{...saved.reminders,sop_review:true},push_types:saved.push_types,delivery_window:null});
  assert.equal(feed(users.observer,'sop_review_due',old).id,n2.id);
- const id=(await x.passport(await x.draft('Учебная актуализация СОП'))).revision_id;
+ const draft=await x.draft('Учебная актуализация СОП'),backdated=new Date(Date.parse(day)-300*86400000).toISOString().slice(0,10);
+ const id=(await store.passportLibrary(users.author.id,1,{id:draft.id,revision_id:draft.revision_id,expected_revision:draft.rev,print_format:'portrait',changed_on:backdated})).revision_id;
  assert(feed(users.observer,'sop_review_due',old)?.pending,'a draft cannot close effective revision deadline');
  await x.submit(id);for(const stage of ['safety','engineering','twi','director'])await x.change(stage,id,stage);
  await x.impact(id);assert(feed(users.observer,'sop_review_due',old)?.pending);
+ const approved=x.detail('manager',id).round,approvedDay=approved.decisions.find(d=>d.stage==='Директор · утверждение'&&d.command==='approve').at.slice(0,10);
  await x.change('director',id,'publish','publish');
+ const current=owner(users.observer,id);
+ assert.equal(current.approval_on,approvedDay);assert.equal(current.review_basis,'director_approval');
+ assert.equal(current.due_on,reviewDue(approvedDay));assert.equal(current.passport_due_on,reviewDue(backdated));assert.notEqual(current.due_on,current.passport_due_on);
+ assert.equal(x.detail('manager',id).round.binding_sha256,approved.binding_sha256);
+ assert.equal(store.libraryCard(users.manager.id,1,id).revision.review_due,current.due_on);
  assert.equal(feed(users.observer,'sop_review_due',old),undefined);
  assert(!plan(users.observer).some(p=>p.route?.id===old));
  assert.equal(owner(users.observer,id).person_id,users.observer.person_id,'explicit document responsibility survives new revision');
@@ -917,4 +925,16 @@ test('LC825 actualization ownership, reminder until effective revision, task dea
   assert(!restored.notificationFeed(actor.id,1,{filter:'actions'}).items.some(n=>n.kind==='sop_review_due'&&n.route.id===old));
  }finally{await restored.close()}
  console.log('LC825_SOP_OWNER_REASSIGN_READ_DRAFT_PUBLISH_TASK_RESTORE_OK');
+});
+
+test('LC825 calendar-year review uses site civil director decision; legacy evidence and fallback',()=>{
+ const db=new SQL.Database();
+ try{
+  db.run("CREATE TABLE lc81_meta(key TEXT,value TEXT); INSERT INTO lc81_meta VALUES('site_time_zone','Asia/Novosibirsk'); CREATE TABLE document_revision(id TEXT,effective_at TEXT); CREATE TABLE document_approval(id TEXT,revision_id TEXT,decision TEXT,decided_at TEXT); CREATE TABLE lc83_sop_round(id TEXT,revision_id TEXT,state TEXT,round_no INTEGER); CREATE TABLE lc83_sop_decision(round_id TEXT,stage TEXT,command TEXT,occurred_at TEXT);");
+  db.run("INSERT INTO document_revision VALUES('new','2024-03-02T00:00:00.000Z'),('old','2024-03-01T00:00:00.000Z'),('import','2024-03-01T00:00:00.000Z'); INSERT INTO lc83_sop_round VALUES('round','new','effective',2),('returned','new','returned',1); INSERT INTO lc83_sop_decision VALUES('round','director','approve','2024-02-28T20:00:00.000Z'),('round','publish','publish','2024-03-02T00:00:00.000Z'),('returned','director','approve','2023-01-01T00:00:00.000Z'); INSERT INTO document_approval VALUES('vote','old','approved','2024-02-28T20:00:00.000Z');");
+  const out=projectSopReviewRows(db,['new','old','import'].map(id=>({id,state:'effective',review_due:'2025-01-01'})));
+  assert.deepEqual(out.map(r=>[r.approval_on,r.review_due,r.review_basis]),[['2024-02-29','2025-02-28','director_approval'],['2024-02-28','2025-02-28','legacy_approval'],[null,'2025-01-01','legacy_passport']]);
+  assert(out.every(r=>r.passport_review_due==='2025-01-01'));
+  console.log('LC825_APPROVAL_CIVIL_YEAR_LEAP_LEGACY_OK');
+ }finally{db.close()}
 });
