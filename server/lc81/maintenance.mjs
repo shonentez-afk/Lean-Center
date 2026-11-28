@@ -2,7 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {openPilot,PILOT_STATE} from '../lc74-store.mjs';
-import {openSecureQA} from './store.mjs';
+import {openSecureQA,recoverLockedSnapshot} from './store.mjs';
 async function separate(source,target){
  if(!path.isAbsolute(source)||!path.isAbsolute(target))throw Error('Separate absolute paths required');
  const from=await fs.realpath(source),parent=await fs.realpath(path.dirname(target)),to=path.resolve(parent,path.basename(target));
@@ -23,4 +23,9 @@ export async function copySecureCheckpoint(source,target){
  await separate(source,target);
  const store=await openSecureQA({dataDir:source});
  try{return await store.copyCheckpoint(target)}finally{await store.close()}
+}
+
+export async function recoverCopy(source,target,{confirmedOffline=false}={}){
+ await separate(source,target);
+ return recoverLockedSnapshot(source,target,{confirmedOffline});
 }

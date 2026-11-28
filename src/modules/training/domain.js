@@ -163,6 +163,12 @@ function revoke(db,table,e,old){
 function noFuture(day,e){invariant(date(day)&&day<=eventDay(e),'Дата события не может быть в будущем')}
 function validClock(s){return typeof s==='string'&&/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/.test(s)&&date(s.slice(0,10))}
 function exactAssignmentTarget(db,p,r){const skill=active(db,'skill',p.skill_id);invariant(skill.operation_id===r.operation_id,'Навык должен относиться к операции выбранного СОП');level(db,p.scale_id,p.target_level)}
+export const CORPORATE_SCALE_NAME='Производственная компетенция (1–4)';
+export const CORPORATE_SCALE_LEVELS=Object.freeze([[1,'Обучен'],[2,'Выполняет работу самостоятельно'],[3,'Выполняет работу мастерски'],[4,'Инструктор-наставник']].map(Object.freeze));
+export function corporateScaleValid(db,id){
+ const scale=one(db,'SELECT id,name FROM rating_scale WHERE id=? AND archived=0',[id]);
+ return !!scale&&scale.name===CORPORATE_SCALE_NAME&&canonical(rows(db,'SELECT value,label FROM rating_level WHERE scale_id=? ORDER BY value',[id]).map(x=>[x.value,x.label]))===canonical(CORPORATE_SCALE_LEVELS);
+}
 export function applyTrainingEvent(db,e,old){
  const p=e.payload,id=e.entity_id,t=e.entity_type;
  if(isRC1Import(e))return applyRC1Event(db,e,old);
@@ -189,8 +195,7 @@ export function applyTrainingEvent(db,e,old){
   createOnly(e,old);exact(p,['code','title','author_id','unit_id','shift_id','scale_id','base_on','target_on','roster','columns','baseline','previous_id','previous_rev']);
   invariant(required(p.code,80)&&required(p.title,200)&&period(p.base_on,p.target_on)&&p.target_on&&p.base_on<=eventDay(e),'Укажите код, название, дату среза и целевую дату');
   person(db,p.author_id);if(p.unit_id)active(db,'org_unit',p.unit_id);if(p.shift_id)active(db,'work_shift',p.shift_id);
-  const scale=active(db,'rating_scale',p.scale_id),levels=rows(db,'SELECT value,label FROM rating_level WHERE scale_id=? ORDER BY value',[p.scale_id]);
-  invariant(scale.name==='Производственная компетенция (1–4)'&&canonical(levels.map(x=>[x.value,x.label]))===canonical([[1,'Обучен'],[2,'Выполняет работу самостоятельно'],[3,'Выполняет работу мастерски'],[4,'Инструктор-наставник']]),'Для матрицы нужна точная корпоративная шкала 1–4');
+  invariant(corporateScaleValid(db,p.scale_id),'Для матрицы нужна точная корпоративная шкала 1–4');
   invariant(Array.isArray(p.roster)&&p.roster.length>0&&p.roster.length<=300&&Array.isArray(p.columns)&&p.columns.length>0&&p.columns.length<=150&&p.roster.length*p.columns.length<=12000,'Выберите 1–300 сотрудников и 1–150 навыков; до 12000 ячеек');
   const people=new Set(),skills=new Set();
   const allowedUnits=new Set(p.unit_id?rows(db,'WITH RECURSIVE scope(id) AS (SELECT ? UNION SELECT u.id FROM org_unit u JOIN scope s ON u.parent_id=s.id) SELECT id FROM scope',[p.unit_id]).map(x=>x.id):[]);

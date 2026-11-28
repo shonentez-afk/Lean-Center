@@ -79,7 +79,7 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
  const failed=keys=>{const now=Date.now();for(const k of keys){const x=attempts.get(k);attempts.set(k,{count:(x?.count||0)+1,until:x?.until||now+300000})}};
 
  const server=http.createServer(async(req,res)=>{
-  if(active>=24){reply(res,429,{error:'Сервер занят'});return}active++;
+  if(active>=24){reply(res,429,{error:'Сервер занят'},undefined,{'Retry-After':'1'});return}active++;
   try{
    const url=new URL(req.url,'http://localhost'),p=url.pathname;
    if(req.method==='GET'&&p==='/healthz'){reply(res,store.healthy?200:503,{ok:store.healthy,mode:'LC8.1-QA',complete:false,sourceCommit});return}
@@ -337,6 +337,12 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='POST'&&p==='/api/lc81/tasks/implement'){reply(res,200,await store.implementOwnTask(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/resources'){
     const action=url.searchParams.get('action'),id=url.searchParams.get('id');
+    const paged=['page','limit','q','unit'].some(k=>url.searchParams.has(k));
+    if(paged){
+     must(action==='person.read_directory'&&id===null,400,'Страницы доступны для справочника сотрудников');
+     must(['page','limit','q','unit'].every(k=>url.searchParams.getAll(k).length<=1),400,'Повтор параметра страницы');
+     reply(res,200,store.staffPage(a.id,{page:Number(url.searchParams.get('page')??1),limit:Number(url.searchParams.get('limit')??50),q:url.searchParams.get('q')??'',unit:url.searchParams.get('unit')??''}));return;
+    }
     if(id!==null){const data=store.readResource(a.id,action,id);must(data,404,'Запись недоступна');reply(res,200,{data});return}
     reply(res,200,{items:store.listResources(a.id,action)});return;
    }
@@ -346,6 +352,6 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    else if(!res.destroyed)res.destroy();
   }finally{active--}
  });
- server.requestTimeout=30000;server.headersTimeout=10000;server.keepAliveTimeout=3000;server.maxConnections=32;
+ server.requestTimeout=30000;server.headersTimeout=10000;server.keepAliveTimeout=3000;server.maxConnections=64; // bounded sockets; keep the 24-request admission limit and explicit 429
  return server;
 }

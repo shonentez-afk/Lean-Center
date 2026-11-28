@@ -36,9 +36,14 @@ const discard=()=>{if(libraryUI?.active()&&!libraryUI.close())return false;retur
 function refreshIndicator(){
  if(!user)return;
  const value=cloudSaveState({dirty:dirty(),saving,checking,offline:navigator.onLine===false||networkFailed,saveFailed});
- const n=$('save-indicator');
+ const n=$('save-indicator'),locked=busy||checking||document.documentElement.classList.contains('lc81-access-check');
  n.dataset.kind=value.kind;
  n.textContent=value.kind==='offline'?'Нет связи · изменения не отправлены':value.text;
+ if(locked&&value.kind==='saved')n.textContent='Операция выполняется…';
+ n.title=locked?'Дождитесь окончания операции или проверки доступа; переходы временно недоступны.':'';
+ const nav=$('nav');nav.setAttribute('aria-busy',String(locked));
+ for(const b of nav.querySelectorAll('button[data-action]')){b.disabled=locked;b.title=locked?'Переход после завершения текущей операции':''}
+ const pending=$('lc81-nav-wait');if(pending)pending.hidden=!locked;
 }
 const note=(text,bad=false)=>{statusVersion++;const s=$('status');s.hidden=!text;s.textContent=text;s.className='status'+(bad?' error':'');refreshIndicator()};
 async function api(url,data,signal){
@@ -49,12 +54,22 @@ async function api(url,data,signal){
  try{
   const r=await fetch('/api/lc81/'+url,options),b=await r.json();
   if(generation!==authGeneration)throw new DOMException('Контекст доступа изменился','AbortError');
-  networkFailed=false;if(!r.ok)throw Object.assign(Error(b.error||'Запрос отклонён'),{status:r.status});
+  networkFailed=false;if(!r.ok)throw Object.assign(Error(b.error||'Запрос отклонён'),{status:r.status,write,retryAfter:r.headers.get('Retry-After')});
   return b;
  }catch(e){if(generation===authGeneration&&e.name!=='AbortError'){if(!e.status)networkFailed=true;if(write)saveFailed=true}throw e}finally{if(generation===authGeneration&&write)saving=false;refreshIndicator()}
 }
 function button(text,fn,cls=''){const n=el('button',text,cls);n.type='button';n.addEventListener('click',()=>run(fn));return n}
-async function run(fn){if(busy||user&&document.documentElement.classList.contains('lc81-access-check'))return;busy=true;try{await fn()}catch(e){if(e.name!=='AbortError'){if(e.status===401)showLogin();note(e.message||'Ошибка',true)}}finally{busy=false;refreshIndicator();if(accessRefreshPending&&user)void checkAccess(true)}}
+async function run(fn){
+ if(busy||user&&document.documentElement.classList.contains('lc81-access-check'))return;
+ busy=true;refreshIndicator();
+ try{await fn()}catch(e){
+  if(e.name!=='AbortError'){
+   if(e.status===401)showLogin();
+   const retry=e.write&&e.status===429;
+   note(retry?'Не сохранено: '+e.message+'. '+(e.retryAfter?'Повторите вручную не ранее чем через '+e.retryAfter+' сек. ':'Повторите вручную после освобождения сервера. ')+'Введённые поля не сбрасываются. Автоматического повтора записи нет.':e.message||'Ошибка',true);
+  }
+ }finally{busy=false;refreshIndicator();if(accessRefreshPending&&user)void checkAccess(true)}
+}
 function closeProtectedViews(){for(const d of document.querySelectorAll('dialog.lc81-password-dialog,dialog.lc72-context-dialog')){if(d.open)d.close();else d.remove()}libraryUI?.clear();$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren()}
 function showLogin(){authGeneration++;sequence++;user=null;navigationStarted=false;historyReplay=false;navAccount=null;navOpen.clear();centerUI?.resetReports();history.replaceState(null,'');accessRefreshPending=false;maskAccess(false);closeProtectedViews();saving=false;checking=false;saveFailed=false;$('shell').classList.add('lc81-logged-out');$('workspace').hidden=true;$('nav').hidden=true;$('nav').replaceChildren();$('menu').hidden=true;$('save-indicator').hidden=true;$('content').replaceChildren();$('issued').hidden=true;$('issued').replaceChildren();$('identity').replaceChildren();$('login-panel').hidden=false;$('login').reset()}
 function showUser(a){user=a;maskAccess(false);$('shell').classList.remove('lc81-logged-out');$('login-panel').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('menu').hidden=false;$('save-indicator').hidden=false;$('identity').replaceChildren(el('span',a.display_name+' · '+a.login,'lc81-login-name'),button('Изменить пароль',ownPasswordDialog),button('Выйти',async()=>{if(!discard()||!$('issued').hidden&&!confirm('Выданный пароль ещё открыт. Завершить сеанс?'))return;await api('logout',{});showLogin();note('Выход выполнен')}));refreshIndicator()}
@@ -245,7 +260,7 @@ function adminPanel(d){
   statusCard('4. Начать работу','Операций: '+d.setup.operations+' · СОП: '+d.setup.sop+' · ФРВ: '+d.setup.frv+'. Можно начать без заполнения всех справочников.',d.setup.operations>0||d.setup.sop>0||d.setup.frv>0,[button('Конструктор СОП',openPage('sop.constructor'),'primary'),button('ФРВ',openPage('frv.read')),button('Операции',openPage('operation.read'))])
  );
  const guide=panel('Настройка центра',el('p',activeManager?'Доступ управляющего настроен. Откройте нужный рабочий раздел или продолжите настройки предприятия.':'Добро пожаловать в Центр TWI. Настройте предприятие и создайте рабочий аккаунт управляющего — система сама свяжет сотрудника, роль и доступ.'),cards,el('p','Системный администратор отвечает за пользователей и права. Производственные решения выполняются под рабочими учётными записями.','muted'));
- const storage=panel('Хранение и восстановление',el('p','Резервная копия выполняется только администратором сервера на остановленном экземпляре в отдельную новую папку. Копия содержит закрытые учётные записи, права и исходники; её нельзя передавать в браузер или хранить в общей папке.'),el('pre','LC81_QA=1 node server/lc81-maintenance.mjs backup /abs/source /abs/new-backup\nLC81_QA=1 node server/lc81-maintenance.mjs restore-new /abs/new-backup /abs/new-restored'),el('p','Восстановление не перезаписывает исходное хранилище. Сначала проверьте копию в изолированном QA; только после приёмки переключайте размещение. Рабочий Amvera этим экраном не изменяется.'));
+ const storage=panel('Хранение и восстановление',el('p','Резервная копия выполняется только администратором сервера на остановленном экземпляре в отдельную новую папку. Копия содержит закрытые учётные записи, права и исходники; её нельзя передавать в браузер или хранить в общей папке.'),el('pre','LC81_QA=1 node server/lc81-maintenance.mjs backup /abs/source /abs/new-backup\nLC81_QA=1 node server/lc81-maintenance.mjs restore-new /abs/new-backup /abs/new-restored'),el('p','После аварийного завершения не удаляйте writer.lock. Остановите сервис и его автозапуск, подтвердите отсутствие писателя; создайте отдельную изолированную копию с сохранённой блокировкой.'),el('pre','LC81_QA=1 LC81_RECOVERY_OFFLINE=1 node server/lc81-maintenance.mjs recover-copy /abs/stopped-copy /abs/new-recovered'),el('p','Восстановление не перезаписывает исходное хранилище и не снимает исходную блокировку. Сначала проверьте копию в изолированном QA; только после приёмки переключайте размещение. Рабочий Amvera этим экраном не изменяется.'));
  const auditPanel=panel('Журнал управления доступом',table(['Время (UTC)','Кто','Действие','Цель','Основание'],d.audit.map(a=>[a.occurred_at,accounts.get(a.actor_account_id)||a.actor_account_id,a.action,a.target_id,a.reason])));
  const [personRef,unitRef,employmentRef,roleRef,assignmentRef]=[...grid.children];
  if(page==='admin.enterprise')return [panel('Данные предприятия',el('p',root?.name||'Предприятие'),el('p','Измените название и код корневого предприятия в справочнике структуры. Дочерние подразделения создаются там же.'),button('Структура предприятия',openPage('org.read'),'primary'),button('Справочник сотрудников',openPage('person.read_directory')),button('Импорт XLSX',openPage('import.view'))),clock,panel('ИИ и интеграции',el('p','ИИ конструктора: '+(d.integrations?.editor_ai?'Включён':'Отключён')),el('p','Помощник центра: '+(d.integrations?.center_ai?'Включён':'Отключён')),el('p','ИИ конструктора и помощник центра включаются отдельно в настройках размещения. Внешняя отправка содержимого СОП требует разрешения организации и подтверждения запроса. При отключении ИИ ручная работа сохраняется.','muted')),panel('Справочники',unitRef,personRef,employmentRef)];
@@ -263,9 +278,28 @@ function adminPanel(d){
 
 }
 
-function directoryPanel(info,items){
+function directoryPanel(info,items,pagination=null){
  const type=info.type,d=info.definition,section=panel(actions[page]),editor=el('div',undefined,'lc81-editor'),wrap=el('div'),search=el('input');
- search.type='search';search.placeholder='Поиск по справочнику';const row=el('div',undefined,'row');row.append(search);
+ search.type='search';search.placeholder='Поиск по справочнику';search.maxLength=120;search.setAttribute('aria-label','Поиск по справочнику');const row=el('div',undefined,'row');row.append(search);
+ let unit=null;
+ if(pagination){
+  unit=el('select');unit.setAttribute('aria-label','Подразделение сотрудников');
+  for(const [id,title] of [['','Все доступные подразделения'],...(info.refs.org_unit||[]).map(x=>[x.id,x.label])]){const opt=el('option',title);opt.value=id;unit.append(opt)}
+  row.append(unit,button('Найти',()=>load(1)),button('Сбросить фильтр',()=>{search.value='';unit.value='';return load(1)}));
+  search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();void run(()=>load(1))}});
+  unit.addEventListener('change',()=>void run(()=>load(1)));
+ }
+ async function load(pageNo){
+  if(!pagination||!discard())return;
+  close();
+  const args=new URLSearchParams({action:'person.read_directory',page:String(pageNo),limit:String(pagination.limit),q:search.value.trim(),unit:unit.value});
+  wrap.replaceChildren(el('p','Загрузка страницы…','muted'));
+  try{
+   const next=await api('resources?'+args);pagination=next;items=next.items;draw();
+  }catch(e){
+   wrap.replaceChildren(el('p','Страница не получена. Проверьте права или связь.','empty'),button('Повторить чтение',()=>load(pageNo)));throw e;
+  }
+ }
  const close=()=>{editor.replaceChildren();refreshIndicator()};
  function open(v){
   if(!discard())return;
@@ -297,11 +331,12 @@ function directoryPanel(info,items){
  };
  const fields=Object.entries(d.fields);
  function draw(){
-  const q=search.value.trim().toLocaleLowerCase('ru-RU'),visible=items.filter(r=>!q||fields.some(([k,f])=>String(display(k,f,r)).toLocaleLowerCase('ru-RU').includes(q))||String(r.unit||'').toLocaleLowerCase('ru-RU').includes(q));
+  const q=search.value.trim().toLocaleLowerCase('ru-RU'),visible=pagination?items:items.filter(r=>!q||fields.some(([k,f])=>String(display(k,f,r)).toLocaleLowerCase('ru-RU').includes(q))||String(r.unit||'').toLocaleLowerCase('ru-RU').includes(q));
   const headers=fields.map(([,f])=>f.label);
   if(type==='person')headers.push('Подразделение','Должность');
   headers.push('Версия','Действия');
-  wrap.replaceChildren(el('p','Показано '+visible.length+' из '+items.length,'muted'),visible.length?table(headers,visible.map(r=>{
+  const summary=pagination?'Показано '+(pagination.total?(pagination.page-1)*pagination.limit+1:0)+'–'+Math.min(pagination.page*pagination.limit,pagination.total)+' из '+pagination.total+' · доступно всего: '+pagination.accessible:'Показано '+visible.length+' из '+items.length;
+  wrap.replaceChildren(el('p',summary,'muted'),visible.length?table(headers,visible.map(r=>{
    const cells=fields.map(([k,f])=>display(k,f,r));if(type==='person')cells.push(r.unit,r.position);
    const buttons=el('div',undefined,'row');
    if(type==='person'&&r.can_card)buttons.append(button('Карточка',()=>trainingUI.card(editor,r.id)));
@@ -309,8 +344,13 @@ function directoryPanel(info,items){
    if(r.can_archive)buttons.append(button('Архив',async()=>{if(!discard()||!confirm('Архивировать запись? История сохранится.'))return;await api('directory/change',{type,operation:'archive',id:r.id,expected_revision:r.rev,fields:null});note('Запись архивирована на сервере');await render()},'danger'));
    cells.push('v'+r.rev,buttons.childElementCount?buttons:'Только чтение');return cells;
   })):el('p','Нет доступных записей','empty'));
+  if(pagination){
+   const paging=el('div',undefined,'row lc81-paging'),prev=button('← Назад',()=>load(pagination.page-1)),next=button('Вперёд →',()=>load(pagination.page+1));
+   prev.disabled=pagination.page<=1;next.disabled=pagination.page>=pagination.page_count;
+   paging.append(prev,el('span','Страница '+pagination.page+' из '+pagination.page_count),next);wrap.append(paging);
+  }
  }
- search.addEventListener('input',draw);draw();section.append(row,editor,wrap);return section;
+ if(!pagination)search.addEventListener('input',draw);draw();section.append(row,editor,wrap);return section;
 }
 const labels={id:'ID',display_name:'Сотрудник',revision_id:'Редакция',version_no:'Версия',state:'Состояние',document_id:'Документ',code:'Код',title:'Название',operation_id:'Операция',trainee_id:'Обучаемый',sop_revision_id:'Версия СОП',due_on:'Срок',created_at:'Создано',effective_at:'Введено в действие',review_due:'Пересмотр',start_on:'Начало',kind:'Тип',role:'Роль',issued_on:'Выдано',valid_until:'Действует до',valid_from:'Начало',valid_to:'Окончание',observed_at:'Дата',category:'Категория',adaptation:'Адаптация',safety:'ОТ',internship:'Стажировка',month:'Месяц',currency:'Валюта',method:'Метод',owner_id:'Ответственный',person_id:'Сотрудник',mentor_id:'Наставник'};
 const states={draft:'Черновик',review:'На согласовании',approved:'Согласован (старый статус)',effective:'Действует',superseded:'Заменён',withdrawn:'Выведен',planned:'Запланировано',in_progress:'В работе',completed:'Завершено',active:'Активно',cancelled:'Отменено',implemented:'Выполнено',verified:'Проверено',ineffective:'Неэффективно',open:'Открыто',final:'Завершено',retired:'Архив',void:'Аннулировано',declined:'Отклонено'};
@@ -455,8 +495,9 @@ function buildNav(){
  }
  for(const act of available)if(!selected.includes(act)){selected.push(act);nav.append(navButton(act,available))}
  if(!available.has(page))page=user.admin?'admin':available.has('person.read_directory')?'person.read_directory':available.has('sop.constructor')?'sop.constructor':selected[0]||'';
+ const wait=el('p','Выполняется операция. Переходы временно недоступны.','lc81-nav-wait');wait.id='lc81-nav-wait';wait.hidden=true;nav.prepend(wait);
  const current=nav.querySelector('[data-action="'+page+'"]');if(current){current.classList.add('active');current.setAttribute('aria-current','page');if(current.closest('details'))current.closest('details').open=true}
- const head=$('page-heading'),left=el('div');left.append(el('div',groupFor(page),'eyebrow'),el('h1',titleFor(page)));const tools=el('div',undefined,'row');if(user.permissions.includes('assistant.read')&&assistantSections[page])tools.append(button('ИИ-помощник раздела',()=>assistantUI.section(assistantSections[page])));tools.append(el('span','Подтверждение сервером','pill'));head.replaceChildren(left,tools);
+ const head=$('page-heading'),left=el('div');left.append(el('div',groupFor(page),'eyebrow'),el('h1',titleFor(page)));const tools=el('div',undefined,'row');if(user.permissions.includes('assistant.read')&&assistantSections[page])tools.append(button('ИИ-помощник раздела',()=>assistantUI.section(assistantSections[page])));tools.append(el('span','Подтверждение сервером','pill'));head.replaceChildren(left,tools);refreshIndicator();
 }
 // Only page keys in history, no personal identifiers or content. Back/Forward
 // reauthorize through render() just like menu navigation.
@@ -474,9 +515,18 @@ window.addEventListener('popstate',e=>{
  }
  historyReplay=true;page=target;void run(()=>render());
 });
+function setMobileMenu(open,returnFocus=false){
+ $('nav').classList.toggle('lc53-menu-open',open);$('menu').setAttribute('aria-expanded',String(open));
+ if(returnFocus&&$('menu').getClientRects().length)$('menu').focus();
+}
 function navButton(act,available){
- const n=button(titleFor(act),async()=>{if(!discard())return;page=act;$('nav').classList.remove('lc53-menu-open');$('menu').setAttribute('aria-expanded','false');await render()},'nav');
- n.dataset.action=act;return n;
+ const n=button(titleFor(act),async()=>{
+  if(!discard())return;
+  const mobile=$('nav').classList.contains('lc53-menu-open');page=act;setMobileMenu(false);
+  await render();
+  if(mobile&&user){const h=$('page-heading').querySelector('h1');if(h){h.tabIndex=-1;h.focus({preventScroll:true})}}
+ },'nav');
+ n.dataset.action=act;n.disabled=busy||checking||document.documentElement.classList.contains('lc81-access-check');return n;
 }
 async function render(){
  const serial=++sequence,oldStatus=statusVersion,clearOldError=$('status').classList.contains('error')&&!saveFailed;let succeeded=false;checking=true;refreshIndicator();
@@ -533,7 +583,7 @@ async function render(){
    if(page==='sop.evaluation.read'){const n=await trainingUI.sopEvaluationPanel();if(serial===sequence)$('content').replaceChildren(n);return}
    if(page==='import.view'){const n=await importPanel();if(serial===sequence)$('content').replaceChildren(n);return}
    if(page==='forms.read'){const d=await api('forms');if(serial===sequence)$('content').replaceChildren(formsPanel(d));return}
-  const data=await api('resources?action='+encodeURIComponent(page));if(serial!==sequence)return;
+  const data=await api('resources?action='+encodeURIComponent(page)+(page==='person.read_directory'?'&page=1&limit=50':''));if(serial!==sequence)return;
   if(['employment.read','role_assignment.read'].includes(page)){$('content').replaceChildren(trainingUI.personnelPanel(page,data.items));return}
   if(page==='roi.read'){$('content').replaceChildren(centerUI.roiPanel(data.items,user));return}
   if(['development.read','audit.read','self.read','bank.read'].includes(page)||page==='task.read'&&(user.permissions.includes('task.detail')||user.permissions.includes('task.create'))){
@@ -567,7 +617,7 @@ async function render(){
   }
   if(directoryActions[page]){
    const info=await api('directory/info?type='+encodeURIComponent(directoryActions[page]));if(serial!==sequence)return;
-   $('content').replaceChildren(directoryPanel(info,data.items));return;
+   $('content').replaceChildren(directoryPanel(info,data.items,page==='person.read_directory'?data:null));return;
   }
   $('content').replaceChildren(resourcePanel(data.items));
  }catch(e){succeeded=false;if(serial===sequence)$('content').replaceChildren();throw e}finally{if(serial===sequence){checking=false;if(succeeded&&clearOldError&&oldStatus===statusVersion&&!saveFailed)note('');refreshIndicator()}}
@@ -577,7 +627,7 @@ async function render(){
 function maskAccess(on){
  on=on||!!user&&document.visibilityState==='hidden';
  document.documentElement.classList.toggle('lc81-access-check',on);
- $('access-check-notice').hidden=!on;
+ $('access-check-notice').hidden=!on;refreshIndicator();
 }
 async function checkAccess(mask=false){
  if(!user)return;
@@ -615,7 +665,10 @@ async function checkAccess(mask=false){
  try{await accessCheck}finally{accessCheck=null;if(accessRefreshPending&&user&&!busy)queueMicrotask(()=>{if(!accessCheck&&!busy&&accessRefreshPending)void checkAccess(true)});if(!accessRefreshPending&&user&&!document.documentElement.classList.contains('lc81-access-check'))$('access-check-notice').textContent='Проверка действующих прав доступа…'}
 }
 
-$('menu').addEventListener('click',()=>{const open=$('nav').classList.toggle('lc53-menu-open');$('menu').setAttribute('aria-expanded',String(open))});
+$('menu').addEventListener('click',()=>setMobileMenu(!$('nav').classList.contains('lc53-menu-open'),$('nav').classList.contains('lc53-menu-open')));
+document.addEventListener('keydown',e=>{
+ if(e.key==='Escape'&&$('nav').classList.contains('lc53-menu-open')&&!document.querySelector('dialog[open]')){e.preventDefault();setMobileMenu(false,true)}
+});
 $('content').addEventListener('input',refreshIndicator,true);$('content').addEventListener('change',refreshIndicator,true);
 window.addEventListener('offline',()=>{if(user)maskAccess(true);refreshIndicator()});window.addEventListener('online',()=>{if(user)void checkAccess(true);else refreshIndicator()});
 // Timers in background tabs may be throttled. Visibility/focus and BFCache

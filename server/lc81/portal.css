@@ -48,3 +48,20 @@
 #status{margin-bottom:8px}
 @media(min-width:761px){.main{padding-top:12px}.corp-header{min-height:54px;padding-block:6px}}
 @media(max-width:760px){.corp-header{padding:6px 10px;gap:5px}.header-meta{gap:4px;flex-wrap:wrap}.header-meta .version{font-size:11px}.lc81-login-name{max-width:145px;font-size:12px}.header-meta button{padding:5px 8px;min-height:30px;font-size:12px}.main{padding-top:7px}.lc81-notice{font-size:11px;margin-bottom:5px}#page-heading{margin-bottom:6px}.lc81-card-tabs button{font-size:12px;padding:6px 8px}}
+
+/* R6.1: no enabled-looking navigation during a protected operation. */
+.lc81-nav-wait{margin:4px 8px;padding:8px;font-size:12px;line-height:1.35;color:var(--muted);border:1px solid var(--line);border-radius:8px}
+.lc81-nav-wait[hidden]{display:none}
+#nav[aria-busy=true] button[data-action]:disabled{opacity:.55;cursor:wait}
+#page-heading h1:focus-visible{outline:2px solid var(--tn-red);outline-offset:3px}
+.lc81-paging{justify-content:flex-end;align-items:center;margin-top:10px}
+@media(max-width:760px){
+ .corp-header{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 8px}
+ .corp-header .brand-lockup{grid-column:1;grid-row:1;min-width:0;gap:6px;min-height:34px}
+ .corp-header #menu{grid-column:2;grid-row:1;justify-self:end;min-height:32px}
+ .corp-header .header-meta{grid-column:1/-1;grid-row:2;justify-content:space-between;gap:4px}
+ .header-meta #identity{gap:4px;flex-wrap:wrap;min-width:0}
+ .header-meta #save-indicator{font-size:11px}
+ .header-meta .version{font-size:10px}
+ .lc81-paging{justify-content:space-between}
+}

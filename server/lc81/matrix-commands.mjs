@@ -2,14 +2,14 @@
 import {one,rows,uuid,isId,applyEvent} from '../../src/core/db.js';
 import {matrixRoster,columnChoices,matrixBaseline,matrixProjection,matrixFromRecord,LEVEL_TEXT} from '../../src/modules/training/matrix-view.js';
 import {autoMatrix,profileEdits} from '../../src/modules/training/matrix-assistant.js';
-import {matrixData,latestQualification} from '../../src/modules/training/domain.js';
+import {matrixData,latestQualification,corporateScaleValid,CORPORATE_SCALE_NAME} from '../../src/modules/training/domain.js';
 import {competencyChange} from './competency-commands.mjs';
 import {matrixResource,programResource,requirementResource,assessmentResource,trainingAssignmentResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
 const must=(ok,status,msg)=>{if(!ok)throw new PilotError(status,msg)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
 const date=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
-const scaleFor=db=>rows(db,"SELECT id,name FROM rating_scale WHERE archived=0 AND name='Производственная компетенция (1–4)' ORDER BY id");
+const scaleFor=(db,a)=>rows(db,'SELECT id,name FROM rating_scale WHERE archived=0 AND name=? ORDER BY id',[CORPORATE_SCALE_NAME]).filter(s=>corporateScaleValid(db,s.id)&&a.read('scale.read',s.id));
 const readablePerson=(a,id)=>a.read('person.read_directory',id)||a.read('person.read_basic',id);
 function unitResource(unit){return {data:{},self:null,units:[unit],assigned:[]}}
 export function matrixInfo(db,a,unit=null,baseOn=a.day,filters={}){
@@ -25,7 +25,7 @@ export function matrixInfo(db,a,unit=null,baseOn=a.day,filters={}){
  const today=new Set(matrixRoster(db,a.day,unit).map(x=>x.person_id));
  const roster=matrixRoster(db,baseOn,unit,shift_id||'',profession_id||'').filter(r=>readablePerson(a,r.person_id)&&today.has(r.person_id));
  const columns=columnChoices(db,unit,workplace_id||'',category_id||'').filter(x=>x.skill_id&&(x.document_id===null||a.read('operation.read',x.operation_id)&&rows(db,"SELECT id FROM document_revision WHERE document_id=? AND state='effective'",[x.document_id]).some(v=>a.read('sop.read_effective',v.id))));
- return {units,day:a.day,baseOn,shifts,professions,categories,workplaces,roster,columns:columns.map(({skill_id,document_id,title,skill,operation_id})=>({skill_id,document_id,title,skill,operation_id})),scales:scaleFor(db)};
+ return {units,day:a.day,baseOn,shifts,professions,categories,workplaces,roster,columns:columns.map(({skill_id,document_id,title,skill,operation_id})=>({skill_id,document_id,title,skill,operation_id})),scales:scaleFor(db,a)};
 }
 export function suggestMatrix(db,a,f){
  must(exact(f,['unit_id','base_on','filters','scale_id','person_ids','include_sops'])&&isId(f.unit_id)&&date(f.base_on)&&isId(f.scale_id)&&exact(f.filters,['shift_id','profession_id','workplace_id','category_id'])&&Array.isArray(f.person_ids)&&f.person_ids.length>0&&f.person_ids.length<=300&&new Set(f.person_ids).size===f.person_ids.length&&f.person_ids.every(isId)&&typeof f.include_sops==='boolean',400,'Неверный состав для подбора');
@@ -145,7 +145,7 @@ export function matrixAssessmentHistory(db,a,personId,skillId,offset=0){
 }
 export function profileOptions(db,a){
  must(siteRight(db,a,'requirement.read')&&a.permissions.includes('skill.read'),403,'Профили профессий недоступны');
- const professions=refOptions(db,a,'profession','profession.read'),scales=scaleFor(db).filter(s=>a.read('scale.read',s.id)&&JSON.stringify(rows(db,'SELECT value FROM rating_level WHERE scale_id=? ORDER BY value',[s.id]).map(x=>x.value))==='[1,2,3,4]');
+ const professions=refOptions(db,a,'profession','profession.read'),scales=scaleFor(db,a);
  return {day:a.day,professions,scales,levels:LEVEL_TEXT,can_edit:!!a.personId&&siteRight(db,a,'requirement.create')&&siteRight(db,a,'requirement.close')};
 }
 export function professionProfile(db,a,professionId,scaleId,effective){

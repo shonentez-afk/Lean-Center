@@ -96,7 +96,17 @@ function sessionView(db,a,withWorkspace=true){
  return {...view,workspace_actions:[...new Set([...work,...(a.person_id?SHARED_LIBRARY_WORKSPACES:[])])].sort(),access_stamp:stamp};
 }
 function auditView(db){return rows(db,"SELECT a.id,a.actor_account_id,a.action,a.target_id,a.occurred_at,m.value reason FROM lc81_audit a LEFT JOIN lc81_meta m ON m.key='reason:'||a.target_id ORDER BY a.occurred_at DESC,a.id LIMIT 100")}
+// A synchronous read may perform hundreds of decisions for one account.
+ // Memoize the trusted policy inputs only inside that read, never inside a
+ // write transaction and never across a committed change or a new request.
+const readSecurityMemo=new WeakMap();
 function security(db,accountId){
+ const memo=readSecurityMemo.get(db);
+ if(memo?.has(accountId))return memo.get(accountId);
+ const value=loadSecurity(db,accountId);
+ memo?.set(accountId,value);return value;
+}
+function loadSecurity(db,accountId){
  const a=account(db,accountId);if(!a||a.bootstrap===1)return {accounts:[],policies:[],grants:[]};
  const emp=employment(db,a.person_id,day(db))[0];
  const policies=rows(db,'SELECT * FROM lc81_policy').map(({role_id,revision,permissions_json})=>({role_id,revision,permissions:JSON.parse(permissions_json)}));
@@ -430,9 +440,41 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   await storageStep('DOCUMENTS',()=>checkSources(current,dataDir));
  }catch(e){current?.close();await release();throw e}
  const ready=()=>must(!closed&&!poisoned,503,'Защищённое хранилище требует проверки');
- const read=fn=>{ready();return fn(current)};
+ const read=fn=>{
+  ready();const db=current;if(readSecurityMemo.has(db))return fn(db);
+  readSecurityMemo.set(db,new Map());
+  try{return fn(db)}finally{readSecurityMemo.delete(db)}
+ };
+ // Staff lists contain authorized projections only. The cache belongs to
+ // this committed checkpoint, has bounded size and is invalidated on every
+ // successful mutation (including grants, policies and transfers).
+ const staffCache=new Map();
+ function staffEntries(db,a,action,d){
+  const key=JSON.stringify([a.id,a.credential_revision,action,d]);
+  let value=staffCache.get(key);
+  if(value){staffCache.delete(key);staffCache.set(key,value);return value}
+  const sec=security(db,a.id),site=a.bootstrap===1?config(db).site:null;
+  const items=rows(db,'SELECT id FROM person WHERE archived=0 ORDER BY id').flatMap(({id})=>{
+   const r=site?readManagerProjection(db,site,action,id,d):readAuthorized(db,sec,a.id,action,id,d);
+   return r?[r.data]:[];
+  });
+  value={items,views:new Map()};
+  if(items.length<=10000){
+   while(staffCache.size>=8||([...staffCache.values()].reduce((n,x)=>n+x.items.length,0)+items.length)>40000)staffCache.delete(staffCache.keys().next().value);
+   staffCache.set(key,value);
+  }
+  return value;
+ }
+ function staffView(db,a,action,d,entry,row){
+  let v=entry.views.get(row.id);
+  if(!v){v=projectView(db,a,action,row,d);entry.views.set(row.id,v)}
+  // Returned values are not mutable references to cached access data.
+  return structuredClone(v);
+ }
  function mutate(fn,beforeWrite=null){
-  ready();must(!copying&&queued<8,429,'Очередь сохранения занята');queued++;
+  ready();
+  if(copying||queued>=8){const e=new PilotError(429,'Очередь сохранения занята');e.retryAfter=1;throw e}
+  queued++;
   const task=tail.then(async()=>{
    ready();const candidate=openDb(SQL,bytesOf(current),{upgrade:false});
    try{
@@ -442,7 +484,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
      const packed=pack(candidate);await write(file,packed);
      const back=await unpack(SQL,file);try{must((await fs.readFile(file)).equals(packed),503,'Запись не подтверждена')}finally{back.close()}
     }catch(e){poisoned=true;throw new PilotError(503,'Запись не подтверждена; требуется проверка хранилища')}
-    current.close();current=candidate;return result;
+    current.close();current=candidate;staffCache.clear();return result;
    }finally{if(candidate!==current)candidate.close()}
   });
   tail=task.catch(()=>{}).finally(()=>{queued--});return task;
@@ -607,9 +649,33 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   listResources(actor,action){return read(db=>{
    const a=account(db,actor);must(a,401,'Необходим вход');const d=day(db),shared=SHARED_LIBRARY_READS.includes(action),access=shared?libraryAccess(db,a,d):null;
    must(READ_ACTIONS.includes(action)&&(shared?access.permissions:permissionsFor(db,a)).includes(action),404,'Раздел недоступен');
+   if(['person.read_directory','person.read_basic'].includes(action)){
+    const entry=staffEntries(db,a,action,d);
+    return entry.items.map(row=>staffView(db,a,action,d,entry,row));
+   }
    const table=RESOURCE_TABLES[action];
    const s=security(db,actor);return rows(db,'SELECT id FROM '+table+' ORDER BY id').map(({id})=>shared?access.read(action,id):a.bootstrap===1?readManagerProjection(db,config(db).site,action,id,d):readAuthorized(db,s,actor,action,id,d)).filter(Boolean).map(v=>projectView(db,a,action,v.data,d));
   })},
+  staffPage(actor,{page=1,limit=50,q='',unit=''}={}){
+   return read(db=>{
+    const a=account(db,actor);must(a,401,'Необходим вход');
+    must(permissionsFor(db,a).includes('person.read_directory'),404,'Справочник недоступен');
+    must(Number.isSafeInteger(page)&&page>=1&&page<=1000000&&Number.isSafeInteger(limit)&&limit>=1&&limit<=100&&typeof q==='string'&&q.length<=120&&typeof unit==='string'&&(unit===''||isId(unit)),400,'Некорректные параметры страницы');
+    const d=day(db),action='person.read_directory',entry=staffEntries(db,a,action,d);
+    // Filter only records already authorized for this account; even totals
+    // and search misses must not reveal out-of-scope persons.
+    let members=null;
+    if(unit){
+     must(readFor(db,a,'org.read',unit,d),404,'Подразделение недоступно');
+     members=new Set(rows(db,"SELECT person_id FROM person_assignment WHERE unit_id=? AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)",[unit,d,d]).map(x=>x.person_id));
+    }
+    const norm=v=>String(v??'').normalize('NFC').toLocaleLowerCase('ru-RU'),query=norm(q.trim());
+    const filtered=entry.items.filter(x=>(!members||members.has(x.id))&&(!query||[x.employee_code,x.display_name,x.unit,x.position].some(v=>norm(v).includes(query))));
+    filtered.sort((x,y)=>String(x.display_name).localeCompare(String(y.display_name),'ru')||String(x.employee_code).localeCompare(String(y.employee_code),'ru')||x.id.localeCompare(y.id));
+    const total=filtered.length,page_count=Math.max(1,Math.ceil(total/limit)),actual=Math.min(page,page_count);
+    return {items:filtered.slice((actual-1)*limit,actual*limit).map(row=>staffView(db,a,action,d,entry,row)),page:actual,limit,total,page_count,accessible:entry.items.length};
+   });
+  },
   trainingOptions(actor,revision,operationId=null){return read(db=>trainingOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),operationId))},
   async createTraining(actor,revision,input){
    const resolved=read(db=>resolveTrainingCreate(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))));
@@ -1055,4 +1121,33 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   },
   async close(){if(closed)return;closed=true;await tail;current.close();await release()}
  };
+}
+
+// Offline recovery from an explicitly stopped, isolated COPY of a crashed
+// storage. This never removes a writer lock, opens a live writer, or changes
+// the original directory. Only a new independently verified checkpoint is made.
+export async function recoverLockedSnapshot(source,target,{confirmedOffline=false}={}){
+ must(confirmedOffline===true&&path.isAbsolute(source)&&path.isAbsolute(target),400,'Подтвердите остановленную изолированную копию и абсолютные пути');
+ const from=await fs.realpath(source),parent=await fs.realpath(path.dirname(target)),to=path.resolve(parent,path.basename(target));
+ must(from!==to&&!to.startsWith(from+path.sep)&&!from.startsWith(to+path.sep),400,'Требуются отдельные каталоги');
+ const file=path.join(from,'secure.lc81'),marker=path.join(from,'initialized'),lock=path.join(from,'writer.lock');
+ const [st,mark,locked,docs]=await Promise.all([fs.lstat(file),fs.lstat(marker),fs.lstat(lock),fs.lstat(path.join(from,'documents'))]);
+ must(st.isFile()&&st.size<=MAX+MAGIC.length+65&&st.size>MAGIC.length+165&&mark.isFile()&&locked.isFile()&&docs.isDirectory(),503,'Некорректная структура аварийной копии');
+ const original=await fs.readFile(file),identity=await fs.readFile(marker,'utf8'),{SQL}=await pilotSql(),db=unpackBytes(SQL,original);
+ let created=false;
+ try{
+  const id=meta(db,'database_id');must(identity===id+'\n',503,'Маркер не совпадает с базой');
+  await checkSources(db,from);
+  await fs.mkdir(to,{mode:0o700});created=true;
+  await copySources(db,to,async sha=>new TextDecoder('utf-8',{fatal:true}).decode(await fs.readFile(path.join(from,'documents',sha+'.json'))));
+  await atomicReplace(path.join(to,'secure.lc81'),original);
+  await atomicReplace(path.join(to,'initialized'),Buffer.from(identity));
+  const checked=await unpack(SQL,path.join(to,'secure.lc81'));
+  try{must(meta(checked,'database_id')===id,503,'Восстановлена другая база');await checkSources(checked,to)}finally{checked.close()}
+  const lockAfter=await fs.lstat(lock);
+  must(lockAfter.isFile()&&lockAfter.ino===locked.ino&&lockAfter.dev===locked.dev&&lockAfter.mtimeMs===locked.mtimeMs&&
+   (await fs.readFile(file)).equals(original)&&(await fs.readFile(marker,'utf8'))===identity&&(await fs.readFile(path.join(to,'secure.lc81'))).equals(original),503,'Источник изменился во время проверки');
+  await checkSources(db,from);
+  return {database_id:id,sha256:digest(original),source_lock_preserved:true};
+ }catch(e){if(created)await fs.rm(to,{recursive:true,force:true});throw e}finally{db.close()}
 }
