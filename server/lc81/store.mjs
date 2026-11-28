@@ -34,6 +34,7 @@ import {directoryPeople} from '../../src/modules/master-data/people-directory.js
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {internalTrainerAppointment} from '../../src/modules/training/domain.js';
 import {notificationsEnabled,notificationFeed,readNotification,readAllNotifications,checkNotificationIntegrity} from './notifications.mjs';
+import {domainEventWatermark,captureDomainNotices,checkDomainNoticeIntegrity} from './domain-notices.mjs';
 import {pushDevices,registerPushDevice,revokePushDevice,queuePushTest,setPushPolicy,pushAdminStatus,pushNeedsRecovery,recoverPush,stalePushDevices,retireStalePushDevices,discoverPush,enqueuePush,pushReady,claimPush,recheckPush,releaseChangedPush,finishPush,checkPushIntegrity} from './web-push.mjs';
 import {sendWebPush} from './web-push-transport.mjs';
 import {backgroundEnabled,notificationPreferences,saveNotificationPreferences,saveReminderPolicy,discoverBackground,enqueueBackground,readyBackground,drainBackground,backgroundStatus,checkBackgroundIntegrity} from './notification-background.mjs';
@@ -325,6 +326,7 @@ function checkPrivate(db){
  checkNotificationIntegrity(db);
  checkBackgroundIntegrity(db);
  checkPushIntegrity(db);
+ checkDomainNoticeIntegrity(db);
 }
 const digest=b=>createHash('sha256').update(b).digest('hex');
 function pack(db){
@@ -521,7 +523,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   const task=tail.then(async()=>{
    ready();const candidate=openDb(SQL,bytesOf(current),{upgrade:false});
    try{
-    const result=tx(candidate,()=>fn(candidate));checkPrivate(candidate);
+    const result=tx(candidate,()=>{const mark=domainEventWatermark(candidate),value=fn(candidate);captureDomainNotices(candidate,mark,siteClock(candidate));return value});checkPrivate(candidate);
     if(beforeWrite)await beforeWrite(candidate);
     try{
      const packed=pack(candidate);await write(file,packed);

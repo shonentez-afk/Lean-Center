@@ -426,7 +426,7 @@ test('LC822 persistent reminder jobs: policy, live authorization, deadline repla
  const pol=await store.setNotificationPolicy(admin.id,1,{expected_revision:1,approval:0,familiarization:0,training:1});assert.equal(pol.rev,2);
  assert.equal((await store.runNotificationBackground()).completed,1);
  const training=of('author','training_due')[0];assert(training);assert.equal(training.route.id,x.assignment);assert.equal(training.due_on,tomorrow);
- const snapshot=feed('author').snapshot;assert(snapshot.startsWith('v2.'));
+ const snapshot=feed('author').snapshot;assert(snapshot.startsWith('v3.'));
  assert.equal((await store.runNotificationBackground()).completed,0);
  // User opt-out is separate from task state and from mandatory notices.
  const current=store.notificationPreferences(users.author.id,1);
@@ -441,7 +441,7 @@ test('LC822 persistent reminder jobs: policy, live authorization, deadline repla
  const receipt=store.familiarizationList(users.author.id,1,{kind:'mine',revision_id:id}).items[0];
  await store.setSopFamiliarizationDeadline(users.manager.id,1,{id:receipt.id,expected_revision:receipt.rev,due_on:x.day,note:'Срок проверки'});
  assert.equal((await store.runNotificationBackground()).completed,1);
- const reminder=of('author','familiarization_due')[0];assert(reminder);const mixed=feed('author').snapshot;assert(mixed.startsWith('v2.'));
+ const reminder=of('author','familiarization_due')[0];assert(reminder);const mixed=feed('author').snapshot;assert(/^v[23]\./.test(mixed));
  await store.readAllNotifications(users.author.id,1,{snapshot:mixed});assert.equal(feed('author').unread,0);
  const newest=store.familiarizationList(users.author.id,1,{kind:'mine',revision_id:id}).items[0];
  await store.confirmSopFamiliarization(users.author.id,1,{id:newest.id,expected_revision:newest.rev,source_sha256:newest.source_sha256,confirmed:true});
@@ -694,4 +694,61 @@ test('LC823 service worker keeps payload and click generic; scheduler drains on 
  const scheduler=startPushDelivery({async runPushDelivery(){calls++;start();await gate}},{intervalMs:5,onError:()=>errors.push('tick error')});
  try{await entered;await delay(25);assert.equal(calls,1);let drained=false;const stopped=scheduler.stop().then(()=>{drained=true});await delay(15);assert.equal(drained,false);release();await stopped;await delay(15);assert.equal(calls,1);assert.deepEqual(errors,[])}finally{release();await scheduler.stop()}
  console.log('LC823_SW_PRIVACY_AND_WORKER_DRAIN_OK');
+});
+
+test('LC824 domain events, mixed snapshot, late account, live Push ownership and access revocation',async t=>{
+ const ec=createECDH('prime256v1');ec.generateKeys();
+ const key=Buffer.concat([Buffer.alloc(32-ec.getPrivateKey().length),ec.getPrivateKey()]).toString('base64url');
+ const cfg={...vapidFromPrivate(key,'mailto:qa@example.invalid'),binding:'e'.repeat(64),origin:'https://qa.invalid'},sent=[];
+ const transport=async(config,device,notice_id,opts)=>{sent.push({device:device.id,notice_id});return {status:201}};
+ const x=await setupApproval({pushConfig:cfg,pushSender:transport});t.after(x.cleanup);
+ const {store,users,admin}=x;
+ const data=store.adminData(admin.id),role=data.assignments.find(a=>a.person_id===users.author.person_id);assert(role);
+ await store.setPolicy(admin.id,{role_id:role.role_id,revision:0,permissions:['task.read','task.detail','task.implement_own','task.start','plan.read','training.read','training.detail','operation.read']});
+ const grant=await store.grant(admin.id,{account_id:users.author.id,assignment_id:role.id,scope:{kind:'self'},valid_to:null});
+ const make=(title,owner_id=users.author.person_id)=>store.createTask(users.manager.id,1,{source:null,title,owner_id,due_on:x.day,kind:'corrective',priority:'normal'});
+ const feed=(u=users.author,filter='all')=>store.notificationFeed(u.id,1,{filter,limit:50});
+ const by=(id,u=users.author)=>feed(u).items.find(n=>n.kind==='task_assigned'&&n.route.id===id);
+ assert(!feed().items.some(n=>n.kind==='training_assigned'&&n.route.id===x.assignment),'migrated history is not replayed');
+ await store.setPushPolicy(admin.id,1,{expected_revision:0,enabled:true});
+ const prefs=store.notificationPreferences(users.author.id,1);
+ await store.saveNotificationPreferences(users.author.id,1,{expected_revision:prefs.rev,reminders:prefs.reminders,push_types:{...prefs.push_types,task:true},delivery_window:null});
+ const earlier=await make('Поручение до подписки'),n1=by(earlier.id);assert(n1?.pending);
+ const browser=createECDH('prime256v1');browser.generateKeys();
+ const device=await store.registerPushDevice(users.author.id,1,{label:'Тестовый телефон',confirmed:true,subscription:{endpoint:'https://fcm.googleapis.com/fcm/send/qa-domain',expirationTime:null,keys:{p256dh:browser.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}}});
+ assert.equal((await store.runPushDelivery()).enqueued,0);assert.equal(sent.length,0);
+ const snapshot=feed().snapshot;assert(snapshot.startsWith('v3.'));
+ const later=await make('Поручение после снимка'),n2=by(later.id);assert(n2?.pending);
+ await assert.rejects(store.readNotification(users.observer.id,1,{id:n2.id}),/недоступно/);
+ await assert.rejects(store.readAllNotifications(users.observer.id,1,{snapshot}),/недоступен/);
+ await store.readAllNotifications(users.author.id,1,{snapshot});
+ assert(by(earlier.id).read_at);assert.equal(by(later.id).read_at,null);
+ assert.equal((await store.runPushDelivery()).finished,1);assert.deepEqual(sent,[{device:device.id,notice_id:n2.id}]);
+ assert.equal(by(later.id).read_at,null,'provider acceptance is not a read');
+ await store.readNotification(users.author.id,1,{id:n2.id});assert(by(later.id).pending);
+ assert(store.calendarWorkspace(users.author.id,1,{mode:'plan',from:x.day,to:x.day}).items.some(v=>v.route?.id===later.id&&v.pending));
+ const third=await make('Поручение перед отзывом доступа'),n3=by(third.id);assert(n3);
+ assert.equal((await store.runPushDelivery({enqueueOnly:true})).enqueued,1);
+ await store.revoke(admin.id,grant.id);
+ assert.equal(by(third.id),undefined);await assert.rejects(store.readNotification(users.author.id,1,{id:n3.id}),/недоступно/);
+ await store.runPushDelivery();assert.equal(sent.length,1);
+ assert.equal(store.notificationBackgroundStatus(admin.id,1).push.counts.cancelled,1);
+ const mentor=data.people.find(p=>p.display_name==='Инструктор Тестовый');assert(mentor);
+ const lateRole=data.assignments.find(a=>a.person_id===mentor.id);assert(lateRole);
+ const lateTask=await make('Открытая задача до регистрации аккаунта',mentor.id);
+ const cancelledTask=await make('Отменённая задача до регистрации аккаунта',mentor.id);
+ await store.changeTask(users.manager.id,1,{id:cancelledTask.id,expected_revision:cancelledTask.rev,command:'cancel',fields:{reason:'Учебная отмена'}});
+ await store.setPolicy(admin.id,{role_id:lateRole.role_id,revision:0,permissions:['task.read','task.detail','plan.read']});
+ const late=await store.createAccount(admin.id,{person_id:mentor.id,login:'late-domain',password:x.password,generate:false});
+ await store.grant(admin.id,{account_id:late.id,assignment_id:lateRole.id,scope:{kind:'self'},valid_to:null});
+ assert(by(lateTask.id,late)?.pending);
+ assert(!feed(late).items.some(n=>n.route.id===cancelledTask.id),'late account must not replay cancelled history');
+ const saved=by(lateTask.id,late);await store.readNotification(late.id,1,{id:saved.id});
+ await store.close();const backup=path.join(x.root,'lc824-copy');await copySecureCheckpoint(x.target,backup);
+ const restored=await openSecureQA({dataDir:backup});try{
+  const actor=restored.authenticate('late-domain',x.password),n=restored.notificationFeed(actor.id,1,{filter:'actions'}).items.find(n=>n.id===saved.id);
+  assert(n?.read_at&&n.pending);
+  assert.equal(restored.notificationBackgroundStatus(admin.id,1).push.enabled,false);
+ }finally{await restored.close()}
+ console.log('LC824_DOMAIN_MIXED_SNAPSHOT_LATE_ACCOUNT_PUSH_REVOKE_RESTORE_OK');
 });

@@ -120,7 +120,7 @@ async function openNotifications(){
   const labels={approval:'Согласование СОП',familiarization:'Ознакомление',training:'Обучение TWI',audit:'Аудиты и оценки',task:'Мероприятия',information:'Информационные события'};
   const rkeys=['approval','familiarization','training'],pkeys=[...rkeys,'audit','task','information'];
   const reminders=el('fieldset');reminders.append(el('legend','Дополнительные напоминания внутри портала'),...rkeys.map(k=>check('reminder_'+k,labels[k]+(v.policy[k]===null?' · выключено предприятием':' · за '+v.policy[k]+' дн.'),v.reminders[k])));
-  const push=el('fieldset');push.append(el('legend','Типы Web Push'),el('p','Настройки действуют только после явного подключения личного устройства. Аудиты и мероприятия зарезервированы для дальнейшего подключения событий.'),...pkeys.map(k=>check('push_'+k,labels[k],v.push_types[k])));
+  const push=el('fieldset');push.append(el('legend','Типы Web Push'),el('p','Настройки действуют только после явного подключения личного устройства. Согласования, обучение, аудит, практическая оценка и мероприятия используют общую ленту.'),...pkeys.map(k=>check('push_'+k,labels[k],v.push_types[k])));
   const window=el('fieldset'),start=input('window_start','Начало','time',false),end=input('window_end','Окончание','time',false);
   start.querySelector('input').required=false;end.querySelector('input').required=false;
   start.querySelector('input').value=v.delivery_window?.start??'';end.querySelector('input').value=v.delivery_window?.end??'';
@@ -159,7 +159,7 @@ async function openNotifications(){
     const c=el('article',undefined,'lc82-notice-card'),h=el('h3',n.label),row=el('div',undefined,'row');
     c.dataset.noticeId=n.id;c.classList.toggle('lc82-unread',!n.read_at);
     c.append(h,el('p',n.title),el('p',n.reason,'muted'),el('p',(n.overdue?'Просрочено · ':'')+n.state+(n.due_on?' · срок '+n.due_on:''),'lc83-state'),el('p',n.occurred_at.replace('T',' ').slice(0,19)+' UTC · '+(n.read_at?'Прочитано':'Не прочитано'),'muted'));
-    row.append(button(({sop_approval:'Открыть согласование',familiarization:'Открыть ознакомление',training:'Открыть обучение'})[n.route.type]||'Открыть поручение',async()=>{
+    row.append(button(({sop_approval:'Открыть согласование',familiarization:'Открыть ознакомление',training:'Открыть обучение',schedule:'Открыть плановое событие',audit:'Открыть аудит',assessment:'Открыть оценку',task:'Открыть мероприятие'})[n.route.type]||'Открыть поручение',async()=>{
      const r=await api('notifications/read',{id:n.id});d.close();void refreshNoticeCounter(true);
      // The returned server route is reauthorized again by its own endpoint.
      await openLinked($('content'),r.route);

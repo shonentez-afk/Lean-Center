@@ -5,6 +5,7 @@ import {one,rows,isId,uuid} from '../../src/core/db.js';
 import {PilotError} from '../lc74-store.mjs';
 import {pushNoticeWatermarks,pushNoticeCandidates} from './notifications.mjs';
 import {notificationPreferences} from './notification-background.mjs';
+import {domainNoticeOwner} from './domain-notices.mjs';
 import {validatePushSubscription} from './web-push-transport.mjs';
 import {zoneOffset} from './site-clock.mjs';
 const must=(v,s,m)=>{if(!v)throw new PilotError(s,m)};
@@ -18,6 +19,12 @@ const schema=[
  "CREATE TABLE IF NOT EXISTS lc823_push_job(id TEXT PRIMARY KEY,device_id TEXT NOT NULL REFERENCES lc823_push_device(id),notice_id TEXT,kind TEXT NOT NULL CHECK(kind IN('notice','test')),dedup TEXT NOT NULL,category TEXT NOT NULL,created_at TEXT NOT NULL,expires_at TEXT NOT NULL,next_attempt_at TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('pending','retry','sending','accepted','cancelled','expired','failed','uncertain')),attempts INTEGER NOT NULL CHECK(attempts BETWEEN 0 AND 4),claim_id TEXT,finished_at TEXT,last_code TEXT,UNIQUE(device_id,dedup),CHECK((kind='test')=(notice_id IS NULL)),CHECK((state='sending')=(claim_id IS NOT NULL)),CHECK((state IN('accepted','cancelled','expired','failed','uncertain'))=(finished_at IS NOT NULL)));",
  "CREATE INDEX IF NOT EXISTS lc823_job_ready ON lc823_push_job(state,next_attempt_at,device_id);"
 ].join('\n');
+function ensureSchema(db){
+ db.run(schema);
+ // LC8.2.3 checkpoints predate the third inbox source. New notices start
+ // at ordinal 1, so old devices get a zero mark without historical replay.
+ if(!rows(db,'PRAGMA table_info(lc823_push_device)').some(x=>x.name==='domain_after'))db.run('ALTER TABLE lc823_push_device ADD COLUMN domain_after INTEGER NOT NULL DEFAULT 0 CHECK(domain_after>=0)');
+}
 const MAX_DEVICES=5,MAX_GLOBAL=2000,MAX_JOBS=128,MAX_PER_SEND=32,MAX_AGE=86400000;
 const states=['pending','retry','sending','accepted','cancelled','expired','failed','uncertain'];
 const hex=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
@@ -55,7 +62,7 @@ export function registerPushDevice(db,a,config,f){
  // between accounts. A switched browser must unsubscribe and subscribe anew.
  must(!old||old.account_id===a.accountId,409,'Подписка другого аккаунта. Отключите её в браузере и подключите заново');
  if(old?.state==='active'&&old.binding===config.binding&&old.credential_revision===a.credentialRevision&&old.p256dh===s.p256dh&&old.auth===s.auth)return publicDevice(old,a,config);
- db.run(schema);
+ ensureSchema(db);
  // Incompatible subscriptions are retired, never silently reused to replay.
  for(const d of rows(db,"SELECT * FROM lc823_push_device WHERE account_id=? AND state='active'",[a.accountId])){
   if(d.id===old?.id||d.binding!==config.binding||d.credential_revision!==a.credentialRevision||d.expiration_time!==null&&d.expiration_time<=Date.parse(a.at))retire(db,d,a.at);
@@ -64,8 +71,8 @@ export function registerPushDevice(db,a,config,f){
  const mark=pushNoticeWatermarks(db),id=old?.id??uuid();
  if(old){
   cancelDeviceJobs(db,id,a.at,'device_reconnected');
-  db.run("UPDATE lc823_push_device SET credential_revision=?,binding=?,p256dh=?,auth=?,expiration_time=?,label=?,state='active',created_at=?,original_after=?,background_after=?,revoked_at=NULL WHERE id=?",[a.credentialRevision,config.binding,s.p256dh,s.auth,s.expiration_time,f.label.trim(),a.at,mark.original,mark.background,id]);
- }else db.run("INSERT INTO lc823_push_device VALUES(?,?,?,?,?,?,?,?,?,?,'active',?,?,?,NULL,NULL)",[id,a.accountId,a.personId,a.credentialRevision,config.binding,s.endpoint,s.p256dh,s.auth,s.expiration_time,f.label.trim(),a.at,mark.original,mark.background]);
+  db.run("UPDATE lc823_push_device SET credential_revision=?,binding=?,p256dh=?,auth=?,expiration_time=?,label=?,state='active',created_at=?,original_after=?,background_after=?,domain_after=?,revoked_at=NULL WHERE id=?",[a.credentialRevision,config.binding,s.p256dh,s.auth,s.expiration_time,f.label.trim(),a.at,mark.original,mark.background,mark.domain,id]);
+ }else db.run("INSERT INTO lc823_push_device(id,account_id,person_id,credential_revision,binding,endpoint,p256dh,auth,expiration_time,label,state,created_at,original_after,background_after,revoked_at,last_test_at,domain_after) VALUES(?,?,?,?,?,?,?,?,?,?,'active',?,?,?,NULL,NULL,?)",[id,a.accountId,a.personId,a.credentialRevision,config.binding,s.endpoint,s.p256dh,s.auth,s.expiration_time,f.label.trim(),a.at,mark.original,mark.background,mark.domain]);
  a.audit('notification.push.register',id);return publicDevice(device(db,id),a,config);
 }
 export function revokePushDevice(db,a,config,f){
@@ -79,20 +86,20 @@ export function setPushPolicy(db,actor,clock,config,f,audit){
  const p=policy(db,config);
  must(p.rev===f.expected_revision,409,'Настройка изменилась');
  must(!f.enabled||config&&clock.configured,409,'Нужны настроенный HTTPS/VAPID и часовой пояс');
- db.run(schema);
+ ensureSchema(db);
  const binding=config?.binding??one(db,'SELECT binding FROM lc823_push_policy WHERE id=1')?.binding??'0'.repeat(64);
  db.run("INSERT INTO lc823_push_policy VALUES(1,?,?,?, ?,?) ON CONFLICT(id) DO UPDATE SET rev=excluded.rev,enabled=excluded.enabled,binding=excluded.binding,updated_at=excluded.updated_at,updated_by=excluded.updated_by",[p.rev+1,f.enabled?1:0,binding,clock.at,actor]);
  if(!f.enabled||!p.enabled){
   // No replay of earlier history after centrally toggling transport.
   const mark=pushNoticeWatermarks(db);
   db.run("UPDATE lc823_push_job SET state='cancelled',finished_at=?,last_code='transport_policy' WHERE state IN('pending','retry')",[clock.at]);
-  db.run("UPDATE lc823_push_device SET original_after=?,background_after=? WHERE state='active' AND binding=?",[mark.original,mark.background,binding]);
+  db.run("UPDATE lc823_push_device SET original_after=?,background_after=?,domain_after=? WHERE state='active' AND binding=?",[mark.original,mark.background,mark.domain,binding]);
   if(f.enabled)for(const d of rows(db,"SELECT * FROM lc823_push_device WHERE state='active' AND binding<>?",[binding]))retire(db,d,clock.at,'revoked','deployment_changed');
  }
  audit('notification.push.policy',actor);return policy(db,config);
 }
-const category=n=>n.kind.startsWith('familiarization_')?'familiarization':n.kind==='training_due'?'training':n.pending?'approval':'information';
-const actionable=n=>n.pending||['effective','withdrawn','publication_blocked','publication_cancelled','familiarization_confirmed','returned'].includes(n.kind);
+const category=n=>n.category??(n.kind.startsWith('familiarization_')?'familiarization':n.kind==='training_due'?'training':n.pending?'approval':'information');
+const actionable=n=>n.category?n.deliverable===true:n.pending||['effective','withdrawn','publication_blocked','publication_cancelled','familiarization_confirmed','returned'].includes(n.kind);
 function eligibleNotice(db,a,d,n,at){
  if(!n||!actionable(n)||!instant(n.occurred_at)||Date.parse(n.occurred_at)>Date.parse(at)||Date.parse(at)-Date.parse(n.occurred_at)>=MAX_AGE)return false;
  return notificationPreferences(db,a).push_types[category(n)]===true;
@@ -262,14 +269,15 @@ export function checkPushIntegrity(db){
  must(!p||hex(p.binding)&&instant(p.updated_at),503,'Повреждена политика Web Push');
  for(const d of rows(db,'SELECT d.*,a.person_id owner FROM lc823_push_device d JOIN lc81_account a ON a.id=d.account_id')){
   let valid=false;try{validatePushSubscription({endpoint:d.endpoint,expirationTime:d.expiration_time,keys:{p256dh:d.p256dh,auth:d.auth}});valid=true}catch{}
-  must(valid&&d.owner===d.person_id&&isId(d.id)&&hex(d.binding)&&instant(d.created_at)&&(!d.revoked_at||instant(d.revoked_at))&&(!d.last_test_at||instant(d.last_test_at))&&Number.isSafeInteger(d.original_after)&&d.original_after>=0&&Number.isSafeInteger(d.background_after)&&d.background_after>=0&&typeof d.label==='string'&&d.label.length<=80,503,'Повреждено устройство Web Push');
+  must(valid&&d.owner===d.person_id&&isId(d.id)&&hex(d.binding)&&instant(d.created_at)&&(!d.revoked_at||instant(d.revoked_at))&&(!d.last_test_at||instant(d.last_test_at))&&Number.isSafeInteger(d.original_after)&&d.original_after>=0&&Number.isSafeInteger(d.background_after)&&d.background_after>=0&&Number.isSafeInteger(d.domain_after??0)&&(d.domain_after??0)>=0&&typeof d.label==='string'&&d.label.length<=80,503,'Повреждено устройство Web Push');
  }
  for(const j of rows(db,'SELECT * FROM lc823_push_job')){
   const d=device(db,j.device_id);must(d,503,'Нет устройства для доставки');
   if(j.kind==='notice'){
    const n=exists(db,'lc83_sop_notice')&&one(db,'SELECT recipient_account_id account_id FROM lc83_sop_notice WHERE id=?',[j.notice_id]),b=exists(db,'lc822_notification_job')&&one(db,"SELECT account_id FROM lc822_notification_job WHERE id=? AND state='completed' AND kind<>'familiarization_catchup'",[j.notice_id]);
-   must((n||b)?.account_id===d.account_id,503,'Неверный получатель доставки');
+   const domain=domainNoticeOwner(db,j.notice_id);
+   must((n||b)?.account_id===d.account_id||domain?.person_id===d.person_id,503,'Неверный получатель доставки');
   }
-  must(isId(j.id)&&instant(j.created_at)&&instant(j.expires_at)&&j.expires_at>j.created_at&&instant(j.next_attempt_at)&&(!j.finished_at||instant(j.finished_at))&&(!j.claim_id||isId(j.claim_id))&&(j.kind==='test'?j.category==='test'&&j.dedup==='test:'+j.id:isId(j.notice_id)&&j.dedup===j.notice_id&&['approval','training','familiarization','information'].includes(j.category)),503,'Повреждено задание Web Push');
+  must(isId(j.id)&&instant(j.created_at)&&instant(j.expires_at)&&j.expires_at>j.created_at&&instant(j.next_attempt_at)&&(!j.finished_at||instant(j.finished_at))&&(!j.claim_id||isId(j.claim_id))&&(j.kind==='test'?j.category==='test'&&j.dedup==='test:'+j.id:isId(j.notice_id)&&j.dedup===j.notice_id&&['approval','training','familiarization','audit','task','information'].includes(j.category)),503,'Повреждено задание Web Push');
  }
 }
