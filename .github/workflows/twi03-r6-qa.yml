@@ -40,6 +40,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           bash -n deploy/cloudcore/install.sh
           bash tests/cloudcore-install-lock.test.sh
+          bash tests/cloudcore-control-rollback.test.sh
           bash -n deploy/cloudcore/start.sh
           bash -n deploy/cloudcore/check-update.sh
           bash -n deploy/cloudcore/host-control.sh
@@ -81,9 +82,31 @@ jobs:
           set -euo pipefail
           sandbox="$(mktemp -d)"
           trap 'rm -rf -- "$sandbox"' EXIT
-          tar -xzf "$RUNNER_TEMP/cloudcore-qa.tgz" -C "$sandbox"
-          cd "$sandbox"
+          release="$sandbox/$GITHUB_SHA"
+          mkdir -m 700 "$release" "$sandbox/qa-backups"
+          tar -xzf "$RUNNER_TEMP/cloudcore-qa.tgz" -C "$release"
+          cd "$release"
           timeout --kill-after=10s 90s .runtime/node deploy/cloudcore/smoke.mjs
+          LC81_QA=1 .runtime/node server/lc81-maintenance.mjs backup "$release/data" "$sandbox/qa-backups/verified"
+          diff -qr -- "$release/data" "$sandbox/qa-backups/verified"
+          bash deploy/cloudcore/check-update.sh "$sandbox/qa-backups/verified" "$GITHUB_SHA" 'https://nl6smkdc-18081.eun1.devtunnels.ms'
+          LC81_QA=1 .runtime/node server/lc81-maintenance.mjs restore-new "$sandbox/qa-backups/verified" "$sandbox/restored"
+          diff -qr -- "$release/data" "$sandbox/restored"
+          .runtime/node --input-type=module - "$sandbox/restored" <<'RESTORE_SMOKE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs/promises';
+          import {openSecureQA} from './server/lc81/store.mjs';
+          const password=(await fs.readFile('admin-password','utf8')).trim();
+          const restored=await openSecureQA({dataDir:process.argv[2]});
+          try {
+            const admin=restored.authenticate('admin',password);
+            assert(admin?.admin);
+            assert(restored.adminData(admin.id).units.some(u=>u.code==='QA-CLOUDCORE'));
+          } finally { await restored.close() }
+          console.log('CLOUDCORE_PACKAGED_RESTORE_REHEARSAL_OK');
+          RESTORE_SMOKE
+          diff -qr -- "$release/data" "$sandbox/qa-backups/verified"
+          diff -qr -- "$release/data" "$sandbox/restored"
       - name: Save tested release candidate (no SSH or deployment)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
