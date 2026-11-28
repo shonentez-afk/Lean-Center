@@ -158,7 +158,8 @@ try{
  await history.getByRole('cell',{name:'2',exact:true}).waitFor();
  assert.equal(await history.getByRole('button',{name:'Открыть оценку',exact:true}).count(),2);
  await rowWith(history,'2').getByRole('button',{name:'Открыть оценку',exact:true}).click();
- await content.getByRole('heading',{name:/Оценка/}).last().waitFor();
+ const assessment=content.getByRole('heading',{name:/^Общий навык · /}).locator('xpath=..');
+ await assessment.waitFor();await assessment.getByRole('cell',{name:'2',exact:true}).waitFor();
  await ready();
  assert.deepEqual(errors,[]);
  console.log('PARITY_R2_MATRIX_HISTORY_OK');
