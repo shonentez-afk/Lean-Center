@@ -12,7 +12,8 @@ import {prepareSnapshot,one,rows,uuid} from '../src/core/db.js';
 import {RC1_CRITERIA} from '../src/modules/training/builtin-forms.js';
 import {openSecureQA} from '../server/lc81/store.mjs';
 import {createSecureQAServer} from '../server/lc81/http.mjs';
-import {copyPilotCheckpoint,migratePilotCopy} from '../server/lc81/maintenance.mjs';
+import {copyPilotCheckpoint} from '../server/lc74-store.mjs';
+import {migratePilotCopy} from '../server/lc81/maintenance.mjs';
 
 const root=await fs.mkdtemp(path.join(os.tmpdir(),'lc81-parity-r2-'));
 let f,store,server,proxy,browser;
@@ -20,9 +21,9 @@ const close=s=>s?.listening?new Promise(resolve=>s.close(resolve)):Promise.resol
 try{
  f=await fixture();
  const site=f.w.edit('org_unit',null,{code:'QA-SITE-R2',name:'Учебное предприятие R2',kind:'Предприятие',parent_id:null});
- f.w.edit('org_unit',f.unit,{parent_id:site});
- const managerRole=f.w.edit('business_role',null,{code:'QA-MANAGER-R2',name:'Управляющий учебного предприятия R2'});
- const adminRole=f.w.edit('business_role',null,{code:'QA-ADMIN-R2',name:'Администратор учебного предприятия R2'});
+ f.w.edit('org_unit',f.unit,{code:'QA',name:'Учебный участок',kind:'Участок',parent_id:site});
+ const managerRole=f.w.edit('business_role',null,{code:'QA-MANAGER-R2',name:'Управляющий центром TWI'});
+ const adminRole=f.w.edit('business_role',null,{code:'QA-ADMIN-R2',name:'Администратор'});
  const managerAssignment=f.w.edit('role_assignment',null,{person_id:f.actor,role_id:managerRole,valid_from:'2020-01-01',valid_to:null});
  const trainerRole=f.w.edit('business_role',null,{code:'INTERNAL_TRAINER',name:'Внутренний тренер'});
  f.w.edit('role_assignment',null,{person_id:f.actor,role_id:trainerRole,valid_from:'2020-01-01',valid_to:null});
