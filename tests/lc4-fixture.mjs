@@ -20,7 +20,8 @@ export async function makeSop(action='Учебная операция',outdated=
  const p={schemaVersion:2,document:{id:'QA-LC4',status:'Опубликован',number:'QA-LC4',version:1},constructor:s,photoAssets:{'1':{original:img,rendered:null,ext:'png',annotations:[]}}};
  const text=JSON.stringify({...p,integrity:{algorithm:'SHA-256',sha256:await sha256(JSON.stringify(p))}});return {text,...await inspectSource(text,'sop')}
 }
-export async function fixture({installMethod=true}={}){
+export async function fixture({installMethod=true,startOn=date}={}){
+ const date=startOn;
  const w=new Workspace(SQL,createDb(SQL,schema,migrations[0])),sources=new Map(),readContent=async r=>sources.get(r.sha256)?.text;
  let clock=Date.parse(date+'T00:00:00Z');
  const advanceTo=day=>{clock=Date.parse(day+'T00:00:00Z')};
@@ -41,7 +42,7 @@ export async function fixture({installMethod=true}={}){
  const appointment=(await save('mentor_appointment',{person_id:mentor,credential_id:certificate,role:'instructor',order_number:'QA-ORDER',order_on:'2020-01-01',approved_by:actor,valid_from:'2020-01-01',valid_to:null,acknowledged_on:'2020-01-01',evidence:'Синтетический приказ'})).entity_id;
  const auth=(await save('mentor_authorization',{person_id:mentor,operation_id:operation,approved_by:actor,valid_from:'2020-01-01',valid_to:null,credential_id:certificate,appointment_id:appointment})).entity_id;
  const method=installMethod?(await save('checklist_version',practicalMethod)).entity_id:null;
- const base={trainee_id:trainee,mentor_id:mentor,supervisor_id:null,authorization_id:auth,revision_id:doc.id,source:source.source,skill_id:skill,scale_id:scale,target_level:2,assigned_by:actor,assigned_on:date,due_on:'2027-01-31',reason:'Синтетическое обучение',variant:'classic',shift_id:shift,enrollment_id:null,program_task_id:null,plan_reviewed:true};
+ const base={trainee_id:trainee,mentor_id:mentor,supervisor_id:null,authorization_id:auth,revision_id:doc.id,source:source.source,skill_id:skill,scale_id:scale,target_level:2,assigned_by:actor,assigned_on:date,due_on:startOn==='2026-01-20'?'2027-01-31':new Date(Date.parse(startOn)+730*86400000).toISOString().slice(0,10),reason:'Синтетическое обучение',variant:'classic',shift_id:shift,enrollment_id:null,program_task_id:null,plan_reviewed:true};
  const addAssignment=async(overrides={})=>(await save('training_assignment',{...base,...overrides})).entity_id;
  const getAssignment=id=>one(w.working,'SELECT * FROM training_assignment WHERE id=?',[id]);
  const approve=async id=>save('training_assignment',{command:'approve',responsible_id:actor,head_id:actor,approved_on:date,note:'Учебное согласование'},id);
