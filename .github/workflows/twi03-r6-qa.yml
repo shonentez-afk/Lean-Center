@@ -47,6 +47,7 @@ jobs:
           bash -n deploy/cloudcore/host-snapshot.sh
           node deploy/cloudcore/pin-source.mjs
           node --check deploy/cloudcore/smoke.mjs
+          for script in tests/lc81-browser.mjs tests/lc81-parity-r2-browser.mjs tests/lc53-mobile-browser.mjs tests/lc74-cloud-browser.mjs; do node --check "$script"; done
           node tools/build_folder.mjs --cloud
           node --test tests/lc81-amvera-smoke.test.mjs
           git diff --exit-code -- package-lock.json

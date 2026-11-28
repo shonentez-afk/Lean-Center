@@ -157,9 +157,25 @@ try{
  await m.p.getByRole('cell',{name:'Учебный общий навык',exact:true}).waitFor();
  // The protected calendar and report must boot using the new modules.
  const goSection=async action=>{
-  const nav=m.p.locator('#nav [data-action="'+action+'"]'),group=m.p.locator('#nav details').filter({has:m.p.locator('[data-action="'+action+'"]')});
-  if(!await group.evaluate(e=>e.open))await group.locator('summary').click();
-  await nav.click();
+  const p=m.p,nav=p.locator('#nav [data-action="'+action+'"]'),group=nav.locator('xpath=ancestor::details');
+  await p.bringToFront();
+  // A click can be ignored while the previous protected action is still
+  // finishing or the returning tab is verifying access. Only retry
+  // idempotent navigation; never retry a write, bypass permissions or force clicks.
+  for(let attempt=0;attempt<5;attempt++){
+   await p.locator('html:not(.lc81-access-check) #nav').waitFor();
+   await indicator(p,'saved').waitFor();
+   await nav.waitFor({state:'attached'});
+   if(await p.locator('#menu').isVisible()&&await p.locator('#menu').getAttribute('aria-expanded')!=='true')await p.locator('#menu').click();
+   if(await group.count()&&!await group.evaluate(e=>e.open))await group.locator('summary').click();
+   try{
+    await nav.click({timeout:3000});
+    await p.locator('#nav [data-action="'+action+'"][aria-current="page"]').waitFor({timeout:3000});
+    await indicator(p,'saved').waitFor();
+    assert.equal(await p.locator('#status.error').count(),0,'Navigation failed: '+action);
+    return;
+   }catch(e){if(attempt===4)throw new Error('Navigation did not settle: '+action+'; status: '+(await p.locator('#status').textContent()),{cause:e})}
+  }
  };
  await goSection('profession.read');
  await button(m.p,'Добавить').click();

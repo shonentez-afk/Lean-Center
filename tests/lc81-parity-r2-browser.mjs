@@ -160,7 +160,7 @@ try{
  await content.getByText('Отчёт по этой редакции ещё не создан.',{exact:false}).waitFor();
  await button('Сформировать отчёт о внедрении').click();
  await content.getByRole('heading',{name:'Состав и основания внедрения',exact:true}).waitFor();
- await content.getByRole('cell',{name:'Ученик Тестовый',exact:true}).waitFor();
+ await content.getByRole('checkbox',{name:'Ученик Тестовый',exact:true}).waitFor();
  await content.locator('select[name=skill_id]').waitFor();
  const chooseTask=content.locator('select[name=task_id]');
  assert.equal(await chooseTask.locator('option[value="'+ordinaryTask+'"]').count(),0,'Ordinary employee must not appear as rollout instructor');
@@ -181,30 +181,7 @@ try{
   const pending=p.waitForEvent('download');
   await button(name).click();
   const file=await pending;
-  assert.match(file.suggestedFilename(),new RegExp('-V'+version+'\\.xlsxawait content.locator('.lc81-card-tabs').waitFor();
- await ready();console.log('TWI03_R4_ROLLOUT_FORM_OK');
-
- await go('matrix.read');await button('Общая матрица всех навыков').click();
- for(const state of ['none','not_observed','not_applicable','expired'])await content.locator('[data-assessment-state='+state+']').first().waitFor();
- await content.locator('button[data-assessment-state=not_observed]').click();
- const history=heading('История оценок навыка').locator('xpath=..');
- await history.waitFor();
- await history.getByRole('cell',{name:'Не наблюдалось',exact:true}).waitFor();
- await history.getByRole('cell',{name:'2',exact:true}).waitFor();
- assert.equal(await history.getByRole('button',{name:'Открыть оценку',exact:true}).count(),2);
- await rowWith(history,'2').getByRole('button',{name:'Открыть оценку',exact:true}).click();
- const assessment=content.getByRole('heading',{name:/^Общий навык · /}).locator('xpath=..');
- await assessment.waitFor();await assessment.getByRole('cell',{name:'2',exact:true}).waitFor();
- await ready();
- assert.deepEqual(errors,[]);
- console.log('PARITY_R2_MATRIX_HISTORY_OK');
-}finally{
- await browser?.close();
- await close(proxy);await close(server);await store?.close();
- f?.w.close();
- await fs.rm(root,{recursive:true,force:true});
-}
-));
+  assert(file.suggestedFilename().endsWith('-V'+version+'.xlsx'),'Wrong export version or file extension');
   const wb=new (excelJS().Workbook)();
   await wb.xlsx.load(await fs.readFile(await file.path()));
   assert.equal(wb.worksheets.length,5);
@@ -213,6 +190,7 @@ try{
   return wb;
  };
  await downloadRollout('Скачать отчёт XLSX',1);
+ await ready();
  await button('Уточнить состав и основания').click();
  await content.locator('input[name=roster_confirmed]').check();
  await content.locator('input[name=change_reason]').fill('QA уточнение состава R6');
@@ -220,13 +198,13 @@ try{
  await content.getByText('Версия отчёта 2 · Сбор подтверждений',{exact:true}).waitFor();
  await downloadRollout('Скачать отчёт XLSX',2);
  const previous=await downloadRollout('XLSX v1',1);
- assert(previous.getWorksheet('Отчёт внедрения').getRows(1,previous.getWorksheet('Отчёт внедрения').rowCount).some(row=>row.getCell(2).text==='Историческая'));
+ let historical=false;previous.getWorksheet('Отчёт внедрения').eachRow(row=>{if(row.getCell(2).text==='Историческая')historical=true});assert(historical);
  const guest=await browser.newContext({ignoreHTTPSErrors:true});
  try {
   const denied=await guest.request.post(url+'/api/lc81/forms/export',{headers:{Origin:url,'X-LC81-Request':'1'},data:{kind:'rollout_report',id:f.doc.id,version:1}});
   assert.equal(denied.status(),401);
  }finally{await guest.close()}
- await ready();console.log('TWI03_R6_ROLLOUT_BROWSER_DOWNLOAD_OK');
+ await p.bringToFront();await p.locator('html:not(.lc81-access-check)').waitFor();await ready();console.log('TWI03_R6_ROLLOUT_BROWSER_DOWNLOAD_OK');
  await button('← К СОП').click();await content.locator('.lc81-card-tabs').waitFor();
  await ready();console.log('TWI03_R4_ROLLOUT_FORM_OK');
 
