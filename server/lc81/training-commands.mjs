@@ -230,7 +230,6 @@ export function recordInstructionProtocol(db,a,f){
 }
 export function recordAssessmentResult(db,a,f){
  must(exact(f,['id','expected_revision','practical','qualification'])&&isId(f.id)&&Number.isSafeInteger(f.expected_revision)&&exact(f.practical,['assessed_on','method_id','responses','conclusion','feedback'])&&exact(f.qualification,['observation_state','level','valid_until','evidence']),400,'Неверный протокол оценки');
- must(f.practical.conclusion!=='not_meet'||f.qualification.observation_state!=='rated'||f.qualification.level===1,422,'При неудовлетворительном результате нельзя подтвердить самостоятельное выполнение');
  const p=changeTraining(db,{id:f.id,expected_revision:f.expected_revision,command:'practical',fields:f.practical},a);
  const q=changeTraining(db,{id:f.id,expected_revision:p.rev,command:'qualify',fields:{...f.qualification,assessed_on:f.practical.assessed_on,practical_id:p.event_entity_id,feedback:f.practical.feedback}},a);
  return {...q,practical_id:p.event_entity_id,qualification_id:q.event_entity_id};
