@@ -13,7 +13,7 @@ import {isRC1Import,applyRC1Event} from './rc1-import.js';
 import {LC5_TYPES,applyLC5Event} from './audit-domain.js';
 import {SELF_LEVELS} from './builtin-forms.js';
 import {STANDARD_TYPES,PROGRAM_DOCS,applyStandardEvent} from './standard-workflows.js';
-import {PREPARATION_FACT_TYPES,applyPreparationEvent,preparationFinishAllowed} from './preparation-results.js';
+import {PREPARATION_FACT_TYPES,applyPreparationEvent,preparationFinishAllowed,preparationProgress} from './preparation-results.js';
 import {validateJi2,ji2Stages,jiConfig} from './ji-v03.js';
 export const TRAINING_TYPES=Object.freeze({...LC5_TYPES,...STANDARD_TYPES,...PREPARATION_FACT_TYPES,
  competency_matrix:'Матрица компетенций',audit_session:'Аудит инструктора',mentor_self_evaluation:'Самооценка наставника',mentor_order:'Групповой приказ',mentor_credential:'Документы о подготовке',mentor_appointment:'Приказы о назначении',mentor_authorization:'Полномочия наставника',
@@ -106,6 +106,32 @@ export function latestQualification(db,personId,skillId,day='9999-12-31'){
  FROM assessment_item i JOIN assessment_session s ON s.id=i.session_id
  WHERE s.person_id=? AND i.skill_id=? AND s.state='confirmed' AND substr(s.assessed_at,1,10)<=? ORDER BY s.assessed_at DESC,coalesce(s.recorded_at,'') DESC,s.id DESC LIMIT 1`,[personId,skillId,day])
 }
+// A verification of applicability can refer to an existing formal result
+// in the SAME employee's preparation bundle. Never manufacture a new exam
+// or transfer a generic protocol into the pre-practice gate for hazardous work.
+export function preparationVerificationBasis(db,a,kind,day){
+ if(!a?.enrollment_id||!['safety','theory'].includes(kind))return null;
+ if(kind==='safety'&&(a.method_variant==='hazardous'||jiConfig(a)?.hazardous))return null;
+ const b=preparationForEnrollment(db,a.enrollment_id);
+ if(!b||b.trainee_id!==a.trainee_id)return null;
+ const n=one(db,'SELECT * FROM training_enrollment WHERE id=?',[a.enrollment_id]);
+ const t=n&&one(db,'SELECT * FROM training_program_task WHERE id=? AND program_id=?',[a.program_task_id,n.program_id]);
+ if(!n||n.state==='cancelled'||n.trainee_id!==a.trainee_id||!t||t.sop_revision_id!==a.sop_revision_id||t.skill_id!==a.skill_id)return null;
+ if([b.adaptation_id,b.safety_id,b.internship_id].some(id=>!one(db,"SELECT id FROM training_enrollment WHERE id=? AND state<>'cancelled'",[id])))return null;
+ const q=preparationProgress(db,b);
+ const f=kind==='safety'?q.safety.pass&&q.safety.fact:q.current&&q.positive&&q.commission;
+ return f&&f.fact_on<=day?{id:f.id,preparation_id:b.id,kind,day:f.fact_on}:null;
+}
+export function verificationSourceId(db,v){
+ if(!v)return null;
+ const e=one(db,"SELECT payload_json FROM change_event WHERE entity_type='training_verification' AND entity_id=? AND operation='create'",[v.id]);
+ return e?JSON.parse(e.payload_json).source_preparation_fact_id??null:null;
+}
+export function verificationPass(db,a,v,day){
+ if(!v||v.result!=='pass'||v.evaluated_on>day)return false;
+ const source=verificationSourceId(db,v);
+ return !source||preparationVerificationBasis(db,a,v.kind,day)?.id===source;
+}
 function admissionRecordStatus(db,a,day){
  if(!a)return {record:null,status:'Нет решения',current:false};
  if(a.decision==='denied')return {record:a,status:'Не допущен',current:false};
@@ -116,7 +142,8 @@ function admissionRecordStatus(db,a,day){
  const item=one(db,'SELECT * FROM assessment_item WHERE session_id=?',[a.qualification_id]);
  if(item?.valid_until&&item.valid_until<day)return {record:a,status:'Срок квалификации истёк · требуется анализ',current:false};
  const q=latestAssessment(db,a.assignment_id,'qualification'),p=latestAssessment(db,a.assignment_id,'practical'),s=latestVerification(db,a.assignment_id,'safety'),t=latestVerification(db,a.assignment_id,'theory');
- if(q?.id!==a.qualification_id||p?.id!==a.practical_id||s?.id!==a.safety_id||t?.id!==a.theory_id)return {record:a,status:'Подтверждения изменились · требуется решение',current:false};
+ const training=one(db,'SELECT * FROM training_assignment WHERE id=?',[a.assignment_id]);
+ if(q?.id!==a.qualification_id||p?.id!==a.practical_id||s?.id!==a.safety_id||t?.id!==a.theory_id||!training||!verificationPass(db,training,s,day)||!verificationPass(db,training,t,day))return {record:a,status:'Подтверждения изменились · требуется решение',current:false};
  return {record:a,status:'Допуск зарегистрирован',current:true}
 }
 export function admissionStatus(db,personId,operationId,day){return admissionRecordStatus(db,latest(db,'admission_decision','person_id=? AND operation_id=? AND decided_on<=?',[personId,operationId,day],'decided_on'),day)}
@@ -341,17 +368,19 @@ export function applyTrainingEvent(db,e,old){
   invariant(p.mentor_ack===true&&p.trainee_ack===true,'Нужны отметки подтверждения обеих сторон (не электронная подпись)');
   const witness=optional(db,'person',p.witness_id);
   if(a.method_variant==='special'&&stage.phase==='presentation')invariant(witness&&witness.id!==a.trainee_id&&(a.method_version!=='JI-2'||witness.id!==a.mentor_id),'Укажите отдельного демонстратора со специальными навыками');
-  if((a.method_variant==='hazardous'||jiConfig(a)?.hazardous)&&stage.phase==='practice'){const safety=latestVerification(db,a.id,'safety');invariant(safety?.result==='pass'&&safety.evaluated_on<=day,'Сначала зарегистрируйте подтверждение обязательной проверки безопасности')}
+  if((a.method_variant==='hazardous'||jiConfig(a)?.hazardous)&&stage.phase==='practice'){const safety=latestVerification(db,a.id,'safety');invariant(verificationPass(db,a,safety,day),'Сначала зарегистрируйте подтверждение обязательной проверки безопасности')}
   store(db,t,{id,assignment_id:a.id,mentor_id:a.mentor_id,held_at:p.held_at,notes:p.notes,result:p.result,steps_json:canonical({version:a.method_version,variant:a.method_variant,stage:stage.code,label:stage.label,...(stage.execution?{execution:stage.execution}:{}),...(stage.segment?{segment:stage.segment}:{}),repeat:pr.done.has(stage.code)}),rev:1,stage_code:stage.code,duration_minutes:p.duration_minutes,witness_id:p.witness_id,witness_name:witness?.display_name||null,mentor_ack:1,trainee_ack:1,recorded_at:e.occurred_at});
   const done=progressFor(db,a);update(db,'training_assignment',a.id,{state:done.complete?'completed':'in_progress'});
   if(a.enrollment_id){const n=one(db,'SELECT * FROM training_enrollment WHERE id=?',[a.enrollment_id]);if(n?.state==='active')update(db,'training_enrollment',n.id,{state:n.state})}return
  }
  if(t==='training_verification'){
-  createOnly(e,old);exact(p,['assignment_id','assignment_rev','kind','evaluator_id','evaluated_on','result','evidence','feedback']);
+  createOnly(e,old);const sourced=Object.hasOwn(p,'source_preparation_fact_id');
+  exact(p,['assignment_id','assignment_rev','kind','evaluator_id','evaluated_on','result','evidence','feedback',...(sourced?['source_preparation_fact_id']:[])]);
   const a=freshAssignment(db,p);person(db,p.evaluator_id);noFuture(p.evaluated_on,e);
+  if(sourced){const b=preparationVerificationBasis(db,a,p.kind,p.evaluated_on);invariant(b&&isId(p.source_preparation_fact_id)&&b.id===p.source_preparation_fact_id&&p.result==='pass','Исходный протокол не подтверждён или неприменим к этому назначению')}
   invariant(a.state!=='cancelled'&&a.approval_json&&isCurrentStandard(db,a.sop_revision_id)&&p.evaluator_id!==a.trainee_id&&p.evaluated_on>=a.assigned_on&&p.evaluated_on>=JSON.parse(a.approval_json).approved_on&&['safety','theory'].includes(p.kind)&&['pass','fail'].includes(p.result)&&required(p.evidence)&&required(p.feedback),'Проверка требует согласованного назначения, отдельного оценщика, даты, результата и основания');
   const prev=latestVerification(db,a.id,p.kind);invariant(!prev||p.evaluated_on>=prev.evaluated_on,'Нельзя подменить историю более ранней проверкой');
-  const {assignment_rev,...data}=p;store(db,t,{id,...data,recorded_at:e.occurred_at,rev:1});update(db,'training_assignment',a.id,{state:a.state});return
+  const {assignment_rev,source_preparation_fact_id,...data}=p;store(db,t,{id,...data,recorded_at:e.occurred_at,rev:1});update(db,'training_assignment',a.id,{state:a.state});return
  }
  if(t==='assessment_session'){
   // LC8.1: a general (non-operational) skill may be evidenced independently
@@ -406,7 +435,7 @@ export function applyTrainingEvent(db,e,old){
   invariant(!previous||p.decided_on>=previous.decided_on,'Нельзя подменить историю более ранним решением');
   if(p.decision==='granted'){
    const item=q&&one(db,'SELECT * FROM assessment_item WHERE session_id=?',[q.id]);
-   invariant(pr&&q&&q.practical_id===pr.id&&pr.conclusion!=='not_meet'&&item?.observation_state==='rated'&&(!item.valid_until||item.valid_until>=p.decided_on)&&s?.result==='pass'&&th?.result==='pass'&&[q.assessed_at,pr.assessed_at,s.evaluated_on,th.evaluated_on].every(x=>x.slice(0,10)<=p.decided_on),'Нужны последняя практическая оценка, подтверждённый уровень, положительные проверки ОТ и теории. Процент сам по себе не выдаёт допуск.');
+   invariant(pr&&q&&q.practical_id===pr.id&&pr.conclusion!=='not_meet'&&item?.observation_state==='rated'&&(!item.valid_until||item.valid_until>=p.decided_on)&&verificationPass(db,a,s,p.decided_on)&&verificationPass(db,a,th,p.decided_on)&&[q.assessed_at,pr.assessed_at,s.evaluated_on,th.evaluated_on].every(x=>x.slice(0,10)<=p.decided_on),'Нужны последняя практическая оценка, подтверждённый уровень, положительные проверки ОТ и теории. Процент сам по себе не выдаёт допуск.');
   }else invariant(p.valid_until===null,'Отказ не имеет срока действия');
   const {assignment_rev,...data}=p;store(db,t,{id,...data,person_id:a.trainee_id,operation_id:a.operation_id,revision_id:a.sop_revision_id,qualification_id:q?.id||null,practical_id:pr?.id||null,safety_id:s?.id||null,theory_id:th?.id||null,recorded_at:e.occurred_at,rev:1});update(db,'training_assignment',a.id,{state:a.state});return
  }

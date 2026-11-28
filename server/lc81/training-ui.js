@@ -51,12 +51,27 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    el('p','Срок '+d.due_on+' · '+d.completed+'/'+d.stages.length+' этапов · '+(d.approved?'Согласовано':'Требуется согласование')),
    table(['Этап','Состояние'],d.stages.map(s=>[s.label,s.done?'Выполнено':s.code===d.next?'Следующий':'Ожидается'])),
    table(['Фактический этап','Дата','Мин.','Результат','Примечание'],d.facts.map(f=>[d.stages.find(s=>s.code===f.stage_code)?.label||f.stage_code,f.held_at,f.duration_minutes,state[f.result]||f.result,f.notes])),
-   table(['Проверка','Результат','Дата'],d.verification.map(v=>[v.kind==='safety'?'Безопасность':'Теория',state[v.result]||'Нет',v.day])),
+   table(['Проверка (по применимости)','Результат','Дата','Основание'],d.verification.map(v=>[v.kind==='safety'?'Безопасность':'Теория',v.current===false?'Требуется пересмотр':state[v.result]||'Нет',v.day,v.source?'Учтён исходный протокол'+(v.source_day?' от '+v.source_day:''):'Отдельная проверка'])),
    el('p','Практика: '+(d.practical?d.conclusions[d.practical.conclusion]:'Нет оценки')+' · Квалификация: '+(d.qualification?.level??'Нет уровня')+' · '+d.admission));
   if(d.scenario_label)n.append(el('p','Основание: '+d.scenario_label));
   if(d.plan_pending)n.append(el('p','Назначение входит в общий план. Согласование — в плане производственного обучения.','muted'));
   const command=(cmd,fields)=>async f=>{await api('training/change',{id:d.id,expected_revision:d.rev,command:cmd,fields:fields(f)});note('Действие подтверждено сервером');await render()};
   const cap=d.cap,open=['planned','in_progress'].includes(d.state),valid=d.state!=='cancelled';
+  const isRapid=d.scenario==='rapid';
+  const rapidFields=()=>isRapid?[el('h3','Контроль исполнения: 3–5 хронометражей'),el('p','Норматив СОП: '+(d.standard_seconds??'не задан')+' с. Оцените соответствие по фактическому качеству и времени, без автоматически выдуманных допусков.','muted'),...Array.from({length:5},(_,i)=>{
+   const sec=num('seconds_'+i,'Замер '+(i+1)+' · секунд',0.001,86400,'',0.001);sec.querySelector('input').required=i<3;
+   const opts=[['','— Не выбран —'],['yes','Соответствует'],['no','Отклонение']];
+   const q=select('quality_'+i,'Качество '+(i+1),opts),t=select('time_'+i,'Время '+(i+1),opts);
+   q.querySelector('select').required=t.querySelector('select').required=i<3;
+   return [sec,q,t];
+  }).flat(),input('rapid_note','Условия замеров и критерий соответствия СОП')]:[];
+  const rapidValue=f=>isRapid?{rapid_control:{samples:Array.from({length:5},(_,i)=>{
+   const s=value(f,'seconds_'+i),q=value(f,'quality_'+i),t=value(f,'time_'+i);
+   if(!s&&!q&&!t&&i>=3)return null;
+   if(!s||!q||!t)throw Error('Заполните время и оба результата замера '+(i+1));
+   return {seconds:Number(s),quality_ok:q==='yes',time_ok:t==='yes'};
+  }).filter(Boolean),note:value(f,'rapid_note')}}:{};
+  if(d.rapid_control)n.append(panel('Фактический контроль быстрого обучения',table(['Замер','Секунд','Качество','Время'],d.rapid_control.samples.map((s,i)=>[i+1,s.seconds,s.quality_ok?'Соответствует':'Отклонение',s.time_ok?'Соответствует':'Отклонение'])),el('p',d.rapid_control.note)));
   if(open&&!d.approved){
    for(const kind of ['responsible','head']){
     const done=d.pending_approvals.some(v=>v.kind===kind),label=kind==='responsible'?'Ответственный за обучение':'Руководитель';
@@ -82,18 +97,22 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
     const held=input('held_at','Фактические дата и время','datetime-local');
     n.append(groups('Регистрация инструктажа',[stage,held,number('duration','Минуты',1,1440),select('result','Результат',[['completed','Выполнен'],['incomplete','Не завершён']]),input('notes','Что выполнено'),optional('witness_id','Демонстратор (если требуется)',opts(d.witnesses)),check('mentor_ack','Инструктор подтвердил факт'),check('trainee_ack','Обучаемый подтвердил факт')],'Записать факт инструктажа',command('stage',f=>({stage_code:value(f,'stage_code'),held_at:value(f,'held_at'),duration_minutes:Number(value(f,'duration')),result:value(f,'result'),notes:value(f,'notes'),witness_id:value(f,'witness_id')||null,mentor_ack:checked(f,'mentor_ack'),trainee_ack:checked(f,'trainee_ack')}))));
    }
+   if(cap.verify_source)for(const v of d.verification.filter(v=>v.option&&(!v.current||!v.source))){
+    const label=v.kind==='safety'?'ОТ':'Теория';
+    n.append(groups('Учесть ранее подтверждённый протокол · '+label,[el('p','Исходный протокол от '+v.option.day+'. Это подтверждение применимости, а не новая проверка знаний.'),button('Открыть исходный комплект подготовки',()=>preparationCard(host,v.option.preparation_id)),input('applicability','Почему этот протокол применим к данной операции'),input('feedback','Обратная связь')],'Подтвердить применимость',command('verify_source',f=>({kind:v.kind,source_id:v.option.id,applicability:value(f,'applicability'),feedback:value(f,'feedback')}))));
+   }
    if(cap.verify)n.append(groups(d.safety_required?'Проверка знаний — безопасность обязательна перед практикой':'Дополнительная проверка знаний',[select('kind','Вид проверки',[['safety','Безопасность'],['theory','Теория']]),dt('evaluated_on','Фактическая дата',d.day),select('result','Результат',[['pass','Пройдено'],['fail','Не пройдено']]),input('evidence','Подтверждающий документ / факт'),input('feedback','Обратная связь')],'Записать проверку',command('verify',f=>({kind:value(f,'kind'),evaluated_on:value(f,'evaluated_on'),result:value(f,'result'),evidence:value(f,'evidence'),feedback:value(f,'feedback')}))));
    if(cap.practical&&cap.qualify&&d.methods.length){
     const m=d.methods[0],answers=m.criteria.flatMap((q,i)=>[select('answer_'+i,q.section+' · '+q.question,[['','— Выберите —'],['1','Да'],['0','Нет']]),input('note_'+i,'Примечание','text',false)]);
-    n.append(groups('Практическая оценка и уровень матрицы',[dt('assessed_on','Дата оценки',d.day),...answers,select('conclusion','Заключение',Object.entries(d.conclusions)),select('observation_state','Результат наблюдения',[['rated','Оценено'],['not_observed','Не наблюдалось'],['not_applicable','Неприменимо']]),select('level','Уровень',d.levels.map(x=>[x.value,x.label])),input('valid_until','Срок оценки (если установлен)','date',false),input('evidence','Подтверждающее основание'),input('feedback','Обратная связь и рекомендация')],'Сохранить оценку и уровень',async f=>{
+    n.append(groups('Практическая оценка и уровень матрицы',[dt('assessed_on','Дата оценки',d.day),...answers,...rapidFields(),select('conclusion','Заключение',Object.entries(d.conclusions)),select('observation_state','Результат наблюдения',[['rated','Оценено'],['not_observed','Не наблюдалось'],['not_applicable','Неприменимо']]),select('level','Уровень',d.levels.map(x=>[x.value,x.label])),input('valid_until','Срок оценки (если установлен)','date',false),input('evidence','Подтверждающее основание'),input('feedback','Обратная связь и рекомендация')],'Сохранить оценку и уровень',async f=>{
      const obs=value(f,'observation_state');
-     await api('training/result',{id:d.id,expected_revision:d.rev,practical:{assessed_on:value(f,'assessed_on'),method_id:m.id,responses:m.criteria.map((q,i)=>({criterion_id:q.id,value:Number(value(f,'answer_'+i)),note:value(f,'note_'+i)})),conclusion:value(f,'conclusion'),feedback:value(f,'feedback')},qualification:{observation_state:obs,level:obs==='rated'?Number(value(f,'level')):null,valid_until:obs==='rated'?value(f,'valid_until')||null:null,evidence:value(f,'evidence')}});
+     await api('training/result',{id:d.id,expected_revision:d.rev,practical:{assessed_on:value(f,'assessed_on'),method_id:m.id,responses:m.criteria.map((q,i)=>({criterion_id:q.id,value:Number(value(f,'answer_'+i)),note:value(f,'note_'+i)})),conclusion:value(f,'conclusion'),feedback:value(f,'feedback'),...rapidValue(f)},qualification:{observation_state:obs,level:obs==='rated'?Number(value(f,'level')):null,valid_until:obs==='rated'?value(f,'valid_until')||null:null,evidence:value(f,'evidence')}});
      note('Практическая оценка и уровень матрицы сохранены');await render();
     }));
    }
    if(cap.practical&&d.methods.length){
     const method=d.methods[0],fields=method.criteria.flatMap((q,i)=>[select('answer_'+i,q.section+' · '+q.question,[['','— Выберите —'],['1','Да'],['0','Нет']]),input('note_'+i,'Примечание','text',false)]);
-    n.append(groups('Практическая оценка',[dt('assessed_on','Дата',d.day),...fields,select('conclusion','Заключение',Object.entries(d.conclusions)),input('feedback','Обратная связь')],'Сохранить оценку',command('practical',f=>({assessed_on:value(f,'assessed_on'),method_id:method.id,responses:method.criteria.map((q,i)=>({criterion_id:q.id,value:Number(value(f,'answer_'+i)),note:value(f,'note_'+i)})),conclusion:value(f,'conclusion'),feedback:value(f,'feedback')}))));
+    n.append(groups('Практическая оценка',[dt('assessed_on','Дата',d.day),...fields,...rapidFields(),select('conclusion','Заключение',Object.entries(d.conclusions)),input('feedback','Обратная связь')],'Сохранить оценку',command('practical',f=>({assessed_on:value(f,'assessed_on'),method_id:method.id,responses:method.criteria.map((q,i)=>({criterion_id:q.id,value:Number(value(f,'answer_'+i)),note:value(f,'note_'+i)})),conclusion:value(f,'conclusion'),feedback:value(f,'feedback'),...rapidValue(f)}))));
    }
    if(cap.qualify&&d.practical){
     const until=input('valid_until','Действует до','date',false);
