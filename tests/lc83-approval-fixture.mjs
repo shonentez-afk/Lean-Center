@@ -24,7 +24,7 @@ export async function setupApproval(){
   for(const [k,[code,name]] of Object.entries(defs))roles[k]=w.edit('business_role',null,{code,name});
   for(const [name,role,unit] of [['safety','safety',f.unit],['safety2','safety',f.unit],['outside','safety',unitB],['engineering','engineering',f.unit],['twi','twi',f.unit],['uncertified','twi',f.unit],['director','director',site]]){
    const person=w.edit('person',null,{employee_code:'LC83-'+name,display_name:'Учебный '+name});
-   w.edit('person_assignment',null,{person_id:person,unit_id:unit,profession_id:null,position_id:null,shift_id:null,valid_from:'2020-01-01',valid_to:null});
+   w.edit('person_assignment',null,{person_id:person,unit_id:unit,profession_id:null,position_id:null,shift_id:null,shift_code:null,valid_from:'2020-01-01',valid_to:null});
    people[name]={person,assignment:assign(person,roles[role]),unit};
   }
   const cert=(await f.save('mentor_credential',{person_id:people.twi.person,kind:'certificate',role:'internal_trainer',number:'LC83-VT',issuer:'Учебный центр',issued_on:'2020-01-01',valid_until:null,evidence:'Учебный сертификат',registered_by:f.actor})).entity_id;
