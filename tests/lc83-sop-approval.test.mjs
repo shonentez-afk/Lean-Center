@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {startSopPublicationScheduler} from '../server/lc81/sop-publication-scheduler.mjs';
+import {startNotificationBackground} from '../server/lc81/notification-scheduler.mjs';
 import {setupApproval} from './lc83-approval-fixture.mjs';
 import {makeSop} from './lc4-fixture.mjs';
 import {compareApprovalSnapshots} from '../server/lc81/sop-approval.mjs';
@@ -380,4 +381,88 @@ test('LC835 conservative comparison recognizes inserted steps and does not equat
  assert(diff.steps.some(v=>v.before_position===2&&v.after_position===2&&v.fields.includes('Причина')));
  assert.equal(diff.same_work_content,false);
  console.log('LC835_CONSERVATIVE_STEP_ALIGNMENT_OK');
+});
+
+test('LC822 persistent reminder jobs: policy, live authorization, deadline replacement, late account and restart',async t=>{
+ const x=await setupApproval();t.after(x.cleanup);
+ const {store,users,admin}=x;
+ const status=()=>store.notificationBackgroundStatus(admin.id,1),feed=name=>store.notificationFeed(users[name].id,1,{}),of=(name,kind)=>feed(name).items.filter(v=>v.kind===kind);
+ assert.deepEqual(status().policy,{rev:0,approval:null,familiarization:null,training:null});
+ assert.throws(()=>store.notificationBackgroundStatus(users.observer.id,1),/администратора/);
+ await assert.rejects(store.setNotificationPolicy(users.observer.id,1,{expected_revision:0,approval:0,familiarization:0,training:0}),/администратора/);
+ await assert.rejects(store.setNotificationPolicy(admin.id,1,{expected_revision:0,approval:31,familiarization:0,training:0}),/30 дней/);
+ const role=store.adminData(admin.id).assignments.find(a=>a.person_id===users.author.person_id);
+ assert(role);
+ await store.setPolicy(admin.id,{role_id:role.role_id,revision:0,permissions:['training.read','training.detail','operation.read','plan.read']});
+ await store.grant(admin.id,{account_id:users.author.id,assignment_id:role.id,scope:{kind:'self'},valid_to:null});
+ const due=day=>store.changeTraining(users.manager.id,1,{id:x.assignment,expected_revision:store.trainingDetail(users.manager.id,1,x.assignment).rev,command:'reschedule',fields:{due_on:day,reason:'Проверка изменения срока'}});
+ await due(x.day);
+ const id=(await x.passport(await x.draft('Проверка очереди уведомлений'))).revision_id;
+ const round=await x.submit(id,'sequential');
+ assert.equal((await store.runNotificationBackground()).enqueued,0,'no guessed reminder thresholds');
+ const settings=store.notificationPreferences(users.author.id,1);
+ assert.equal(settings.internal_inbox,true);assert.equal(settings.push_available,false);
+ const prefs={expected_revision:settings.rev,reminders:settings.reminders,push_types:{...settings.push_types,training:true},delivery_window:{days:[1,3],start:'20:00',end:'08:00'}};
+ const saved=await store.saveNotificationPreferences(users.author.id,1,prefs);assert.equal(saved.rev,1);assert.deepEqual(saved.delivery_window,prefs.delivery_window);
+ await assert.rejects(store.saveNotificationPreferences(users.author.id,1,prefs),/изменились/);
+ await assert.rejects(store.saveNotificationPreferences(users.author.id,1,{...prefs,expected_revision:1,delivery_window:{days:[1,1],start:'20:00',end:'08:00'}}),/окно доставки/);
+ const policy=await store.setNotificationPolicy(admin.id,1,{expected_revision:0,approval:0,familiarization:0,training:0});assert.equal(policy.rev,1);
+ await assert.rejects(store.setNotificationPolicy(admin.id,1,{expected_revision:0,approval:0,familiarization:0,training:0}),/изменилась/);
+ const queued=await store.runNotificationBackground({enqueueOnly:true});assert.equal(queued.enqueued,2);assert.equal(status().counts.pending,2);
+ const tomorrow=new Date(Date.parse(x.day)+86400000).toISOString().slice(0,10);
+ await due(tomorrow);await x.change('safety',id,'safety');
+ const first=await store.runNotificationBackground();assert.equal(first.cancelled,2);assert.equal(first.completed,1);
+ assert.equal(of('safety','approval_due').length,0);assert.equal(of('author','training_due').length,0);
+ const eng=of('engineering','approval_due');assert.equal(eng.length,1);assert.equal(eng[0].route.round_id,round.id);assert.equal(eng[0].route.stage,'engineering');
+ await store.readNotification(users.engineering.id,1,{id:eng[0].id});assert.equal(of('engineering','approval_due')[0].pending,true);
+ const pol=await store.setNotificationPolicy(admin.id,1,{expected_revision:1,approval:0,familiarization:0,training:1});assert.equal(pol.rev,2);
+ assert.equal((await store.runNotificationBackground()).completed,1);
+ const training=of('author','training_due')[0];assert(training);assert.equal(training.route.id,x.assignment);assert.equal(training.due_on,tomorrow);
+ const snapshot=feed('author').snapshot;assert(snapshot.startsWith('v2.'));
+ assert.equal((await store.runNotificationBackground()).completed,0);
+ // User opt-out is separate from task state and from mandatory notices.
+ const current=store.notificationPreferences(users.author.id,1);
+ const off=await store.saveNotificationPreferences(users.author.id,1,{expected_revision:current.rev,reminders:{...current.reminders,training:false},push_types:current.push_types,delivery_window:current.delivery_window});
+ assert.equal(of('author','training_due').length,0);
+ await store.saveNotificationPreferences(users.author.id,1,{expected_revision:off.rev,reminders:{...off.reminders,training:true},push_types:off.push_types,delivery_window:off.delivery_window});
+ assert.equal(of('author','training_due').length,1);assert.equal(of('author','training_due')[0].id,training.id);
+ await x.change('engineering',id,'engineering');await x.change('twi',id,'twi');await x.change('director',id,'director');await x.impact(id);await x.change('director',id,'publish','publish');
+ assert.equal(of('author','training_due').length,0,'superseded SOP is not reminded as current TWI');
+ await store.readAllNotifications(users.author.id,1,{snapshot});
+ assert.equal(of('author','familiarization_required').length,1);assert.equal(of('author','familiarization_required')[0].read_at,null);
+ const receipt=store.familiarizationList(users.author.id,1,{kind:'mine',revision_id:id}).items[0];
+ await store.setSopFamiliarizationDeadline(users.manager.id,1,{id:receipt.id,expected_revision:receipt.rev,due_on:x.day,note:'Срок проверки'});
+ assert.equal((await store.runNotificationBackground()).completed,1);
+ const reminder=of('author','familiarization_due')[0];assert(reminder);const mixed=feed('author').snapshot;assert(mixed.startsWith('v2.'));
+ await store.readAllNotifications(users.author.id,1,{snapshot:mixed});assert.equal(feed('author').unread,0);
+ const newest=store.familiarizationList(users.author.id,1,{kind:'mine',revision_id:id}).items[0];
+ await store.confirmSopFamiliarization(users.author.id,1,{id:newest.id,expected_revision:newest.rev,source_sha256:newest.source_sha256,confirmed:true});
+ assert.equal(of('author','familiarization_due').length,0);
+ // An unregistered real employee receives one current requirement after an
+ // account appears, including restart between durable enqueue and execution.
+ const mentor=store.adminData(admin.id).people.find(p=>p.display_name==='Инструктор Тестовый');assert(mentor);
+ assert(!store.adminData(admin.id).accounts.some(a=>a.person_id===mentor.id));
+ const extra=await store.changeSopFamiliarizationScope(users.manager.id,1,{revision_id:id,person_id:mentor.id,expected_revision:0,skill_id:null,reason:'Дополнительный исполнитель без аккаунта'});assert(extra.added);
+ assert.equal(status().missing_accounts,1);
+ const late=await store.createAccount(admin.id,{person_id:mentor.id,login:'late',password:x.password,generate:false});
+ assert.equal(store.notificationFeed(late.id,1,{}).total,0);
+ assert.equal((await store.runNotificationBackground({enqueueOnly:true})).enqueued,1);assert.equal(status().counts.pending,1);
+ await store.close();const backup=path.join(x.root,'lc822-background-copy');await copySecureCheckpoint(x.target,backup);
+ const restored=await openSecureQA({dataDir:backup});try{
+  const actor=restored.authenticate('late',x.password),adminActor=restored.authenticate('admin',x.password),author=restored.authenticate('author',x.password);
+  assert.equal(restored.notificationBackgroundStatus(adminActor.id,1).counts.pending,1);
+  assert.equal(restored.notificationPreferences(author.id,1).delivery_window.start,'20:00');
+  const done=await restored.runNotificationBackground();assert.equal(done.enqueued,0);assert.equal(done.completed,1);
+  const notices=restored.notificationFeed(actor.id,1,{}).items;assert.equal(notices.length,1);assert.equal(notices[0].kind,'familiarization_required');assert.equal(notices[0].route.id,id);
+  assert.equal(restored.familiarizationList(actor.id,1,{kind:'mine',revision_id:id}).items[0].state,'pending');
+  await restored.runNotificationBackground();assert.equal(restored.notificationFeed(actor.id,1,{}).total,1);
+  assert.equal(restored.notificationBackgroundStatus(adminActor.id,1).missing_accounts,0);
+ }finally{await restored.close()}
+ console.log('LC822_POLICY_LIVE_REMINDERS_CATCHUP_RESTART_OK');
+});
+test('LC822 scheduler is serial and shutdown drains outstanding work',async()=>{
+ let calls=0,start,release;const entered=new Promise(r=>start=r),gate=new Promise(r=>release=r),errors=[];
+ const scheduler=startNotificationBackground({async runNotificationBackground(){calls++;start();await gate}},{intervalMs:5,onError:()=>errors.push('tick error')});
+ try{await entered;await delay(25);assert.equal(calls,1);let drained=false;const stopped=scheduler.stop().then(()=>{drained=true});await delay(15);assert.equal(drained,false);release();await stopped;await delay(15);assert.equal(calls,1);assert.deepEqual(errors,[])}finally{release();await scheduler.stop()}
+ console.log('LC822_SCHEDULER_SERIAL_DRAIN_OK');
 });

@@ -286,6 +286,10 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='POST'&&p==='/api/lc81/matrix/retire'){reply(res,200,await store.retireMatrix(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/person/card'){reply(res,200,store.personCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
+   if(req.method==='GET'&&p==='/api/lc81/notifications/preferences'){reply(res,200,store.notificationPreferences(a.id,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/notifications/preferences'){reply(res,200,await store.saveNotificationPreferences(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='GET'&&p==='/api/lc81/admin/notification-background'){reply(res,200,store.notificationBackgroundStatus(a.id,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/admin/notification-policy'){reply(res,200,await store.setNotificationPolicy(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/notifications'){reply(res,200,store.notificationFeed(a.id,a.credential_revision,{filter:url.searchParams.get('filter')||'all',cursor:url.searchParams.get('cursor')||null,limit:Number(url.searchParams.get('limit')||30)}));return}
    if(req.method==='POST'&&p==='/api/lc81/notifications/read'){reply(res,200,await store.readNotification(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='POST'&&p==='/api/lc81/notifications/read-all'){reply(res,200,await store.readAllNotifications(a.id,a.credential_revision,await body(req)));return}

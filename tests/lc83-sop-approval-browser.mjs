@@ -151,6 +151,24 @@ try{
  await control.ctx.close();
  console.log('LC834_BROWSER_EXPLICIT_ROSTER_SUPPLEMENT_OK');
  console.log('LC834_BROWSER_PERSONAL_CONFIRM_AND_CONTROL_OK');
+ const prefsProfile=await profile('observer',true);await prefsProfile.p.locator('#lc82-bell').click();
+ const inbox=prefsProfile.p.locator('dialog.lc82-notification-dialog');
+ await inbox.getByRole('button',{name:'Настройки уведомлений',exact:true}).click();
+ await inbox.locator('input[name=window_enabled]').check();
+ await inbox.locator('input[name=window_start]').fill('20:00');await inbox.locator('input[name=window_end]').fill('08:00');
+ await inbox.locator('input[name=day_1]').check();await inbox.locator('input[name=push_familiarization]').check();
+ await inbox.getByRole('button',{name:'Сохранить настройки',exact:true}).click();
+ await inbox.getByRole('heading',{name:'Требуется ознакомление с СОП',exact:true}).waitFor();
+ const saved=x.store.notificationPreferences(x.users.observer.id,1);
+ assert.deepEqual(saved.delivery_window,{days:[1],start:'20:00',end:'08:00'});assert.equal(saved.push_available,false);
+ await inbox.getByRole('button',{name:'Закрыть',exact:true}).click();await prefsProfile.ctx.close();
+ const admin=await profile('admin');await admin.go('admin.notifications');
+ await admin.content.getByRole('heading',{name:'Фоновые уведомления',exact:true}).waitFor();
+ await admin.content.locator('select[name=familiarization]').selectOption('0');
+ await admin.button('Сохранить политику напоминаний').click();await admin.ready();
+ assert.equal(x.store.notificationBackgroundStatus(x.admin.id,1).policy.familiarization,0);
+ await admin.ctx.close();
+ console.log('LC822_BROWSER_PREFERENCES_ADMIN_POLICY_OK');
  assert.deepEqual(errors,[]);
  console.log('LC83_BROWSER_FULL_ROUTE_OK');
 }finally{if(browser)await browser.close();await close(proxy);await close(server);await x.cleanup()}

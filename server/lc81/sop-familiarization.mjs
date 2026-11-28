@@ -134,6 +134,47 @@ export function familiarizationNoticeView(db,a,n){
  const pending=own&&v.can_ack&&n.kind!=='familiarization_confirmed';
  return {label,title:v.code+' · v'+v.version_no+' · '+v.title,reason:own?'Вам назначено персональное ознакомление':'Вы отвечаете за оценку влияния',due_on:v.due_on,pending,overdue:pending&&v.overdue,state:v.state_label,route:{type:'familiarization',id:v.revision_id,person_id:v.person_id}};
 }
+// Reconciliation uses only live personal receipts. Never create historical
+// assignments for legacy revisions or replay earlier informational notices.
+export function familiarizationHasRequiredNotice(db,id,account){
+ if(one(db,"SELECT id FROM lc83_sop_notice WHERE event_key=? AND recipient_account_id=? AND kind='familiarization_required'",[id,account]))return true;
+ return exists(db,'lc834_sop_scope_change')&&!!one(db,"SELECT n.id FROM lc83_sop_notice n JOIN lc834_sop_scope_change c ON c.id=n.event_key WHERE c.receipt_id=? AND n.recipient_account_id=? AND n.kind='familiarization_required' LIMIT 1",[id,account]);
+}
+export function familiarizationBackgroundTargets(db,until){
+ if(!exists(db))return [];
+ const result=[];
+ for(const x of rows(db,selectSQL+" WHERE r.state='effective' AND v.state='effective' AND d.archived=0 AND o.archived=0 AND f.confirmed_at IS NULL ORDER BY f.id")){
+  const account=one(db,"SELECT id FROM lc81_account WHERE person_id=? AND state='active'",[x.person_id]);
+  if(!account)continue;
+  const base={target_id:x.id,stage:'',person_id:x.person_id,account_id:account.id};
+  if(!familiarizationHasRequiredNotice(db,x.id,account.id))result.push({...base,kind:'familiarization_catchup',basis:'required'});
+  const d=until&&lastDeadline(db,x.id);
+  if(d&&d.due_on<=until)result.push({...base,kind:'familiarization_due',basis:d.due_on});
+ }
+ return result;
+}
+export function familiarizationBackgroundView(db,a,j){
+ const x=find(db,j.target_id);
+ if(!x||!a.personId||x.person_id!==a.personId||a.personId!==j.person_id||a.accountId!==j.account_id)return null;
+ const v=itemFor(db,a,null,x,false);
+ if(!v.can_ack||v.state!=='pending')return null;
+ if(j.kind==='familiarization_catchup'){
+  if(familiarizationHasRequiredNotice(db,x.id,a.accountId))return null;
+  return {round_id:x.round_id,event_key:x.id};
+ }
+ if(j.kind!=='familiarization_due'||v.due_on!==j.basis)return null;
+ return {label:v.overdue?'Просрочено ознакомление с СОП':'Приближается срок ознакомления с СОП',title:v.code+' · v'+v.version_no+' · '+v.title,reason:'Вам назначено персональное ознакомление',due_on:v.due_on,pending:true,overdue:v.overdue,state:v.state_label,route:{type:'familiarization',id:v.revision_id,person_id:v.person_id}};
+}
+export function familiarizationMissingAccounts(db,accessFor,day){
+ if(!exists(db))return 0;
+ let count=0;
+ for(const x of rows(db,selectSQL+" WHERE r.state='effective' AND v.state='effective' AND d.archived=0 AND o.archived=0 AND f.confirmed_at IS NULL")){
+  if(employee(db,x.person_id,day)?.id!==liveScope(db,x).employment_id)continue;
+  const a=one(db,"SELECT id FROM lc81_account WHERE person_id=? AND state='active'",[x.person_id]);
+  if(!a||!accessFor(a.id)?.personId)count++;
+ }
+ return count;
+}
 export function hasOwnFamiliarization(db,a){
  return !!a.personId&&exists(db)&&rows(db,selectSQL+" WHERE f.person_id=? AND r.state='effective' AND v.state='effective' AND d.archived=0 AND o.archived=0 AND f.confirmed_at IS NULL",[a.personId]).some(x=>stateFor(db,a,x)==='pending'&&a.effective(x.revision_id));
 }

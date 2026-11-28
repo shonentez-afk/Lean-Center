@@ -4,6 +4,7 @@ import {one,rows,isId} from '../../src/core/db.js';
 import {PilotError} from '../lc74-store.mjs';
 import {approvalNoticeView} from './sop-approval.mjs';
 import {familiarizationNoticeView} from './sop-familiarization.mjs';
+import {backgroundNoticeRows,backgroundNoticeView,markBackgroundRead,backgroundAnchor} from './notification-background.mjs';
 const must=(v,s,m)=>{if(!v)throw new PilotError(s,m)};
 const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
 const exists=(db,t)=>!!one(db,"SELECT name FROM sqlite_master WHERE type='table' AND name=?",[t]);
@@ -12,12 +13,11 @@ const schema="CREATE TABLE IF NOT EXISTS lc82_notice_read(notice_id TEXT PRIMARY
 export const notificationsEnabled=()=>process.env.LC82_INBOX_ENABLED!=='0';
 function requireInbox(a){must(notificationsEnabled()&&a.personId,404,'Личные уведомления недоступны')}
 function sourceRows(db,a){
- if(!exists(db,journal))return [];
- const read=exists(db,readTable);
- return rows(db,'SELECT n.*,n.rowid ordinal,'+(read?'r.read_at':'NULL read_at')+' FROM lc83_sop_notice n '+(read?'LEFT JOIN lc82_notice_read r ON r.notice_id=n.id AND r.account_id=n.recipient_account_id ':'')+'WHERE n.recipient_account_id=? ORDER BY n.occurred_at DESC,n.id DESC',[a.accountId]);
+ const read=exists(db,readTable),original=exists(db,journal)?rows(db,"SELECT n.*,n.rowid ordinal,'original' source,"+(read?'r.read_at':'NULL read_at')+' FROM lc83_sop_notice n '+(read?'LEFT JOIN lc82_notice_read r ON r.notice_id=n.id AND r.account_id=n.recipient_account_id ':'')+'WHERE n.recipient_account_id=? ORDER BY n.occurred_at DESC,n.id DESC',[a.accountId]):[];
+ return [...original,...backgroundNoticeRows(db,a)];
 }
 function project(db,a,n){
- const view=n.kind.startsWith('familiarization_')?familiarizationNoticeView(db,a,n):approvalNoticeView(db,a,n);
+ const view=n.source==='background'?backgroundNoticeView(db,a,n):n.kind.startsWith('familiarization_')?familiarizationNoticeView(db,a,n):approvalNoticeView(db,a,n);
  return view?{id:n.id,kind:n.kind,occurred_at:n.occurred_at,read_at:n.read_at,...view}:null;
 }
 function visible(db,a){
@@ -32,7 +32,11 @@ export function notificationFeed(db,a,{filter='all',cursor=null,limit=30}={}){
  // Rowid is internal append order, not a client-supplied number. A snapshot
  // is the latest currently visible owned event ID. Read-all cannot consume an
  // event appended later, including a same-millisecond event.
- const snapshot=all.reduce((best,x)=>!best||x.n.ordinal>best.n.ordinal?x:best,null)?.v.id??null;
+ const latest=source=>all.filter(x=>x.n.source===source).reduce((best,x)=>!best||x.n.ordinal>best.n.ordinal?x:best,null)?.v.id??null;
+ const original=latest('original'),background=latest('background');
+ // Per-source insert order, not wall-clock time. Retain the A token format
+ // when there are no background reminders and accept older A snapshots.
+ const snapshot=background?'v2.'+(original??'-')+'.'+background:original;
  const selected=all.filter(x=>filter==='all'||filter==='unread'&&!x.v.read_at||filter==='actions'&&x.v.pending).sort(filter==='actions'?actions:newest);
  let start=0;
  if(cursor!==null){const i=selected.findIndex(x=>x.v.id===cursor);must(i>=0,409,'Лента изменилась. Обновите список уведомлений');start=i+1}
@@ -42,16 +46,19 @@ export function notificationFeed(db,a,{filter='all',cursor=null,limit=30}={}){
 export function readNotification(db,a,f){
  requireInbox(a);must(exact(f,['id'])&&isId(f.id),400,'Неверное уведомление');
  const x=visible(db,a).find(x=>x.v.id===f.id);must(x,404,'Действие больше недоступно');
- if(!x.v.read_at){db.run(schema);db.run('INSERT OR IGNORE INTO lc82_notice_read VALUES(?,?,?)',[x.v.id,a.accountId,a.at])}
+ if(!x.v.read_at){if(x.n.source==='background')markBackgroundRead(db,a,x.v.id);else{db.run(schema);db.run('INSERT OR IGNORE INTO lc82_notice_read VALUES(?,?,?)',[x.v.id,a.accountId,a.at])}}
  return {id:x.v.id,read_at:x.v.read_at||a.at,route:x.v.route};
 }
 export function readAllNotifications(db,a,f){
- requireInbox(a);must(exact(f,['snapshot'])&&(f.snapshot===null||isId(f.snapshot)),400,'Неверный снимок ленты');
+ requireInbox(a);must(exact(f,['snapshot'])&&(f.snapshot===null||typeof f.snapshot==='string'&&f.snapshot.length<=85),400,'Неверный снимок ленты');
  if(f.snapshot===null)return {marked:0};
- const anchor=exists(db,journal)&&one(db,'SELECT rowid ordinal FROM lc83_sop_notice WHERE id=? AND recipient_account_id=?',[f.snapshot,a.accountId]);
- must(anchor,404,'Снимок ленты недоступен');
- const batch=visible(db,a).filter(x=>!x.v.read_at&&x.n.ordinal<=anchor.ordinal);
- if(batch.length){db.run(schema);for(const x of batch)db.run('INSERT OR IGNORE INTO lc82_notice_read VALUES(?,?,?)',[x.v.id,a.accountId,a.at])}
+ const parts=f.snapshot.startsWith('v2.')?f.snapshot.split('.').slice(1):[f.snapshot,'-'];
+ must(parts.length===2&&parts.every(x=>x==='-'||isId(x))&&parts.some(isId),400,'Неверный снимок ленты');
+ const original=parts[0]==='-'?null:exists(db,journal)&&one(db,'SELECT rowid ordinal FROM lc83_sop_notice WHERE id=? AND recipient_account_id=?',[parts[0],a.accountId]);
+ const background=parts[1]==='-'?null:backgroundAnchor(db,a,parts[1]);
+ must((parts[0]==='-'||original)&&(parts[1]==='-'||background),404,'Снимок ленты недоступен');
+ const batch=visible(db,a).filter(x=>!x.v.read_at&&x.n.ordinal<=(x.n.source==='background'?background?.ordinal??0:original?.ordinal??0));
+ for(const x of batch){if(x.n.source==='background')markBackgroundRead(db,a,x.v.id);else{db.run(schema);db.run('INSERT OR IGNORE INTO lc82_notice_read VALUES(?,?,?)',[x.v.id,a.accountId,a.at])}}
  return {marked:batch.length};
 }
 export function checkNotificationIntegrity(db){

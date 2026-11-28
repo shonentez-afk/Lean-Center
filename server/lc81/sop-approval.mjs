@@ -133,6 +133,23 @@ export function approvalPlanItems(db,a,{mode,from,to,person_id=null}){
 }
 // Historical events are addressed, not a second permissions system. Resolve
 // the exact stage which produced each notice (director may also be publisher).
+// Deadline jobs are derived from currently active slots only. Identity is
+// the round + stage + due date; a scheduled publication is not a manual task.
+export function approvalReminderTargets(db,until){
+ if(!exists(db))return [];
+ return rows(db,"SELECT * FROM lc83_sop_round WHERE state IN('review','approved') ORDER BY id").flatMap(rr=>{
+  const active=currentStage(db,rr),job=pendingPublication(db,rr);
+  return route(rr).participants.filter(x=>active.includes(x.stage)&&x.due_on<=until&&!(x.stage==='publish'&&job)).map(x=>({kind:'approval_due',target_id:rr.id,stage:x.stage,person_id:x.person_id,account_id:x.account_id,basis:x.due_on}));
+ });
+}
+export function approvalReminderView(db,a,j){
+ const rr=byRound(db,j.target_id),r=rr&&revision(db,rr.revision_id);
+ if(!r||!a.personId||a.personId!==j.person_id||a.accountId!==j.account_id||r.document_archived||r.operation_archived||latest(db,r.id)?.id!==rr.id||!canSee(db,a,r,rr))return null;
+ const slot=route(rr).participants.find(x=>x.stage===j.stage);
+ if(!slot||slot.due_on!==j.basis||!availableFor(db,a,r,rr).includes(j.stage)||j.stage==='publish'&&pendingPublication(db,rr))return null;
+ const b=frozen(rr),overdue=j.basis<a.day;
+ return {label:overdue?'Просрочено поручение по СОП':'Приближается срок поручения по СОП',title:b.code+' · v'+b.version_no+' · '+b.title+' · раунд '+rr.round_no,reason:'Ваш этап: '+LABELS[j.stage],due_on:j.basis,pending:true,overdue,state:overdue?'Просрочено':'Ожидает решения',route:{type:'sop_approval',id:r.id,round_id:rr.id,stage:j.stage}};
+}
 export function approvalNoticeView(db,a,n){
  const rr=byRound(db,n.round_id),r=rr&&revision(db,rr.revision_id);
  if(!r||!a.personId||n.recipient_account_id!==a.accountId||r.document_archived||r.operation_archived||!canSee(db,a,r,rr))return null;

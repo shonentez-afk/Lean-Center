@@ -21,7 +21,7 @@ let user=null,page='person.read_basic',busy=false,sequence=0,saving=false,checki
 let authGeneration=0,statusVersion=0,accessCheck=null,accessRefreshPending=false,provisionManager=false;
 let navigationStarted=false,historyReplay=false,navAccount=null,navOpen=new Map();
 let noticeCounterFetch=null,noticeCounterAt=0;
-const adminPages=Object.freeze({admin:'Начало работы','admin.enterprise':'Предприятие','admin.users':'Пользователи','admin.roles':'Роли и права','admin.access':'Назначения и доступ','admin.storage':'Хранение и журнал'});
+const adminPages=Object.freeze({admin:'Начало работы','admin.enterprise':'Предприятие','admin.users':'Пользователи','admin.roles':'Роли и права','admin.access':'Назначения и доступ','admin.storage':'Хранение и журнал','admin.notifications':'Фоновые уведомления'});
 const isAdminPage=key=>Object.hasOwn(adminPages,key);
 const titleFor=key=>adminPages[key]||actions[key]||'Личное рабочее пространство';
 const landingPage=a=>a.admin?'admin':a.workspace_actions?.includes('center.read')?'center.read':a.permissions.includes('person.read_directory')?'person.read_directory':a.workspace_actions?.includes('sop.constructor')?'sop.constructor':'person.read_basic';
@@ -114,7 +114,27 @@ async function openNotifications(){
  const tabButtons=[['actions','Требуют действия'],['unread','Непрочитанные'],['all','Все']].map(([key,title])=>{
   const b=button(title,async()=>{filter=key;await load()});tabs.append(b);return [key,b];
  });
- tools.append(reload,allRead);d.append(head,summary,tabs,tools,body);document.body.append(d);
+ const prefs=button('Настройки уведомлений',async()=>{
+  const v=await api('notifications/preferences');if(!d.isConnected)return;
+  const labels={approval:'Согласование СОП',familiarization:'Ознакомление',training:'Обучение TWI',audit:'Аудиты и оценки',task:'Мероприятия',information:'Информационные события'};
+  const rkeys=['approval','familiarization','training'],pkeys=[...rkeys,'audit','task','information'];
+  const reminders=el('fieldset');reminders.append(el('legend','Дополнительные напоминания внутри портала'),...rkeys.map(k=>check('reminder_'+k,labels[k]+(v.policy[k]===null?' · выключено предприятием':' · за '+v.policy[k]+' дн.'),v.reminders[k])));
+  const push=el('fieldset');push.append(el('legend','Предпочтения будущего Web Push'),el('p','Внешняя отправка пока не подключена. Эти настройки не включают браузерную подписку.'),...pkeys.map(k=>check('push_'+k,labels[k],v.push_types[k])));
+  const window=el('fieldset'),start=input('window_start','Начало','time',false),end=input('window_end','Окончание','time',false);
+  start.querySelector('input').required=false;end.querySelector('input').required=false;
+  start.querySelector('input').value=v.delivery_window?.start??'';end.querySelector('input').value=v.delivery_window?.end??'';
+  window.append(el('legend','Разрешённое окно будущей доставки'),check('window_enabled','Ограничить доставку временем и днями',!!v.delivery_window),start,end,el('p','Часовой пояс предприятия: '+v.zone+'. Если окончание раньше начала, окно продолжается после полуночи. Дни относятся к началу окна. Реальный график вводится вручную.'),...[ 'Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((l,i)=>check('day_'+(i+1),l,v.delivery_window?.days.includes(i+1)??false)));
+  const f=form([el('p','Обязательные события и рабочие поручения остаются доступны. Можно отключить дополнительные напоминания, не закрывая задания.'),reminders,push,window],'Сохранить настройки',async f=>{
+   const checked=k=>f.elements.namedItem(k).checked;
+   const delivery_window=checked('window_enabled')?{days:[1,2,3,4,5,6,7].filter(n=>checked('day_'+n)),start:value(f,'window_start'),end:value(f,'window_end')}:null;
+   await api('notifications/preferences',{expected_revision:v.rev,reminders:Object.fromEntries(rkeys.map(k=>[k,checked('reminder_'+k)])),push_types:Object.fromEntries(pkeys.map(k=>[k,checked('push_'+k)])),delivery_window});
+   f.lcResetForm?.();summary.textContent='Настройки сохранены';await load();
+  });
+  const enable=f.elements.namedItem('window_enabled'),update=()=>{for(const n of [f.elements.namedItem('window_start'),f.elements.namedItem('window_end'),...[1,2,3,4,5,6,7].map(i=>f.elements.namedItem('day_'+i))])n.disabled=!enable.checked;f.elements.namedItem('window_start').required=enable.checked;f.elements.namedItem('window_end').required=enable.checked};
+  enable.addEventListener('change',update);update();f.lcResetForm?.();
+  body.replaceChildren(el('h3','Настройки уведомлений'),f);summary.textContent='Настройки пользователя';allRead.disabled=true;
+ });
+ tools.append(reload,allRead,prefs);d.append(head,summary,tabs,tools,body);document.body.append(d);
  d.addEventListener('close',()=>{d.remove();if(trigger?.isConnected)trigger.focus({preventScroll:true})},{once:true});
  d.showModal();
  async function load(cursor=null){
@@ -132,7 +152,7 @@ async function openNotifications(){
     const c=el('article',undefined,'lc82-notice-card'),h=el('h3',n.label),row=el('div',undefined,'row');
     c.dataset.noticeId=n.id;c.classList.toggle('lc82-unread',!n.read_at);
     c.append(h,el('p',n.title),el('p',n.reason,'muted'),el('p',(n.overdue?'Просрочено · ':'')+n.state+(n.due_on?' · срок '+n.due_on:''),'lc83-state'),el('p',n.occurred_at.replace('T',' ').slice(0,19)+' UTC · '+(n.read_at?'Прочитано':'Не прочитано'),'muted'));
-    row.append(button(n.route.type==='sop_approval'?'Открыть согласование':'Открыть ознакомление',async()=>{
+    row.append(button(({sop_approval:'Открыть согласование',familiarization:'Открыть ознакомление',training:'Открыть обучение'})[n.route.type]||'Открыть поручение',async()=>{
      const r=await api('notifications/read',{id:n.id});d.close();void refreshNoticeCounter(true);
      // The returned server route is reauthorized again by its own endpoint.
      await openLinked($('content'),r.route);
@@ -171,6 +191,18 @@ function displayIssued(r){
  const n=$('issued');n.hidden=false;n.replaceChildren(el('p','Выданный пароль для '+r.login+': '+r.issued_password),button('Пароль записан · скрыть',()=>{n.replaceChildren();n.hidden=true}));
 }
 const grantLabels={effective:'Действует',revoked:'Отозван',future:'Ещё не действует',expired:'Истёк срок',blocked:'Аккаунт заблокирован',role_ended:'Роль не действует',policy_changed:'Политика изменена · требуется подтверждение',employment_changed:'Кадровое назначение изменилось',scope_changed:'Область недоступна'};
+function notificationAdminPanel(v){
+ const labels={approval:'Согласование СОП',familiarization:'Ознакомление с СОП',training:'Обучение TWI'},fields=Object.keys(labels).map(k=>{
+  const l=select(k,labels[k],[['off','Отключено'],...Array.from({length:31},(_,i)=>[String(i),i===0?'В день срока':('За '+i+' дн.')])]);l.querySelector('select').value=v.policy[k]===null?'off':String(v.policy[k]);return l;
+ });
+ const settings=form(fields,'Сохранить политику напоминаний',async f=>{
+  const p={expected_revision:v.policy.rev,...Object.fromEntries(Object.keys(labels).map(k=>[k,value(f,k)==='off'?null:Number(value(f,k))]))};
+  await api('admin/notification-policy',p);f.lcResetForm?.();note('Политика напоминаний сохранена');await render();
+ });
+ settings.lcResetForm?.();
+ const state={pending:'В очереди',retry:'Повторная попытка',completed:'Выполнено',cancelled:'Отменено как неактуальное',failed:'Ошибка'};
+ return panel('Фоновые уведомления',el('p',v.enabled&&!v.worker_disabled?'Внутренний обработчик разрешён':'Обработчик выключен настройкой размещения'),el('p','Часовой пояс: '+v.zone+(v.clock_configured?' · закреплён':' · не настроен')+' · лимит пакета: '+v.batch_limit),table(['Состояние задания','Количество'],Object.keys(state).map(k=>[state[k],v.counts[k]])),el('p','Готовы к обработке: '+v.ready+' · незавершённых ознакомлений без активного аккаунта: '+v.missing_accounts),el('p','Последнее завершение: '+(v.last_finished||'ещё нет')+' · внешняя отправка отключена.'),button('Обновить состояние',()=>render()),el('h3','Политика напоминаний предприятия'),el('p','Сроки СОП, ознакомления и обучения берутся из действующих записей. Пока категория отключена, дополнительных напоминаний нет. Существующие обязательные уведомления продолжают работать.'),settings);
+}
 function adminPanel(d){
  const people=new Map(d.people.map(x=>[x.id,x.display_name])),roles=new Map(d.roles.map(x=>[x.id,x.name])),units=new Map(d.units.map(x=>[x.id,x.name])),accounts=new Map(d.accounts.map(x=>[x.id,x.login]));
  const renew=async(text)=>{note(text);await render()};
@@ -342,6 +374,7 @@ function adminPanel(d){
  if(presetList.some(p=>p.status==='missing'))presetPanel.append(button('Добавить недостающие роли TWI',async()=>{if(!discard()||!confirm('Добавить недостающие роли и начальные настройки прав? Существующие роли и доступы останутся прежними.'))return;const r=await api('admin/role-presets',{confirmed:true});await renew('Добавлено ролей: '+r.created)},'primary'));
  if(page==='admin.roles')return [presetPanel,panel('Роли и права',el('p','Роль — набор разрешённых действий. Выберите роль, чтобы настроить права. Системные роли защищены. Изменение прав требует подтверждения доступа в разделе «Назначения и доступ».'),roleRef,...policyForms),button('Справочник ролей',openPage('role.read'))];
  if(page==='admin.access')return [panel('Назначение доступа',el('p','Выберите пользователя, рабочую роль и область. Система создаст недостающее назначение роли и подтвердит доступ одной операцией. Роль без настроенных прав здесь не появляется.'),grantForm),panel('Действующие и завершённые доступы',grants),peopleHistory, panel('Дополнительные кадровые назначения',assignmentRef,employmentRef)];
+ if(page==='admin.notifications')return [notificationAdminPanel(d.notification_background)];
  if(page==='admin.storage')return [storage,auditPanel];
  return [guide];
 
@@ -609,7 +642,7 @@ async function render(){
   user=fresh.user;succeeded=true;
   const version=document.querySelector('.header-meta .version');if(version&&/^[a-f0-9]{40}$/.test(fresh.sourceCommit||'')){version.textContent='LC8.1 · QA · '+fresh.sourceCommit.slice(0,7);version.title='Исходный коммит: '+fresh.sourceCommit;}
   buildNav();rememberPage();$('content').replaceChildren(); // do not retain stale authorized rows
-  if(isAdminPage(page)&&user.admin){const data=await api('admin');if(serial===sequence)$('content').replaceChildren(...adminPanel(data));return}
+  if(isAdminPage(page)&&user.admin){if(page==='admin.notifications'){const v=await api('admin/notification-background');if(serial===sequence)$('content').replaceChildren(notificationAdminPanel(v));return}const data=await api('admin');if(serial===sequence)$('content').replaceChildren(...adminPanel(data));return}
   if(!page){$('content').replaceChildren(panel('Личное рабочее пространство',el('p','Вам пока не назначены права на рабочие разделы. Обратитесь к администратору.')));return}
   if(page==='instruction.view'){
    const d=await api('resources?action=training.read');if(serial===sequence)$('content').replaceChildren(trainingUI.training(d.items,user,'instruction'));return;

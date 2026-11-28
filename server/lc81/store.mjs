@@ -34,6 +34,7 @@ import {directoryPeople} from '../../src/modules/master-data/people-directory.js
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {internalTrainerAppointment} from '../../src/modules/training/domain.js';
 import {notificationsEnabled,notificationFeed,readNotification,readAllNotifications,checkNotificationIntegrity} from './notifications.mjs';
+import {backgroundEnabled,notificationPreferences,saveNotificationPreferences,saveReminderPolicy,discoverBackground,enqueueBackground,readyBackground,drainBackground,backgroundStatus,checkBackgroundIntegrity} from './notification-background.mjs';
 import {approvalPlanItems,approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,compareApprovalSnapshots,approvalImpactContext,saveApprovalImpact,preparePublicationSchedule,schedulePublication,cancelPublication,duePublications,prepareScheduledPublication,executeScheduledPublication,blockDuePublication,checkApprovalIntegrity} from './sop-approval.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
@@ -320,6 +321,7 @@ function checkPrivate(db){
  checkApprovalIntegrity(db);
  checkFamiliarizationIntegrity(db);
  checkNotificationIntegrity(db);
+ checkBackgroundIntegrity(db);
 }
 const digest=b=>createHash('sha256').update(b).digest('hex');
 function pack(db){
@@ -980,6 +982,32 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const a=checkedAccount(db,actor,revision);
    return finalizeLibrary(db,input,{...libraryAccess(db,a,day(db)),personId:a.person_id,at:at(),audit:(action,target)=>audit(db,actor,action,target)});
   })},
+  notificationPreferences(actor,revision){return read(db=>notificationPreferences(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  saveNotificationPreferences(actor,revision,f){return mutate(db=>saveNotificationPreferences(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
+  notificationBackgroundStatus(actor,revision){return read(db=>{
+   requireAdmin(db,actor,revision);const clock=siteClock(db);
+   return backgroundStatus(db,clock,id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)});
+  })},
+  setNotificationPolicy(actor,revision,f){return mutate(db=>{
+   requireAdmin(db,actor,revision);return saveReminderPolicy(db,actor,siteClock(db),f,(action,target)=>audit(db,actor,action,target));
+  })},
+  // The worker is an internal API, never exposed by the HTTP router. A
+  // separate durable enqueue and drain allows restart between both commits.
+  async runNotificationBackground({enqueueOnly=false}={}){
+   const empty={enqueued:0,completed:0,cancelled:0,retried:0,failed:0,deferred:0};
+   if(!backgroundEnabled()||process.env.LC81_SCHEDULER_DISABLED==='1')return empty;
+   const ctx=db=>{const clock=siteClock(db);return {clock,accessFor:id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)}}};
+   const result={...empty};
+   try{
+    const candidates=read(db=>{const c=ctx(db);return discoverBackground(db,c.clock,c.accessFor)});
+    if(candidates.length)result.enqueued=await mutate(db=>{const c=ctx(db);return enqueueBackground(db,c.clock,c.accessFor,candidates)});
+    if(!enqueueOnly){
+     const ids=read(db=>readyBackground(db,siteClock(db)));
+     if(ids.length)Object.assign(result,await mutate(db=>{const c=ctx(db);return drainBackground(db,c.clock,c.accessFor,ids)}));
+    }
+   }catch(e){if(e instanceof PilotError&&e.status===429)result.deferred++;else throw e}
+   return result;
+  },
   notificationFeed(actor,revision,filter){return read(db=>notificationFeed(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),filter))},
   readNotification(actor,revision,f){return mutate(db=>readNotification(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   readAllNotifications(actor,revision,f){return mutate(db=>readAllNotifications(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
