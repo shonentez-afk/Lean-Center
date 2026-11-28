@@ -1,7 +1,7 @@
 // Protected program templates, personal enrolments, task facts and preparation
 // links. The LC4/LC6 validators and enrollmentTasks remain authoritative.
 import {one,rows,uuid,isId,foldKey,applyEvent} from '../../src/core/db.js';
-import {programKinds,parts,conclusions} from '../../src/modules/training/domain.js';
+import {programKinds,parts,conclusions,activeEmployment} from '../../src/modules/training/domain.js';
 import {PROGRAM_DOCS,bankRows} from '../../src/modules/training/standard-workflows.js';
 import {enrollmentTasks,sharedTrainingTask,latestTaskAssignment} from '../../src/modules/training/training-facts.js';
 import {preparationProgress,THEORY_BLOCKS,COMMISSION_ROLES} from '../../src/modules/training/preparation-results.js';
@@ -83,7 +83,7 @@ export function enrollmentOptions(db,a){
  must(a.personId&&a.permissions.includes('training.enrollment.create'),403,'Назначение программы недоступно');
  const action='training.enrollment.create',people=directoryPeople(db,a.day).filter(p=>readPerson(a,p.id)&&allowed(a,action,p.id,personWorkResource(db,[p.id],a.day)));
  const pick=(kinds)=>people.filter(p=>p.roles.some(r=>kinds.some(k=>matchesRoleKind(r,k)))).map(p=>({id:p.id,name:p.display_name}));
- return {day:a.day,programs:rows(db,"SELECT * FROM training_program WHERE state='active' ORDER BY code").filter(p=>a.read('program.read',p.id)).map(p=>({id:p.id,label:programLabel(p),kind:p.kind,standard_kind:p.standard_kind,version_no:p.version_no,rev:p.rev})),trainees:pick(['trainee']),mentors:pick(['mentor','instructor','internship_mentor']),managers:people.map(p=>({id:p.id,name:p.display_name}))};
+ return {day:a.day,programs:rows(db,"SELECT * FROM training_program WHERE state='active' ORDER BY code").filter(p=>a.read('program.read',p.id)).map(p=>({id:p.id,label:programLabel(p),kind:p.kind,standard_kind:p.standard_kind,version_no:p.version_no,rev:p.rev})),trainees:people.filter(p=>activeEmployment(db,p.id,a.day)).map(p=>({id:p.id,name:p.display_name})),mentors:pick(['mentor','instructor','internship_mentor']),managers:people.map(p=>({id:p.id,name:p.display_name}))};
 }
 export function createEnrollment(db,a,f){
  const action='training.enrollment.create';

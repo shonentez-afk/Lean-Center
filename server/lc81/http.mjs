@@ -136,6 +136,11 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
     reply(res,200,html,'text/html; charset=utf-8',{'X-Frame-Options':'SAMEORIGIN','Content-Security-Policy':"sandbox allow-scripts allow-modals; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src data: blob:; object-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'; child-src 'none'"});
     return;
    }
+   if(req.method==='GET'&&p==='/api/lc81/training/plans'){reply(res,200,store.productionPlans(a.id,a.credential_revision));return}
+   if(req.method==='POST'&&p==='/api/lc81/training/plan-create'){reply(res,200,await store.createProductionPlan(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/training/plan-approve'){reply(res,200,await store.approveProductionPlan(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/training/protocol'){reply(res,200,await store.recordInstructionProtocol(a.id,a.credential_revision,await body(req)));return}
+   if(req.method==='POST'&&p==='/api/lc81/training/result'){reply(res,200,await store.recordAssessmentResult(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/training/options'){reply(res,200,store.trainingOptions(a.id,a.credential_revision,url.searchParams.get('operation_id')));return}
    if(req.method==='GET'&&p==='/api/lc81/training/detail'){reply(res,200,store.trainingDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/training/sop'){reply(res,200,store.trainingSop(a.id,a.credential_revision,url.searchParams.get('id')));return}

@@ -1,6 +1,7 @@
 // Every section is independently authorized using existing projections.
 import {rows,one,isId} from '../../src/core/db.js';
-import {trainingAssignmentResource,matrixResource} from './read-policy.mjs';
+import {trainingAssignmentResource,matrixResource,assessmentResource} from './read-policy.mjs';
+import {latestQualification,isCurrentStandard} from '../../src/modules/training/domain.js';
 import {personnelView} from './personnel-commands.mjs';
 import {scheduleView} from './center-commands.mjs';
 import {roiView} from './roi-commands.mjs';
@@ -37,6 +38,25 @@ const sections=[
  ['calendar.read','schedule_event','owner_id','Плановые аудиты и оценки'],
  ['roi.read','economic_effect','owner_id','Карточки экономического эффекта']
 ];
+// A dedicated self projection, not permission to read a department matrix.
+function ownCompetences(db,a,id){
+ if(a.personId!==id||!a.permissions.includes('person.read_card'))return null;
+ const employment=one(db,"SELECT profession_id FROM person_assignment WHERE person_id=? AND valid_from<=? AND coalesce(valid_to,'9999-12-31')>=? ORDER BY valid_from DESC,id LIMIT 1",[id,a.day,a.day]);
+ if(!employment)return [];
+ const goals=rows(db,"SELECT r.* FROM role_requirement r JOIN skill s ON s.id=r.skill_id WHERE r.profession_id=? AND r.valid_from<=? AND coalesce(r.valid_to,'9999-12-31')>=? AND s.archived=0",[employment.profession_id,a.day,a.day]);
+ const known=rows(db,"SELECT DISTINCT i.skill_id FROM assessment_item i JOIN assessment_session s ON s.id=i.session_id WHERE s.person_id=? AND s.state='confirmed' AND substr(s.assessed_at,1,10)<=?",[id,a.day]);
+ const targets=new Map(goals.map(g=>[g.skill_id,g]));
+ const result=[];
+ for(const skillId of new Set([...targets.keys(),...known.map(x=>x.skill_id)])){
+  const s=one(db,'SELECT name,operation_id FROM skill WHERE id=? AND archived=0',[skillId]);if(!s)continue;
+  const goal=targets.get(skillId),fact=latestQualification(db,id,skillId,a.day),session=fact&&one(db,'SELECT * FROM assessment_session WHERE id=?',[fact.session_id]),resource=session&&assessmentResource(db,session,a.day);
+  const visible=fact&&resource&&a.read('assessment.read',fact.session_id)&&a.allows('assessment.detail',fact.session_id,resource);
+  if(!goal&&!visible)continue;
+  const state=!fact?'Нет оценки':!visible?'Оценка недоступна':fact.observation_state==='not_observed'?'Не наблюдалось':fact.observation_state==='not_applicable'?'Неприменимо':fact.valid_until&&fact.valid_until<a.day?'Срок оценки истёк':goal&&goal.scale_id!==fact.scale_id?'Другая шкала':s.operation_id&&!isCurrentStandard(db,fact.standard_revision_id)?'Прежняя редакция СОП':'Подтверждён';
+  result.push({skill:s.name,target:goal?.required_level??null,actual:visible&&fact.observation_state==='rated'?fact.level:null,state,assessed_on:visible?fact.assessed_at.slice(0,10):null,assessment_id:visible?fact.session_id:null});
+ }
+ return result.sort((x,y)=>x.skill.localeCompare(y.skill,'ru'));
+}
 export function personCard(db,a,id,canRead,{libraryRead=(action,id)=>a.read(action,id),canTwiReport=false,canPlan=false}={}){
  const person=isId(id)&&canRead(id)&&(a.read('person.read_directory',id)||a.read('person.read_basic',id));
  if(!person)throw new PilotError(404,'Карточка сотрудника недоступна');
@@ -72,5 +92,5 @@ export function personCard(db,a,id,canRead,{libraryRead=(action,id)=>a.read(acti
  if(sopItems.length)result.push({action:'sop.read_history',title:'Связанные редакции СОП',items:sopItems});
  if(frvItems.length)result.push({action:'frv.read',title:'Исследования ФРВ сотрудника',items:frvItems});
  const current=result.find(s=>s.action==='employment.read')?.items.find(x=>x.state==='Действует'),roles=(result.find(s=>s.action==='role_assignment.read')?.items||[]).filter(x=>x.state==='Действует'&&x.role).map(x=>x.role);
- return {person:{...person.data,...(current?.shift?{shift:current.shift}:{}),roles:[...new Set(roles)]},sections:result,day:a.day,can_create_training:!!a.personId&&a.personId!==id&&a.permissions.includes('training.create'),can_calendar:a.permissions.includes('calendar.read'),can_plan:canPlan,can_twi_report:canTwiReport,can_journal:['training.read','training.detail','sop.read_history','operation.read','org.read'].every(k=>a.permissions.includes(k)),can_retraining:canReadRetraining(db,a)};
+ return {person:{...person.data,...(current?.shift?{shift:current.shift}:{}),roles:[...new Set(roles)]},sections:result,own_competences:ownCompetences(db,a,id),day:a.day,can_create_training:!!a.personId&&a.personId!==id&&a.permissions.includes('training.create'),can_calendar:a.permissions.includes('calendar.read'),can_plan:canPlan,can_twi_report:canTwiReport,can_journal:['training.read','training.detail','sop.read_history','operation.read','org.read'].every(k=>a.permissions.includes(k)),can_retraining:canReadRetraining(db,a)};
 }

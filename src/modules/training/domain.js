@@ -50,6 +50,10 @@ function roleMatches(db,id,day,allowed){
  return directoryPeople(db,day).find(x=>x.id===id)?.roles.some(x=>allowed.some(kind=>matchesRoleKind(x,kind)))
 }
 function hasRole(db,id,day,allowed){person(db,id);invariant(roleMatches(db,id,day,allowed),'У сотрудника нет действующего назначения нужной роли')}
+export function activeEmployment(db,id,day){
+ return !!one(db,`SELECT a.id FROM person_assignment a JOIN person p ON p.id=a.person_id JOIN org_unit u ON u.id=a.unit_id
+ WHERE p.id=? AND p.archived=0 AND u.archived=0 AND a.valid_from<=? AND coalesce(a.valid_to,'9999-12-31')>=? LIMIT 1`,[id,day,day]);
+}
 function roleForCredential(role){return role==='internal_trainer'?['internal_trainer']:role==='mentor'?['mentor']:['instructor']}
 function level(db,scale,levelValue){active(db,'rating_scale',scale);invariant(integer(levelValue,0,1000)&&one(db,'SELECT value FROM rating_level WHERE scale_id=? AND value=?',[scale,levelValue]),'Уровень отсутствует в выбранной шкале')}
 function effective(db,revisionId){const r=currentStandard(db,revisionId);invariant(r&&r.state==='effective'&&!r.archived&&r.operation_id&&r.source?.kind==='sop','Выберите действующую редакцию СОП, привязанную к операции');active(db,'operation',r.operation_id);return r}
@@ -273,7 +277,7 @@ export function applyTrainingEvent(db,e,old){
     if(program.kind==='internship'&&!program.standard_kind)invariant(p.internship_start&&p.internship_end&&p.entry_start&&p.entry_end,'Укажите оба периода из формы стажировки');
    }
    invariant(rows(db,'SELECT day_offset FROM training_program_task WHERE program_id=?',[program.id]).every(x=>plusDays(p.start_on,x.day_offset)<=p.due_on),'Срок персональной программы должен включать все задания');
-   hasRole(db,p.trainee_id,p.start_on,['trainee']);hasRole(db,p.mentor_id,p.start_on,program.standard_kind==='internship'?['mentor','instructor','internship_mentor']:['mentor','instructor']);person(db,p.manager_id);invariant(p.trainee_id!==p.mentor_id,'Сотрудник не может обучать себя');
+   invariant(activeEmployment(db,p.trainee_id,p.start_on),'У обучаемого нет действующего назначения на работу');hasRole(db,p.mentor_id,p.start_on,program.standard_kind==='internship'?['mentor','instructor','internship_mentor']:['mentor','instructor']);person(db,p.manager_id);invariant(p.trainee_id!==p.mentor_id,'Сотрудник не может обучать себя');
    const a=one(db,"SELECT * FROM person_assignment WHERE person_id=? AND valid_from<=? AND coalesce(valid_to,'9999-12-31')>=? ORDER BY valid_from DESC LIMIT 1",[p.trainee_id,p.start_on,p.start_on]);
    invariant((!program.profession_id||a?.profession_id===program.profession_id)&&(!program.position_id||a?.position_id===program.position_id),'Программа не соответствует действующему назначению сотрудника');
    invariant(!one(db,"SELECT id FROM training_enrollment WHERE program_id=? AND trainee_id=? AND state='active'",[p.program_id,p.trainee_id]),'Такая персональная программа уже активна');
@@ -300,7 +304,7 @@ export function applyTrainingEvent(db,e,old){
    const r=effective(db,p.revision_id);invariant(canonical(r.source)===canonical(p.source)&&p.plan_reviewed===true,'Исходник назначения должен соответствовать действующей редакции и проверенному TWI');
    invariant(period(p.assigned_on,p.due_on)&&p.due_on&&required(p.reason)&&Object.hasOwn(variants,p.variant),'Укажите даты, вид и основание обучения');
    invariant(r.effective_at&&p.assigned_on>=r.effective_at.slice(0,10),'Начало обучения не может предшествовать вступлению СОП в действие');
-   hasRole(db,p.trainee_id,p.assigned_on,['trainee']);person(db,p.assigned_by);invariant(p.trainee_id!==p.mentor_id,'Инструктор и обучаемый должны различаться');
+   invariant(activeEmployment(db,p.trainee_id,p.assigned_on),'У обучаемого нет действующего назначения на работу');person(db,p.assigned_by);invariant(p.trainee_id!==p.mentor_id,'Инструктор и обучаемый должны различаться');
    const auth=one(db,'SELECT * FROM mentor_authorization WHERE id=?',[p.authorization_id]);invariant(auth?.person_id===p.mentor_id&&auth.operation_id===r.operation_id&&authorizationValid(db,auth.id,p.assigned_on),'Выберите инструктора с действующим правом обучать этой операции');
    if(p.supervisor_id){hasRole(db,p.supervisor_id,p.assigned_on,['mentor','instructor']);invariant(p.supervisor_id!==p.trainee_id,'Наставник и обучаемый должны различаться')}
    optional(db,'work_shift',p.shift_id);exactAssignmentTarget(db,p,r);
@@ -458,7 +462,8 @@ export function matrixData(db,day){
 export function coverageData(db,day,matrix=matrixData(db,day)){
  return rows(db,'SELECT * FROM coverage_requirement ORDER BY unit_id,skill_id,shift_code').map(r=>{
   const skill=matrix.skills.find(s=>s.id===r.skill_id),scope=matrix.people.filter(p=>p.unit_id===r.unit_id&&(!r.shift_code||p.shift_code===r.shift_code||one(db,'SELECT code FROM work_shift WHERE id=?',[p.shift_id])?.code===r.shift_code));
-  const actual=scope.filter(p=>{const c=matrix.cells.get(p.id+':'+r.skill_id);return c?.valid&&c.revisionCurrent&&c.fact.scale_id===r.scale_id&&c.fact.level>=r.required_level&&(!skill?.operation_id||c.admission?.current&&c.admission.record.revision_id===c.fact.standard_revision_id)}).length;
-  return {...r,actual,deficit:Math.max(0,r.min_people-actual),fraction:r.min_people?actual/r.min_people:null,scope:scope.length}
+  const sufficient=scope.filter(p=>{const c=matrix.cells.get(p.id+':'+r.skill_id);return c?.valid&&c.revisionCurrent&&c.fact.scale_id===r.scale_id&&c.fact.level>=r.required_level});
+  const competent=sufficient.length,actual=sufficient.filter(p=>{const c=matrix.cells.get(p.id+':'+r.skill_id);return !skill?.operation_id||c.admission?.current&&c.admission.record.revision_id===c.fact.standard_revision_id}).length;
+  return {...r,competent,competence_deficit:Math.max(0,r.min_people-competent),requires_admission_measure:!!skill?.operation_id,actual,deficit:Math.max(0,r.min_people-actual),fraction:r.min_people?actual/r.min_people:null,scope:scope.length}
  })
 }

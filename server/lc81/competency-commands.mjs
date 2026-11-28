@@ -121,7 +121,7 @@ export function competencyView(db,a,action,data){
  if(action==='requirement.read')return {...data,profession:one(db,'SELECT name FROM profession WHERE id=?',[data.profession_id])?.name??'',skill:skillLabel(db,data.skill_id),scale:one(db,'SELECT name FROM rating_scale WHERE id=?',[data.scale_id])?.name??'',can_close:!!a.personId&&!data.valid_to&&allowed(a,'requirement.close',data.id,requirementResource(db,data))};
  if(action==='coverage.read'){
   const c=coverageData(db,a.day).find(x=>x.id===data.id);
-  return {...data,unit:a.read('org.read',data.unit_id)?.data.name??null,skill:skillLabel(db,data.skill_id),actual:c?.actual??null,deficit:c?.deficit??null,can_edit:!!a.personId&&allowed(a,'coverage.save',data.id,coverageResource(db,data))};
+  return {...data,unit:a.read('org.read',data.unit_id)?.data.name??null,skill:skillLabel(db,data.skill_id),competent:c?.competent??null,competence_deficit:c?.competence_deficit??null,actual:c?.actual??null,deficit:c?.deficit??null,requires_admission_measure:c?.requires_admission_measure??false,can_edit:!!a.personId&&allowed(a,'coverage.save',data.id,coverageResource(db,data))};
  }
  const r=one(db,'SELECT * FROM assessment_session WHERE id=?',[data.id]);
  return {...data,person_name:name(a,r.person_id),evaluator_name:name(a,r.evaluator_id),title:rows(db,'SELECT s.name FROM assessment_item i JOIN skill s ON s.id=i.skill_id WHERE i.session_id=?',[r.id]).map(x=>x.name).join(' · '),can_detail:allowed(a,'assessment.detail',r.id,assessmentResource(db,r,a.day))};

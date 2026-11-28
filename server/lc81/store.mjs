@@ -14,7 +14,7 @@ import {siteClock,normalizeZone,SITE_ZONE_KEY} from './site-clock.mjs';
 import {changeOwnPassword,resetAccountPassword,renameAccount,grantStatus,endRole,endEmployment} from './admin-commands.mjs';
 import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource} from './read-policy.mjs';
 import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,SITE_REFERENCE_TYPES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
-import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop} from './training-commands.mjs';
+import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop,productionPlans,createProductionPlan,approveProductionPlan,recordInstructionProtocol,recordAssessmentResult} from './training-commands.mjs';
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix,matrixOverviewOptions,matrixOverview,matrixAssessmentHistory,profileOptions,professionProfile,saveProfessionProfile} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
 import {calendarWorkspace,calendarOptions,calendarDetail,createSchedule,changeSchedule,scheduleView,centerOptions,centerWorkspace,metricEvidence} from './center-commands.mjs';
@@ -615,11 +615,16 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    catch(e){throw new PilotError(422,'Проверьте исходный СОП, актуальный план TWI и методику: '+String(e.message||'ошибка').split('\n')[0].slice(0,200))}
    return mutate(db=>{
     const access=trainingAccess(db,checkedAccount(db,actor,revision),day(db)),next=resolveTrainingCreate(db,input,access);
-    must(next.source.sha256===resolved.source.sha256&&JSON.stringify(next.payload)===JSON.stringify(resolved.payload),409,'Назначение изменилось при проверке');
+    must(next.source.sha256===resolved.source.sha256&&JSON.stringify(next.payload)===JSON.stringify(resolved.payload)&&next.scenario===resolved.scenario,409,'Назначение изменилось при проверке');
     return createTraining(db,next,access);
    });
   },
   changeTraining(actor,revision,input){return mutate(db=>changeTraining(db,input,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  productionPlans(actor,revision){return read(db=>productionPlans(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
+  createProductionPlan(actor,revision,input){return mutate(db=>createProductionPlan(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  approveProductionPlan(actor,revision,input){return mutate(db=>approveProductionPlan(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  recordInstructionProtocol(actor,revision,input){return mutate(db=>recordInstructionProtocol(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
+  recordAssessmentResult(actor,revision,input){return mutate(db=>recordAssessmentResult(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
   trainingDetail(actor,revision,id){return read(db=>{const a=trainingAccess(db,checkedAccount(db,actor,revision),day(db));return {...trainingDetail(db,a,id),forms:documentLinks(db,a,id,["training_plan","journal"])}})},
   trainingSop(actor,revision,id){return read(db=>trainingSop(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
   programOptions(actor,revision){return read(db=>programOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
