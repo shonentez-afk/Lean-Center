@@ -93,7 +93,7 @@ export function trainingOptions(db,access,operationId=null){
 }
 export const CREATE_FIELDS=Object.freeze(['operation_id','trainee_id','authorization_id','revision_id','skill_id','scale_id','target_level','assigned_on','due_on','reason','variant','method_config','plan_reviewed']);
 export function resolveTrainingCreate(db,input,access){
- const fields=[...CREATE_FIELDS,...(Object.hasOwn(input||{},'scenario')?['scenario']:[])];
+ const fields=[...CREATE_FIELDS,...(Object.hasOwn(input||{},'scenario')?['scenario']:[]),...(Object.hasOwn(input||{},'rapid_confirm')?['rapid_confirm']:[])];
  const linked=exact(input,[...fields,'enrollment_id','program_task_id','enrollment_rev']),repeat=exact(input,[...fields,'retraining_source_id']);
  must((exact(input,fields)||linked||repeat)&&access.personId&&isId(input.operation_id)&&isId(input.trainee_id)&&isId(input.authorization_id)&&isId(input.revision_id)&&date(input.assigned_on)&&date(input.due_on)&&input.assigned_on>=access.day&&input.plan_reviewed===true,400,'Заполните назначение и подтверждение плана');
  must(access.read('operation.read',input.operation_id)&&access.read('sop.read_effective',input.revision_id)&&allowedPerson(db,access,input.trainee_id),403,'Данные назначения недоступны');
@@ -128,11 +128,22 @@ export function resolveTrainingCreate(db,input,access){
  const inferred=repeat?'changed_operation':program&&['adaptation','internship','safety'].includes(program.standard_kind)?'onboarding':program?'development':null;
  const scenario=input.scenario??inferred;
  must(!inferred||!input.scenario||input.scenario===inferred,422,'Основание не соответствует связанной программе или переобучению');
- return {source:r.source,scenario,payload:{trainee_id:input.trainee_id,mentor_id:auth.person_id,supervisor_id:null,authorization_id:auth.id,revision_id:r.id,source:r.source,skill_id:input.skill_id,scale_id:input.scale_id,target_level:input.target_level,assigned_by:access.personId,assigned_on:input.assigned_on,due_on:input.due_on,reason:input.reason,variant:input.variant,method_version:'JI-2',method_config:input.method_config,shift_id:null,enrollment_id:n?.id??null,program_task_id:task?.id??null,plan_reviewed:true}};
+ must(scenario!=='onboarding'||linked&&inferred==='onboarding',422,'Для новичка или перевода сначала оформите персональную программу подготовки и назначайте инструктаж из её задания');
+ if(Object.hasOwn(input,'rapid_confirm')){
+  must(input.rapid_confirm===true&&scenario==='rapid'&&!linked&&!repeat&&input.assigned_on===access.day,422,'Оперативное согласование применяется только к самостоятельному назначению при отклонении с началом сегодня');
+  must(access.personId!==input.trainee_id&&access.allows('training.approve_responsible',input.operation_id,resource),403,'Нет полномочий непосредственного руководителя / ответственного согласовать это обучение');
+ }
+ return {source:r.source,scenario,rapidConfirm:input.rapid_confirm===true,payload:{trainee_id:input.trainee_id,mentor_id:auth.person_id,supervisor_id:null,authorization_id:auth.id,revision_id:r.id,source:r.source,skill_id:input.skill_id,scale_id:input.scale_id,target_level:input.target_level,assigned_by:access.personId,assigned_on:input.assigned_on,due_on:input.due_on,reason:input.reason,variant:input.variant,method_version:'JI-2',method_config:input.method_config,shift_id:null,enrollment_id:n?.id??null,program_task_id:task?.id??null,plan_reviewed:true}};
 }
 export function createTraining(db,resolved,access){
  const id=uuid();emit(db,access,'training_assignment',id,'create',0,resolved.payload,'training.create');
  if(resolved.scenario){db.run(contextSchema);db.run('INSERT INTO lc81_training_context VALUES(?,?)',[id,resolved.scenario])}
+ if(resolved.rapidConfirm){
+  const t=visible(db,access,id);
+  must(allowed(db,access,t,'training.approve_responsible'),403,'Назначение выходит за область согласования');
+  const v=vote(db,t,'responsible','Оперативное согласование при создании назначения',access);
+  return {...v,scenario:resolved.scenario,rapid_confirmed:true};
+ }
  return {id,rev:1,state:'planned',scenario:resolved.scenario};
 }
 function pendingApprovals(db,a){
@@ -186,7 +197,31 @@ function planEligible(db,a,t){
  return !!a.personId&&a.personId!==t.trainee_id&&['planned','in_progress'].includes(t.state)&&!approved(t)&&s?.state==='effective'&&!s.archived&&allowed(db,a,t,'training.create')&&
  !pendingApprovals(db,t).some(v=>approvalValid(db,t,v,a))&&!livePlan(db,t,a);
 }
-const planRow=(db,t)=>({id:t.id,rev:t.rev,assigned_on:t.assigned_on,due_on:t.due_on,trainee:label(db,t.trainee_id),instructor:label(db,t.mentor_id),operation:one(db,'SELECT name FROM operation WHERE id=?',[t.operation_id])?.name??'',scenario:scenarioFor(db,t.id)});
+const planRow=(db,t)=>({id:t.id,rev:t.rev,assigned_on:t.assigned_on,due_on:t.due_on,trainee:label(db,t.trainee_id),instructor:label(db,t.mentor_id),operation:one(db,'SELECT name FROM operation WHERE id=?',[t.operation_id])?.name??'',target_level:t.target_level,scenario:scenarioFor(db,t.id)});
+function planExportRows(db,a,p,items,current){
+ if(!a.personId||!p.approved_at||!items.length)return null;
+ const result=[];
+ for(let i=0;i<items.length;i++){
+  const t=current[i],item=items[i],r=t&&a.read('sop.read_history',t.sop_revision_id)?.data,op=t&&a.read('operation.read',t.operation_id)?.data;
+  if(!t||!r||!op||!allowed(db,a,t,'forms.export'))return null;
+  const unit=a.read('org.read',op.unit_id)?.data.name;
+  if(!unit)return null;
+  const names=JSON.parse(t.recorded_names_json||'{}');
+  // The target and revision are immutable assignment fields; the stored
+  // row dates/version are used even after a later reschedule or cancellation.
+  const level=one(db,'SELECT label FROM rating_level WHERE scale_id=? AND value=?',[t.scale_id,t.target_level])?.label;
+  result.push({assignment_id:t.id,assignment_rev:item.expected_rev,unit,trainee:names.trainee||label(db,t.trainee_id),instructor:names.instructor||label(db,t.mentor_id),sop:r.code+' · '+r.title+' · v'+r.version_no,target_level:t.target_level,target_label:level??'',assigned_on:item.assigned_on,due_on:item.due_on,scenario:TWI_SCENARIOS[scenarioFor(db,t.id)]??'Историческое основание не классифицировано'});
+ }
+ return result;
+}
+export function productionPlanExport(db,a,id){
+ const p=isId(id)&&hasTable(db,'lc81_production_plan')&&one(db,'SELECT * FROM lc81_production_plan WHERE id=?',[id]);
+ const items=p?planItems(db,id):[],current=items.map(x=>planAccess(db,a,x.assignment_id));
+ const result=p&&planExportRows(db,a,p,items,current);
+ must(result,404,'Согласованный состав или права на его выгрузку недоступны');
+ const signer=key=>{const v=JSON.parse(p[key+'_vote']||'null');return v?{name:v.person_name??'Имя в историческом составе не сохранено',date:v.decided_at.slice(0,10)}:null};
+ return {title:p.title,from:p.from_on,to:p.to_on,approved_on:p.approved_at.slice(0,10),responsible:signer('responsible'),head:signer('head'),rows:result};
+}
 function projectPlan(db,a,p){
  const items=planItems(db,p.id),current=items.map(x=>planAccess(db,a,x.assignment_id));
  if(!items.length||current.some(x=>!x))return null;
@@ -195,7 +230,7 @@ function projectPlan(db,a,p){
   const v=p[kind+'_vote']?JSON.parse(p[kind+'_vote']):null;
   return [kind,{done:!!v,day:v?.decided_at.slice(0,10)??null,can:status==='draft'&&!v&&!!a.personId&&current.every(t=>a.personId!==t.trainee_id&&allowed(db,a,t,'training.approve_'+kind))}];
  }));
- return {id:p.id,title:p.title,from:p.from_on,to:p.to_on,status,rows:current.map((t,i)=>({...planRow(db,t),rev:items[i].expected_rev,assigned_on:items[i].assigned_on,due_on:items[i].due_on})),votes};
+ return {id:p.id,title:p.title,from:p.from_on,to:p.to_on,status,can_export:!!planExportRows(db,a,p,items,current),rows:current.map((t,i)=>({...planRow(db,t),rev:items[i].expected_rev,assigned_on:items[i].assigned_on,due_on:items[i].due_on})),votes};
 }
 export function productionPlans(db,a){
  must(a.personId&&a.permissions.includes('training.read')&&a.permissions.includes('training.detail'),403,'План обучения недоступен');
@@ -220,7 +255,7 @@ export function approveProductionPlan(db,a,f){
  const key=f.kind+'_vote',otherKey=(f.kind==='head'?'responsible':'head')+'_vote',other=p[otherKey]&&JSON.parse(p[otherKey]);
  must(!other||other.person_id!==a.personId,403,'Два согласующих должны быть разными сотрудниками');
  must(view.votes[f.kind].can,403,'Согласование недоступно или уже зарегистрировано');
- const v={kind:f.kind,account_id:a.accountId,person_id:a.personId,credential_revision:a.credentialRevision,note:f.note,decided_at:a.at};
+ const v={kind:f.kind,account_id:a.accountId,person_id:a.personId,person_name:label(db,a.personId),credential_revision:a.credentialRevision,note:f.note,decided_at:a.at};
  db.run('UPDATE lc81_production_plan SET '+key+'=? WHERE id=?',[canonical(v),p.id]);a.audit('training.plan_approve_'+f.kind,p.id);
  if(!other)return {id:p.id,status:'draft'};
  const items=planItems(db,p.id),responsible=f.kind==='responsible'?v:other,head=f.kind==='head'?v:other;

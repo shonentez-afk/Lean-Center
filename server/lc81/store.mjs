@@ -616,7 +616,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    catch(e){throw new PilotError(422,'Проверьте исходный СОП, актуальный план TWI и методику: '+String(e.message||'ошибка').split('\n')[0].slice(0,200))}
    return mutate(db=>{
     const access=trainingAccess(db,checkedAccount(db,actor,revision),day(db)),next=resolveTrainingCreate(db,input,access);
-    must(next.source.sha256===resolved.source.sha256&&JSON.stringify(next.payload)===JSON.stringify(resolved.payload)&&next.scenario===resolved.scenario,409,'Назначение изменилось при проверке');
+    must(next.source.sha256===resolved.source.sha256&&JSON.stringify(next.payload)===JSON.stringify(resolved.payload)&&next.scenario===resolved.scenario&&next.rapidConfirm===resolved.rapidConfirm,409,'Назначение изменилось при проверке');
     return createTraining(db,next,access);
    });
   },

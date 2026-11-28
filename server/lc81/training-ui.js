@@ -27,7 +27,18 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    }
    if(!d.people.length||!d.mentors.length||!d.revisions.length||!d.skills.length||!d.scales.length||context&&!d.scales[0]?.levels.length){out.replaceChildren(el('p','Для операции нужны обучаемые, действующий инструктор с полномочием, СОП, навык и шкала.'));return}
    const revision=select('revision_id','Действующая редакция СОП',opts(d.revisions,'title'));
-   const scenario=select('scenario','Основание обучения по TWI 03',[['','— Выберите —'],...Object.entries(d.scenarios||{})]);
+   const scenario=select('scenario','Основание обучения по TWI 03',[['','— Выберите —'],...Object.entries(d.scenarios||{}).filter(([k])=>k!=='onboarding')]);
+   const scenarioHelp=el('p','Новичок / перевод: откройте задание персональной программы подготовки.','muted');
+   const rapidConfirm=check('rapid_confirm','Сразу подтвердить назначение как непосредственный руководитель / ответственный');
+   rapidConfirm.hidden=true;
+   const scenarioMode=()=>{
+    const k=scenario.querySelector('select').value;
+    rapidConfirm.hidden=k!=='rapid';
+    if(k!=='rapid')rapidConfirm.querySelector('input').checked=false;
+    const hints={development:'План развития компетенции: согласование, инструктаж, фактическое наблюдение и уровень МК.',changed_operation:'Новая операция / изменение технологии: ФРВ, актуальный СОП, апробация, обучение всех исполнителей и отчёт руководителю.',rapid:'Отклонение от действующего СОП: обучение как можно быстрее, контроль качества и времени (3–5 замеров). Оперативное подтверждение заменяет отдельный шаг первого согласующего; второй согласующий остаётся обязательным.'};
+    scenarioHelp.textContent=hints[k]||'Новичок / перевод: откройте задание персональной программы подготовки. Если выявлено узкое место или вариабельность — выберите новую операцию / изменение технологии.';
+   };
+   scenario.querySelector('select').addEventListener('change',scenarioMode);scenarioMode();
    const scale=select('scale_id','Шкала',opts(d.scales)),level=select('target_level','Целевой уровень',[]);
    function levels(){level.querySelector('select').replaceChildren(...(d.scales.find(x=>x.id===scale.querySelector('select').value)?.levels||[]).map(x=>{const n=el('option',x.value+' · '+x.label);n.value=x.value;return n}))}
    scale.querySelector('select').addEventListener('change',levels);levels();
@@ -36,10 +47,10 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
    const segments=input('segments','Дробный инструктаж · группы шагов (например 1-3,4-6)','text',false),hazard=check('hazardous','Требуется предварительная проверка безопасности');
    function mode(){const v=variant.querySelector('select').value;realShow.hidden=realTry.hidden=v!=='smed';segments.hidden=v!=='fractional';segments.querySelector('input').required=v==='fractional'}
    variant.querySelector('select').addEventListener('change',mode);mode();
-   out.replaceChildren(form([select('trainee_id','Обучаемый',opts(d.people)),select('authorization_id','Инструктор с действующим полномочием',opts(d.mentors)),revision,select('skill_id','Навык',opts(d.skills)),scale,level,dt('assigned_on','Начало',link&&link.start_on>d.day?link.start_on:d.day),dt('due_on','Срок',link?.due_on||''),...(!context?[scenario]:[]),fill(input('reason','Причина / производственная задача'),retrain?.reason),variant,number('followups','Контрольные проверки',2,10,2),realShow,realTry,segments,hazard,check('plan_reviewed','План TWI действующей редакции проверен')],'Создать назначение',async f=>{
+   out.replaceChildren(form([select('trainee_id','Обучаемый',opts(d.people)),select('authorization_id','Инструктор с действующим полномочием',opts(d.mentors)),revision,select('skill_id','Навык',opts(d.skills)),scale,level,dt('assigned_on','Начало',link&&link.start_on>d.day?link.start_on:d.day),dt('due_on','Срок',link?.due_on||''),...(!context?[scenario,scenarioHelp,rapidConfirm]:[]),fill(input('reason','Причина / производственная задача'),retrain?.reason),variant,number('followups','Контрольные проверки',2,10,2),realShow,realTry,segments,hazard,check('plan_reviewed','План TWI действующей редакции проверен')],'Создать назначение',async f=>{
     const v=value(f,'variant'),parts=v==='fractional'?value(f,'segments').split(',').map(s=>{const m=/^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(s);if(!m)throw Error('Укажите группы шагов, например 1-3,4-6');return {from:Number(m[1]),to:Number(m[2])}}):[];
-    await api('training/create',{operation_id:id,trainee_id:value(f,'trainee_id'),authorization_id:value(f,'authorization_id'),revision_id:value(f,'revision_id'),skill_id:value(f,'skill_id'),scale_id:value(f,'scale_id'),target_level:Number(value(f,'target_level')),assigned_on:value(f,'assigned_on'),due_on:value(f,'due_on'),reason:value(f,'reason'),...(!context?{scenario:value(f,'scenario')}:{}),variant:v,method_config:{followups:Number(value(f,'followups')),segments:parts,realShow:v==='smed'?Number(value(f,'real_show')):null,realTry:v==='smed'?Number(value(f,'real_try')):null,hazardous:checked(f,'hazardous')},plan_reviewed:checked(f,'plan_reviewed'),...(link?{enrollment_id:link.enrollment_id,program_task_id:link.program_task_id,enrollment_rev:link.enrollment_rev}:retrain?{retraining_source_id:retrain.retraining_source_id}:{})});
-    note('Назначение сохранено. Добавьте его в план производственного обучения для согласования.');await render();
+    const created=await api('training/create',{operation_id:id,trainee_id:value(f,'trainee_id'),authorization_id:value(f,'authorization_id'),revision_id:value(f,'revision_id'),skill_id:value(f,'skill_id'),scale_id:value(f,'scale_id'),target_level:Number(value(f,'target_level')),assigned_on:value(f,'assigned_on'),due_on:value(f,'due_on'),reason:value(f,'reason'),...(!context?{scenario:value(f,'scenario'),...(value(f,'scenario')==='rapid'&&checked(f,'rapid_confirm')?{rapid_confirm:true}:{})}:{}),variant:v,method_config:{followups:Number(value(f,'followups')),segments:parts,realShow:v==='smed'?Number(value(f,'real_show')):null,realTry:v==='smed'?Number(value(f,'real_try')):null,hazardous:checked(f,'hazardous')},plan_reviewed:checked(f,'plan_reviewed'),...(link?{enrollment_id:link.enrollment_id,program_task_id:link.program_task_id,enrollment_rev:link.enrollment_rev}:retrain?{retraining_source_id:retrain.retraining_source_id}:{})});
+    note(created.rapid_confirmed?'Назначение создано и первое согласование подтверждено. Требуется решение второго руководителя.':'Назначение сохранено. Добавьте его в план производственного обучения для согласования.');await render();
    }));
   },'primary');
   setContent(host,panel(link?'Назначение по заданию программы':retrain?'Повторное обучение по новой редакции СОП':personId?'Назначение обучения выбранному сотруднику':'Новое назначение',op,load,out));
@@ -138,20 +149,21 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
   if(!discard())return;
   const d=await api('training/plans'),n=panel('Планы производственного обучения',el('p','Согласование всего выбранного состава. При изменении строки требуется новый план; прошлые согласования остаются в истории.','muted'));
   if(d.can_create&&d.candidates.length){
-   const fields=d.candidates.map((t,i)=>[check('row_'+i,'Включить'),t.trainee,t.operation,t.instructor,t.assigned_on,t.due_on,d.scenarios[t.scenario]||'Основание ранее не классифицировано']);
+   const fields=d.candidates.map((t,i)=>[check('row_'+i,'Включить'),t.trainee,t.operation,t.instructor,t.assigned_on,t.due_on,d.scenarios[t.scenario]||'Основание ранее не классифицировано',t.target_level]);
    const day=d.day,end=new Date(Date.UTC(Number(day.slice(0,4)),Number(day.slice(5,7)),0)).toISOString().slice(0,10);
-   n.append(groups('Составить план',[input('title','Название плана'),dt('from','Начало периода',day),dt('to','Конец периода',end),table(['Выбор','Сотрудник','Операция','Инструктор','Начало','Срок','Основание'],fields)],'Зафиксировать состав плана',async f=>{
+   n.append(groups('Составить план',[input('title','Название плана'),dt('from','Начало периода',day),dt('to','Конец периода',end),table(['Выбор','Сотрудник','Операция','Инструктор','Начало','Срок','Основание','Целевой уровень'],fields)],'Зафиксировать состав плана',async f=>{
     const rows=d.candidates.flatMap((t,i)=>checked(f,'row_'+i)?[{id:t.id,rev:t.rev}]:[]);
     await api('training/plan-create',{title:value(f,'title'),from:value(f,'from'),to:value(f,'to'),rows});note('Состав плана сохранён');await render();
    }));
   }
   for(const p of d.plans){
-   const box=panel(p.title,el('p',p.from+' — '+p.to+' · '+({draft:'На согласовании',approved:'Согласован',stale:'Состав или полномочия изменились'}[p.status])),table(['Сотрудник','Операция','Инструктор','Начало','Срок'],p.rows.map(t=>[t.trainee,t.operation,t.instructor,t.assigned_on,t.due_on])));
+   const box=panel(p.title,el('p',p.from+' — '+p.to+' · '+({draft:'На согласовании',approved:'Согласован',stale:'Состав или полномочия изменились'}[p.status])),table(['Сотрудник','Операция','Инструктор','Начало','Срок','Целевой уровень'],p.rows.map(t=>[t.trainee,t.operation,t.instructor,t.assigned_on,t.due_on,t.target_level])));
    for(const kind of ['responsible','head']){
     const v=p.votes[kind],label=kind==='responsible'?'Непосредственный руководитель / ответственный':'Руководитель подразделения';
     box.append(el('p',label+': '+(v.done?'Подтверждено '+v.day:'Ожидается')));
     if(v.can)box.append(groups('Согласовать план: '+label,[input('note','Примечание','text',false)],'Согласовать весь план',async f=>{await api('training/plan-approve',{id:p.id,kind,note:value(f,'note')});note('Согласование плана зарегистрировано');await render()}));
    }
+   if(p.can_export)box.append(button('Скачать согласованный состав · приложение 6 XLSX',()=>downloadForm('production_plan',p.id)));
    n.append(box);
   }
   if(!d.plans.length)n.append(empty());setContent(host,n);

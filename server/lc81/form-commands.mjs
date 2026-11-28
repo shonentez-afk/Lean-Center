@@ -6,7 +6,7 @@ import {one,rows,isId} from '../../src/core/db.js';
 import {STANDARD_FORMS,standardWorkbook} from '../../src/modules/training/standard-v03.js';
 import {finalBlankWorkbook} from '../../src/modules/training/standard-final-prints.js';
 import {assessmentMatrixWorkbook,originalChecklistMatch,supplementMatrixWorkbook,preparationStructureWorkbook} from '../../src/modules/training/standard-prints.js';
-import {productionRows,productionWorkbook,practicalWorkbook} from '../../src/modules/training/corporate-forms.js';
+import {productionRows,productionWorkbook,productionPlanWorkbook,practicalWorkbook} from '../../src/modules/training/corporate-forms.js';
 import {builtinOrderDocx,zipStored} from '../../src/modules/training/local-docx.js';
 import {entryForm,preparationForms,programFormsAvailable} from './program-form-commands.mjs';
 import {matrixFromRecord,matrixProjection,matrixWorkbook} from '../../src/modules/training/matrix-view.js';
@@ -17,7 +17,7 @@ import {qualityDetail} from './quality-commands.mjs';
 import {orderDetail,supplementDetail} from './mentor-workflows.mjs';
 import {preparationDetail} from './program-commands.mjs';
 import {bankDetail} from './development-commands.mjs';
-import {trainingDetail} from './training-commands.mjs';
+import {trainingDetail,productionPlanExport} from './training-commands.mjs';
 import {matrixDetail} from './matrix-commands.mjs';
 import {assessmentDetail} from './competency-commands.mjs';
 import {PilotError} from '../lc74-store.mjs';
@@ -169,6 +169,9 @@ export function prepareForm(db,a,f){
  if(f.kind==='blank'){
   formsCatalog(db,a);const form=STANDARD_FORMS.find(x=>x.id===f.appendix);
   must(form&&f.id===null,400,'Выберите приложение 1–17');result=blank(db,form);target=programResource(db).units[0];tag=String(form.id);
+ }else if(f.kind==='production_plan'){
+  must(f.appendix===null&&isId(f.id),400,'Выберите согласованный план');
+  const plan=productionPlanExport(db,a,f.id);result={book:productionPlanWorkbook(excelJS(),plan),extension:'xlsx',tag:'6'};target=f.id;tag='6-PLAN-'+target.slice(0,8);
  }else{
   must(f.appendix===null&&isId(f.id)&&Object.hasOwn(recordTypes,f.kind),400,'Выберите запись');
   result=populated(db,a,f.kind,f.id);target=f.id;tag=result.tag+'-'+target.slice(0,8);
