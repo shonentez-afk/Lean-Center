@@ -553,6 +553,8 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
  }
  function checkedAccount(db,actor,revision){const a=account(db,actor);must(a&&a.credential_revision===revision,401,'Сеанс завершён');return a}
  const resolveCtx=(db,actor,revision,input)=>resolveLibraryContext(db,input,libraryAccess(db,checkedAccount(db,actor,revision),day(db)));
+ // Volatile process heartbeat: no write just to prove that an empty scan ran.
+ let notificationScan=null;
  return {
   get healthy(){return !closed&&!poisoned},
   authenticate(login,password){return read(db=>{
@@ -986,7 +988,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   saveNotificationPreferences(actor,revision,f){return mutate(db=>saveNotificationPreferences(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   notificationBackgroundStatus(actor,revision){return read(db=>{
    requireAdmin(db,actor,revision);const clock=siteClock(db);
-   return backgroundStatus(db,clock,id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)});
+   return {...backgroundStatus(db,clock,id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)}),last_scan:notificationScan};
   })},
   setNotificationPolicy(actor,revision,f){return mutate(db=>{
    requireAdmin(db,actor,revision);return saveReminderPolicy(db,actor,siteClock(db),f,(action,target)=>audit(db,actor,action,target));
@@ -997,7 +999,8 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const empty={enqueued:0,completed:0,cancelled:0,retried:0,failed:0,deferred:0};
    if(!backgroundEnabled()||process.env.LC81_SCHEDULER_DISABLED==='1')return empty;
    const ctx=db=>{const clock=siteClock(db);return {clock,accessFor:id=>{const a=account(db,id);return a&&approvalAccess(db,a,clock.day)}}};
-   const result={...empty};
+   const result={...empty},started_at=new Date().toISOString();
+   notificationScan={started_at,finished_at:null,state:'running'};
    try{
     const candidates=read(db=>{const c=ctx(db);return discoverBackground(db,c.clock,c.accessFor)});
     if(candidates.length)result.enqueued=await mutate(db=>{const c=ctx(db);return enqueueBackground(db,c.clock,c.accessFor,candidates)});
@@ -1005,7 +1008,11 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
      const ids=read(db=>readyBackground(db,siteClock(db)));
      if(ids.length)Object.assign(result,await mutate(db=>{const c=ctx(db);return drainBackground(db,c.clock,c.accessFor,ids)}));
     }
-   }catch(e){if(e instanceof PilotError&&e.status===429)result.deferred++;else throw e}
+   }catch(e){
+    if(e instanceof PilotError&&e.status===429)result.deferred++;
+    else{notificationScan={started_at,finished_at:new Date().toISOString(),state:'error'};throw e}
+   }
+   notificationScan={started_at,finished_at:new Date().toISOString(),state:result.deferred?'deferred':'ok',...result};
    return result;
   },
   notificationFeed(actor,revision,filter){return read(db=>notificationFeed(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),filter))},

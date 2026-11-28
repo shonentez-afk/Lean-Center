@@ -5,7 +5,10 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {startSopPublicationScheduler} from '../server/lc81/sop-publication-scheduler.mjs';
 import {startNotificationBackground} from '../server/lc81/notification-scheduler.mjs';
 import {setupApproval} from './lc83-approval-fixture.mjs';
-import {makeSop} from './lc4-fixture.mjs';
+import {makeSop,SQL} from './lc4-fixture.mjs';
+import {uuid,one,rows,tx} from '../src/core/db.js';
+import {saveReminderPolicy,discoverBackground,enqueueBackground,readyBackground,drainBackground,checkBackgroundIntegrity} from '../server/lc81/notification-background.mjs';
+import {notificationFeed,readAllNotifications} from '../server/lc81/notifications.mjs';
 import {compareApprovalSnapshots} from '../server/lc81/sop-approval.mjs';
 import {copySecureCheckpoint} from '../server/lc81/maintenance.mjs';
 import {openSecureQA} from '../server/lc81/store.mjs';
@@ -465,4 +468,99 @@ test('LC822 scheduler is serial and shutdown drains outstanding work',async()=>{
  const scheduler=startNotificationBackground({async runNotificationBackground(){calls++;start();await gate}},{intervalMs:5,onError:()=>errors.push('tick error')});
  try{await entered;await delay(25);assert.equal(calls,1);let drained=false;const stopped=scheduler.stop().then(()=>{drained=true});await delay(15);assert.equal(drained,false);release();await stopped;await delay(15);assert.equal(calls,1);assert.deepEqual(errors,[])}finally{release();await scheduler.stop()}
  console.log('LC822_SCHEDULER_SERIAL_DRAIN_OK');
+});
+
+test('LC822 queue-scale fixture: 500 recipients, 1000 events, bounded retry, exact once and completion-ordered read-all',()=>{
+ // This measures the queue and live familiarization projection in an
+ // isolated synthetic SQL.js database, NOT real accounts, a VPS benchmark,
+ // the full checkpoint writer, or Web Push. Integration permissions are
+ // exercised separately in the actual protected-store tests above.
+ const db=new SQL.Database(),start=Date.now();
+ const clock={zone:'UTC',configured:true,day:'2026-11-28',at:'2026-11-28T10:00:00.000Z'};
+ const at=()=>clock.at,people=new Map(),unit=uuid(),admin=uuid(),adminPerson=uuid();
+ try{
+  db.run("CREATE TABLE lc81_account(id TEXT PRIMARY KEY,person_id TEXT UNIQUE,state TEXT);CREATE TABLE person(id TEXT PRIMARY KEY,archived INTEGER);CREATE TABLE person_assignment(id TEXT PRIMARY KEY,person_id TEXT,unit_id TEXT,valid_from TEXT,valid_to TEXT);CREATE TABLE org_unit(id TEXT PRIMARY KEY);CREATE TABLE operation(id TEXT PRIMARY KEY,unit_id TEXT,archived INTEGER);CREATE TABLE document(id TEXT PRIMARY KEY,operation_id TEXT,archived INTEGER);CREATE TABLE document_revision(id TEXT PRIMARY KEY,document_id TEXT,state TEXT);CREATE TABLE lc83_sop_round(id TEXT PRIMARY KEY,revision_id TEXT,binding_json TEXT,binding_sha256 TEXT,state TEXT);CREATE TABLE lc83_sop_impact_plan(id TEXT PRIMARY KEY,decision TEXT);CREATE TABLE lc83_sop_familiarization_batch(round_id TEXT PRIMARY KEY,plan_id TEXT,source_sha TEXT,registered_at TEXT);CREATE TABLE lc83_sop_familiarization(id TEXT PRIMARY KEY,round_id TEXT,person_id TEXT,employment_id TEXT,unit_id TEXT,person_name TEXT,rev INTEGER,confirmed_at TEXT,confirmed_account TEXT);CREATE TABLE lc83_sop_familiarization_deadline(id TEXT PRIMARY KEY,receipt_id TEXT,rev INTEGER,due_on TEXT,note TEXT,account_id TEXT,recorded_at TEXT,UNIQUE(receipt_id,rev));CREATE TABLE lc83_sop_notice(id TEXT PRIMARY KEY,round_id TEXT,event_key TEXT,recipient_account_id TEXT,kind TEXT,occurred_at TEXT,UNIQUE(event_key,recipient_account_id,kind));CREATE INDEX qa_notice_recipient ON lc83_sop_notice(recipient_account_id)");
+  db.run('INSERT INTO org_unit VALUES(?)',[unit]);db.run("INSERT INTO person VALUES(?,0)",[adminPerson]);db.run("INSERT INTO lc81_account VALUES(?,?,'active')",[admin,adminPerson]);
+  const makeRound=()=>{
+   const op=uuid(),doc=uuid(),revision=uuid(),round=uuid(),plan=uuid(),hash='a'.repeat(64),b=JSON.stringify({code:'QA',title:'Синтетическое СОП',version_no:1});
+   db.run('INSERT INTO operation VALUES(?,?,0)',[op,unit]);db.run('INSERT INTO document VALUES(?,?,0)',[doc,op]);db.run("INSERT INTO document_revision VALUES(?,?,'effective')",[revision,doc]);
+   db.run("INSERT INTO lc83_sop_round VALUES(?,?,?,?,'effective')",[round,revision,b,hash]);db.run("INSERT INTO lc83_sop_impact_plan VALUES(?,'retrain')",[plan]);db.run('INSERT INTO lc83_sop_familiarization_batch VALUES(?,?,?,?)',[round,plan,hash,at()]);
+   return round;
+  };
+  const makeReceipt=(account,round,alreadyNotified=false)=>{
+   const p=people.get(account),id=uuid();db.run('INSERT INTO lc83_sop_familiarization VALUES(?,?,?,?,?,?,2,NULL,NULL)',[id,round,p.person_id,p.employment_id,unit,'QA']);
+   db.run('INSERT INTO lc83_sop_familiarization_deadline VALUES(?,?,2,?,?,?,?)',[uuid(),id,clock.day,'QA',admin,at()]);
+   if(alreadyNotified)db.run("INSERT INTO lc83_sop_notice VALUES(?,?,?,?,'familiarization_required',?)",[uuid(),round,id,account,at()]);
+   return id;
+  };
+  tx(db,()=>{
+   const round=makeRound();
+   for(let i=0;i<500;i++){
+    const account=uuid(),person_id=uuid(),employment_id=uuid();people.set(account,{person_id,employment_id});
+    db.run('INSERT INTO person VALUES(?,0)',[person_id]);db.run("INSERT INTO person_assignment VALUES(?,?,?,'2020-01-01',NULL)",[employment_id,person_id,unit]);db.run("INSERT INTO lc81_account VALUES(?,?,'active')",[account,person_id]);makeReceipt(account,round);
+   }
+  });
+  const accessFor=id=>{const p=people.get(id);return p?{accountId:id,personId:p.person_id,day:clock.day,at:at(),zone:'UTC',clockConfigured:true,employmentFor:who=>who===p.person_id?p.employment_id:null,effective:()=>true,history:()=>true,impactActor:()=>null}:null};
+  saveReminderPolicy(db,admin,clock,{expected_revision:0,approval:null,familiarization:0,training:null},()=>{});
+  let completed=0,queued=0,retried=0,rounds=0,retryId=null;
+  for(let i=0;i<40;i++){
+   const candidates=discoverBackground(db,clock,accessFor);
+   assert(candidates.length<=64);
+   queued+=tx(db,()=>enqueueBackground(db,clock,accessFor,candidates));
+   const ids=readyBackground(db,clock);assert(ids.length<=64);
+   if(!ids.length&&!candidates.length)break;
+   rounds++;
+   if(i===0)retryId=ids[0];
+   const r=tx(db,()=>drainBackground(db,clock,accessFor,ids,{beforeJob:i===0?j=>{if(j.id===retryId)throw Error('synthetic transient failure')}:null}));
+   completed+=r.completed;retried+=r.retried;assert.equal(r.failed,0);assert.equal(r.cancelled,0);
+   if(i===0){assert.equal(r.retried,1);assert(!readyBackground(db,clock).includes(retryId));assert.equal(one(db,'SELECT state FROM lc822_notification_job WHERE id=?',[retryId]).state,'retry')}
+   clock.at=new Date(Date.parse(clock.at)+60000).toISOString();
+  }
+  assert.equal(queued,1000);assert.equal(completed,1000);assert.equal(retried,1);
+  assert.equal(one(db,'SELECT attempts FROM lc822_notification_job WHERE id=?',[retryId]).attempts,2);
+  assert.equal(one(db,'SELECT count(*) n FROM lc83_sop_notice').n,500);
+  assert.equal(one(db,"SELECT count(*) n FROM lc822_notification_job WHERE notice_ordinal IS NOT NULL").n,500);
+  assert.equal(one(db,"SELECT count(*) n FROM lc822_notification_job WHERE state<>'completed'").n,0);
+  assert.deepEqual(discoverBackground(db,clock,accessFor),[]);assert.deepEqual(readyBackground(db,clock),[]);
+  checkBackgroundIntegrity(db);
+  for(const id of people.keys()){const feed=notificationFeed(db,accessFor(id),{});assert.equal(feed.total,2);assert.equal(feed.unread,2)}
+  // Two same-recipient reminders are committed in the reverse enqueue
+  // order. The earlier inserted job that completes after the snapshot must
+  // not be marked read by an older read-all operation.
+  const owner=people.keys().next().value;
+  makeReceipt(owner,makeRound(),true);makeReceipt(owner,makeRound(),true);
+  assert.equal(tx(db,()=>enqueueBackground(db,clock,accessFor,discoverBackground(db,clock,accessFor))),2);
+  const two=rows(db,"SELECT id FROM lc822_notification_job WHERE state='pending' ORDER BY rowid").map(x=>x.id);assert.equal(two.length,2);
+  assert.equal(tx(db,()=>drainBackground(db,clock,accessFor,[two[1]])).completed,1);
+  const snapshot=notificationFeed(db,accessFor(owner),{}).snapshot;assert(snapshot.startsWith('v2.'));
+  assert.equal(tx(db,()=>drainBackground(db,clock,accessFor,[two[0]])).completed,1);
+  tx(db,()=>readAllNotifications(db,accessFor(owner),{snapshot}));
+  const feed=notificationFeed(db,accessFor(owner),{filter:'unread'});
+  assert.equal(feed.total,1);assert.equal(feed.items[0].id,two[0]);checkBackgroundIntegrity(db);
+  const reopened=makeReceipt(owner,makeRound(),true),tomorrow='2026-11-29';
+  assert.equal(tx(db,()=>enqueueBackground(db,clock,accessFor,discoverBackground(db,clock,accessFor))),1);
+  const original=readyBackground(db,clock)[0];
+  db.run('UPDATE lc83_sop_familiarization_deadline SET due_on=? WHERE receipt_id=?',[tomorrow,reopened]);
+  assert.equal(tx(db,()=>drainBackground(db,clock,accessFor,[original])).cancelled,1);
+  db.run('UPDATE lc83_sop_familiarization_deadline SET due_on=? WHERE receipt_id=?',[clock.day,reopened]);
+  assert.equal(tx(db,()=>enqueueBackground(db,clock,accessFor,discoverBackground(db,clock,accessFor))),1);
+  assert.deepEqual(readyBackground(db,clock),[original]);
+  assert.equal(tx(db,()=>drainBackground(db,clock,accessFor,[original])).completed,1);
+  // A permanently failing job is not retried indefinitely or exposed as
+  // a successful notice. Repeated discovery does not recreate it.
+  makeReceipt(owner,makeRound(),true);
+  assert.equal(tx(db,()=>enqueueBackground(db,clock,accessFor,discoverBackground(db,clock,accessFor))),1);
+  const bad=readyBackground(db,clock)[0];
+  for(let i=0;i<4;i++){
+   const r=tx(db,()=>drainBackground(db,clock,accessFor,[bad],{beforeJob:()=>{throw Error('synthetic persistent failure')}}));
+   assert.equal(r[i===3?'failed':'retried'],1);
+   const v=one(db,'SELECT * FROM lc822_notification_job WHERE id=?',[bad]);
+   assert.equal(v.attempts,i+1);assert.equal(v.notice_ordinal,null);
+   clock.at=v.next_attempt_at;
+  }
+  assert.equal(one(db,'SELECT state FROM lc822_notification_job WHERE id=?',[bad]).state,'failed');
+  assert.deepEqual(discoverBackground(db,clock,accessFor),[]);assert.deepEqual(readyBackground(db,clock),[]);
+  checkBackgroundIntegrity(db);
+  console.log('LC822_QUEUE_500_RECIPIENTS_1000_EVENTS_OK',JSON.stringify({queued,completed,retried,rounds,elapsed_ms:Date.now()-start,scope:'synthetic queue fixture; not VPS or full checkpoint load'}));
+ }finally{db.close()}
 });

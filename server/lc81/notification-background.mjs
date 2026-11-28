@@ -120,9 +120,10 @@ export function discoverBackground(db,clock,accessFor,limit=BACKGROUND_BATCH){
  const approvalUntil=horizon(clock,p,'approval');
  const candidates=[...familiarizationBackgroundTargets(db,horizon(clock,p,'familiarization')),...(approvalUntil?approvalReminderTargets(db,approvalUntil):[]),...trainingTargets(db,horizon(clock,p,'training'))];
  candidates.sort((a,b)=>Number(b.kind==='familiarization_catchup')-Number(a.kind==='familiarization_catchup')||a.basis.localeCompare(b.basis)||key(a).localeCompare(key(b)));
+ const known=exists(db,table)?new Set(rows(db,"SELECT kind,target_id,stage,basis,account_id FROM lc822_notification_job WHERE state<>'cancelled'").map(key)):new Set();
  const jobs=[];
  for(const j of candidates){
-  if(exists(db,table)&&one(db,'SELECT id FROM lc822_notification_job WHERE kind=? AND target_id=? AND stage=? AND basis=? AND account_id=?',[j.kind,j.target_id,j.stage,j.basis,j.account_id]))continue;
+  if(known.has(key(j)))continue;
   if(!liveView(db,a(j.account_id),j,p,clock))continue;
   jobs.push(j);if(jobs.length>=limit)break;
  }
@@ -130,11 +131,18 @@ export function discoverBackground(db,clock,accessFor,limit=BACKGROUND_BATCH){
 }
 export function enqueueBackground(db,clock,accessFor,candidates){
  if(!backgroundEnabled()||!candidates.length)return 0;
- const p=policy(db),a=accessMemo(accessFor);let count=0;
+ const p=policy(db),a=accessMemo(accessFor);let count=0,initialized=exists(db,table);
  for(const j of candidates.slice(0,BACKGROUND_BATCH)){
   if(!liveView(db,a(j.account_id),j,p,clock))continue;
-  db.run(schema);
-  if(one(db,'SELECT id FROM lc822_notification_job WHERE kind=? AND target_id=? AND stage=? AND basis=? AND account_id=?',[j.kind,j.target_id,j.stage,j.basis,j.account_id]))continue;
+  if(!initialized){db.run(schema);initialized=true}
+  const prior=one(db,'SELECT id,state FROM lc822_notification_job WHERE kind=? AND target_id=? AND stage=? AND basis=? AND account_id=?',[j.kind,j.target_id,j.stage,j.basis,j.account_id]);
+  if(prior){
+   // A never-delivered cancelled job may become valid again (e.g. the
+   // same date is reinstated). Reuse its identity; never duplicate a
+   // completed notice or reset a terminal failure automatically.
+   if(prior.state!=='cancelled')continue;
+   db.run("UPDATE lc822_notification_job SET state='pending',next_attempt_at=?,finished_at=NULL,last_code='reactivated' WHERE id=?",[clock.at,prior.id]);count++;continue;
+  }
   db.run("INSERT INTO lc822_notification_job VALUES(?,?,?,?,?,?,?,'pending',0,?,?,NULL,NULL,NULL,NULL)",[uuid(),j.kind,j.target_id,j.stage,j.basis,j.person_id,j.account_id,clock.at,clock.at]);count++;
  }
  return count;
