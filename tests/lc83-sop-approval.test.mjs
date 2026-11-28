@@ -17,6 +17,7 @@ import {notificationFeed,readAllNotifications} from '../server/lc81/notification
 import {compareApprovalSnapshots} from '../server/lc81/sop-approval.mjs';
 import {copySecureCheckpoint} from '../server/lc81/maintenance.mjs';
 import {openSecureQA} from '../server/lc81/store.mjs';
+import {createSecureQAServer} from '../server/lc81/http.mjs';
 const status=code=>e=>e?.status===code||e?.statusCode===code;
 test('LC83 mandatory independent votes, frozen round history, publication and restored checkpoint',async t=>{
  const x=await setupApproval();t.after(x.cleanup);
@@ -751,4 +752,68 @@ test('LC824 domain events, mixed snapshot, late account, live Push ownership and
   assert.equal(restored.notificationBackgroundStatus(admin.id,1).push.enabled,false);
  }finally{await restored.close()}
  console.log('LC824_DOMAIN_MIXED_SNAPSHOT_LATE_ACCOUNT_PUSH_REVOKE_RESTORE_OK');
+});
+
+test('LC824 twelve-month native task history, mixed authenticated HTTP load and checkpoint restoration',async t=>{
+ // Full protected store + real loopback HTTP, with a one-year synthetic
+ // action history. This does NOT claim a full-year factory-wide dataset,
+ // physical VPS performance, provider delivery or manually accepted UAT.
+ const x=await setupApproval({annualHistory:true});t.after(x.cleanup);
+ const {store,admin,users,history}=x;
+ assert.equal(history.months.length,12);assert.equal(history.tasks,600);assert.equal(history.events,1200);
+ const role=store.adminData(admin.id).assignments.find(a=>a.person_id===users.author.person_id);assert(role);
+ await store.setPolicy(admin.id,{role_id:role.role_id,revision:0,permissions:['task.read','task.detail','task.implement_own','task.start','plan.read']});
+ await store.grant(admin.id,{account_id:users.author.id,assignment_id:role.id,scope:{kind:'self'},valid_to:null});
+ const from=history.months[0],to=x.day,plan={mode:'plan',from,to};
+ // The interval is at most 366 days including this partial month. Start
+ // on today's calendar date one year earlier for the current plan; older
+ // completed history remains visible through the task registry.
+ const boundary=new Date(Date.parse(to)-365*86400000).toISOString().slice(0,10);plan.from=boundary;
+ const old=store.listResources(users.author.id,'task.read').filter(r=>r.title.startsWith('Год QA '));
+ assert.equal(old.length,history.perAuthor);
+ assert.equal(store.notificationFeed(users.author.id,1,{}).total,0);
+ const start=performance.now(),created=[];
+ for(let i=0;i<24;i++)created.push(await store.createTask(users.manager.id,1,{source:null,title:'Новая задача годовой базы '+i,owner_id:users.author.person_id,due_on:to,kind:'corrective',priority:'normal'}));
+ const writes_ms=Math.round(performance.now()-start);
+ assert.equal(store.notificationFeed(users.author.id,1,{limit:50}).total,24);
+ const notice=store.notificationFeed(users.author.id,1,{limit:50}).items[0],target=created[0].id;
+ const origin='https://qa.invalid',server=createSecureQAServer({store,origin});
+ try{
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const url='http://127.0.0.1:'+server.address().port;
+  const post=async(route,body,cookie=null)=>{
+   const r=await fetch(url+'/api/lc81/'+route,{method:'POST',headers:{Origin:origin,'X-LC81-Request':'1','Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(60000)});
+   return {status:r.status,headers:r.headers,data:await r.json()};
+  };
+  const login=async name=>{const r=await post('login',{login:name,password:x.password});assert.equal(r.status,200);return r.headers.get('set-cookie').split(';')[0]};
+  const cookie=await login('author'),other=await login('observer');
+  const get=async(route,c=cookie)=>{const start=performance.now(),r=await fetch(url+'/api/lc81/'+route,{headers:{Cookie:c},signal:AbortSignal.timeout(60000)});return {status:r.status,retry:r.headers.get('retry-after'),data:await r.json(),ms:performance.now()-start}};
+  assert.equal((await get('notifications?limit=50')).data.total,24);
+  assert.equal((await get('notifications?limit=50',other)).data.total,0);
+  assert.equal((await post('notifications/read',{id:notice.id},other)).status,404);
+  assert.equal((await post('notifications/read',{id:notice.id},cookie)).status,200);
+  assert.equal((await get('tasks/detail?id='+target)).data.id,target);
+  const routes=['notifications?limit=30','calendar/view?'+new URLSearchParams(plan),'tasks/detail?id='+target,'session'];
+  const results=[];
+  for(const concurrent of [1,10,20,40]){
+   const timing=[],statuses={},perRoute=Object.fromEntries(routes.map(r=>[r,0])),started=performance.now();
+   await Promise.all(Array.from({length:concurrent},async(_,c)=>{
+    for(let i=0;i<4;i++){
+     const route=routes[(c+i)%routes.length],r=await get(route);timing.push(r.ms);statuses[r.status]=(statuses[r.status]||0)+1;
+     assert([200,429].includes(r.status));if(r.status===429)assert(Number(r.retry)>0);else{perRoute[route]++;if(route.startsWith('notifications'))assert.equal(r.data.total,24)}
+    }
+   }));
+   assert.equal(timing.length,concurrent*4);assert(Object.values(perRoute).every(n=>n>0));
+   timing.sort((a,b)=>a-b);const q=n=>Math.round(timing[Math.ceil(timing.length*n)-1]*100)/100;
+   results.push({concurrent,requests:timing.length,statuses,p50_ms:q(.5),p95_ms:q(.95),p99_ms:q(.99),elapsed_ms:Math.round(performance.now()-started)});
+  }
+  console.log('LC824_YEAR_HISTORY_HTTP_LOAD_OK',JSON.stringify({months:history.months,legacy_tasks:history.tasks,legacy_task_events:history.events,owner_tasks:history.perAuthor,new_tasks:24,writes_ms,results}));
+ }finally{if(server.listening)await new Promise(resolve=>{server.close(resolve);server.closeAllConnections?.()})}
+ await store.close();const backup=path.join(x.root,'lc824-annual-copy');await copySecureCheckpoint(x.target,backup);
+ const restored=await openSecureQA({dataDir:backup});try{
+  const actor=restored.authenticate('author',x.password),feed=restored.notificationFeed(actor.id,1,{limit:50});
+  assert.equal(feed.total,24);assert.equal(feed.unread,23);assert(feed.items.find(n=>n.id===notice.id).pending);
+  assert.equal(restored.listResources(actor.id,'task.read').filter(r=>r.title.startsWith('Год QA ')).length,history.perAuthor);
+ }finally{await restored.close()}
+ console.log('LC824_YEAR_HISTORY_RESTORE_OK');
 });

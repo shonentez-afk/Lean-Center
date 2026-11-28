@@ -117,7 +117,7 @@ export function domainNoticeView(db,a,n){
  // not earlier historical results. Existing recipients keep authorized
  // history, with stale actionable status cleared.
  if(!pending&&n.initial_account_id!==a.accountId)return null;
- return {label,title,reason,due_on:due,pending,overdue:!!(pending&&due&&due<a.day),state,category,deliverable:latest&&(pending||['training_changed','schedule_cancelled','audit_result','practical_result','task_result','task_cancelled'].includes(n.kind)),route:{type:link.type,id:link.id}};
+ return {label,title,reason,due_on:due,pending,overdue:!!(pending&&due&&due<a.day),state,category,deliverable:latest&&(pending||n.kind==='training_changed'&&(p.command==='cancel'||currentTraining(db,r))||['schedule_cancelled','audit_result','practical_result','task_result','task_cancelled'].includes(n.kind)),route:{type:link.type,id:link.id}};
 }
 export function checkDomainNoticeIntegrity(db){
  if(!exists(db))return;

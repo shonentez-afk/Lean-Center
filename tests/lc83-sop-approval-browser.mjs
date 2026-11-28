@@ -185,6 +185,20 @@ try{
  assert.equal(x.store.notificationBackgroundStatus(x.admin.id,1).policy.familiarization,0);
  await admin.ctx.close();
  console.log('LC822_BROWSER_PREFERENCES_ADMIN_POLICY_OK');
+ const role=x.store.adminData(x.admin.id).assignments.find(a=>a.person_id===x.users.author.person_id);assert(role);
+ await x.store.setPolicy(x.admin.id,{role_id:role.role_id,revision:0,permissions:['task.read','task.detail','task.implement_own','task.start','plan.read']});
+ await x.store.grant(x.admin.id,{account_id:x.users.author.id,assignment_id:role.id,scope:{kind:'self'},valid_to:null});
+ const task=await x.store.createTask(x.users.manager.id,1,{source:null,title:'Браузерная задача из уведомления',owner_id:x.users.author.person_id,due_on:x.day,kind:'corrective',priority:'normal'});
+ const domain=x.store.notificationFeed(x.users.author.id,1,{filter:'actions',limit:50}).items.find(n=>n.kind==='task_assigned'&&n.route.id===task.id);assert(domain);
+ const worker=await profile('author',true);await worker.p.locator('#lc82-bell').click();
+ const notices=worker.p.locator('dialog.lc82-notification-dialog'),entry=notices.locator('[data-notice-id="'+domain.id+'"]');
+ await entry.getByRole('heading',{name:'Назначено мероприятие',exact:true}).waitFor();
+ await entry.getByRole('button',{name:'Открыть мероприятие',exact:true}).click();
+ await worker.content.getByText('Браузерная задача из уведомления',{exact:false}).first().waitFor();await worker.ready();
+ assert(x.store.notificationFeed(x.users.author.id,1,{filter:'actions',limit:50}).items.find(n=>n.id===domain.id).read_at);
+ assert.equal(x.store.taskDetail(x.users.author.id,1,task.id).state,'open');
+ await worker.ctx.close();
+ console.log('LC824_BROWSER_TASK_NOTICE_EXACT_CARD_OK');
  assert.deepEqual(errors,[]);
  console.log('LC83_BROWSER_FULL_ROUTE_OK');
 }finally{if(browser)await browser.close();await close(proxy);await close(server);await x.cleanup()}

@@ -172,7 +172,7 @@ function taskSourceLabel(db,a,t){
  return 'Связанный документ';
 }
 export function taskDetail(db,a,id){
- const t=actionRows(db).find(x=>x.id===id),r=taskResource(db,t,a.day);
+ const t=isId(id)?actionRows(db,id)[0]:null,r=taskResource(db,t,a.day);
  must(t&&a.read('task.read',id)&&allowed(a,'task.detail',id,r),404,'Карточка задачи недоступна');
  const status=actionStatus(db,t),open=['open','in_progress','ineffective'].includes(status),cap=k=>!!a.personId&&allowed(a,k,id,r);
  const follow=t.followup_assignment_id||t.followup_enrollment_id||t.followup_plan_id||null;
@@ -185,7 +185,7 @@ export function taskDetail(db,a,id){
 }
 export function changeTask(db,a,f){
  must(a.personId&&exact(f,['id','expected_revision','command','fields'])&&isId(f.id)&&Number.isSafeInteger(f.expected_revision)&&['start','link','cancel','verify'].includes(f.command),400,'Неверная команда задачи');
- const t=actionRows(db).find(x=>x.id===f.id),r=taskResource(db,t,a.day),action='task.'+f.command;
+ const t=actionRows(db,f.id)[0],r=taskResource(db,t,a.day),action='task.'+f.command;
  must(t&&a.read('task.read',t.id)&&allowed(a,action,t.id,r),403,'Задача недоступна');
  must(t.rev===f.expected_revision,409,'Задача изменилась');
  let p;
@@ -205,7 +205,7 @@ export function changeTask(db,a,f){
 export function qualityView(db,a,action,data){
  if(action==='task.read'){
   const t=find(db,'action_item',data.id),r=taskResource(db,t,a.day);
-  const full=actionRows(db).find(x=>x.id===t.id);
+  const full=actionRows(db,t.id)[0];
   return {...data,state:full?actionStatus(db,full):data.state,kind:t.kind,owner:name(a,t.owner_id),subject:name(a,t.subject_id),can_detail:allowed(a,'task.detail',data.id,r)};
  }
  if(action==='audit.read'){const t=find(db,'audit_session',data.id);return {...data,mentor_name:name(a,t.mentor_id),operation_name:a.read('operation.read',t.operation_id)?.data.name??null,historical:!!isHistoricalRC1(db,t.id),can_history:historyAllowed(db,a,t.id),can_detail:!isHistoricalRC1(db,t.id)&&allowed(a,'audit.detail',t.id,auditResource(db,t,a.day))}}

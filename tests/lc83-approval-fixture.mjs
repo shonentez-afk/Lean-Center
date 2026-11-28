@@ -9,7 +9,7 @@ import {migratePilotCopy} from '../server/lc81/maintenance.mjs';
 import {openSecureQA} from '../server/lc81/store.mjs';
 export const context=(command,operation_id,id=null,revision_id=null)=>({kind:'sop',command,id,revision_id,operation_id,origin_id:null,origin_revision:null});
 export const request=(context,expected_revision,title,text)=>({request_id:uuid(),context,expected_revision,title,code:null,observed_at:null,text});
-export async function setupApproval({pushConfig=null,pushSender=undefined}={}){
+export async function setupApproval({pushConfig=null,pushSender=undefined,annualHistory=false}={}){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'lc83-approval-'));
  let f,store;
  try{
@@ -30,6 +30,25 @@ export async function setupApproval({pushConfig=null,pushSender=undefined}={}){
   const cert=(await f.save('mentor_credential',{person_id:people.twi.person,kind:'certificate',role:'internal_trainer',number:'LC83-VT',issuer:'Учебный центр',issued_on:'2020-01-01',valid_until:null,evidence:'Учебный сертификат',registered_by:f.actor})).entity_id;
   await f.save('mentor_appointment',{person_id:people.twi.person,credential_id:cert,role:'internal_trainer',order_number:'LC83-ORDER',order_on:'2020-01-01',approved_by:f.actor,valid_from:'2020-01-01',valid_to:null,acknowledged_on:'2020-01-01',evidence:'Учебный приказ'});
   const assignment=await f.addAssignment();
+  let history=null;
+  if(annualHistory){
+   // Twelve completed calendar months of valid native task events, not
+   // directly inserted fake SQL rows. No notification journal exists yet.
+   const now=new Date(),events=[],months=[],owners=[f.trainee,f.mentor,f.other];
+   for(let m=12;m>=1;m--){
+    const day=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()-m,1)).toISOString().slice(0,10);months.push(day);
+    for(let i=0;i<50;i++){
+     const id=uuid(),owner_id=owners[(i+months.length)%3],event=(operation,expected_revision,payload,hour)=>({id:uuid(),entity_type:'action_item',entity_id:id,operation,expected_revision,payload,occurred_at:day+'T'+hour+':00:00.000Z'});
+     events.push(event('create',0,{response_id:null,title:'Год QA '+day+' · '+i,owner_id,subject_id:null,due_on:day,kind:'corrective',priority:'normal'},'08'));
+     if(i%2===0){
+      events.push(event('update',1,{command:'implement',result:'Учебный факт'},'09'));
+      events.push(event('update',2,{command:'verify',verifier_id:f.actor,audit_id:null,outcome:'effective',evidence:'Учебная независимая проверка'},'10'));
+     }
+    }
+   }
+   await w.applyContentEvents(events,f.readContent);
+   history={months,tasks:600,events:events.length,perAuthor:events.filter(e=>e.operation==='create'&&e.payload.owner_id===f.trainee).length};
+  }
   await w.acceptOwn(f.readContent);
   const source=path.join(root,'legacy'),target=path.join(root,'secure');
   await copyPilotCheckpoint({SQL,snapshot:await prepareSnapshot(w),readSource:f.readContent,target:source});
@@ -65,6 +84,6 @@ export async function setupApproval({pushConfig=null,pushSender=undefined}={}){
   };
   const effective=(name='observer')=>store.listResources(users[name].id,'sop.read_effective').map(x=>x.revision_id);
   const cleanup=async()=>{await store.close();f.w.close();await fs.rm(root,{recursive:true,force:true})};
-  return {root,target,store,admin,users,people,password,day,old,document,operation,assignment,skill:f.skill,scale:f.scale,unit:f.unit,unitB,detail,draft,passport,edit,route,submit,decision,change,impact,effective,cleanup};
+  return {root,target,store,admin,users,people,password,day,history,old,document,operation,assignment,skill:f.skill,scale:f.scale,unit:f.unit,unitB,detail,draft,passport,edit,route,submit,decision,change,impact,effective,cleanup};
  }catch(e){if(store)await store.close();if(f)f.w.close();await fs.rm(root,{recursive:true,force:true});throw e}
 }
