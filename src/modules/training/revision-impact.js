@@ -22,9 +22,10 @@ export function competenceRevisionCurrent(db,id,day){
 // be identical; a wording change in a step is not automatically editorial.
 export function sameWorkContent(a,b){
  function key(raw){
-  const {document,integrity,...rest}=raw;
+  const {integrity,...rest}=raw;
   const src=structuredClone(rest);
-  if(!src.constructor||!src.constructor.meta||!src.photoAssets)return null;
+  if(!src.document||!src.constructor||!src.constructor.meta||!src.photoAssets)return null;
+  for(const field of ['id','number','version','status'])delete src.document[field];
   delete src.constructor.meta.sopNumber;
   return canonical(src);
  }

@@ -17,7 +17,7 @@ import {READ_ACTIONS,PERMISSIONS} from '../server/lc81/access-contract.mjs';
 import {readManagerProjection} from '../server/lc81/read-policy.mjs';
 const password=()=>randomBytes(24).toString('base64url');
 const sha=b=>createHash('sha256').update(b).digest('hex');
-async function synthetic(t){
+async function synthetic(t,{twiR2=false}={}){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'lc81-migrate-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const f=await fixture();t.after(()=>f.w.close());const w=f.w;
  const site=w.edit('org_unit',null,{code:'QA-SITE',name:'Учебное предприятие',kind:'Предприятие',parent_id:null});
@@ -29,6 +29,7 @@ async function synthetic(t){
  const managerAssignment=w.edit('role_assignment',null,{person_id:f.actor,role_id:managerRole,valid_from:'2020-01-01',valid_to:null});
  const trainerRole=w.edit('business_role',null,{code:'INTERNAL_TRAINER',name:'Внутренний тренер'});
  w.edit('role_assignment',null,{person_id:f.actor,role_id:trainerRole,valid_from:'2020-01-01',valid_to:null});
+ if(twiR2)await f.save('mentor_credential',{person_id:f.actor,kind:'certificate',role:'internal_trainer',number:'QA-VT-R2',issuer:'Учебный центр',issued_on:'2020-01-01',valid_until:null,evidence:'Синтетический документ ВТ',registered_by:f.mentor});
  const workerRole=one(w.working,"SELECT id FROM business_role WHERE code='TRAINEE'").id,workerAssignment=one(w.working,'SELECT id FROM role_assignment WHERE person_id=? AND role_id=?',[f.trainee,workerRole]).id;
  const matrixScale=w.edit('rating_scale',null,{name:'Производственная компетенция (1–4)',version_no:'1',levels:'1: Обучен\n2: Выполняет работу самостоятельно\n3: Выполняет работу мастерски\n4: Инструктор-наставник'});
  const category=one(w.working,'SELECT category_id FROM skill WHERE id=?',[f.skill]).category_id;
@@ -922,8 +923,8 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
  assert.equal(sha(await fs.readFile(path.join(x.source,PILOT_STATE))),x.sourceHash);
 });
 
-test('TWI03 R1: one plan, atomic JI and assessment, personal competence without extra role or fictitious admission',async t=>{
- const x=await synthetic(t),pass=password();
+test('TWI03 R1/R2: shared plan, atomic JI, competence, rapid control, candidate evidence and revision decision',async t=>{
+ const x=await synthetic(t,{twiR2:true}),pass=password();
  await migratePilotCopy({source:x.source,target:x.target,siteId:x.site,adminRoleId:x.adminRole,managerRoleId:x.managerRole,password:pass});
  let store=await openSecureQA({dataDir:x.target});
  try{
@@ -992,10 +993,55 @@ test('TWI03 R1: one plan, atomic JI and assessment, personal competence without 
   assert.equal(store.personCard(manager.id,1,x.f.trainee).own_competences,null);
   assert.throws(()=>store.personCard(worker.id,1,x.personB),/недоступна/);
   assert.throws(()=>store.listResources(worker.id,'matrix.read'),/Раздел недоступен/);
+
+  await assert.rejects(store.changeTraining(manager.id,1,{id:first.id,expected_revision:done.rev,command:'verify_source',fields:{kind:'safety',source_id:uuid(),applicability:'Без связанного комплекта',feedback:'QA'}}),/неприменим/);
+  const sd=store.trainingDetail(manager.id,1,second.id);
+  await store.recordInstructionProtocol(instructor.id,1,{id:second.id,expected_revision:sd.rev,facts:sd.stages.map(s=>fact(s.code))});
+  const rd=store.trainingDetail(manager.id,1,second.id);
+  const re={...evaluation,id:second.id,expected_revision:rd.rev};
+  const samples=[12,13,14].map(seconds=>({seconds,quality_ok:true,time_ok:true}));
+  const control={samples,note:'QA: сравнение качества и времени с СОП'};
+  await assert.rejects(store.recordAssessmentResult(manager.id,1,re),/контроль качества и времени/);
+  await assert.rejects(store.recordAssessmentResult(manager.id,1,{...re,practical:{...re.practical,rapid_control:{...control,samples:samples.slice(0,2)}}}),/3–5/);
+  const negative={...control,samples:[{...samples[0],quality_ok:false},...samples.slice(1)]};
+  await assert.rejects(store.recordAssessmentResult(manager.id,1,{...re,practical:{...re.practical,rapid_control:negative}}),/отклонение/i);
+  await assert.rejects(store.recordAssessmentResult(manager.id,1,{...re,practical:{...re.practical,conclusion:'not_meet',rapid_control:negative}}),/самостоятельную/);
+  assert.equal(store.trainingDetail(manager.id,1,second.id).practical,null);
+  assert.equal(store.trainingDetail(manager.id,1,second.id).rev,rd.rev);
+  await store.recordAssessmentResult(manager.id,1,{...re,practical:{...re.practical,rapid_control:control}});
+  assert.deepEqual(store.trainingDetail(manager.id,1,second.id).rapid_control,control);
+  assert.equal(store.trainingDetail(manager.id,1,second.id).admission,'Нет решения');
+  const rv=await store.revisionChange(manager.id,1,x.f.doc.id,x.revision.revision);
+  assert.equal(rv.same_work_content,false);
+  const review={old_id:x.f.doc.id,new_id:x.revision.revision,expected_revision:0,decision:'editorial',reason:'QA проверка'};
+  await assert.rejects(store.saveRevisionChange(manager.id,1,review),/рабочее содержание/);
+  await store.saveRevisionChange(manager.id,1,{...review,decision:'retrain'});
+  await assert.rejects(store.saveRevisionChange(manager.id,1,{...review,decision:'retrain'}),/изменились/);
+  await assert.rejects(store.revisionChange(worker.id,1,x.f.doc.id,x.revision.revision),/недоступ|прав/);
+  const from=day.slice(0,4)+'-01-01',candidate=x.personB;
+  assert(store.candidateOptions(manager.id,1).people.some(z=>z.id===candidate));
+  const evidence=(kind,fields,reference='QA '+kind)=>({person_id:candidate,kind,held_on:day,reference,fields});
+  const ji=evidence('ji',{revision_id:x.revision.revision,trainee_id:x.f.trainee,present:true,confirmed:true});
+  await assert.rejects(store.recordCandidateEvidence(worker.id,1,ji),/сертифицированный ВТ|недоступ/);
+  const registered=await store.recordCandidateEvidence(manager.id,1,ji);
+  await assert.rejects(store.recordCandidateEvidence(manager.id,1,ji),/уже зарегистрировано/);
+  await store.recordCandidateEvidence(manager.id,1,evidence('sop',{revision_id:x.revision.revision,contribution:'QA участие в разработке'}));
+  await assert.rejects(store.recordCandidateEvidence(manager.id,1,evidence('app13',{answers:Array(16).fill(1)})),/все критерии/);
+  await store.recordCandidateEvidence(manager.id,1,evidence('app13',{answers:[...Array(14).fill(1),0,0,0]}));
+  await store.recordCandidateEvidence(manager.id,1,evidence('app14',{answers:Array(16).fill(1)}));
+  const ce=store.candidateEvidence(manager.id,1,candidate,from,day);
+  assert.equal(ce.checks[0].actual,1);assert.equal(ce.checks[1].actual,1);assert.equal(ce.checks[2].actual,1);assert.equal(ce.checks[3].actual,14/17);assert(ce.checks[3].ok);assert(ce.checks[4].ok);
+  assert.equal(ce.checks[5].actual,0);
+  assert(!store.listResources(manager.id,'credential.read').some(c=>c.person_id===candidate),'Candidate evidence is not a certificate');
+  await store.voidCandidateEvidence(manager.id,1,{id:registered.id,reason:'QA исправление'});
+  const afterVoid=store.candidateEvidence(manager.id,1,candidate,from,day);
+  assert.equal(afterVoid.checks[1].actual,0);assert(afterVoid.saved.some(v=>v.id===registered.id&&v.voided));
   const before=store.productionPlans(manager.id,1).plans.find(z=>z.id===p.id);
   await store.close();store=await openSecureQA({dataDir:x.target});
   assert.deepEqual(store.productionPlans(manager.id,1).plans.find(z=>z.id===p.id),before);
   assert.equal(store.personCard(worker.id,1,x.f.trainee).own_competences.find(c=>c.assessment_id===assessed.qualification_id).actual,2);
   assert.equal(store.trainingDetail(manager.id,1,second.id).scenario,'rapid');
+  assert.deepEqual(store.trainingDetail(manager.id,1,second.id).rapid_control,control);
+  assert.equal(store.candidateEvidence(manager.id,1,candidate,from,day).checks[1].actual,0);
  }finally{await store.close()}
 });
