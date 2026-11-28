@@ -24,7 +24,7 @@ jobs:
   install:
     if: github.repository == 'shonentez-afk/Lean-Center' && github.event_name == 'push' && github.ref == 'refs/heads/feature/cloudcore-vps-qa'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -47,6 +47,20 @@ jobs:
           node tools/build_folder.mjs --cloud
           node --test tests/lc81-amvera-smoke.test.mjs
           git diff --exit-code -- package-lock.json
+      - name: Complete protected and domain regressions before VPS access
+        shell: bash
+        run: |
+          set -euo pipefail
+          find server/lc81 -type f \( -name '*.js' -o -name '*.mjs' \) -print0 | xargs -0 -r -n 1 node --check
+          node --test tests/lc81-read-policy.test.mjs tests/lc81-secure-qa.test.mjs tests/lc81-migration.test.mjs
+          node tools/lc81-inventory.mjs
+          npm test
+          node --test tests/lc74-server.test.mjs tests/lc74-save-state.test.mjs
+          npx playwright install --with-deps chromium
+          node tests/lc81-browser.mjs
+          node tests/lc81-parity-r2-browser.mjs
+          node tests/lc53-mobile-browser.mjs
+          node tests/lc74-cloud-browser.mjs
       - name: Package the Ubuntu x64 runtime and application
         shell: bash
         run: |

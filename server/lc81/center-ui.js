@@ -139,7 +139,9 @@ export function createCenterUI({api,run,button,panel,table,el,input,select,form,
       const h=el('div',undefined,'lc81-chart'),p=panel(title,h,table(headers,values.map((row,i)=>[row[0],...row.slice(1).map((v,j)=>button(String(v),()=>drill(i,j),'lc81-number-link'))])));header.append(p);
       requestAnimationFrame(()=>{if(h.isConnected)localChart(h,labels,series,{onClick:(i,j)=>{if(h.isConnected)void run(()=>drill(i,j))}})});
      };
+     if(Array.isArray(data.cohortMonths)&&!data.cohortMonths.length)header.append(panel('Назначения обучения по месяцам когорты',empty('За выбранный период нет назначений обучения.')));
      if(data.cohortMonths?.length){const x=data.cohortMonths;addChart('Назначения обучения по месяцам когорты',x.map(r=>r.id),[{name:'Назначено',data:x.map(r=>r.assignments)},{name:'Завершено из назначенных',data:x.map(r=>r.completed)}],['Месяц','Назначено','Завершено'],x.map(r=>[r.id,r.assignments,r.completed]),['training_assigned','training_completed'])}
+     if(Array.isArray(data.auditMonths)&&!data.auditMonths.length)header.append(panel('Факты аудита L1',empty('За выбранный период нет фактических аудитов L1.')));
      if(data.auditMonths?.length){const x=data.auditMonths;addChart('Факты аудита L1',x.map(r=>r.id),[{name:'Аудиты',data:x.map(r=>r.count)}],['Месяц','Аудиты'],x.map(r=>[r.id,r.count]),['audit_count'])}
    };
    if(kind==='center.read'){

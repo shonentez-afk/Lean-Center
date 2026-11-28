@@ -40,8 +40,8 @@ async function synthetic(t){
  w.edit('person_assignment',null,{...fields,position_id:position,valid_from:'2026-01-01',valid_to:null});
  const bank=(await f.save('twi_knowledge_bank',{profession_id:f.profession,author_id:f.actor,reviewed_on:'2026-01-20',previous_id:null,note:'Учебный банк',blocks:QUESTION_BANK_V03.blocks})).entity_id;
  const assignment=await f.addAssignment();
- const task=async owner=>(await f.save('action_item',{response_id:null,title:'Учебное мероприятие',owner_id:owner,subject_id:null,due_on:'2027-01-31',kind:'corrective',priority:'normal'})).entity_id;
- const ownTask=await task(f.trainee),otherTask=await task(personB);
+ const task=async (owner,due_on='2027-01-31')=>(await f.save('action_item',{response_id:null,title:'Учебное мероприятие',owner_id:owner,subject_id:null,due_on,kind:'corrective',priority:'normal'})).entity_id;
+ const ownTask=await task(f.trainee,'2026-01-31'),otherTask=await task(personB);
  const bareOperation=w.edit('operation',null,{unit_id:f.unit,workplace_id:f.workplace,equipment_id:null,code:'QA-NO-SKILL',name:'Учебная операция без навыка',criticality:'normal'});
  const bareSource=await makeSop('Операция без навыка');f.sources.set(bareSource.source.sha256,bareSource);
  const bareDoc=await f.save('document',{command:'create',code:'QA-NO-SKILL-SOP',title:'Учебная операция без навыка',operation_id:bareOperation,source:bareSource.source,projection:bareSource.projection});
@@ -202,6 +202,17 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(JSON.parse(origin.text).constructor.steps[0].frvSource.observedTimeSec,12);
   fromFrv=await store.saveLibrary(manager.id,1,req(originCtx,0,'Проект из замеров','LC81-FRV-SOP',null,origin.text));
   assert.equal(store.readResource(manager.id,'sop.read_history',fromFrv.revision_id).state,'draft');
+  assert.equal(store.libraryCard(manager.id,1,fromFrv.revision_id).origin.study_id,frv.id);
+  const originalSnapshot=await store.libraryOrigin(manager.id,1,fromFrv.revision_id);
+  assert.equal(originalSnapshot.current,true);assert.equal(originalSnapshot.summary.cycles[0].seconds,12);
+  const draftStudy=await store.saveLibrary(manager.id,1,req(ctx('frv','create',op),0,'Учебный изменяемый ФРВ',null,'2026-01-20',frvRaw));
+  const draftOriginCtx=ctx('sop','create',op,null,null,draftStudy.id,draftStudy.rev),draftOrigin=await store.openLibrary(manager.id,1,draftOriginCtx);
+  const fromDraft=await store.saveLibrary(manager.id,1,req(draftOriginCtx,0,'Проект из прежних замеров','LC81-FRV-ORIGINAL',null,draftOrigin.text));
+  const changedRaw=JSON.parse(frvRaw);changedRaw.cycles[0].observations[0].durationSec=24;
+  await store.saveLibrary(manager.id,1,req(ctx('frv','save',op,draftStudy.id),draftStudy.rev,'Учебный изменяемый ФРВ',null,'2026-01-20',JSON.stringify(changedRaw)));
+  const oldSnapshot=await store.libraryOrigin(manager.id,1,fromDraft.revision_id);
+  assert.equal(oldSnapshot.current,false);assert.equal(oldSnapshot.summary.cycles[0].seconds,12);
+  assert.equal((await store.libraryDetail(manager.id,1,'frv.read_summary',draftStudy.id)).cycles[0].seconds,24);
   // Shared enterprise authoring is independent of scoped management rights.
   const editorRole=(await store.createReference(admin.id,'business_role',{code:'LC81-OTHER-EDITOR',name:'Редактор другого участка'})).id;
   const editorAssignment=(await store.createReference(admin.id,'role_assignment',{person_id:x.personB,role_id:editorRole,valid_from:'2020-01-01',valid_to:null})).id;
@@ -226,6 +237,16 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   const tasks=store.listResources(worker.id,'task.read');
   assert.deepEqual(tasks.map(r=>r.id),[x.ownTask]);assert.equal(tasks[0].can_implement,true);
   assert.equal(store.readResource(worker.id,'task.read',x.otherTask),null);
+  const planDay=store.adminData(admin.id).clock.day,planTo=new Date(Date.parse(planDay+'T00:00:00Z')+30*86400000).toISOString().slice(0,10);
+  assert(planDay>'2026-01-31');
+  const planScope={from:planDay,to:planTo,person_id:x.f.trainee};
+  const overdue=store.calendarWorkspace(manager.id,1,{mode:'plan',...planScope}).items.find(q=>q.route?.id===x.ownTask);
+  assert(overdue?.overdue&&overdue.pending&&overdue.date==='2026-01-31');
+  assert(store.calendarWorkspace(worker.id,1,{mode:'plan',from:planDay,to:planTo}).items.some(q=>q.route?.id===x.ownTask&&q.overdue));
+  assert(!store.calendarWorkspace(manager.id,1,{mode:'calendar',...planScope}).items.some(q=>q.route?.id===x.ownTask));
+  assert.throws(()=>store.calendarWorkspace(worker.id,1,{mode:'plan',...planScope,person_id:x.personB}),/недоступ/);
+  await assert.rejects(store.libraryOrigin(worker.id,1,fromDraft.revision_id),/недоступны/);
+  await assert.rejects(store.libraryOrigin(otherEditor.id,1,fromFrv.revision_id),/недоступны/);
   assert.equal((await store.sopPhoto(worker.id,user.credential_revision,x.revision.revision,1)).type,'image/png');
   assert(store.listResources(worker.id,'sop.read_effective').some(r=>r.revision_id===x.revision.revision));
   assert.equal(store.readResource(worker.id,'sop.read_history',sharedDraft.revision_id),null);
@@ -501,6 +522,14 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert.equal(store.matrixDetail(manager.id,1,mixed.id).cells[1][0].actual,null);
   assert.equal(store.readResource(manager.id,'coverage.read',need.id).actual,0);
   assert.equal(store.assessmentDetail(manager.id,1,general.id).items[0].level,2);
+  const cellFor=(person,skill,filters=matrixQuery)=>{
+   const m=store.matrixOverview(manager.id,1,filters);return m.cells[m.people.findIndex(p=>p.id===person)][m.skills.findIndex(s=>s.id===skill)];
+  };
+  assert.equal(cellFor(x.f.trainee,x.generalSkill).assessment_state,'not_observed');
+  const skillHistory=store.matrixAssessmentHistory(manager.id,1,x.f.trainee,x.generalSkill,0);
+  assert.deepEqual(skillHistory.items.map(r=>r.id),[unobserved.id,general.id]);
+  assert.deepEqual(skillHistory.items.map(r=>r.state),['not_observed','rated']);
+  assert.throws(()=>store.matrixAssessmentHistory(worker.id,1,x.f.trainee,x.generalSkill,0),/доступ/);
   await competence(manager.id,'requirement.close',{id:requirement.id,rev:requirement.rev,valid_to:today});
   const revisedCoverage=await competence(manager.id,'coverage.save',{...coverage,id:need.id,rev:need.rev,min_people:1});
   assert.equal(revisedCoverage.rev,need.rev+1);
@@ -536,7 +565,14 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   // One calculation registry, authorized exact-unit slice and reconciled
   // evidence; no fake zeros for unavailable source permissions.
   const scope={unit_id:x.f.unit,from:yesterday,to:today};
-  const overview=store.centerWorkspace(manager.id,1,'analytics.read',scope);
+  const overview=store.centerWorkspace(manager.id,1,'analytics.read',scope),dashboard=store.centerWorkspace(manager.id,1,'center.read',scope);
+  assert.deepEqual(dashboard.cohortMonths,overview.cohortMonths);assert.deepEqual(dashboard.auditMonths,overview.auditMonths);
+  assert(dashboard.auditMonths.some(m=>m.count>0));
+  for(const month of dashboard.auditMonths){
+   const end=new Date(Date.UTC(Number(month.id.slice(0,4)),Number(month.id.slice(5,7)),0)).toISOString().slice(0,10),start=month.id+'-01';
+   const r=store.metricEvidence(manager.id,1,'center.read',{...scope,from:start>scope.from?start:scope.from,to:end<scope.to?end:scope.to},'audit_count',0);
+   assert.equal(r.value,month.count);assert(r.items.every(q=>q.route?.type==='audit'));
+  }
   const ma=overview.metrics.find(m=>m.id==='training_assigned');
   assert.notEqual(ma.availability,'restricted');assert(ma.value>0);
   const detailMetrics=store.metricEvidence(manager.id,1,'metrics.read',scope,'training_assigned',0);
@@ -550,6 +586,7 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
    for(const [id,count] of [['training_assigned',month.assignments],['training_completed',month.completed]]){
     const evidence=store.metricEvidence(manager.id,1,'analytics.read',monthly,id,0);
     assert.equal(evidence.value,count,id+' '+month.id);
+    assert.deepEqual(store.metricEvidence(manager.id,1,'center.read',monthly,id,0),evidence);
     assert(evidence.items.every(q=>q.route?.type==='training'));
    }
   }
@@ -834,6 +871,29 @@ test('migration keeps all existing v17 records and referenced sources, reuses ro
   assert(card.sections.find(s=>s.action==='matrix.read').items.some(r=>r.id===finalMatrix.id));
   const ownCard=store.personCard(worker.id,1,x.f.trainee);assert(!ownCard.sections.some(s=>s.action==='matrix.read'));
   assert.throws(()=>store.personCard(worker.id,1,x.personB),/недоступна/);
+  const secondScope={...matrixQuery,unit_id:x.unitB},matrixPerson=x.personB;
+  assert.equal(cellFor(matrixPerson,x.generalSkill,secondScope).assessment_state,'none');
+  const expired=await competence(manager.id,'assessment.general',{...baseGeneral,person_id:matrixPerson,assessed_on:yesterday,valid_until:yesterday});
+  const expiredCell=cellFor(matrixPerson,x.generalSkill,secondScope);
+  assert.equal(expiredCell.assessment_state,'expired');assert.equal(expiredCell.actual,2);assert.equal(expiredCell.valid_until,yesterday);
+  const na=await competence(manager.id,'assessment.general',{...baseGeneral,person_id:matrixPerson,previous_assessment_id:expired.id,observation_state:'not_applicable',level:null});
+  assert.equal(cellFor(matrixPerson,x.generalSkill,secondScope).assessment_state,'not_applicable');
+  assert.deepEqual(store.matrixAssessmentHistory(manager.id,1,matrixPerson,x.generalSkill,0).items.map(x=>x.state),['not_applicable','expired']);
+  // Reference permission and the local matrix/assessment grant are separate.
+  const scopedMatrixRole=(await store.createReference(admin.id,'business_role',{code:'LC81-MATRIX-LOCAL',name:'Локальная матрица'})).id;
+  const refsRole=(await store.createReference(admin.id,'business_role',{code:'LC81-MATRIX-REFS',name:'Справочные требования'})).id;
+  const localAssign=(await store.createReference(admin.id,'role_assignment',{person_id:x.personB,role_id:scopedMatrixRole,valid_from:'2020-01-01',valid_to:null})).id;
+  const refAssign=(await store.createReference(admin.id,'role_assignment',{person_id:x.personB,role_id:refsRole,valid_from:'2020-01-01',valid_to:null})).id;
+  await store.setPolicy(admin.id,{role_id:scopedMatrixRole,revision:0,permissions:['matrix.read','assessment.read','assessment.detail','org.read','person.read_basic']});
+  await store.setPolicy(admin.id,{role_id:refsRole,revision:0,permissions:['skill.read','requirement.read']});
+  await store.grant(admin.id,{account_id:otherEditor.id,assignment_id:localAssign,scope:{kind:'unit_tree',unit_id:x.unitB},valid_to:null});
+  await store.grant(admin.id,{account_id:otherEditor.id,assignment_id:refAssign,scope:{kind:'unit_tree',unit_id:x.site},valid_to:null});
+  const localMatrix=store.matrixOverview(otherEditor.id,1,secondScope);
+  assert(localMatrix.people.length>0&&localMatrix.people.every(p=>p.id!==x.f.trainee));
+  assert.throws(()=>store.matrixAssessmentHistory(otherEditor.id,1,x.f.trainee,x.generalSkill,0),/недоступна/);
+  const lr=localMatrix.people.findIndex(p=>p.id===matrixPerson),lc=localMatrix.skills.findIndex(s=>s.id===x.generalSkill);
+  assert(lr>=0&&lc>=0);assert.equal(localMatrix.cells[lr][lc].restricted,true);
+  assert.throws(()=>store.matrixAssessmentHistory(otherEditor.id,1,matrixPerson,x.generalSkill,0),/недоступна/);
 
  }finally{await store.close()}
  const backup=path.join(x.root,'backup'),restored=path.join(x.root,'restored');
