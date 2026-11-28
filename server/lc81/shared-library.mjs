@@ -16,7 +16,7 @@ export function sharedLibrary(db,a,site,day){
   if(['operation.read','sop.read_effective','sop.read_steps'].includes(action))return siteRead(action,id);
   if(action==='sop.read_history'){
    const v=siteRead(action,id);if(!v||v.data.document_archived)return null;
-   return (v.data.state==='effective'&&siteRead('sop.read_effective',id)||v.data.state==='draft'&&ownSop(id))?v:null;
+   return (v.data.state==='effective'&&siteRead('sop.read_effective',id)||ownSop(id))?v:null;
   }
   if(action==='frv.read'){
    const v=siteRead(action,id);return v&&(v.data.state==='final'||v.data.state==='draft'&&ownFrv(id))?v:null;
@@ -37,5 +37,5 @@ export function sharedLibrary(db,a,site,day){
   }
   return anchor==='sop.read_effective'&&action==='sop.read_linked_frv'&&!!read(anchor,id);
  }
- return {enabled,read,allows,readScope:(_kind,id)=>!!siteRead('operation.read',id)};
+ return {enabled,read,allows,ownsSop:id=>enabled&&ownSop(id),readScope:(_kind,id)=>!!siteRead('operation.read',id)};
 }

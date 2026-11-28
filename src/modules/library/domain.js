@@ -93,13 +93,13 @@ export function applyDomainEvent(db,e,old){
    const effective=one(db,"SELECT id FROM document_revision WHERE document_id=? AND state='effective'",[id]);db.run('UPDATE document SET title=?,operation_id=?,rev=rev+1 WHERE id=?',[effective?documentTitle(db,id,effective.id):p.title.trim(),p.operation_id,id]);return
   }
   exact(p,['command','revision_id','actor_id','note']);const v=revision(db,p.revision_id,id);invariant(string(p.note,2000),'Некорректное примечание');active(db,'person',p.actor_id);
-  const transitions={submit:['draft','review'],return:['review','draft'],approve:['review','approved'],effect:['approved','effective'],withdraw:['effective','withdrawn']};
+  const transitions={submit:['draft','review'],return:['review','draft'],return_approved:['approved','draft'],approve:['review','approved'],effect:['approved','effective'],withdraw:['effective','withdrawn']};
   const tr=Object.hasOwn(transitions,p.command)&&transitions[p.command];invariant(tr&&v.state===tr[0],'Недопустимый переход статуса');
   if(['submit','approve','effect'].includes(p.command)){active(db,'operation',old.operation_id);const steps=rows(db,'SELECT action_text FROM document_step WHERE revision_id=?',[v.id]);invariant(steps.length&&steps.every(s=>s.action_text.trim()),'Заполните действия всех шагов');invariant(v.print_format&&v.changed_on&&v.review_due,'Заполните паспорт: формат А3 и дата изменения');invariant(steps.length<=(v.print_format==='portrait'?9:12),'Количество шагов превышает формат А3');invariant(v.workplace_id&&one(db,'SELECT workplace_id FROM operation WHERE id=?',[old.operation_id])?.workplace_id===v.workplace_id,'Паспорт: подтвердите рабочее место операции');if(p.command!=='submit'){const src=JSON.parse(v.payload_json).projection;invariant(src.steps.every(s=>s.seconds>0&&hasSopKeyMomentsAndReason(s)&&s.photo),'Перед согласованием заполните время, ключевые моменты, причины и визуализацию всех шагов')}}
-  if(p.command==='return'||p.command==='withdraw')invariant(p.note.trim(),'Укажите причину');
+  if(['return','return_approved','withdraw'].includes(p.command))invariant(p.note.trim(),'Укажите причину');
   if(p.command==='effect'){db.run("UPDATE document_revision SET state='superseded' WHERE document_id=? AND state='effective'",[id]);db.run("UPDATE document_revision SET state='effective',effective_at=? WHERE id=?",[e.occurred_at,v.id]);db.run('UPDATE document SET title=? WHERE id=?',[documentTitle(db,id,v.id),id])}
   else db.run('UPDATE document_revision SET state=? WHERE id=?',[tr[1],v.id]);
-  if(p.command==='approve'||p.command==='return')db.run('INSERT INTO document_approval(id,revision_id,actor_id,decision,decided_at,note) VALUES(?,?,?,?,?,?)',[e.id,v.id,p.actor_id,p.command==='approve'?'approved':'returned',e.occurred_at,p.note]);
+  if(['approve','return','return_approved'].includes(p.command))db.run('INSERT INTO document_approval(id,revision_id,actor_id,decision,decided_at,note) VALUES(?,?,?,?,?,?)',[e.id,v.id,p.actor_id,p.command==='approve'?'approved':'returned',e.occurred_at,p.note]);
   db.run('UPDATE document SET rev=rev+1 WHERE id=?',[id]);return
  }
  invariant(e.entity_type==='frv_study','Неизвестное событие');

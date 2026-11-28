@@ -4,7 +4,7 @@
 import {scheduleKind,scheduleScopeDate} from '../../src/modules/training/center-planning.js';
 import {one,rows,isId} from '../../src/core/primitives.js';
 
-import {READ_ACTIONS,PERMISSIONS,DIRECTORY_COMMANDS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
+import {READ_ACTIONS,PERMISSIONS,DIRECTORY_COMMANDS,LIBRARY_COMMANDS,TRAINING_COMMANDS,SOP_APPROVAL_COMMANDS} from './access-contract.mjs';
 import {documentTitle} from '../../src/modules/library/revision-title.js';
 export {READ_ACTIONS};
 const validDay=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
@@ -457,7 +457,7 @@ function decide(db,security,accountId,action,resourceId,day,resourceAction=actio
   if(!role||assignment?.person_id!==account.person_id||assignment.role_id!==role.id||!activePeriod(assignment,day))continue;
   const policy=unique(security.policies,x=>x?.role_id===role.id);
   if(!policy||!Number.isSafeInteger(policy.revision)||policy.revision<1||grant.policy_revision!==policy.revision||!Array.isArray(policy.permissions)||!policy.permissions.includes(action))continue;
-  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result','preparation.shift','supplement.create','supplement.revise','supplement.decide','self.create','task.start','calendar.complete'].includes(x)),'matrix.detail','center.read','analytics.read','metrics.read','roi.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
+  if((![...DIRECTORY_COMMANDS,...LIBRARY_COMMANDS,...SOP_APPROVAL_COMMANDS,...TRAINING_COMMANDS.filter(x=>!['training.stage','training.enrollment.result','preparation.shift','supplement.create','supplement.revise','supplement.decide','self.create','task.start','calendar.complete'].includes(x)),'matrix.detail','center.read','analytics.read','metrics.read','roi.detail'].includes(action)||grant.scope.kind==='unit_tree')&&scopeAllows(db,grant.scope,account.person_id,resource))return {data:resource.data,decision:{grantId:grant.id,roleId:role.id,policyRevision:policy.revision}};
  }
  return null;
 }
@@ -506,4 +506,9 @@ export function bootstrapTrainingScope(db,site,resource){
 }
 export function canReadPersonCard(db,security,accountId,id,day){
  return !!decide(db,security,accountId,'person.read_card',id,day,'person.read_basic');
+}
+
+// A workflow separately checks the exact participant and frozen grant.
+export function sopApprovalGrant(db,security,accountId,action,operationId,day){
+ return SOP_APPROVAL_COMMANDS.includes(action)?decide(db,security,accountId,action,operationId,day,'operation.read')?.decision??null:null;
 }

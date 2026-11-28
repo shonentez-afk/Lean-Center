@@ -15,6 +15,7 @@ const publicFiles=new Map(await Promise.all([
  ['/', './portal.html','text/html; charset=utf-8'],
  ['/portal.js','./portal.js','text/javascript; charset=utf-8'],
  ['/library-ui.js','./library-ui.js','text/javascript; charset=utf-8'],
+ ['/sop-approval-ui.js','./sop-approval-ui.js','text/javascript; charset=utf-8'],
  ['/training-ui.js','./training-ui.js','text/javascript; charset=utf-8'],
  ['/center-ui.js','./center-ui.js','text/javascript; charset=utf-8'],
  ['/assistant-ui.js','./assistant-ui.js','text/javascript; charset=utf-8'],
@@ -285,6 +286,18 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='POST'&&p==='/api/lc81/matrix/retire'){reply(res,200,await store.retireMatrix(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/person/card'){reply(res,200,store.personCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
+   if(req.method==='GET'&&p==='/api/lc81/sop-approval/list'){reply(res,200,store.approvalList(a.id,a.credential_revision,{kind:url.searchParams.get('kind')||'all',offset:Number(url.searchParams.get('offset')||0)}));return}
+   if(req.method==='GET'&&p==='/api/lc81/sop-approval/detail'){reply(res,200,store.approvalDetail(a.id,a.credential_revision,url.searchParams.get('id'),url.searchParams.get('round_id')||null));return}
+   if(req.method==='POST'&&['/api/lc81/sop-approval/submit','/api/lc81/sop-approval/change'].includes(p)){
+    must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
+    try{const f=await body(req);reply(res,200,p.endsWith('/submit')?await store.submitSopApproval(a.id,a.credential_revision,f):await store.changeSopApproval(a.id,a.credential_revision,f));return}finally{libraryBusy--}
+   }
+   if(req.method==='GET'&&['/api/lc81/sop-approval/preview','/api/lc81/sop-approval/photo'].includes(p)){
+    const pos=p.endsWith('/photo')?url.searchParams.get('position'):null;
+    must(pos===null&&!p.endsWith('/photo')||/^\d{1,4}$/.test(pos||''),404,'Фото недоступно');
+    must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
+    try{const result=await store.approvalMaterial(a.id,a.credential_revision,url.searchParams.get('id'),url.searchParams.get('round_id')||null,pos===null?null:Number(pos));if(pos===null)reply(res,200,result);else reply(res,200,result.bytes,result.type);return}finally{libraryBusy--}
+   }
    if(req.method==='GET'&&p==='/api/lc81/library/card'){reply(res,200,store.libraryCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/rollout'){reply(res,200,store.rolloutDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='POST'&&['/api/lc81/library/rollout-save','/api/lc81/library/rollout-accept'].includes(p)){

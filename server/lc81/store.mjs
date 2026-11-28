@@ -8,12 +8,12 @@ import {pilotSql,atomicReplace,PilotError,PILOT_DOCUMENT_LIMIT} from '../lc74-st
 import {createDb,openDb,verifyDb,applyEvent,one,rows,uuid,tx,bytesOf,meta,isId,readSnapshot} from '../../src/core/db.js';
 import {hashPassword,verifyPassword,validHash,normalizeLogin,generatePassword,validPassword} from './credentials.mjs';
 import {workspaceActions} from './workspace-access.mjs';
-import {rolePresetStatus,installMissingRolePresets} from './role-presets.mjs';
+import {rolePresetStatus,installMissingRolePresets,matchesApprovalRole} from './role-presets.mjs';
 import {sharedLibrary,SHARED_LIBRARY_READS,SHARED_LIBRARY_WORKSPACES} from './shared-library.mjs';
 import {siteClock,normalizeZone,SITE_ZONE_KEY} from './site-clock.mjs';
 import {changeOwnPassword,resetAccountPassword,renameAccount,grantStatus,endRole,endEmployment} from './admin-commands.mjs';
-import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource} from './read-policy.mjs';
-import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,SITE_REFERENCE_TYPES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS,TRAINING_COMMANDS} from './access-contract.mjs';
+import {READ_ACTIONS,readAuthorized,readManagerProjection,canImplementOwnTask,canChangeDirectory,canReadSopPhoto,canUseLibrary,canReadLibraryAtOperation,canUseTrainingResource,bootstrapTrainingScope,canReadPersonCard,trainingAssignmentResource,matrixResource,sopApprovalGrant} from './read-policy.mjs';
+import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,SITE_REFERENCE_TYPES,DIRECTORY_COMMANDS,DETAIL_ACTIONS,LIBRARY_COMMANDS,TRAINING_COMMANDS,MANAGER_PERMISSIONS} from './access-contract.mjs';
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop,productionPlans,createProductionPlan,approveProductionPlan,recordInstructionProtocol,recordAssessmentResult} from './training-commands.mjs';
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix,matrixOverviewOptions,matrixOverview,matrixAssessmentHistory,profileOptions,professionProfile,saveProfessionProfile} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
@@ -31,6 +31,8 @@ import {requestDigest,getReceipt,addReceipt} from './library-receipts.mjs';
 import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,inspectLibraryText,saveLibrary,passportLibrary,finalizeLibrary,detailDescriptor,projectLibraryDetail,libraryReadAction,unboundLibraryContext} from './library-commands.mjs';
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
+import {internalTrainerAppointment} from '../../src/modules/training/domain.js';
+import {approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,checkApprovalIntegrity} from './sop-approval.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
 import {journalWorkspace,retrainingWorkspace,revisionReviewContext,inspectRevisionChange,publicRevisionReview,saveRevisionReview} from './training-registers.mjs';
@@ -90,10 +92,11 @@ function sessionView(db,a,withWorkspace=true){
  const restricted=effective.some(g=>g[4].kind!=='unit_tree'||g[4].unit_id!==config(db).site);
  const assigned=effective.some(g=>g[4].kind==='assigned');
  const types=restricted?['org_unit','person_assignment','person','operation','role_assignment',...(assigned?['training_assignment','training_enrollment','action_item','schedule_event']:[])]:a.person_id?['org_unit','operation']:[];
+ if(view.permissions.includes('sop.approval.twi'))types.push('mentor_credential','mentor_appointment');
  const epoch=types.length?one(db,'SELECT count(*) n FROM change_event WHERE entity_type IN ('+types.map(()=>'?').join(',')+')',types).n:0;
  const stamp=createHash('sha256').update(JSON.stringify([a.id,a.credential_revision,d,view.permissions,effective,epoch])).digest('hex');
  const work=workspaceActions(db,trainingAccess(db,a,d),a.bootstrap===1);
- return {...view,workspace_actions:[...new Set([...work,...(a.person_id?SHARED_LIBRARY_WORKSPACES:[])])].sort(),access_stamp:stamp};
+ return {...view,workspace_actions:[...new Set([...work,...(a.person_id?[...SHARED_LIBRARY_WORKSPACES,'sop.approvals']:[])])].sort(),access_stamp:stamp};
 }
 function auditView(db){return rows(db,"SELECT a.id,a.actor_account_id,a.action,a.target_id,a.occurred_at,m.value reason FROM lc81_audit a LEFT JOIN lc81_meta m ON m.key='reason:'||a.target_id ORDER BY a.occurred_at DESC,a.id LIMIT 100")}
 // A synchronous read may perform hundreds of decisions for one account.
@@ -134,6 +137,24 @@ function libraryAccess(db,a,d){
  const fullAllows=(action,anchor,id)=>(LIBRARY_COMMANDS.includes(action)||DETAIL_ACTIONS.includes(action))&&!!readFor(db,a,anchor,id,d)&&(a.bootstrap===1?action!=='frv.finalize':canUseLibrary(db,security(db,a.id),a.id,action,anchor,id,d));
  const read=(action,id)=>readFor(db,a,action,id,d)||shared.read(action,id);
  return {read,fullAllows,allows:(action,anchor,id)=>action==='sop.read_public'?anchor==='sop.read_effective'&&!!read(anchor,id):fullAllows(action,anchor,id)||shared.allows(action,anchor,id),readScope:(kind,id)=>shared.readScope(kind,id)||(a.bootstrap===1?!!readManagerProjection(db,config(db).site,'operation.read',id,d):canReadLibraryAtOperation(db,security(db,a.id),a.id,kind,id,d)),permissions:[...new Set([...permissionsFor(db,a),...(shared.enabled?SHARED_LIBRARY_READS:[])])]};
+}
+function approvalAccess(db,a,d){
+ const v=libraryAccess(db,a,d),site=config(db).site,clock=siteClock(db);
+ const shared=sharedLibrary(db,a,site,d);
+ const local=x=>!!x?.person_id&&x.bootstrap!==1&&rootUnit(db,employment(db,x.person_id,d)[0]?.unit_id)===site;
+ const siteRead=id=>local(a)&&!!readManagerProjection(db,site,'sop.read_history',id,d);
+ const eligible=(stage,id,operation)=>{
+  const other=account(db,id);if(!local(other))return null;
+  const roleKey={safety:'safety_head',engineering:'chief_engineer',twi:'internal_trainer',director:'director'}[stage];
+  const sec=security(db,id),cfg=config(db);
+  const scoped={...sec,grants:sec.grants.filter(g=>g.role_id!==cfg.manager&&g.role_id!==cfg.admin&&(!roleKey||matchesApprovalRole(roleKey,roleRow(db,g.role_id)||{})))};
+  const permission='sop.approval.'+stage,grant=sopApprovalGrant(db,scoped,id,permission,operation,d);if(!grant)return null;
+  const appointment=stage==='twi'?internalTrainerAppointment(db,other.person_id,d):null;if(stage==='twi'&&!appointment)return null;
+  return {account_id:id,person_id:other.person_id,name:activePerson(db,other.person_id).display_name,role:roleRow(db,grant.roleId).name,grant_id:grant.grantId,role_id:grant.roleId,policy_revision:grant.policyRevision,credential_id:appointment?.credential_id??null,appointment_id:appointment?.id??null};
+ };
+ return {accountId:a.id,personId:local(a)?a.person_id:null,name:a.person_id?activePerson(db,a.person_id)?.display_name:'',day:clock.day,at:clock.at,
+  siteRead,history:id=>siteRead(id)&&!!readFor(db,a,'sop.read_history',id,d),
+  coordinate:id=>siteRead(id)&&(shared.ownsSop(id)||v.fullAllows('sop.edit_draft','sop.read_history',id)),eligible,audit:(action,target)=>audit(db,a.id,action,target)};
 }
 // A revision and its historical FRV source are independently protected.
 // The shared final-study floor does not disclose previously replaced sources.
@@ -204,7 +225,7 @@ function projectView(db,a,action,data,d){
  }
  if(action==='sop.read_history'){
   const v=libraryAccess(db,a,d),id=data.revision_id,active=!data.document_archived;
-  return {...data,can_edit:active&&data.state==='draft'&&v.allows('sop.edit_draft',action,id),can_revise:active&&['effective','superseded','withdrawn'].includes(data.state)&&!one(db,"SELECT id FROM document_revision WHERE document_id=? AND state IN ('draft','review','approved')",[data.document_id])&&v.allows('sop.revise',action,id),can_passport:active&&data.state==='draft'&&v.allows('sop.passport',action,id)};
+  return {...data,approval:approvalBadge(db,approvalAccess(db,a,d),id),can_edit:active&&data.state==='draft'&&v.allows('sop.edit_draft',action,id),can_revise:active&&['effective','superseded','withdrawn'].includes(data.state)&&!one(db,"SELECT id FROM document_revision WHERE document_id=? AND state IN ('draft','review','approved')",[data.document_id])&&v.allows('sop.revise',action,id),can_passport:active&&data.state==='draft'&&v.allows('sop.passport',action,id)};
  }
  if(action==='sop.read_effective'){
   const v=libraryAccess(db,a,d),id=data.revision_id;
@@ -282,6 +303,7 @@ function checkPrivate(db){
   const ps=JSON.parse(p.permissions_json);must(Array.isArray(ps)&&new Set(ps).size===ps.length&&ps.every(x=>PERMISSIONS.includes(x))&&p.role_id!==cfg.admin,503,'Неверная политика');
  }
  must(!!one(db,'SELECT role_id FROM lc81_policy WHERE role_id=?',[cfg.manager]),503,'Нет политики управляющего');
+ checkApprovalIntegrity(db);
 }
 const digest=b=>createHash('sha256').update(b).digest('hex');
 function pack(db){
@@ -421,7 +443,7 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     must(admin!==manager,422,'Административная и рабочая роли должны различаться');
     for(const [k,v] of [['site_id',site],['admin_role_id',admin],['manager_role_id',manager]])current.run('INSERT INTO lc81_meta VALUES(?,?)',[k,v]);
     if(seed)current.run("INSERT INTO lc81_meta VALUES('migrated_snapshot_sha256',?)",[seed.snapshot.manifest.snapshot_sha256]);
-    current.run('INSERT INTO lc81_policy VALUES(?,1,?)',[manager,JSON.stringify(PERMISSIONS)]);
+    current.run('INSERT INTO lc81_policy VALUES(?,1,?)',[manager,JSON.stringify(MANAGER_PERMISSIONS)]);
     const id=uuid();current.run('INSERT INTO lc81_account(id,person_id,login,password_hash,state,bootstrap,created_at) VALUES(?,NULL,?,?,\'active\',1,?)',[id,normalizeLogin(login),hashPassword(password),at()]);
     audit(current,id,seed?'bootstrap.migrated':'bootstrap',id);
     if(!seed)installMissingRolePresets(current,[admin,manager],payload=>domainCreate(current,'business_role',payload),roleId=>audit(current,id,'role.preset.install',roleId));
@@ -913,6 +935,24 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const a=checkedAccount(db,actor,revision);
    return finalizeLibrary(db,input,{...libraryAccess(db,a,day(db)),personId:a.person_id,at:at(),audit:(action,target)=>audit(db,actor,action,target)});
   })},
+  approvalList(actor,revision,filter){return read(db=>approvalList(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),filter))},
+  approvalDetail(actor,revision,id,roundId=null){return read(db=>approvalDetail(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),id,roundId))},
+  async submitSopApproval(actor,revision,f){
+   const ctx=read(db=>prepareApprovalSubmit(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f));
+   await inspectApprovalSource(ctx.b,readFile);
+   return mutate(db=>submitApproval(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx));
+  },
+  async changeSopApproval(actor,revision,f){
+   const ctx=read(db=>prepareApprovalChange(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f));
+   await inspectApprovalSource(ctx.b,readFile);
+   return mutate(db=>changeApproval(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx));
+  },
+  async approvalMaterial(actor,revision,id,roundId=null,position=null){
+   const context=db=>approvalPreviewContext(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),id,roundId);
+   const ctx=read(context),p=await inspectApprovalSource(ctx.binding,readFile);
+   const result=position===null?approvalPreview(ctx.binding,p):await approvalPhoto(ctx.binding,p,position);
+   return read(db=>{const next=context(db);must(next.sha===ctx.sha&&next.round_id===ctx.round_id,409,'Материал изменился');return result});
+  },
   libraryCard(actor,revision,id){
    return read(db=>{
     const a=checkedAccount(db,actor,revision),d=day(db),v=libraryAccess(db,a,d),access=trainingAccess(db,a,d);
@@ -998,8 +1038,8 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     requireAdmin(db,actor,revision);must(keys(input,['revision']),400,'Неверные поля политики');
     const id=config(db).manager,old=one(db,'SELECT * FROM lc81_policy WHERE role_id=?',[id]);
     must(old&&old.revision===input.revision,409,'Политика изменилась');
-    if(JSON.stringify([...JSON.parse(old.permissions_json)].sort())===JSON.stringify([...PERMISSIONS].sort()))return {revision:old.revision};
-    db.run('UPDATE lc81_policy SET revision=revision+1,permissions_json=? WHERE role_id=?',[JSON.stringify(PERMISSIONS),id]);
+    if(JSON.stringify([...JSON.parse(old.permissions_json)].sort())===JSON.stringify([...MANAGER_PERMISSIONS].sort()))return {revision:old.revision};
+    db.run('UPDATE lc81_policy SET revision=revision+1,permissions_json=? WHERE role_id=?',[JSON.stringify(MANAGER_PERMISSIONS),id]);
     audit(db,actor,'policy.manager_upgrade',id);
     return {revision:old.revision+1};
    });
