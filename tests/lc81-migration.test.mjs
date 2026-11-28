@@ -991,7 +991,7 @@ test('TWI03 R1: one plan, atomic JI and assessment, personal competence without 
   assert(own.own_competences.some(c=>c.actual===2&&c.assessment_id===assessed.qualification_id));
   assert.equal(store.personCard(manager.id,1,x.f.trainee).own_competences,null);
   assert.throws(()=>store.personCard(worker.id,1,x.personB),/недоступна/);
-  assert.deepEqual(store.listResources(worker.id,'matrix.read'),[]);
+  assert.throws(()=>store.listResources(worker.id,'matrix.read'),/Раздел недоступен/);
   const before=store.productionPlans(manager.id,1).plans.find(z=>z.id===p.id);
   await store.close();store=await openSecureQA({dataDir:x.target});
   assert.deepEqual(store.productionPlans(manager.id,1).plans.find(z=>z.id===p.id),before);
