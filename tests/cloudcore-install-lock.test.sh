@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Isolated regression: no SSH, real releases or live services.
 set -euo pipefail
+umask 077
 test "$(id -u)" -ne 0
 installer="$(realpath deploy/cloudcore/install.sh)"
 work="$(mktemp -d)"

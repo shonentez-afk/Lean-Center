@@ -1053,7 +1053,8 @@ test('TWI03 R1–R5: shared plan, atomic JI, competence, rapid control, candidat
   assert.equal(store.trainingDetail(manager.id,1,second.id).admission,'Нет решения');
   const actualJournal=await journalBook(p.id),js=actualJournal.getWorksheet('План и реализация'),jd=actualJournal.getWorksheet('Назначения и факты');
   assert.equal(js.getCell('F7').text,day);assert.equal(js.getCell('F8').text,day);
-  assert(Math.abs(Number(js.getCell('H7').value)+Number(js.getCell('H8').value)-(d.stages.length+sd.stages.length)*10/1440)<1e-8);
+  const duration=v=>v instanceof Date?(v.getTime()-Date.UTC(1899,11,30))/86400000:Number(v);
+  assert(Math.abs(duration(js.getCell('H7').value)+duration(js.getCell('H8').value)-(d.stages.length+sd.stages.length)*10/1440)<1e-8);
   assert(!js.getCell('I7').value&&!js.getCell('J7').value);assert.equal(jd.rowCount,1+d.stages.length+sd.stages.length);
   const beforeAccept=store.rolloutDetail(manager.id,1,rolloutRev).report;
   assert.equal(beforeAccept.participants.filter(x=>x.ready).length,2);
