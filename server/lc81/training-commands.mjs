@@ -5,6 +5,7 @@ import {progressFor,currentStandard,latestVerification,latestAssessment,variants
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {trainingResource,trainingAssignmentResource,enrollmentResource,preparationResource} from './read-policy.mjs';
 import {PilotError} from '../lc74-store.mjs';
+import {assertFamiliarizationTraining} from './sop-familiarization.mjs';
 const must=(ok,status,message)=>{if(!ok)throw new PilotError(status,message)};
 const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
 const text=(s,n=2000)=>typeof s==='string'&&s.length<=n;
@@ -93,7 +94,8 @@ export function trainingOptions(db,access,operationId=null){
 }
 export const CREATE_FIELDS=Object.freeze(['operation_id','trainee_id','authorization_id','revision_id','skill_id','scale_id','target_level','assigned_on','due_on','reason','variant','method_config','plan_reviewed']);
 export function resolveTrainingCreate(db,input,access){
- const fields=[...CREATE_FIELDS,...(Object.hasOwn(input||{},'scenario')?['scenario']:[]),...(Object.hasOwn(input||{},'rapid_confirm')?['rapid_confirm']:[])];
+ const familiar=Object.hasOwn(input||{},'familiarization_id');
+ const fields=[...CREATE_FIELDS,...(Object.hasOwn(input||{},'scenario')?['scenario']:[]),...(Object.hasOwn(input||{},'rapid_confirm')?['rapid_confirm']:[]),...(familiar?['familiarization_id']:[])];
  const linked=exact(input,[...fields,'enrollment_id','program_task_id','enrollment_rev']),repeat=exact(input,[...fields,'retraining_source_id']);
  must((exact(input,fields)||linked||repeat)&&access.personId&&isId(input.operation_id)&&isId(input.trainee_id)&&isId(input.authorization_id)&&isId(input.revision_id)&&date(input.assigned_on)&&date(input.due_on)&&input.assigned_on>=access.day&&input.plan_reviewed===true,400,'Заполните назначение и подтверждение плана');
  must(access.read('operation.read',input.operation_id)&&access.read('sop.read_effective',input.revision_id)&&allowedPerson(db,access,input.trainee_id),403,'Данные назначения недоступны');
@@ -117,6 +119,7 @@ export function resolveTrainingCreate(db,input,access){
  must(access.allows('training.create',input.operation_id,resource)&&access.allows('training.read',input.operation_id,resource),403,'Назначение выходит за область полномочий');
  const r=sourceRevision(db,input.revision_id);
  must(r.operation_id===input.operation_id,422,'СОП относится к другой операции');
+ if(familiar){must(!linked&&!Object.hasOwn(input,'rapid_confirm'),422,'Некорректное основание адресного обучения');assertFamiliarizationTraining(db,access,input)}
  if(repeat){
   const old=isId(input.retraining_source_id)&&one(db,'SELECT * FROM training_assignment WHERE id=?',[input.retraining_source_id]);
   must(old&&old.state!=='cancelled'&&access.read('training.read',old.id)&&allowed(db,access,old,'training.detail')&&access.read('sop.read_history',old.sop_revision_id),404,'Прежнее обучение недоступно');
@@ -125,7 +128,7 @@ export function resolveTrainingCreate(db,input,access){
   must(!one(db,"SELECT id FROM training_assignment WHERE trainee_id=? AND skill_id=? AND sop_revision_id=? AND state<>'cancelled'",[old.trainee_id,old.skill_id,r.id]),409,'Переобучение по новой редакции уже назначено');
  }
  const program=n&&one(db,'SELECT standard_kind FROM training_program WHERE id=?',[n.program_id]);
- const inferred=repeat?'changed_operation':program&&['adaptation','internship','safety'].includes(program.standard_kind)?'onboarding':program?'development':null;
+ const inferred=repeat||familiar?'changed_operation':program&&['adaptation','internship','safety'].includes(program.standard_kind)?'onboarding':program?'development':null;
  const scenario=input.scenario??inferred;
  must(!inferred||!input.scenario||input.scenario===inferred,422,'Основание не соответствует связанной программе или переобучению');
  must(scenario!=='onboarding'||linked&&inferred==='onboarding',422,'Для новичка или перевода сначала оформите персональную программу подготовки и назначайте инструктаж из её задания');

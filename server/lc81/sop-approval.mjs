@@ -7,6 +7,7 @@ import {validateRef,inspectSource,checkContent} from '../../src/modules/library/
 import {hasSopKeyMomentsAndReason} from '../../src/modules/library/sop-step-quality.js';
 import {projectLibraryDetail} from './library-commands.mjs';
 import {extractPhoto} from './sop-photo.mjs';
+import {registerSopFamiliarization} from './sop-familiarization.mjs';
 import {sameWorkContent} from '../../src/modules/training/revision-impact.js';
 import {prepublicationContext,saveRevisionReview,REVISION_IMPACT_SCHEMA} from './training-registers.mjs';
 const must=(ok,status,message)=>{if(!ok)throw new PilotError(status,message)};
@@ -223,6 +224,7 @@ export function changeApproval(db,a,f,checked,{scheduledId=null}={}){
  db.run('INSERT INTO lc83_sop_decision VALUES(?,?,?,?,?,?,?,?,?,?,?)',[id,c.rr.id,c.stage,f.command,a.accountId,a.personId,a.name,canonical(c.basis),note,a.at,eid]);
  db.run('UPDATE lc83_sop_round SET state=?,rev=rev+1 WHERE id=?',[c.state,c.rr.id]);
  const rr=byRound(db,c.rr.id),next=currentStage(db,rr);
+ if(c.transition==='effect')registerSopFamiliarization(db,a,rr,c.impactId);
  if(scheduledId){
   must(c.state==='effective',503,'Некорректное выполнение планового ввода');
   db.run("UPDATE lc83_sop_publication SET state='executed',finished_at=?,finished_by=?,outcome='published' WHERE id=? AND state='pending'",[a.at,a.accountId,scheduledId]);

@@ -145,7 +145,7 @@ export function createCenterUI({api,run,button,panel,table,el,input,select,form,
      if(data.auditMonths?.length){const x=data.auditMonths;addChart('Факты аудита L1',x.map(r=>r.id),[{name:'Аудиты',data:x.map(r=>r.count)}],['Месяц','Аудиты'],x.map(r=>[r.id,r.count]),['audit_count'])}
    };
    if(kind==='center.read'){
-    const primary=['prep_completed','twi_first','training_overdue','skill_coverage','audit_count','actions_overdue','effect_pending'];
+    const primary=['prep_completed','twi_first','training_overdue','skill_coverage','audit_count','actions_overdue','effect_pending','lc83_familiarization_coverage','lc83_familiarization_overdue'];
     for(const m of metrics.filter(x=>primary.includes(x.id))){
      const kpi=m.availability==='restricted'?el('strong',metricText(m),'lc81-kpi'):button(metricText(m),()=>goMetric?goMetric(m.id,s,()=>show(m.id)):show(m.id),'lc81-kpi lc81-kpi-link');
      cards.append(panel(m.label,kpi,m.availability==='restricted'?empty('Ограничено правами'):button('Раскрыть расчёт',()=>show(m.id))));

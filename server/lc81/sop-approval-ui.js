@@ -1,15 +1,69 @@
 // Same route and decisions are shown in the personal queue and SOP card.
-export function createApprovalUI({api,button,panel,table,el,input,select,form,value,note,discard,render,refresh}){
+export function createApprovalUI({api,button,panel,table,el,input,select,form,value,note,discard,render,refresh,openSop,openTraining,assignFamiliarization}){
  const url=(action,id,round=null)=>'sop-approval/'+action+'?id='+encodeURIComponent(id)+(round?'&round_id='+encodeURIComponent(round):'');
  const commandLabel={approve:'Согласовано / утверждено',return:'Возвращено',publish:'Введено в действие',cancel:'Возвращено организатором',withdraw:'Выведено'};
  const labels={description:'Описание',print_format:'Формат',changed_on:'Дата изменения',review_due:'Срок пересмотра',workplace_name:'Рабочее место (паспорт)',equipment_name:'Оборудование (паспорт)',branch:'Филиал',department:'Подразделение',workplace:'Рабочее место',operation:'Операция',sopNumber:'Номер',safety:'Безопасность',tools:'Инструменты',material:'Материалы'};
  const comment=(required=false)=>{const l=el('label',required?'Причина (обязательно)':'Комментарий','field'),t=el('textarea');t.name='note';t.required=required;t.maxLength=2000;t.rows=3;l.append(t);return l};
+ async function familiarizationPanel(filter={}){
+  const {kind='mine',revision_id=null,person_id=null,offset=0,back=null}=filter;
+  const query=new URLSearchParams({kind,offset:String(offset),...(revision_id?{revision_id}:{}),...(person_id?{person_id}:{})});
+  const d=await api('sop-familiarization/list?'+query),host=el('div'),sub=el('div'),controls=el('div',undefined,'row');
+  const reload=async(patch={})=>{host.replaceWith(await familiarizationPanel({...filter,...patch}));refresh()};
+  const switchTo=k=>async()=>{if(discard())await reload({kind:k,offset:0})};
+  controls.append(button('Мои ознакомления',switchTo('mine'),kind==='mine'?'primary':''));
+  if(d.can_manage)controls.append(button('Контроль ознакомления',switchTo('managed'),kind==='managed'?'primary':''));
+  if(kind==='visible')controls.append(el('span','Доступные записи выбранной карточки','muted'));
+  if(back)controls.append(button('← Назад к согласованиям',async()=>{if(discard())host.replaceWith(await back())}));
+  const n=panel('Ознакомление с редакциями СОП',el('p','Персональные назначения создаются при фактическом вводе по составу зарегистрированной оценки влияния. Ознакомление не является обучением, практической оценкой или допуском. Срок назначается ответственным; его отсутствие не считается просрочкой.','muted'),controls);
+  const describe=x=>x.code+' · v'+x.version_no+' · '+x.title;
+  function showConfirm(x){
+   const check=el('input');check.type='checkbox';check.name='confirmed';check.required=true;
+   const l=el('label');l.append(check,el('span','Я ознакомился с указанной редакцией СОП'));
+   const fields=[el('p',describe(x)),el('p','SHA-256: '+x.source_sha256,'lc83-hash'),button('Открыть СОП для ознакомления',()=>openSop(sub,x.revision_id)),l];
+   sub.replaceChildren(panel('Личное подтверждение ознакомления',form(fields,'Подтвердить ознакомление',async f=>{
+    await api('sop-familiarization/confirm',{id:x.id,expected_revision:x.rev,source_sha256:x.source_sha256,confirmed:f.elements.namedItem('confirmed').checked});
+    note('Личное ознакомление зарегистрировано');await reload();
+   })));
+  }
+  function showDeadline(x){
+   const due=input('familiarization_due_on','Срок ознакомления','date');due.querySelector('input').min=d.day;due.querySelector('input').value=x.due_on&&x.due_on>=d.day?x.due_on:d.day;
+   sub.replaceChildren(panel('Срок ознакомления · '+x.person,form([el('p',describe(x)),due,comment(true)],'Сохранить срок ознакомления',async f=>{
+    await api('sop-familiarization/deadline',{id:x.id,expected_revision:x.rev,due_on:value(f,'familiarization_due_on'),note:value(f,'note')});
+    note('Срок ознакомления зарегистрирован');await reload();
+   })));
+  }
+  function actions(x){
+   const row=el('div',undefined,'row');
+   if(x.can_open)row.append(button('Открыть СОП',()=>openSop(sub,x.revision_id)));
+   if(x.can_ack)row.append(button('Подтвердить ознакомление',()=>showConfirm(x),'primary'));
+   if(x.can_due)row.append(button('Назначить срок ознакомления',()=>showDeadline(x)));
+   return row.childElementCount?row:'—';
+  }
+  function training(x){
+   if(x.training===null)return x.decision==='editorial'?'Редакционная эквивалентность':'Решение оценки: '+(x.decision==='initial'?'первичный ввод':'переобучение');
+   if(!x.training.length)return 'Редакционная эквивалентность';
+   const col=el('div');
+   for(const t of x.training){
+    const row=el('div',undefined,'row');row.append(el('span',t.skill+' · '+t.label));
+    if(t.assignment_id)row.append(button('Открыть обучение',()=>openTraining(sub,t.assignment_id)));
+    if(t.create)row.append(button('Назначить обучение',()=>assignFamiliarization(sub,t.create,()=>reload()),'primary'));
+    col.append(row);
+   }
+   return col;
+  }
+  if(d.items.length)n.append(table(['Сотрудник','СОП / редакция','Назначено','Срок','Ознакомление / дата','Обучение (отдельный процесс)','Действия'],d.items.map(x=>[x.person,describe(x),x.assigned_on,x.due_on||'Не назначен',x.state_label+(x.confirmed_at?' · '+x.confirmed_at.slice(0,10):'')+(x.overdue?' · просрочено':'')+(!x.current?' · история':''),training(x),actions(x)])));
+  else n.append(el('p',d.registered?'В зафиксированном составе нет доступных персональных назначений.':'Нет доступных назначений. Ранее введённые редакции не получают задним числом вымышленные ознакомления.','empty'));
+  const prev=button('← Назад',()=>reload({offset:Math.max(0,offset-d.limit)})),next=button('Вперёд →',()=>reload({offset:offset+d.limit}));
+  prev.disabled=offset===0;next.disabled=offset+d.limit>=d.total;
+  n.append(el('p','Записей: '+d.total,'muted'),prev,next,sub);host.append(n);return host;
+ }
  async function list(kind='all',offset=0){
   const d=await api('sop-approval/list?kind='+kind+'&offset='+offset),host=el('div');
   const controls=el('div',undefined,'row');
   for(const [key,label] of [['all','Доступные раунды'],['mine','Мои согласования'],['sent','Мои отправленные']]){
    const b=button(label,async()=>{if(!discard())return;host.replaceChildren(await list(key,0));refresh()});b.setAttribute('aria-pressed',String(key===kind));if(key===kind)b.classList.add('primary');controls.append(b);
   }
+  controls.append(button('Ознакомление с СОП',async()=>{if(discard())host.replaceChildren(await familiarizationPanel({back:()=>list(kind,offset)}))}));
   const n=panel('Согласование и утверждение СОП',el('p','Задачи согласования формируются из назначенного маршрута. Согласующие видят только доступные редакции, решения не равнозначны юридической электронной подписи. Новый СОП не действует до отдельного ввода.','muted'),controls);
   if(d.items.length)n.append(table(['СОП / редакция','Раунд','Состояние','Согласовано','Срок моего решения','Действия'],d.items.map(x=>[x.code+' · v'+x.version_no+' · '+x.title,x.round_no,x.status+(x.overdue?' · просрочен':'')+(x.pending?' · требуется моё решение':''),x.approved+' / 3',x.my_due||'—',button('Открыть согласование',()=>detail(host,x.revision_id,x.id,()=>list(kind,offset)))])));
   else n.append(el('p','Нет доступных раундов. Для нового СОП откройте «Редакции и черновики СОП», заполните паспорт и запустите согласование.','empty'));
@@ -93,6 +147,7 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
    }
    n.append(box);
   }
+  if(r&&['effective','withdrawn'].includes(r.state))n.append(button('Ознакомление и адресное обучение',async()=>{if(discard()){const out=await familiarizationPanel({kind:'visible',revision_id:id,back:async()=>{const h=el('div');await detail(h,id,roundId,back,false);return h}});host.replaceChildren(out)}}));
   if(d.publication&&r){
    const j=d.publication,rec=j.record,states={pending:'Запланирован',executed:'Введён',cancelled:'Отменён',blocked:'Заблокирован'},outcomes={published:'Выполнено',manual_cancel:'Отменено ответственным',round_returned:'Редакция возвращена',authorization_or_conditions:'Изменились права, оценка или условия ввода',source_invalid:'Исходники не подтверждены'};
    const box=panel('Плановая дата ввода СОП',el('p','Часовой пояс предприятия: '+j.zone+'. Дата означает ввод не раньше начала этого дня; сервер проверяет готовность при запуске и затем периодически. При сбое или недоступности сохраняется прежняя действующая редакция.','muted'));
@@ -142,5 +197,5 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
   if(d.history.length)n.append(panel('Все доступные раунды этой редакции',table(['Раунд','Состояние','Отправлен','Действия'],d.history.map(x=>[x.round_no,x.status,x.submitted_at.slice(0,10),button('Открыть раунд '+x.round_no,()=>detail(host,id,x.id,back))]))));
   host.replaceChildren(n);refresh();
  }
- return {list,detail};
+ return {list,detail,familiarizationPanel};
 }

@@ -286,6 +286,14 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='POST'&&p==='/api/lc81/matrix/retire'){reply(res,200,await store.retireMatrix(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/person/card'){reply(res,200,store.personCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
+   if(req.method==='GET'&&p==='/api/lc81/sop-familiarization/list'){
+    reply(res,200,store.familiarizationList(a.id,a.credential_revision,{kind:url.searchParams.get('kind')||'mine',revision_id:url.searchParams.get('revision_id')||null,person_id:url.searchParams.get('person_id')||null,offset:Number(url.searchParams.get('offset')||0)}));return;
+   }
+   if(req.method==='POST'&&p==='/api/lc81/sop-familiarization/confirm'){
+    must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
+    try{reply(res,200,await store.confirmSopFamiliarization(a.id,a.credential_revision,await body(req)));return}finally{libraryBusy--}
+   }
+   if(req.method==='POST'&&p==='/api/lc81/sop-familiarization/deadline'){reply(res,200,await store.setSopFamiliarizationDeadline(a.id,a.credential_revision,await body(req)));return}
    if(req.method==='GET'&&p==='/api/lc81/sop-approval/list'){reply(res,200,store.approvalList(a.id,a.credential_revision,{kind:url.searchParams.get('kind')||'all',offset:Number(url.searchParams.get('offset')||0)}));return}
    if(req.method==='GET'&&p==='/api/lc81/sop-approval/detail'){reply(res,200,store.approvalDetail(a.id,a.credential_revision,url.searchParams.get('id'),url.searchParams.get('round_id')||null));return}
    if(req.method==='POST'&&['/api/lc81/sop-approval/schedule','/api/lc81/sop-approval/cancel-schedule'].includes(p)){

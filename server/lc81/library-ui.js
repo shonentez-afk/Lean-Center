@@ -3,7 +3,7 @@
 const context=(kind,command,operation_id,id=null,revision_id=null,origin_id=null,origin_revision=null)=>({kind,command,id,revision_id,operation_id,origin_id,origin_revision});
 const stateLabel={draft:'Черновик',review:'На согласовании',approved:'Согласован (прежний порядок)',effective:'Действует',superseded:'Заменён',withdrawn:'Выведен',final:'Завершено',archived:'Архив'};
 const max=30*1024*1024;
-export function createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh,render,discard,check,assistant,openLinked,twiReport,assignRollout,downloadForm,openApproval}){
+export function createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh,render,discard,check,assistant,openLinked,twiReport,assignRollout,downloadForm,openApproval,openFamiliarization}){
  let active=null;
  function clear(){
   const s=active;active=null;
@@ -239,6 +239,7 @@ export function createLibraryUI({api,run,button,panel,table,el,input,select,form
   const d=await api('library/card?id='+encodeURIComponent(id)),r=d.revision;
   const n=panel('Карточка СОП · '+r.code+' · v'+r.version_no,el('h3',r.title),el('p',(r.approval?.status||stateLabel[r.state]||r.state)+' · '+(r.effective_at?'Введён: '+r.effective_at.slice(0,10):'Редакция '+r.version_no),'muted'));
   if(r.approval&&openApproval)n.append(button('Согласование СОП',()=>openApproval(id)));
+  if(d.can_familiarization)n.append(button('Ознакомление и адресное обучение',()=>openFamiliarization(nested,{kind:'visible',revision_id:id})));
   if(d.can_rollout)n.append(button('Внедрение новой операции / редакции',()=>rolloutPanel(host,id,()=>card(host,id,initial,trail))));
   if(trail.length)n.append(button('Назад к редакции v'+trail[trail.length-1].version,()=>card(host,trail[trail.length-1].id,'versions',trail.slice(0,-1))));
   const tabs=el('div',undefined,'lc81-card-tabs row'),body=el('div'),nested=el('div');let selected=null,serial=0;

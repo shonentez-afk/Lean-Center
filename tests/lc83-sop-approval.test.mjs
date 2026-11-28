@@ -115,6 +115,7 @@ test('LC83 durable scheduled publication: future, cancellation, restart, exact o
  await assert.rejects(schedule(x.day,'manager'),/текущего этапа/);
  const tomorrow=new Date(Date.parse(x.day)+86400000).toISOString().slice(0,10);
  const future=await schedule(tomorrow);assert.equal(future.state,'pending');
+ assert.equal(x.store.familiarizationList(x.users.author.id,1,{kind:'mine',revision_id:id}).total,0);
  assert.deepEqual(await x.store.runDueSopPublications(),{executed:0,blocked:0,deferred:0});
  assert(x.effective().includes(x.old));assert(!x.effective().includes(id));
  await assert.rejects(x.change('director',id,'publish','publish'),/запланированный ввод/);
@@ -138,6 +139,7 @@ test('LC83 durable scheduled publication: future, cancellation, restart, exact o
   const result=restarted.approvalDetail(x.users.author.id,1,id);
   assert.equal(result.round.state,'effective');assert.equal(result.publication.record.id,due.id);assert.equal(result.publication.record.state,'executed');assert.equal(result.publication.history.length,2);
   assert.equal(result.round.decisions.filter(v=>v.command==='publish').length,1);assert(result.impact.record.activated_at);
+  assert.equal(restarted.familiarizationList(x.users.author.id,1,{kind:'mine',revision_id:id}).total,1);
   assert(restarted.listResources(x.users.observer.id,'sop.read_effective').some(r=>r.revision_id===id));
  }finally{await restarted.close()}
  console.log('LC83_SCHEDULE_FUTURE_CANCEL_RESTART_EXACT_ONCE_OK');
@@ -152,6 +154,7 @@ test('LC83 scheduled publication fails closed when reviewer grant is revoked',as
  assert.deepEqual(await x.store.runDueSopPublications(),{executed:0,blocked:1,deferred:0});
  assert.deepEqual(await x.store.runDueSopPublications(),{executed:0,blocked:0,deferred:0});
  assert.equal(x.detail('author',id).publication.record.state,'blocked');
+ assert.equal(x.store.familiarizationList(x.users.author.id,1,{kind:'mine',revision_id:id}).total,0);
  assert.equal(x.detail('author',id).round.state,'approved');assert(x.effective().includes(x.old));assert(!x.effective().includes(id));
  console.log('LC83_SCHEDULE_REVOKED_GRANT_BLOCK_OK');
 });
@@ -167,4 +170,67 @@ test('LC83 scheduler serializes ticks and drains the in-flight task before shutd
   await delay(15);assert.equal(calls,1);assert.deepEqual(errors,[]);
  }finally{release();await scheduler.stop()}
  console.log('LC83_SCHEDULER_SERIAL_DRAIN_OK');
+});
+
+test('LC834 personal familiarization is atomic, version-bound and independent of real training',async t=>{
+ const x=await setupApproval();t.after(x.cleanup);
+ const {store,users}=x;
+ const d=await x.passport(await x.draft('Адресное ознакомление')),id=d.revision_id;
+ const mine=()=>store.familiarizationList(users.author.id,1,{kind:'mine',revision_id:id});
+ assert.equal(mine().total,0);
+ await x.submit(id);
+ for(const stage of ['safety','engineering','twi','director'])await x.change(stage,id,stage);
+ await x.impact(id);
+ assert.equal(mine().total,0);
+ await x.change('director',id,'publish','publish');
+ const initial=mine().items[0];assert(initial);assert.equal(mine().total,1);
+ assert.equal(initial.state,'pending');assert.equal(initial.due_on,null);assert(initial.can_ack);
+ assert.equal(store.familiarizationList(users.observer.id,1,{kind:'visible',revision_id:id}).total,0);
+ assert.equal(store.familiarizationList(users.observer.id,1,{kind:'managed',revision_id:id}).total,0);
+ const control=()=>store.familiarizationList(users.manager.id,1,{kind:'managed',revision_id:id}).items.find(v=>v.id===initial.id);
+ assert(control()?.can_due);
+ const ack=(v,override={})=>({id:v.id,expected_revision:v.rev,source_sha256:v.source_sha256,confirmed:true,...override});
+ await assert.rejects(store.confirmSopFamiliarization(users.observer.id,1,ack(initial)),/недоступно/);
+ await assert.rejects(store.confirmSopFamiliarization(users.author.id,1,ack(initial,{source_sha256:'0'.repeat(64)})),/изменились/);
+ await assert.rejects(store.confirmSopFamiliarization(users.author.id,1,ack(initial,{confirmed:false})),/Подтвердите/);
+ await assert.rejects(store.setSopFamiliarizationDeadline(users.author.id,1,{id:initial.id,expected_revision:initial.rev,due_on:x.day,note:'Учебный срок'}),/недоступно/);
+ await store.setSopFamiliarizationDeadline(users.manager.id,1,{id:initial.id,expected_revision:initial.rev,due_on:x.day,note:'Учебный срок'});
+ await assert.rejects(store.confirmSopFamiliarization(users.author.id,1,ack(initial)),/изменились/);
+ const due=mine().items[0];assert.equal(due.due_on,x.day);
+ await store.confirmSopFamiliarization(users.author.id,1,ack(due));
+ const confirmed=mine().items[0];assert.equal(confirmed.state,'confirmed');assert(confirmed.confirmed_at);assert(!confirmed.can_ack);
+ await assert.rejects(store.confirmSopFamiliarization(users.author.id,1,ack(due)),/изменились/);
+ const row=control();assert.equal(row.state,'confirmed');assert.equal(row.training[0].state,'needs');
+ const ctx=row.training[0].create;assert(ctx);assert.equal(ctx.retraining_source_id,x.assignment);
+ const options=store.trainingOptions(users.manager.id,1,x.operation);
+ const {familiarization_id,operation_id,trainee_id,revision_id,skill_id,scale_id,target_level,retraining_source_id,reason}=ctx;
+ const create={familiarization_id,operation_id,trainee_id,revision_id,skill_id,scale_id,target_level,retraining_source_id,reason,authorization_id:options.mentors[0].id,assigned_on:x.day,due_on:new Date(Date.parse(x.day)+86400000).toISOString().slice(0,10),scenario:'changed_operation',variant:'classic',method_config:{followups:2,segments:[],realShow:null,realTry:null,hazardous:false},plan_reviewed:true};
+ const assigned=await store.createTraining(users.manager.id,1,create);assert.equal(assigned.state,'planned');assert.equal(control().training[0].assignment_id,assigned.id);
+ await assert.rejects(store.createTraining(users.manager.id,1,create),/уже назначено/);
+ assert.equal(control().training[0].state,'planned');
+ const scope={unit_id:'',from:x.day,to:x.day};
+ const dashboard=store.centerWorkspace(users.manager.id,1,'center.read',scope);
+ const coverage=dashboard.metrics.find(v=>v.id==='lc83_familiarization_coverage');assert(coverage);assert.equal(coverage.value,1);assert.equal(coverage.denominator,1);
+ const evidence=store.metricEvidence(users.manager.id,1,'metrics.read',scope,coverage.id,0);assert.equal(evidence.total,1);assert.equal(evidence.items[0].included,true);
+ assert(store.libraryCard(users.author.id,1,id).can_familiarization);
+ const card=store.personCard(users.manager.id,1,initial.person_id);assert(card.sections.some(s=>s.action==='sop.familiarization'&&s.items.some(v=>v.id===initial.id)));
+ await store.close();const backup=path.join(x.root,'lc83-familiarization-copy');await copySecureCheckpoint(x.target,backup);
+ const restored=await openSecureQA({dataDir:backup});try{
+  const actor=restored.authenticate('author',x.password),m=restored.authenticate('manager',x.password);
+  assert.equal(restored.familiarizationList(actor.id,1,{kind:'mine',revision_id:id}).items[0].state,'confirmed');
+  assert.equal(restored.familiarizationList(m.id,1,{kind:'managed',revision_id:id}).items[0].training[0].assignment_id,assigned.id);
+ }finally{await restored.close()}
+ console.log('LC834_PERSONAL_CONFIRM_DEADLINE_TRAINING_METRICS_RESTORE_OK');
+});
+test('LC834 superseded pending receipt cannot be confirmed and new revision has independent receipt',async t=>{
+ const x=await setupApproval();t.after(x.cleanup);
+ async function publish(action,from){const d=await x.passport(await x.draft(action,from)),id=d.revision_id;await x.submit(id);for(const stage of ['safety','engineering','twi','director'])await x.change(stage,id,stage);await x.impact(id);await x.change('director',id,'publish','publish');return id}
+ const first=await publish('Предыдущая адресная редакция',x.old);
+ const mine=id=>x.store.familiarizationList(x.users.author.id,1,{kind:'mine',revision_id:id}).items[0];
+ const pending=mine(first);assert(pending.can_ack);
+ const second=await publish('Следующая адресная редакция',first);
+ const old=mine(first),next=mine(second);
+ assert.equal(old.state,'obsolete');assert.equal(old.current,false);assert.equal(next.state,'pending');assert.notEqual(old.id,next.id);
+ await assert.rejects(x.store.confirmSopFamiliarization(x.users.author.id,1,{id:old.id,expected_revision:old.rev,source_sha256:old.source_sha256,confirmed:true}),/недоступно|изменились/);
+ console.log('LC834_SUPERSEDED_RECEIPT_FAIL_CLOSED_OK');
 });

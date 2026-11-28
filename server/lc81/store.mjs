@@ -17,6 +17,7 @@ import {REFERENCE_CREATE_TYPES,RESOURCE_TABLES,PERMISSIONS,DIRECTORIES,SITE_REFE
 import {trainingOptions,resolveTrainingCreate,createTraining,changeTraining,trainingDetail,trainingSop,productionPlans,createProductionPlan,approveProductionPlan,recordInstructionProtocol,recordAssessmentResult} from './training-commands.mjs';
 import {matrixInfo,saveMatrix,retireMatrix,matrixDetail,suggestMatrix,matrixOverviewOptions,matrixOverview,matrixAssessmentHistory,profileOptions,professionProfile,saveProfessionProfile} from './matrix-commands.mjs';
 import {personCard} from './person-card.mjs';
+import {familiarizationList,prepareFamiliarizationAck,confirmFamiliarization,setFamiliarizationDeadline,checkFamiliarizationIntegrity,familiarizationMetrics,familiarizationMetricId} from './sop-familiarization.mjs';
 import {calendarWorkspace,calendarOptions,calendarDetail,createSchedule,changeSchedule,scheduleView,centerOptions,centerWorkspace,metricEvidence} from './center-commands.mjs';
 import {roiOptions,roiView,roiDetail,createRoi,changeRoi,roiMeasureContext,measureRoi,roiTwiOptions,previewRoiTwi} from './roi-commands.mjs';
 import {competencyOptions,competencyChange,competencyView,assessmentDetail} from './competency-commands.mjs';
@@ -154,6 +155,9 @@ function approvalAccess(db,a,d){
  };
  return {accountId:a.id,personId:local(a)?a.person_id:null,name:a.person_id?activePerson(db,a.person_id)?.display_name:'',credentialRevision:a.credential_revision,day:clock.day,at:clock.at,zone:clock.zone,clockConfigured:clock.configured,
   siteRead,history:id=>siteRead(id)&&!!readFor(db,a,'sop.read_history',id,d),
+  effective:id=>local(a)&&!!v.read('sop.read_effective',id),
+  employmentFor:id=>{const e=employment(db,id,d);return activePerson(db,id)&&e.length===1?e[0].id:null},
+  accountFor:id=>{const q=one(db,'SELECT id FROM lc81_account WHERE person_id=?',[id]),v=q&&account(db,q.id);return local(v)?v.id:null},
   coordinate:id=>siteRead(id)&&(shared.ownsSop(id)||v.fullAllows('sop.edit_draft','sop.read_history',id)),eligible,impactActor:id=>{const other=account(db,id);return local(other)?trainingAccess(db,other,d):null},audit:(action,target)=>audit(db,a.id,action,target)};
 }
 // A revision and its historical FRV source are independently protected.
@@ -304,6 +308,7 @@ function checkPrivate(db){
  }
  must(!!one(db,'SELECT role_id FROM lc81_policy WHERE role_id=?',[cfg.manager]),503,'Нет политики управляющего');
  checkApprovalIntegrity(db);
+ checkFamiliarizationIntegrity(db);
 }
 const digest=b=>createHash('sha256').update(b).digest('hex');
 function pack(db){
@@ -810,8 +815,21 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    const desc=read(descriptor),data=await checkedLibrarySource(desc,readFile);
    return read(db=>{must(descriptor(db).source.sha256===desc.source.sha256,409,'Исходник ФРВ изменился');return frvReportDetail(data.raw,id)});
   },
-  centerWorkspace(actor,revision,kind,scope){return read(db=>centerWorkspace(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind,scope))},
-  metricEvidence(actor,revision,kind,scope,id,offset){return read(db=>metricEvidence(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),kind,scope,id,offset))},
+  centerWorkspace(actor,revision,kind,scope){return read(db=>{
+   const user=checkedAccount(db,actor,revision),d=day(db),base=centerWorkspace(db,trainingAccess(db,user,d),kind,scope),extra=familiarizationMetrics(db,approvalAccess(db,user,d),scope);
+   if(!extra.length)return base;
+   const overdue=extra.find(x=>x.id==='lc83_familiarization_overdue');
+   return {...base,metrics:[...base.metrics,...extra.map(({evidence,...m})=>m)],relations:[...base.relations,{from:'lc83_familiarization_pending',to:'lc83_familiarization_overdue',kind:'subset',label:'Подмножество'}],attention:kind==='center.read'&&overdue.value?[...base.attention,{id:overdue.id,group:'Внедрение СОП',priority:'review',label:overdue.label,basis:overdue.rules,advice:'Откройте карточку СОП и проверьте персональные ознакомления.',count:overdue.value,records:overdue.evidence.slice(0,20),scope}]:base.attention};
+  })},
+  metricEvidence(actor,revision,kind,scope,id,offset){return read(db=>{
+   const user=checkedAccount(db,actor,revision),d=day(db),access=trainingAccess(db,user,d);
+   if(!familiarizationMetricId(id))return metricEvidence(db,access,kind,scope,id,offset);
+   centerWorkspace(db,access,kind,scope);
+   must(Number.isSafeInteger(offset)&&offset>=0,400,'Неверная страница');
+   const m=familiarizationMetrics(db,approvalAccess(db,user,d),scope).find(x=>x.id===id);
+   must(m,404,'Показатель недоступен');
+   const {evidence,...view}=m;return {...view,total:evidence.length,offset,items:evidence.slice(offset,offset+50)};
+  })},
   roiOptions(actor,revision){return read(db=>roiOptions(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db))))},
   roiDetail(actor,revision,id){return read(db=>roiDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
   createRoi(actor,revision,input){return mutate(db=>createRoi(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),input))},
@@ -847,7 +865,12 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    must(cardAllowed(db,a,id,d),404,'Карточка сотрудника недоступна');
    const canTwiReport=access.permissions.includes('analytics.read')&&subjectOptions(db,access).reports.some(r=>r.id==='twi_effect');
    const canPlan=a.person_id===id&&workspaceActions(db,access,a.bootstrap===1).includes('plan.read')||access.permissions.includes('calendar.read');
-   return personCard(db,access,id,i=>cardAllowed(db,a,i,d),{libraryRead:v.read,canTwiReport,canPlan});
+   const card=personCard(db,access,id,i=>cardAllowed(db,a,i,d),{libraryRead:v.read,canTwiReport,canPlan}),approval=approvalAccess(db,a,d);
+    if(approval.personId){
+     const f=familiarizationList(db,approval,{kind:'visible',person_id:id},false);
+     if(f.total)card.sections.push({action:'sop.familiarization',title:'Ознакомление с редакциями СОП',items:f.items.map(x=>({id:x.id,revision_id:x.revision_id,code:x.code,title:x.title,version_no:x.version_no,state:x.state_label,assigned_on:x.assigned_on,due_on:x.due_on,confirmed_on:x.confirmed_at?.slice(0,10)??null,can_open:x.can_open}))});
+    }
+    return card;
   })},
   libraryInfo(actor,kind){
    return read(db=>{
@@ -937,6 +960,13 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
   })},
   approvalList(actor,revision,filter){return read(db=>approvalList(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),filter))},
   approvalDetail(actor,revision,id,roundId=null){return read(db=>approvalDetail(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),id,roundId))},
+  familiarizationList(actor,revision,filter){return read(db=>familiarizationList(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),filter))},
+  async confirmSopFamiliarization(actor,revision,f){
+   const context=db=>prepareFamiliarizationAck(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f);
+   const c=read(context);await inspectApprovalSource(c.binding,readFile);
+   return mutate(db=>confirmFamiliarization(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f,c));
+  },
+  setSopFamiliarizationDeadline(actor,revision,f){return mutate(db=>setFamiliarizationDeadline(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f))},
   async submitSopApproval(actor,revision,f){
    const ctx=read(db=>prepareApprovalSubmit(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f));
    await inspectApprovalSource(ctx.b,readFile);
@@ -1024,8 +1054,9 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     }
     const pub=effective?projectView(db,a,'sop.read_effective',effective.data,d):null;
     const rev=history?projectView(db,a,'sop.read_history',history.data,d):(pub||entry.data);
-    const origin=readableFrvOrigin(db,v,id);
-    return {day:d,revision:rev,versions,measured,origin:origin?publicFrvOrigin(origin):null,evaluations:sopEvaluationsForRevision(db,access,id),can_evaluation:access.permissions.includes('sop.evaluation.read')&&!!history,can_effectiveness:canEffect,can_rollout:canReadRollout(db,access,id),can_public:!!effective&&v.allows('sop.read_public','sop.read_effective',id),can_steps:!!v.read('sop.read_steps',id),can_twi:!!pub?.can_twi,can_linked_frv:!!pub?.can_linked_frv};
+    const origin=readableFrvOrigin(db,v,id),approval=approvalAccess(db,a,d);
+    const familiarization=approval.personId?familiarizationList(db,approval,{kind:'visible',revision_id:id},false):null;
+    return {day:d,revision:rev,versions,measured,can_familiarization:!!familiarization?.registered,origin:origin?publicFrvOrigin(origin):null,evaluations:sopEvaluationsForRevision(db,access,id),can_evaluation:access.permissions.includes('sop.evaluation.read')&&!!history,can_effectiveness:canEffect,can_rollout:canReadRollout(db,access,id),can_public:!!effective&&v.allows('sop.read_public','sop.read_effective',id),can_steps:!!v.read('sop.read_steps',id),can_twi:!!pub?.can_twi,can_linked_frv:!!pub?.can_linked_frv};
    });
   },
   rolloutDetail(actor,revision,id){return read(db=>rolloutDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},

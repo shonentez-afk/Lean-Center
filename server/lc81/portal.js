@@ -379,8 +379,9 @@ function resourcePanel(items){
  }
  return content;
 }
-const approvalUI=createApprovalUI({api,button,panel,table,el,input,select,form,value,note,discard,render,refresh:refreshIndicator});
-libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard,check,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),openLinked,twiReport:context=>finalUI.twiReport(context),assignRollout:(host,context,onSaved)=>trainingUI.rolloutAssignmentEditor(host,context,onSaved),downloadForm,openApproval:id=>approvalUI.detail($('content'),id)});
+const approvalUI=createApprovalUI({api,button,panel,table,el,input,select,form,value,note,discard,render,refresh:refreshIndicator,openSop:(host,id)=>openLinked(host,{type:'sop',id}),openTraining:(host,id)=>openLinked(host,{type:'training',id}),assignFamiliarization:(host,context,onSaved)=>trainingUI.familiarizationAssignmentEditor(host,context,onSaved)});
+async function openFamiliarization(host,filter){if(discard())host.replaceChildren(await approvalUI.familiarizationPanel(filter))}
+libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard,check,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),openLinked,twiReport:context=>finalUI.twiReport(context),assignRollout:(host,context,onSaved)=>trainingUI.rolloutAssignmentEditor(host,context,onSaved),downloadForm,openApproval:id=>approvalUI.detail($('content'),id),openFamiliarization});
 async function downloadForm(kind,id=null,appendix=null,version=null){
  const generation=authGeneration;
  const r=await fetch('/api/lc81/forms/export',{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:JSON.stringify(kind==='batch'?{kind,items:id}:kind==='rollout_report'?{kind,id,version}:{kind,id,appendix})});
@@ -452,7 +453,7 @@ async function importPanel(){
 assistantUI=createAssistantUI({api,button,panel,table,el,input,select,note,openLinked,permitted:()=>!!user?.permissions.includes('assistant.read')});
 mobileUI=createMobileAuditUI({api,button,panel,table,el,input,select,form,value,note,discard});
 finalUI=createFinalUI({api,button,panel,table,el,input,select,note,discard,openLinked});
-trainingUI=createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,downloadForm,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),mobilePanel:()=>mobileUI.panel(),personCalendar:(mode,id)=>centerUI.calendar(mode,id),twiReport:context=>finalUI.twiReport(context)});
+trainingUI=createTrainingUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,downloadForm,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),mobilePanel:()=>mobileUI.panel(),personCalendar:(mode,id)=>centerUI.calendar(mode,id),twiReport:context=>finalUI.twiReport(context),openFamiliarization});
 centerUI=createCenterUI({api,run,button,panel,table,el,input,select,form,value,note,render,discard,check,openLinked,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),goMetric:async(id,scope,fallback)=>{
  if(!user?.workspace_actions.includes('metrics.read'))return fallback();
  if(!discard())return;centerUI.focusMetric(id,scope);page='metrics.read';await render();

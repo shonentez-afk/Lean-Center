@@ -110,6 +110,18 @@ try{
   }
   await q.ctx.close();
  }
- assert.equal(x.detail('author',id).round.state,'effective');assert(x.effective().includes(id));assert(!x.effective().includes(x.old));assert.deepEqual(errors,[]);
+ assert.equal(x.detail('author',id).round.state,'effective');assert(x.effective().includes(id));assert(!x.effective().includes(x.old));
+ const employee=await profile('author',true);await employee.go('sop.approvals');await employee.button('Ознакомление с СОП').click();await employee.button('Подтвердить ознакомление').click();
+ const ackForm=employee.content.locator('form').filter({has:employee.p.locator('input[name=confirmed]')});
+ await ackForm.locator('input[name=confirmed]').check();
+ await ackForm.getByRole('button',{name:'Подтвердить ознакомление',exact:true}).click();
+ await employee.content.getByText('Ознакомлен · ',{exact:false}).first().waitFor();await employee.ready();
+ assert.equal(x.store.familiarizationList(x.users.author.id,1,{kind:'mine',revision_id:id}).items[0].state,'confirmed');
+ await employee.ctx.close();
+ const control=await profile('manager');await control.go('sop.approvals');await control.button('Ознакомление с СОП').click();await control.button('Контроль ознакомления').click();
+ await control.content.getByText('Ознакомлен · ',{exact:false}).first().waitFor();
+ await control.button('Назначить обучение').first().waitFor();await control.ctx.close();
+ console.log('LC834_BROWSER_PERSONAL_CONFIRM_AND_CONTROL_OK');
+ assert.deepEqual(errors,[]);
  console.log('LC83_BROWSER_FULL_ROUTE_OK');
 }finally{if(browser)await browser.close();await close(proxy);await close(server);await x.cleanup()}
