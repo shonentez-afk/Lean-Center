@@ -286,6 +286,11 @@ export function createSecureQAServer({store,origin,cloudAiEnabled=false,editorAi
    if(req.method==='GET'&&p==='/api/lc81/person/card'){reply(res,200,store.personCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/info'){reply(res,200,store.libraryInfo(a.id,url.searchParams.get('kind')));return}
    if(req.method==='GET'&&p==='/api/lc81/library/card'){reply(res,200,store.libraryCard(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='GET'&&p==='/api/lc81/library/rollout'){reply(res,200,store.rolloutDetail(a.id,a.credential_revision,url.searchParams.get('id')));return}
+   if(req.method==='POST'&&['/api/lc81/library/rollout-save','/api/lc81/library/rollout-accept'].includes(p)){
+    must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
+    try{const f=await body(req);reply(res,200,p.endsWith('-save')?await store.saveRollout(a.id,a.credential_revision,f):await store.acceptRollout(a.id,a.credential_revision,f));return}finally{libraryBusy--}
+   }
    if(req.method==='GET'&&p==='/api/lc81/library/origin'){
     must(libraryBusy<1,429,'Документы обрабатываются, повторите запрос');libraryBusy++;
     try{reply(res,200,await store.libraryOrigin(a.id,a.credential_revision,url.searchParams.get('id')));return}finally{libraryBusy--}

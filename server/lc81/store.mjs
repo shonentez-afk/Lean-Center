@@ -34,6 +34,7 @@ import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
 import {journalWorkspace,retrainingWorkspace,revisionReviewContext,inspectRevisionChange,publicRevisionReview,saveRevisionReview} from './training-registers.mjs';
+import {canReadRollout,rolloutDetail,prepareRollout,inspectRolloutSources,saveRollout,prepareRolloutAcceptance,acceptRollout} from './operation-rollout.mjs';
 import {sopEvaluationWorkspace,sopEvaluationOptions,sopEvaluationDetail,createSopEvaluation,installSopMethod,sopEvaluationsForRevision} from './sop-evaluation-commands.mjs';
 import {importTypes,importAllowed,inspectDirectoryFile,parseDirectoryFile,planDirectoryImport,makeImportToken,checkImportToken} from './import-commands.mjs';
 import {mobileOptions,exportMobile,previewMobile,commitMobile,receiptMobile} from './mobile-audit-commands.mjs';
@@ -870,8 +871,19 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
     const pub=effective?projectView(db,a,'sop.read_effective',effective.data,d):null;
     const rev=history?projectView(db,a,'sop.read_history',history.data,d):(pub||entry.data);
     const origin=readableFrvOrigin(db,v,id);
-    return {day:d,revision:rev,versions,measured,origin:origin?publicFrvOrigin(origin):null,evaluations:sopEvaluationsForRevision(db,access,id),can_evaluation:access.permissions.includes('sop.evaluation.read')&&!!history,can_effectiveness:canEffect,can_public:!!effective&&v.allows('sop.read_public','sop.read_effective',id),can_steps:!!v.read('sop.read_steps',id),can_twi:!!pub?.can_twi,can_linked_frv:!!pub?.can_linked_frv};
+    return {day:d,revision:rev,versions,measured,origin:origin?publicFrvOrigin(origin):null,evaluations:sopEvaluationsForRevision(db,access,id),can_evaluation:access.permissions.includes('sop.evaluation.read')&&!!history,can_effectiveness:canEffect,can_rollout:canReadRollout(db,access,id),can_public:!!effective&&v.allows('sop.read_public','sop.read_effective',id),can_steps:!!v.read('sop.read_steps',id),can_twi:!!pub?.can_twi,can_linked_frv:!!pub?.can_linked_frv};
    });
+  },
+  rolloutDetail(actor,revision,id){return read(db=>rolloutDetail(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),id))},
+  async saveRollout(actor,revision,f){
+   const ctx=read(db=>prepareRollout(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f));
+   const summary=await inspectRolloutSources(ctx,readFile);
+   return mutate(db=>saveRollout(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx,summary));
+  },
+  async acceptRollout(actor,revision,f){
+   const ctx=read(db=>prepareRolloutAcceptance(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f));
+   const summary=await inspectRolloutSources(ctx,readFile);
+   return mutate(db=>acceptRollout(db,trainingAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx,summary));
   },
   async libraryOrigin(actor,revision,id){
    const descriptor=db=>{

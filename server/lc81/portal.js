@@ -338,7 +338,7 @@ function resourcePanel(items){
  }
  return content;
 }
-libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),openLinked,twiReport:context=>finalUI.twiReport(context)});
+libraryUI=createLibraryUI({api,run,button,panel,table,el,input,select,form,value,note,refresh:refreshIndicator,render,discard,check,assistant:(ctx,label)=>assistantUI.contextButton(ctx,label),openLinked,twiReport:context=>finalUI.twiReport(context)});
 async function downloadForm(kind,id=null,appendix=null){
  const r=await fetch('/api/lc81/forms/export',{method:'POST',cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','X-LC81-Request':'1'},body:JSON.stringify(kind==='batch'?{kind,items:id}:{kind,id,appendix})});
  if(!r.ok){const b=await r.json().catch(()=>({}));throw Object.assign(Error(b.error||'Выгрузка не подтверждена'),{status:r.status})}
