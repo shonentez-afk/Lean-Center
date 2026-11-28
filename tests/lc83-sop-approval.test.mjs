@@ -99,3 +99,52 @@ test('LC83 revoked reviewer cannot vote or see assigned snapshot; publication re
  assert.equal(x.detail('author',id).round.decisions.length,0);
  console.log('LC83_REVOKED_SCOPE_FAIL_CLOSED_OK');
 });
+
+test('LC83 durable scheduled publication: future, cancellation, restart, exact once',async t=>{
+ const x=await setupApproval();t.after(x.cleanup);
+ const id=(await x.passport(await x.draft('Плановый ввод учебного СОП'))).revision_id;
+ await x.submit(id);for(const stage of ['safety','engineering','twi','director'])await x.change(stage,id,stage);
+ const schedule=(due_on,name='director')=>{
+  const d=x.detail(name,id);
+  return x.store.scheduleSopPublication(x.users[name].id,1,{revision_id:id,round_id:d.round.id,expected_revision:d.document_rev,expected_round_revision:d.round.rev,due_on,note:'Учебный план ввода'});
+ };
+ await assert.rejects(schedule(x.day),/оценка влияния/);
+ await x.impact(id);
+ await assert.rejects(schedule(x.day,'manager'),/текущего этапа/);
+ const tomorrow=new Date(Date.parse(x.day)+86400000).toISOString().slice(0,10);
+ const future=await schedule(tomorrow);assert.equal(future.state,'pending');
+ assert.deepEqual(await x.store.runDueSopPublications(),{executed:0,blocked:0,deferred:0});
+ assert(x.effective().includes(x.old));assert(!x.effective().includes(id));
+ await assert.rejects(x.change('director',id,'publish','publish'),/запланированный ввод/);
+ await assert.rejects(schedule(x.day),/запланированный ввод/);
+ await assert.rejects(x.impact(id),/Отмените запланированный ввод/);
+ const d=x.detail('author',id);
+ await x.store.cancelSopPublication(x.users.author.id,1,{revision_id:id,round_id:d.round.id,schedule_id:future.id,expected_revision:d.document_rev,expected_round_revision:d.round.rev,note:'Учебная отмена'});
+ assert.equal(x.detail('author',id).publication.record.state,'cancelled');
+ const due=await schedule(x.day);assert.equal(due.state,'pending');
+ await x.store.close();
+ const target=path.join(x.root,'scheduled-copy');await copySecureCheckpoint(x.target,target);
+ const restarted=await openSecureQA({dataDir:target});try{
+  assert(restarted.listResources(x.users.observer.id,'sop.read_effective').some(r=>r.revision_id===x.old));
+  assert.deepEqual(await restarted.runDueSopPublications(),{executed:1,blocked:0,deferred:0});
+  assert.deepEqual(await restarted.runDueSopPublications(),{executed:0,blocked:0,deferred:0});
+  const result=restarted.approvalDetail(x.users.author.id,1,id);
+  assert.equal(result.round.state,'effective');assert.equal(result.publication.record.id,due.id);assert.equal(result.publication.record.state,'executed');assert.equal(result.publication.history.length,2);
+  assert.equal(result.round.decisions.filter(v=>v.command==='publish').length,1);assert(result.impact.record.activated_at);
+  assert(restarted.listResources(x.users.observer.id,'sop.read_effective').some(r=>r.revision_id===id));
+ }finally{await restarted.close()}
+ console.log('LC83_SCHEDULE_FUTURE_CANCEL_RESTART_EXACT_ONCE_OK');
+});
+test('LC83 scheduled publication fails closed when reviewer grant is revoked',async t=>{
+ const x=await setupApproval();t.after(x.cleanup);
+ const id=(await x.passport(await x.draft('Блокировка планового ввода'))).revision_id;
+ await x.submit(id);for(const stage of ['safety','engineering','twi','director'])await x.change(stage,id,stage);await x.impact(id);
+ const d=x.detail('director',id);
+ await x.store.scheduleSopPublication(x.users.director.id,1,{revision_id:id,round_id:d.round.id,expected_revision:d.document_rev,expected_round_revision:d.round.rev,due_on:x.day,note:'Учебный план'});
+ await x.store.revoke(x.admin.id,x.people.safety.grant.id);
+ assert.deepEqual(await x.store.runDueSopPublications(),{executed:0,blocked:1,deferred:0});
+ assert.deepEqual(await x.store.runDueSopPublications(),{executed:0,blocked:0,deferred:0});
+ assert.equal(x.detail('author',id).publication.record.state,'blocked');
+ assert.equal(x.detail('author',id).round.state,'approved');assert(x.effective().includes(x.old));assert(!x.effective().includes(id));
+ console.log('LC83_SCHEDULE_REVOKED_GRANT_BLOCK_OK');
+});

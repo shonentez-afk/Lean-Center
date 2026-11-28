@@ -32,7 +32,7 @@ import {resolveLibraryContext,contextStamp,checkedLibrarySource,sourceForEditor,
 import {directoryPeople} from '../../src/modules/master-data/people-directory.js';
 import {photoDescriptor,extractPhoto} from './sop-photo.mjs';
 import {internalTrainerAppointment} from '../../src/modules/training/domain.js';
-import {approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,compareApprovalSnapshots,approvalImpactContext,saveApprovalImpact,checkApprovalIntegrity} from './sop-approval.mjs';
+import {approvalList,approvalDetail,approvalBadge,prepareApprovalSubmit,submitApproval,prepareApprovalChange,changeApproval,approvalPreviewContext,inspectApprovalSource,approvalPreview,approvalPhoto,compareApprovalSnapshots,approvalImpactContext,saveApprovalImpact,preparePublicationSchedule,schedulePublication,cancelPublication,duePublications,prepareScheduledPublication,executeScheduledPublication,blockDuePublication,checkApprovalIntegrity} from './sop-approval.mjs';
 import {applyDirectoryCommand,directorySchema} from './directory-commands.mjs';
 import {personnelView,employmentDetail,transferEmployment} from './personnel-commands.mjs';
 import {journalWorkspace,retrainingWorkspace,revisionReviewContext,inspectRevisionChange,publicRevisionReview,saveRevisionReview} from './training-registers.mjs';
@@ -152,7 +152,7 @@ function approvalAccess(db,a,d){
   const appointment=stage==='twi'?internalTrainerAppointment(db,other.person_id,d):null;if(stage==='twi'&&!appointment)return null;
   return {account_id:id,person_id:other.person_id,name:activePerson(db,other.person_id).display_name,role:roleRow(db,grant.roleId).name,grant_id:grant.grantId,role_id:grant.roleId,policy_revision:grant.policyRevision,credential_id:appointment?.credential_id??null,appointment_id:appointment?.id??null};
  };
- return {accountId:a.id,personId:local(a)?a.person_id:null,name:a.person_id?activePerson(db,a.person_id)?.display_name:'',day:clock.day,at:clock.at,
+ return {accountId:a.id,personId:local(a)?a.person_id:null,name:a.person_id?activePerson(db,a.person_id)?.display_name:'',credentialRevision:a.credential_revision,day:clock.day,at:clock.at,zone:clock.zone,clockConfigured:clock.configured,
   siteRead,history:id=>siteRead(id)&&!!readFor(db,a,'sop.read_history',id,d),
   coordinate:id=>siteRead(id)&&(shared.ownsSop(id)||v.fullAllows('sop.edit_draft','sop.read_history',id)),eligible,impactActor:id=>{const other=account(db,id);return local(other)?trainingAccess(db,other,d):null},audit:(action,target)=>audit(db,a.id,action,target)};
 }
@@ -948,6 +948,37 @@ export async function openSecureQA({dataDir,initialize=false,login='admin',passw
    await inspectApprovalSource(ctx.b,readFile);
    if(ctx.transition==='effect'){const c=read(db=>approvalPreviewContext(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f.revision_id,f.round_id));if(c.previous)await inspectApprovalSource(c.previous,readFile)}
    return mutate(db=>changeApproval(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx));
+  },
+  async scheduleSopPublication(actor,revision,f){
+   const ctx=read(db=>preparePublicationSchedule(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f));
+   await inspectApprovalSource(ctx.b,readFile);
+   const preview=read(db=>approvalPreviewContext(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f.revision_id,f.round_id));
+   if(preview.previous)await inspectApprovalSource(preview.previous,readFile);
+   return mutate(db=>schedulePublication(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f,ctx));
+  },
+  cancelSopPublication(actor,revision,f){
+   return mutate(db=>cancelPublication(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f));
+  },
+  // Internal process-only runner. There is deliberately no HTTP tick API or
+  // client-controlled time. The serialized store is the sole writer.
+  async runDueSopPublications(){
+   const jobs=read(db=>duePublications(db,day(db))),result={executed:0,blocked:0,deferred:0};
+   const recoverable=e=>e instanceof PilotError&&[400,401,403,404,409,422].includes(e.status);
+   const block=async(job,code)=>{try{
+    if(await mutate(db=>blockDuePublication(db,job.id,siteClock(db),code,(actor,action,target)=>audit(db,actor,action,target))))result.blocked++;
+   }catch(e){if(e instanceof PilotError&&e.status===429)result.deferred++;else throw e}};
+   for(const job of jobs){
+    const access=db=>approvalAccess(db,checkedAccount(db,job.account_id,job.credential_revision),day(db));
+    let ctx;
+    try{ctx=read(db=>prepareScheduledPublication(db,access(db),job.id))}
+    catch(e){if(!recoverable(e))throw e;await block(job,'authorization_or_conditions');continue}
+    if(!ctx)continue;
+    try{await inspectApprovalSource(ctx.c.b,readFile);if(ctx.previous)await inspectApprovalSource(ctx.previous,readFile)}
+    catch{await block(job,'source_invalid');continue}
+    try{const done=await mutate(db=>executeScheduledPublication(db,access(db),job.id,ctx));if(done)result.executed++}
+    catch(e){if(e instanceof PilotError&&e.status===429)result.deferred++;else if(recoverable(e))await block(job,'authorization_or_conditions');else throw e}
+   }
+   return result;
   },
   async saveSopApprovalImpact(actor,revision,f){
    const context=db=>approvalImpactContext(db,approvalAccess(db,checkedAccount(db,actor,revision),day(db)),f);

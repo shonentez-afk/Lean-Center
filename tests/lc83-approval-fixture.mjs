@@ -34,7 +34,7 @@ export async function setupApproval(){
   const source=path.join(root,'legacy'),target=path.join(root,'secure');
   await copyPilotCheckpoint({SQL,snapshot:await prepareSnapshot(w),readSource:f.readContent,target:source});
   const password=randomBytes(24).toString('base64url');
-  await migratePilotCopy({source,target,siteId:site,adminRoleId:adminRole,managerRoleId:managerRole,login:'admin',password});
+  await migratePilotCopy({source,target,siteId:site,adminRoleId:adminRole,managerRoleId:managerRole,login:'admin',password,siteTimeZone:'UTC'});
   store=await openSecureQA({dataDir:target});
   const admin=store.authenticate('admin',password),users={};
   const account=async(name,person_id)=>users[name]=await store.createAccount(admin.id,{person_id,login:name,password,generate:false});

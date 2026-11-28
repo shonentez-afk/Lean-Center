@@ -93,6 +93,25 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
    }
    n.append(box);
   }
+  if(d.publication&&r){
+   const j=d.publication,rec=j.record,states={pending:'Запланирован',executed:'Введён',cancelled:'Отменён',blocked:'Заблокирован'},outcomes={published:'Выполнено',manual_cancel:'Отменено ответственным',round_returned:'Редакция возвращена',authorization_or_conditions:'Изменились права, оценка или условия ввода',source_invalid:'Исходники не подтверждены'};
+   const box=panel('Плановая дата ввода СОП',el('p','Часовой пояс предприятия: '+j.zone+'. Дата означает ввод не раньше начала этого дня; сервер проверяет готовность при запуске и затем периодически. При сбое или недоступности сохраняется прежняя действующая редакция.','muted'));
+   if(rec)box.append(el('p',states[rec.state]+' · '+rec.due_on+' · '+rec.actor+' · '+rec.note+(rec.outcome?' · '+(outcomes[rec.outcome]||rec.outcome):''),'lc83-state'));
+   if(!j.clock_configured&&d.can_decide.includes('publish'))box.append(el('p','Для планирования необходимо сначала настроить часовой пояс предприятия. Ручной ввод остаётся доступен при соблюдении условий.'));
+   if(j.can_schedule){
+    const due=input('publication_due_on','Дата ввода','date');due.querySelector('input').min=d.day;due.querySelector('input').value=d.day;
+    box.append(form([due,comment(true)],'Запланировать ввод',async f=>{
+     await api('sop-approval/schedule',{revision_id:id,round_id:r.id,expected_revision:d.document_rev,expected_round_revision:r.rev,due_on:value(f,'publication_due_on'),note:value(f,'note')});
+     f.lcResetForm?.();note('Дата ввода зарегистрирована');await reload();
+    }));
+   }
+   if(j.can_cancel)box.append(form([comment(true)],'Отменить запланированный ввод',async f=>{
+    await api('sop-approval/cancel-schedule',{revision_id:id,round_id:r.id,schedule_id:rec.id,expected_revision:d.document_rev,expected_round_revision:r.rev,note:value(f,'note')});
+    f.lcResetForm?.();note('Плановый ввод отменён');await reload();
+   }));
+   if(j.history.length>1){const history=el('details');history.append(el('summary','История планирования'),table(['Дата ввода','Запланировал','Состояние','Результат / причина'],j.history.map(v=>[v.due_on,v.actor,states[v.state],[(outcomes[v.outcome]||v.outcome),v.finish_note,v.finished_at?.slice(0,19)].filter(Boolean).join(' · ')])));box.append(history)}
+   n.append(box);
+  }
   const decision=(command,stage,caption,required=false)=>{
    const f=form([comment(required)],caption,async f=>{
     await api('sop-approval/change',{revision_id:id,round_id:r?.id??null,expected_revision:d.document_rev,expected_round_revision:r?.rev??0,command,stage,note:value(f,'note')});
@@ -107,7 +126,8 @@ export function createApprovalUI({api,button,panel,table,el,input,select,form,va
     actions.append(el('h3',label));
     if(stage==='publish'){
      actions.append(el('p','После ввода предыдущая действующая редакция будет заменена. Оценка влияет на существующий реестр переобучения.','muted'));
-     if(d.impact?.record)actions.append(decision('publish',stage,'Ввести в действие'));
+     if(d.publication?.record?.state==='pending')actions.append(el('p','Ввод уже запланирован. Для ручного ввода сначала отмените план.','muted'));
+     else if(d.impact?.record)actions.append(decision('publish',stage,'Ввести в действие'));
      else actions.append(el('p','Сначала ответственный должен зарегистрировать оценку влияния.','empty'));
     }
     else{

@@ -6,6 +6,7 @@ import {openSecureQA,restoreUploadedQA} from './lc81/store.mjs';
 import {createSecureQAServer} from './lc81/http.mjs';
 import {normalizeLogin,validPassword} from './lc81/credentials.mjs';
 import {normalizeZone} from './lc81/site-clock.mjs';
+import {startSopPublicationScheduler} from './lc81/sop-publication-scheduler.mjs';
 class StartupError extends Error{
  constructor(code){super(code);this.code=code}
 }
@@ -48,6 +49,8 @@ async function main(){
  requireSetting(u?.protocol==='https:'&&u.origin===origin,'ORIGIN_INVALID');
  const siteTimeZone=env.LC81_SITE_TIME_ZONE||null;
  requireSetting(siteTimeZone===null||!!normalizeZone(siteTimeZone),'TIME_ZONE_INVALID');
+ const schedulerDisabled=env.LC81_SCHEDULER_DISABLED;
+ requireSetting(schedulerDisabled===undefined||schedulerDisabled==='1','SCHEDULER_SETTING_INVALID');
  const loopbackOnly=env.LC81_LOOPBACK_ONLY;
  requireSetting(loopbackOnly===undefined||loopbackOnly==='1','LOOPBACK_SETTING_INVALID');
  const bindHost=loopbackOnly==='1'?'127.0.0.1':'0.0.0.0';
@@ -85,9 +88,13 @@ async function main(){
  let server;
  try{server=createSecureQAServer({store,origin,cloudAiEnabled:env.LC81_CLOUD_AI==='1',editorAiEnabled:env.LC81_EDITOR_AI==='1'});}catch(e){await store.close();throw e}
  phase='HTTP_LISTEN';
- server.on('error',async e=>{report(e);try{await store.close()}catch{}process.exitCode=1});
- server.listen(port,bindHost,()=>console.log('LC8.1 QA authentication and limited projections listening'));
- let stopping=false;const shutdown=()=>{if(stopping)return;stopping=true;server.close(async()=>{try{await store.close()}catch{process.exitCode=1}})};
+ let stopping=false,scheduler=null;
+ server.on('error',async e=>{report(e);stopping=true;try{await scheduler?.stop();await store.close()}catch{}process.exitCode=1});
+ server.listen(port,bindHost,()=>{
+  console.log('LC8.1 QA authentication and limited projections listening');
+  if(!stopping&&schedulerDisabled!=='1')scheduler=startSopPublicationScheduler(store);
+ });
+ const shutdown=()=>{if(stopping)return;stopping=true;const stopped=scheduler?.stop();server.close(async()=>{try{await stopped;await store.close()}catch{process.exitCode=1}})};
  process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);
 }
 main().catch(e=>{report(e);process.exitCode=1});

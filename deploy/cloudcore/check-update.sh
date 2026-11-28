@@ -30,7 +30,7 @@ await new Promise((resolve,reject)=>probe.close(error=>error?reject(error):resol
 const child=spawn(process.execPath,['server/lc81-main.mjs'],{
   env:{
     PATH:'/usr/bin:/bin', PORT:String(port), LC81_QA:'1',
-    LC81_LOOPBACK_ONLY:'1', LC81_DATA_DIR:dataDir, LC81_ORIGIN:origin
+    LC81_LOOPBACK_ONLY:'1', LC81_SCHEDULER_DISABLED:'1', LC81_DATA_DIR:dataDir, LC81_ORIGIN:origin
   },
   stdio:'ignore'
 });
