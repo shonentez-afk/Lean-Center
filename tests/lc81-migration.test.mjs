@@ -1018,7 +1018,7 @@ test('TWI03 R1–R6: shared plan, atomic JI, competence, rapid control, candidat
   for(const form of allForms){
    const file=await store.exportForm(manager.id,1,{kind:'blank',id:null,appendix:form.id});assert(file.bytes.length>100,'Appendix '+form.id);
    if(form.id===15){assert.match(file.filename,/\.docx$/);assert.equal(file.bytes.subarray(0,2).toString(),'PK')}
-   else{const book=new (excelJS().Workbook)();await book.xlsx.load(file.bytes);assert(book.worksheets.length,'Appendix '+form.id);}
+   else{const book=new (excelJS().Workbook)();await book.xlsx.load(file.bytes);assert(book.worksheets.length,'Appendix '+form.id);if(form.id===6){assert(book.getWorksheet('План обучения'));assert(book.getWorksheet('План и реализация'));assert(!book.getWorksheet('План и реализация').getCell('F7').value);}}
   }
   const pendingRollout=store.rolloutDetail(manager.id,1,rolloutRev).report;
   assert.equal(pendingRollout.baseline.mean_seconds,20);assert(!pendingRollout.ready);
@@ -1072,6 +1072,11 @@ test('TWI03 R1–R6: shared plan, atomic JI, competence, rapid control, candidat
   const duration=v=>v instanceof Date?(v.getTime()-Date.UTC(1899,11,30))/86400000:Number(v);
   assert(Math.abs(duration(js.getCell('H7').value)+duration(js.getCell('H8').value)-(d.stages.length+sd.stages.length)*10/1440)<1e-8);
   assert(!js.getCell('I7').value&&!js.getCell('J7').value);assert.equal(jd.rowCount,1+d.stages.length+sd.stages.length);
+  const combinedFile=await store.exportForm(manager.id,1,{kind:'production_combined',appendix:null,id:p.id}),combinedBook=new (excelJS().Workbook)();await combinedBook.xlsx.load(combinedFile.bytes);
+  assert(combinedBook.getWorksheet('Согласованный план'));assert(combinedBook.getWorksheet('Основания строк'));
+  const cs=combinedBook.getWorksheet('План и реализация'),cd=combinedBook.getWorksheet('Назначения и факты');
+  assert.equal(cs.getCell('F7').text,day);assert.equal(cs.getCell('F8').text,day);assert(!cs.getCell('I7').value&&!cs.getCell('J7').value);assert.equal(cd.rowCount,jd.rowCount);
+  await assert.rejects(store.exportForm(worker.id,1,{kind:'production_combined',appendix:null,id:p.id}),/недоступны/);
   const beforeAccept=store.rolloutDetail(manager.id,1,rolloutRev).report;
   assert.equal(beforeAccept.participants.filter(x=>x.ready).length,2);
   assert(!beforeAccept.ready&&beforeAccept.blockers.some(x=>x.includes('ФРВ')));

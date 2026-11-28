@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,SQL,schema,migrations,date,practicalMethod} from './lc4-fixture.mjs';
 import {one,rows,meta,bytesOf,openDb,Workspace,restore,backup,uuid,setMeta,prepareSnapshot,readSnapshot} from '../src/core/db.js';
-import {jiStages,progressFor,authorizationValid,admissionStatus,practicalResult,latestAssessment,matrixData,coverageData,enrollmentTasks,practicalMethods} from '../src/modules/training/domain.js';
+import {jiStages,progressFor,authorizationValid,instructorAppointment,admissionStatus,practicalResult,latestAssessment,matrixData,coverageData,enrollmentTasks,practicalMethods} from '../src/modules/training/domain.js';
 import {refsForDb,refsForEvents} from '../src/modules/library/domain.js';
 
 test('LC5 migration v9 through v10/v11/v12/v13 to v17 retains identities and old data',()=>{
@@ -25,6 +25,27 @@ test('role/certificate/order authorization and exact SOP source, no unreviewed o
  await f.stage(id,'prepare');await f.stage(id,'prepare');assert.equal(progressFor(f.w.working,f.getAssignment(id)).facts.length,3);
  await f.save('mentor_credential',{command:'revoke',reason:'Учебный отзыв'},f.certificate);assert.equal(authorizationValid(f.w.working,f.auth,'9999-01-01'),false);
  await assert.rejects(f.addAssignment({skill_id:f.skill,assigned_on:'2027-01-01'}),/правом/);
+ }finally{f.w.close()}
+});
+test('TWI03 R6: instructor appointment requires role, certificate, order and valid dates, not a new task grant',async()=>{
+ const f=await fixture();try{
+  const db=f.w.working,at='2026-01-21';
+  assert.equal(instructorAppointment(db,f.mentor,date).id,f.appointment);
+  assert.equal(instructorAppointment(db,f.trainee,date),null);
+  const instructorRole=one(db,"SELECT id FROM business_role WHERE code='INSTRUCTOR'").id;
+  f.w.edit('role_assignment',null,{person_id:f.other,role_id:instructorRole,valid_from:'2020-01-01',valid_to:null});
+  assert.equal(instructorAppointment(db,f.other,date),null,'Role without certificate is insufficient');
+  const cred={person_id:f.other,kind:'certificate',role:'instructor',number:'QA-ROLLOUT-EXPIRY',issuer:'Учебный центр',issued_on:'2020-01-01',valid_until:date,evidence:'Учебное основание',registered_by:f.actor};
+  const cert=(await f.save('mentor_credential',cred)).entity_id;
+  assert.equal(instructorAppointment(db,f.other,date),null,'Certificate without order is insufficient');
+  const order=(await f.save('mentor_appointment',{person_id:f.other,credential_id:cert,role:'instructor',order_number:'QA-ROLLOUT-ORDER',order_on:'2020-01-01',approved_by:f.actor,valid_from:'2020-01-01',valid_to:null,acknowledged_on:'2020-01-01',evidence:'Учебный приказ'})).entity_id;
+  assert.equal(instructorAppointment(db,f.other,date).id,order);
+  assert.equal(instructorAppointment(db,f.other,at),null,'Expired certificate');
+  assert.equal(rows(db,'SELECT id FROM mentor_authorization WHERE person_id=?',[f.other]).length,0,'Task status does not manufacture an operation grant');
+  f.advanceTo(at);await f.save('mentor_appointment',{command:'revoke',reason:'Учебный отзыв'},f.appointment);
+  assert.equal(instructorAppointment(db,f.mentor,date).id,f.appointment,'Historical status remains intact');
+  assert.equal(instructorAppointment(db,f.mentor,at),null);
+  assert.equal(authorizationValid(db,f.auth,at),false);
  }finally{f.w.close()}
 });
 test('training stages, 5 followups, separate practical qualification and admission, matrix, exchange and backup',async()=>{

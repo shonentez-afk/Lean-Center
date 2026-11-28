@@ -48,7 +48,9 @@ export function formsCatalog(db,a){
 function blank(db,form){
  if(form.id===15)return {bytes:Buffer.from(builtinOrderDocx({organization:'________________',city:'________________',order_on:'',order_number:'____ /ОДП',approved_name:'________________',supplement_from:'',instructor_amount:5000,trainer_amount:7000},[])),extension:'docx'};
  const X=excelJS(),id=form.id;
- const book=[9,13,14].includes(id)?assessmentMatrixWorkbook(X,id):id===16?supplementMatrixWorkbook(X,db):id===17?preparationStructureWorkbook(X):id===6?productionPlanWorkbook(X,{blank:true,rows:Array.from({length:12},()=>({}))}):id===8?productionWorkbook(X,Array.from({length:12},()=>({values:Array(9).fill(''),facts:[],assignment:{assigned_on:'',due_on:'',state:''}})),{title:form.title}):finalBlankWorkbook(X,id)||standardWorkbook(X,form);
+ const blankJournal=()=>Array.from({length:12},()=>({values:Array(9).fill(''),facts:[],assignment:{assigned_on:'',due_on:'',state:''}}));
+ const book=[9,13,14].includes(id)?assessmentMatrixWorkbook(X,id):id===16?supplementMatrixWorkbook(X,db):id===17?preparationStructureWorkbook(X):id===6?productionPlanWorkbook(X,{blank:true,rows:Array.from({length:12},()=>({}))}):id===8?productionWorkbook(X,blankJournal(),{title:form.title}):finalBlankWorkbook(X,id)||standardWorkbook(X,form);
+ if(id===6)productionWorkbook(X,blankJournal(),{book,title:'Приложение 6 · План и реализация',includeDetails:false});
  return {book,extension:'xlsx'};
 }
 const programFormKinds=new Set(['entry','adaptation','safety_program','internship_program','preparation_pack']);
@@ -159,7 +161,7 @@ function populated(db,a,kind,id){
 // Appendix 8 is the factual projection of an approved plan version, not
 // a second set of manually entered dates. Facts belong to the approval
 // interval identified by the assignment revision in their immutable event.
-function productionJournal(db,a,plan){
+function productionJournal(db,a,plan,{book=null,title=STANDARD_FORMS.find(x=>x.id===8).title}={}){
  const data=[];let total=0;
  for(const row of plan.rows){
   const r=find(db,'training_assignment',row.assignment_id);
@@ -180,7 +182,7 @@ function productionJournal(db,a,plan){
   total+=facts.length;must(total<=2000,413,'Слишком много фактов для одной выгрузки');
   data.push(...productionRows([{...r,assigned_on:row.assigned_on,due_on:row.due_on,state:end?'Исторический состав':r.state}],facts,{unit:()=>row.unit,person:p=>p===r.mentor_id?row.instructor:row.trainee,revision:()=>row.sop}));
  }
- return productionWorkbook(excelJS(),data,{title:STANDARD_FORMS.find(x=>x.id===8).title,scope:plan.title+' · '+plan.from+' — '+plan.to,date:a.day});
+ return productionWorkbook(excelJS(),data,{book,title,scope:plan.title+' · '+plan.from+' — '+plan.to,date:a.day});
 }
 export function prepareForm(db,a,f){
  if(f?.kind==='rollout_report'){
@@ -202,9 +204,12 @@ export function prepareForm(db,a,f){
  if(f.kind==='blank'){
   formsCatalog(db,a);const form=STANDARD_FORMS.find(x=>x.id===f.appendix);
   must(form&&f.id===null,400,'Выберите приложение 1–17');result=blank(db,form);target=programResource(db).units[0];tag=String(form.id);
- }else if(['production_plan','production_journal'].includes(f.kind)){
+ }else if(['production_plan','production_journal','production_combined'].includes(f.kind)){
   must(f.appendix===null&&isId(f.id),400,'Выберите согласованный план');
-  const plan=productionPlanExport(db,a,f.id),isPlan=f.kind==='production_plan';result={book:isPlan?productionPlanWorkbook(excelJS(),plan):productionJournal(db,a,plan),extension:'xlsx',tag:isPlan?'6':'8'};target=f.id;tag=result.tag+'-PLAN-'+target.slice(0,8);
+  const plan=productionPlanExport(db,a,f.id),isPlan=f.kind!=='production_journal';
+  let book=isPlan?productionPlanWorkbook(excelJS(),plan):null;
+  if(f.kind!=='production_plan')book=productionJournal(db,a,plan,{book,...(isPlan?{title:'Приложение 6 · План и реализация'}:{})});
+  result={book,extension:'xlsx',tag:f.kind==='production_combined'?'6-COMBINED':isPlan?'6':'8'};target=f.id;tag=result.tag+'-PLAN-'+target.slice(0,8);
  }else{
   must(f.appendix===null&&isId(f.id)&&Object.hasOwn(recordTypes,f.kind),400,'Выберите запись');
   result=populated(db,a,f.kind,f.id);target=f.id;tag=result.tag+'-'+target.slice(0,8);

@@ -78,14 +78,14 @@ export function productionPlanWorkbook(ExcelJS,plan){
  merge(s,5,1,9,'Руководитель подразделения: '+(plan.head?.name||'')+' · '+(plan.head?.date||'')+' · подпись: __________');
  cells(s,6,['№','Подразделение','Обучаемый','СОП / редакция','Целевой уровень','Инструктор','Начало','Срок','Основание']);header(s,6,9);
  plan.rows.forEach((x,i)=>cells(s,i+7,[i+1,x.unit,x.trainee,x.sop,x.target_level==null?'':x.target_level+(x.target_label?' · '+x.target_label:''),x.instructor,x.assigned_on,x.due_on,x.scenario]));
- merge(s,plan.rows.length+8,1,9,plan.blank?'Пустой бланк. Заполните состав и согласуйте план.':'Выписка согласованного состава. Подписи не подставляются; фактическое время и этапы — в приложении 8.');
+ merge(s,plan.rows.length+8,1,9,plan.blank?'Пустой бланк. Заполните состав и согласуйте план.':'Выписка согласованного состава. Подписи не подставляются; факты берутся из приложения 8 и доступны в сводной выгрузке.');
  s.views=[{state:'frozen',ySplit:6}];s.pageSetup.printTitlesRow='6:6';s.pageSetup.printArea='A1:I'+(plan.rows.length+8);
  if(plan.blank)return w;
  const trace=sheet(w,'Основания строк',[8,45,19]);cells(trace,1,['№','ID назначения','Версия при согласовании']);header(trace,1,3);
  plan.rows.forEach((x,i)=>cells(trace,i+2,[i+1,x.assignment_id,x.assignment_rev]));return w;
 }
-export function productionWorkbook(ExcelJS,records,{title='План производственного обучения сотрудников',organization='',scope='',date='',approver=''}={}){
- const w=new ExcelJS.Workbook(),s=sheet(w,'План и реализация',[7,25,25,43,25,15,12,15,17,17]);
+export function productionWorkbook(ExcelJS,records,{title='План производственного обучения сотрудников',organization='',scope='',date='',approver='',book=null,includeDetails=true}={}){
+ const w=book||new ExcelJS.Workbook(),s=sheet(w,'План и реализация',[7,25,25,43,25,15,12,15,17,17]);
  merge(s,1,1,10,title,true);merge(s,2,1,10,organization);merge(s,3,1,6,scope);merge(s,3,7,10,'Дата: '+date);
  merge(s,4,1,6,'Утверждающий: '+(approver||'________________'));merge(s,4,7,10,'Подпись: ________________');
  merge(s,5,1,5,'План',true);merge(s,5,6,10,'Реализация',true);header(s,5,10);
@@ -93,6 +93,7 @@ export function productionWorkbook(ExcelJS,records,{title='План произв
  records.forEach((x,i)=>{cells(s,i+7,[i+1,...x.values]);s.getCell(i+7,8).numFmt='[h]:mm'});
  s.pageSetup.printTitlesRow='5:6';s.pageSetup.printArea='A1:J'+(records.length+8);s.views=[{state:'frozen',ySplit:6}];
  merge(s,records.length+8,1,10,'Строка факта — назначение за день: первое время и сумма зарегистрированных минут. Подписи пустые. Отдельные этапы — на втором листе.');
+ if(!includeDetails)return w;
  const detail=sheet(w,'Назначения и факты',[25,25,42,15,15,23,23,15,15,45,16,16]);cells(detail,1,['Инструктор','Обучаемый','СОП и версия','Начало плана','Срок плана','Статус','Фактический этап','Дата и время','Минут','Наблюдение','Подтверждение инструктора','Подтверждение обучаемого']);header(detail,1,12);
  let detailRow=2;for(const x of records)for(const fact of x.facts.length?x.facts:[null])cells(detail,detailRow++,[x.values[1],x.values[3],x.values[2],x.assignment.assigned_on,x.assignment.due_on,x.assignment.state,fact?JSON.parse(fact.steps_json).label:'',fact?.held_at||'',fact?.duration_minutes??null,fact?.notes||'',fact?.mentor_ack?'Да':'',fact?.trainee_ack?'Да':'']);
  return w

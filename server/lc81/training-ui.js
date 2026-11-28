@@ -165,7 +165,10 @@ export function createTrainingUI({api,run,button,panel,table,el,input,select,for
     box.append(el('p',label+': '+(v.done?'Подтверждено '+v.day:'Ожидается')));
     if(v.can)box.append(groups('Согласовать план: '+label,[input('note','Примечание','text',false)],'Согласовать весь план',async f=>{await api('training/plan-approve',{id:p.id,kind,note:value(f,'note')});note('Согласование плана зарегистрировано');await render()}));
    }
-   if(p.can_export)box.append(button('Скачать согласованный состав · приложение 6 XLSX',()=>downloadForm('production_plan',p.id)),button('Журнал по составу плана · приложение 8 XLSX',()=>downloadForm('production_journal',p.id)));
+   if(p.can_export){
+    box.append(button('Скачать согласованный состав · приложение 6 XLSX',()=>downloadForm('production_plan',p.id)),button('Журнал по составу плана · приложение 8 XLSX',()=>downloadForm('production_journal',p.id)));
+    const extra=el('details');extra.append(el('summary','Дополнительная выгрузка'),button('Сводная форма приложения 6 · план и реализация XLSX',()=>downloadForm('production_combined',p.id)));box.append(extra);
+   }
    n.append(box);
   }
   if(!d.plans.length)n.append(empty());setContent(host,n);

@@ -53,7 +53,11 @@ function sopBlank(ExcelJS){
  // One complete A3 landscape form: never isolate the reason row on page 2.
  s.pageSetup.paperSize=8;s.pageSetup.fitToHeight=1;
  let r=head(s,'ПРИЛОЖЕНИЕ 5. СТАНДАРТНАЯ ОПЕРАЦИОННАЯ ПРОЦЕДУРА',{'Предприятие / подразделение':'','Рабочее место':'','Исполнитель / должность':'','Наименование операции':'','Номер СОП / версия / дата':'','Время СОП':'','Требования к безопасности':'','Инструмент, оснастка':'','Материал':'','QR':'','Ответственные':'','Утверждаю / согласовано':''});
- row(s,r++,['','Шаг 1','Шаг 2','Шаг 3','Шаг 4'],true);for(const [name,height] of [['Визуализация / фото / схема',90],['Действие — что делать',58],['Время, сек',23],['Ключевой момент — как делать',58],['Причина — почему именно так',58]]){row(s,r,[name]);s.getRow(r++).height=height}finish(s,r-1,r-6);return w
+ // Four steps per print sheet, 12 editable slots as in appendix 5.
+ const block=(target,at,start)=>{const h=at;row(target,at++,['',...Array.from({length:4},(_,i)=>'Шаг '+(start+i))],true);for(const [name,height] of [['Визуализация / фото / схема',90],['Действие — что делать',58],['Время, сек',23],['Ключевой момент — как делать',58],['Причина — почему именно так',58]]){row(target,at,[name]);target.getRow(at++).height=height}finish(target,at-1,h)};
+ block(s,r,1);
+ for(const start of [5,9]){const next=sheet(w,'СОП · шаги '+start+'–'+(start+3),[27,35,35,35,35]);next.pageSetup.paperSize=8;next.pageSetup.fitToHeight=1;const h=head(next,'ПРИЛОЖЕНИЕ 5. СОП · ПРОДОЛЖЕНИЕ',{'Номер СОП / версия / дата':'','Наименование операции':''});block(next,h,start)}
+ return w
 }
 function matrixBlank(ExcelJS){
  const w=new ExcelJS.Workbook(),s=sheet(w,'Матрица компетенций',[6,28,22,...Array(10).fill(10),14,11,13]);
